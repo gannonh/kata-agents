@@ -269,8 +269,6 @@ export const initializeSessionsAtom = atom(
     for (const oldId of oldIds) {
       if (!newIdSet.has(oldId)) {
         sessionAtomFamily.remove(oldId)
-        expandedTurnsAtomFamily.remove(oldId)
-        expandedActivityGroupsAtomFamily.remove(oldId)
         backgroundTasksAtomFamily.remove(oldId)
       }
     }
@@ -358,8 +356,6 @@ export const removeSessionAtom = atom(
 
     // Clean up additional atom families to prevent memory leaks
     // These store per-session UI state that should be garbage collected
-    expandedTurnsAtomFamily.remove(sessionId)
-    expandedActivityGroupsAtomFamily.remove(sessionId)
     backgroundTasksAtomFamily.remove(sessionId)
   }
 )
@@ -523,25 +519,6 @@ export const ensureSessionMessagesLoadedAtom = atom(
       sessionLoadingPromises.delete(sessionId)
     }
   }
-)
-
-/**
- * Atom family for tracking expanded turn IDs per session
- * Persists expanded/collapsed state across session switches
- */
-export const expandedTurnsAtomFamily = atomFamily(
-  (_sessionId: string) => atom<Set<string>>(new Set<string>()),
-  (a, b) => a === b
-)
-
-/**
- * Atom family for tracking expanded activity group IDs per session
- * Persists expanded/collapsed state for Task subagents
- * Default is collapsed (ID not in set = collapsed)
- */
-export const expandedActivityGroupsAtomFamily = atomFamily(
-  (_sessionId: string) => atom<Set<string>>(new Set<string>()),
-  (a, b) => a === b
 )
 
 /**

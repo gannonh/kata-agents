@@ -466,6 +466,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onInputChange={handleInputChange}
                 sources={enabledSources}
                 skills={skills}
+                todoStates={todoStates}
+                onTodoStateChange={handleTodoStateChange}
                 workspaceId={activeWorkspaceId || undefined}
                 onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
                 workingDirectory={sessionMeta.workingDirectory}
@@ -533,6 +535,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             skills={skills}
             labels={labels}
             onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
+            todoStates={todoStates}
+            onTodoStateChange={handleTodoStateChange}
             workspaceId={activeWorkspaceId || undefined}
             onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
             workingDirectory={workingDirectory}

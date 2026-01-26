@@ -315,6 +315,39 @@ export type SdkMcpServerConfig =
   | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> };
 
+/**
+ * Detect the Windows ENOENT .claude/skills directory error from the Claude Code SDK.
+ * The SDK scans C:\ProgramData\ClaudeCode\.claude\skills for managed/enterprise skills
+ * but crashes if the directory doesn't exist. This is an upstream SDK bug.
+ * See: https://github.com/anthropics/claude-code/issues/20571
+ *
+ * Returns a typed_error event with user-friendly instructions, or null if not this error.
+ */
+function buildWindowsSkillsDirError(errorText: string): { type: 'typed_error'; error: AgentError } | null {
+  if (!errorText.includes('ENOENT') || !errorText.includes('skills')) {
+    return null;
+  }
+
+  const pathMatch = errorText.match(/scandir\s+'([^']+)'/);
+  const missingPath = pathMatch?.[1] || 'C:\\ProgramData\\ClaudeCode\\.claude\\skills';
+
+  return {
+    type: 'typed_error',
+    error: {
+      code: 'unknown_error',
+      title: 'Windows Setup Required',
+      message: `The SDK requires a directory that doesn't exist: ${missingPath} — Create this folder in File Explorer, then restart the app.`,
+      details: [
+        `PowerShell (run as Administrator):`,
+        `New-Item -ItemType Directory -Force -Path "${missingPath}"`,
+      ],
+      actions: [],
+      canRetry: true,
+      originalError: errorText,
+    },
+  };
+}
+
 export class CraftAgent {
   private config: CraftAgentConfig;
   private currentQuery: Query | null = null;
@@ -1840,6 +1873,14 @@ export class CraftAgent {
             return;
           }
 
+          // Check for Windows SDK setup error (missing .claude/skills directory)
+          const windowsSkillsError = buildWindowsSkillsDirError(stderrContext || rawErrorMsg);
+          if (windowsSkillsError) {
+            yield windowsSkillsError;
+            yield { type: 'complete' };
+            return;
+          }
+
           debug('[SESSION_DEBUG] >>> TAKING PATH: Run diagnostics (not session expired)');
 
           // Run diagnostics to identify specific cause (2s timeout)
@@ -3010,7 +3051,14 @@ Please continue the conversation naturally from where we left off.
         } else {
           // Error result - emit error then complete with whatever usage we have
           const errorMsg = 'errors' in message ? message.errors.join(', ') : 'Query failed';
-          events.push({ type: 'error', message: errorMsg });
+
+          // Check for Windows SDK setup error (missing .claude/skills directory)
+          const windowsError = buildWindowsSkillsDirError(errorMsg);
+          if (windowsError) {
+            events.push(windowsError);
+          } else {
+            events.push({ type: 'error', message: errorMsg });
+          }
           events.push({ type: 'complete', usage });
         }
         break;

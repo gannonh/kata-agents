@@ -15,7 +15,12 @@ export interface SavedWindow {
   workspaceId: string
   bounds: WindowBounds
   focused?: boolean
-  url?: string  // Full URL to restore (preserves route/query params)
+  // Full URL captured from webContents.getURL() at quit time.
+  // May be localhost (dev) or file:// (prod) — both are safe to store because
+  // createWindow() never loads this URL directly. It extracts query params
+  // (workspaceId, route, focused, etc.) and rebuilds the URL from __dirname
+  // (prod) or the current dev server (dev). See window-manager.ts restoreUrl.
+  url?: string
 }
 
 export interface WindowState {
@@ -44,21 +49,6 @@ export function saveWindowState(state: WindowState): void {
 }
 
 /**
- * Sanitize a saved URL to remove dev-mode localhost URLs
- * Returns undefined if the URL should not be restored
- */
-function sanitizeUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined
-
-  // Remove localhost URLs (from dev mode) - they won't work in production
-  if (url.includes('localhost') || url.includes('127.0.0.1')) {
-    return undefined
-  }
-
-  return url
-}
-
-/**
  * Load the saved window state
  */
 export function loadWindowState(): WindowState | null {
@@ -76,12 +66,6 @@ export function loadWindowState(): WindowState | null {
       mainLog.warn('[WindowState] Invalid window state file, ignoring')
       return null
     }
-
-    // Sanitize URLs in saved windows (remove dev-mode localhost URLs)
-    state.windows = state.windows.map(win => ({
-      ...win,
-      url: sanitizeUrl(win.url),
-    }))
 
     mainLog.info('[WindowState] Loaded window state:', state.windows.length, 'windows')
     return state

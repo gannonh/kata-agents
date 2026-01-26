@@ -12,6 +12,9 @@ import { flattenLabels, parseLabelEntry, formatLabelEntry } from '@craft-agent/s
 import { resolveEntityColor } from '@craft-agent/shared/colors'
 import { useTheme } from '@/context/ThemeContext'
 import { useDynamicStack } from '@/hooks/useDynamicStack'
+import type { TodoState } from '@/config/todo-states'
+import { getState } from '@/config/todo-states'
+import { TodoStateMenu } from '@/components/ui/todo-filter-menu'
 
 // ============================================================================
 // Permission Mode Icon Component
@@ -63,6 +66,13 @@ export interface ActiveOptionBadgesProps {
   autoOpenLabelId?: string | null
   /** Called after the auto-open has been consumed, so the parent can clear the signal */
   onAutoOpenConsumed?: () => void
+  // ── State/status badge (in dynamic stack) ──
+  /** Available workflow states */
+  todoStates?: TodoState[]
+  /** Current session state ID */
+  currentTodoState?: string
+  /** Callback when state changes */
+  onTodoStateChange?: (stateId: string) => void
   /** Additional CSS classes */
   className?: string
 }
@@ -89,6 +99,9 @@ export function ActiveOptionBadges({
   onLabelsChange,
   autoOpenLabelId,
   onAutoOpenConsumed,
+  todoStates = [],
+  currentTodoState,
+  onTodoStateChange,
   className,
 }: ActiveOptionBadgesProps) {
   // Resolve session label entries to their config objects + parsed values.
@@ -110,6 +123,16 @@ export function ActiveOptionBadges({
 
   const hasLabels = resolvedLabels.length > 0
 
+  // Resolve the current state from todoStates for the badge display.
+  // Every session always has a state — fall back to the default state (or 'todo')
+  // when currentTodoState isn't explicitly set, matching SessionList's behavior.
+  const effectiveStateId = currentTodoState || 'todo'
+  const resolvedState = todoStates.length > 0 ? getState(effectiveStateId, todoStates) : undefined
+  const hasState = !!resolvedState
+
+  // Show the stacking container when there are labels or a state badge
+  const hasStackContent = hasLabels || hasState
+
   // Dynamic stacking with equal visible strips: ResizeObserver computes per-badge
   // margins directly on children. Wider badges get more negative margins so each
   // shows the same visible strip when stacked. No React re-renders needed.
@@ -118,7 +141,7 @@ export function ActiveOptionBadges({
   const stackRef = useDynamicStack({ gap: 8, minVisible: 20, reservedStart: 24 })
 
   // Only render if badges or tasks are active
-  if (!ultrathinkEnabled && !permissionMode && tasks.length === 0 && !hasLabels) {
+  if (!ultrathinkEnabled && !permissionMode && tasks.length === 0 && !hasStackContent) {
     return null
   }
 
@@ -151,10 +174,10 @@ export function ActiveOptionBadges({
         </button>
       )}
 
-      {/* Label Badges Container — dynamic stacking with equal visible strips.
+      {/* Stacking container for state badge + label badges.
        * useDynamicStack sets per-child marginLeft directly via ResizeObserver.
        * overflow: clip prevents scroll container while py/-my gives shadow room. */}
-      {hasLabels && (
+      {hasStackContent && (
         <div
           className="min-w-0 flex-1 py-0.5 -my-0.5"
           style={{
@@ -169,6 +192,15 @@ export function ActiveOptionBadges({
             className="flex items-center min-w-0 justify-end py-1 -my-1 pr-2 -mr-2"
             style={{ overflow: 'clip' }}
           >
+            {/* State badge — first child in the stack (leftmost in the right-aligned row) */}
+            {hasState && resolvedState && (
+              <StateBadge
+                state={resolvedState}
+                todoStates={todoStates}
+                onTodoStateChange={onTodoStateChange}
+              />
+            )}
+            {/* Label badges */}
             {resolvedLabels.map(({ config, rawValue, index }) => (
               <LabelBadge
                 key={config.id}
@@ -302,6 +334,82 @@ function LabelBadge({
         <ChevronDown className="h-3 w-3 opacity-40 ml-1 shrink-0" />
       </button>
     </LabelValuePopover>
+  )
+}
+
+// ============================================================================
+// State Badge Component
+// ============================================================================
+
+/**
+ * Renders the current workflow state as a badge in the dynamic stacking container.
+ * Click opens a TodoStateMenu popover for changing the state.
+ * Styled consistently with label badges (h-[30px], rounded-[8px], color-mix tinting).
+ */
+function StateBadge({
+  state,
+  todoStates,
+  onTodoStateChange,
+}: {
+  state: TodoState
+  todoStates: TodoState[]
+  onTodoStateChange?: (stateId: string) => void
+}) {
+  const [open, setOpen] = React.useState(false)
+
+  const handleSelect = React.useCallback((stateId: string) => {
+    setOpen(false)
+    onTodoStateChange?.(stateId)
+  }, [onTodoStateChange])
+
+  // Use the state's resolved color for tinting (same color-mix pattern as labels)
+  const badgeColor = state.resolvedColor || 'var(--foreground)'
+  const applyColor = state.iconColorable
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
+            "outline-none select-none transition-colors",
+            // Same color-mix tinting as label badges for visual consistency
+            "bg-[color-mix(in_srgb,var(--background)_97%,var(--badge-color))]",
+            "hover:bg-[color-mix(in_srgb,var(--background)_92%,var(--badge-color))]",
+            "text-[color-mix(in_srgb,var(--foreground)_80%,var(--badge-color))]",
+            "relative",
+          )}
+          style={{ '--badge-color': badgeColor } as React.CSSProperties}
+        >
+          {/* State icon with resolved color */}
+          <span
+            className="shrink-0 flex items-center w-3.5 h-3.5 [&>svg]:w-full [&>svg]:h-full [&>img]:w-full [&>img]:h-full [&>span]:text-xs"
+            style={applyColor ? { color: state.resolvedColor } : undefined}
+          >
+            {state.icon}
+          </span>
+          <span className="whitespace-nowrap">{state.label}</span>
+          <ChevronDown className="h-3 w-3 opacity-40 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-auto p-0 border-0 shadow-none bg-transparent"
+        side="top"
+        align="end"
+        sideOffset={4}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('craft:focus-input'))
+        }}
+      >
+        <TodoStateMenu
+          activeState={state.id}
+          onSelect={handleSelect}
+          states={todoStates}
+        />
+      </PopoverContent>
+    </Popover>
   )
 }
 

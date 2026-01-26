@@ -4,6 +4,7 @@ import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../../lib/utils'
 import { CodeBlock, InlineCode } from './CodeBlock'
+import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { preprocessLinks } from './linkify'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
@@ -154,9 +155,13 @@ function createComponents(
         const match = /language-(\w+)/.exec(className || '')
         const isBlock = 'node' in props && props.node?.position?.start.line !== props.node?.position?.end.line
 
-        // Block code - use CodeBlock with full mode
+        // Block code
         if (match || isBlock) {
           const code = String(children).replace(/\n$/, '')
+          // Diff code blocks → pierre/diffs for a proper diff viewer
+          if (match?.[1] === 'diff') {
+            return <MarkdownDiffBlock code={code} className="my-1" />
+          }
           return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
         }
 
@@ -217,6 +222,10 @@ function createComponents(
 
       if (match || isBlock) {
         const code = String(children).replace(/\n$/, '')
+        // Diff code blocks → pierre/diffs for a proper diff viewer
+        if (match?.[1] === 'diff') {
+          return <MarkdownDiffBlock code={code} className="my-1" />
+        }
         return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
       }
 

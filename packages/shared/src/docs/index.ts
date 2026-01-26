@@ -12,7 +12,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { isDebugEnabled } from '../utils/debug.ts';
-import { getAppVersion } from '../version/app-version.ts';
+import { getAppVersion } from '../version/index.ts';
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
 const DOCS_DIR = join(CONFIG_DIR, 'docs');

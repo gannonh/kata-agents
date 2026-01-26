@@ -46,6 +46,7 @@ import { ActiveOptionBadges } from "./ActiveOptionBadges"
 import { InputContainer, type StructuredInputState, type StructuredResponse, type PermissionResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
+import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
 import type { SessionMeta } from "@/atoms/sessions"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { flattenLabels } from "@craft-agent/shared/labels"
@@ -128,6 +129,11 @@ interface ChatDisplayProps {
   labels?: import('@craft-agent/shared/labels').LabelConfig[]
   /** Callback when labels change */
   onLabelsChange?: (labels: string[]) => void
+  // State/status selection (for # menu and ActiveOptionBadges)
+  /** Available workflow states */
+  todoStates?: import('@/config/todo-states').TodoState[]
+  /** Callback when session state changes */
+  onTodoStateChange?: (stateId: string) => void
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -350,6 +356,9 @@ export function ChatDisplay({
   // Labels (for #labels)
   labels,
   onLabelsChange,
+  // States (for # menu and badge)
+  todoStates,
+  onTodoStateChange,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -392,6 +401,14 @@ export function ChatDisplay({
   const { tasks: backgroundTasks, killTask } = useBackgroundTasks({
     sessionId: session?.id ?? ''
   })
+
+  // TurnCard expansion state — persisted to localStorage across session switches
+  const {
+    expandedTurns,
+    toggleTurn,
+    expandedActivityGroups,
+    setExpandedActivityGroups,
+  } = useTurnCardExpansion(session?.id)
 
   // Track which label should auto-open its value popover after being added via # menu.
   // Set when a valued label is selected, cleared once the popover opens.
@@ -745,6 +762,10 @@ export function ChatDisplay({
                         intent={turn.intent}
                         isStreaming={turn.isStreaming}
                         isComplete={turn.isComplete}
+                        isExpanded={expandedTurns.has(turn.turnId)}
+                        onExpandedChange={(expanded) => toggleTurn(turn.turnId, expanded)}
+                        expandedActivityGroups={expandedActivityGroups}
+                        onExpandedActivityGroupsChange={setExpandedActivityGroups}
                         todos={turn.todos}
                         onOpenFile={onOpenFile}
                         onOpenUrl={onOpenUrl}
@@ -913,6 +934,9 @@ export function ChatDisplay({
               }}
               autoOpenLabelId={autoOpenLabelId}
               onAutoOpenConsumed={() => setAutoOpenLabelId(null)}
+              todoStates={todoStates}
+              currentTodoState={session.todoState || 'todo'}
+              onTodoStateChange={onTodoStateChange}
             />
             <InputContainer
               disabled={isInputDisabled}
@@ -958,6 +982,7 @@ export function ChatDisplay({
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
               sessionId={session.id}
+              currentTodoState={session.todoState || 'todo'}
               disableSend={disableSend}
               isEmptySession={session.messages.length === 0}
               contextStatus={{

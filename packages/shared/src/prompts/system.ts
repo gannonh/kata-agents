@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
 import { DOC_REFS, APP_ROOT } from '../docs/index.ts';
 import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
-import { APP_VERSION } from '../version/app-version.ts';
+import { APP_VERSION } from '../version/index.ts';
 import { globSync } from 'glob';
 import os from 'os';
 

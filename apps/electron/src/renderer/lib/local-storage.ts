@@ -37,6 +37,9 @@ export const KEYS = {
 
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',
+
+  // TurnCard expansion state (persisted across session switches)
+  turnCardExpansion: 'turncard-expansion',
 } as const
 
 export type StorageKey = typeof KEYS[keyof typeof KEYS]

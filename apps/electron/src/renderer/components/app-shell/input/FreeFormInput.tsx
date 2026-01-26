@@ -165,6 +165,8 @@ export interface FreeFormInputProps {
   sessionFolderPath?: string
   /** Session ID for scoping events like approve-plan */
   sessionId?: string
+  /** Current todo state of the session (for # menu state selection) */
+  currentTodoState?: string
   /** Disable send action (for tutorial guidance) */
   disableSend?: boolean
   /** Whether the session is empty (no messages yet) - affects context badge prominence */
@@ -223,6 +225,7 @@ export function FreeFormInput({
   onWorkingDirectoryChange,
   sessionFolderPath,
   sessionId,
+  currentTodoState,
   disableSend = false,
   isEmptySession = false,
   contextStatus,
@@ -231,6 +234,9 @@ export function FreeFormInput({
   // Uses optional variant so playground (no provider) doesn't crash.
   const appShellCtx = useOptionalAppShellContext()
   const customModel = appShellCtx?.customModel ?? null
+  // Access todoStates and onTodoStateChange from context for the # menu state picker
+  const todoStates = appShellCtx?.todoStates ?? []
+  const onTodoStateChange = appShellCtx?.onTodoStateChange
   // Resolve workspace rootPath for "Add New Label" deep link
   const workspaceRootPath = React.useMemo(() => {
     if (!appShellCtx || !workspaceId) return null
@@ -631,6 +637,8 @@ export function FreeFormInput({
     labels,
     sessionLabels,
     onSelect: handleLabelSelect,
+    todoStates,
+    activeStateId: currentTodoState,
   })
 
   // "Add New Label" handler: cleans up the #trigger text and opens a controlled
@@ -1079,6 +1087,17 @@ export function FreeFormInput({
     richInputRef.current?.focus()
   }, [inlineLabel, syncToParent])
 
+  // Handle inline state selection from # menu (removes #text, changes session state)
+  const handleInlineStateSelect = React.useCallback((stateId: string) => {
+    const newValue = inlineLabel.handleSelect('')
+    setInput(newValue)
+    syncToParent(newValue)
+    if (sessionId) {
+      onTodoStateChange?.(sessionId, stateId)
+    }
+    richInputRef.current?.focus()
+  }, [inlineLabel, syncToParent, sessionId, onTodoStateChange])
+
   const hasContent = input.trim() || attachments.length > 0
 
   return (
@@ -1122,7 +1141,7 @@ export function FreeFormInput({
           isSearching={inlineMention.isSearching}
         />
 
-        {/* Inline Label Autocomplete (#labels) */}
+        {/* Inline Label & State Autocomplete (#labels / #states) */}
         <InlineLabelMenu
           open={inlineLabel.isOpen}
           onOpenChange={(open) => !open && inlineLabel.close()}
@@ -1131,6 +1150,9 @@ export function FreeFormInput({
           onAddLabel={handleAddLabel}
           filter={inlineLabel.filter}
           position={inlineLabel.position}
+          states={inlineLabel.states}
+          activeStateId={inlineLabel.activeStateId}
+          onSelectState={handleInlineStateSelect}
         />
 
         {/* Controlled EditPopover for "Add New Label" — opens when user selects
