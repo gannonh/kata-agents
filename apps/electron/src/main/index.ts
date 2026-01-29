@@ -86,15 +86,16 @@ import { checkForUpdatesOnLaunch, setWindowManager as setAutoUpdateWindowManager
 log.initialize()
 
 // Enable debug/perf in dev mode (running from source)
+// Note: CRAFT_DEBUG is kept for backward compatibility with existing scripts
 if (isDebugMode) {
   process.env.CRAFT_DEBUG = '1'
   enableDebug()
   setPerfEnabled(true)
 }
 
-// Custom URL scheme for deeplinks (e.g., craftagents://auth-complete)
-// Supports multi-instance dev: CRAFT_DEEPLINK_SCHEME env var (craftagents1, craftagents2, etc.)
-const DEEPLINK_SCHEME = process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'
+// Custom URL scheme for deeplinks (e.g., kata://auth-complete)
+// Supports both KATA_ and legacy CRAFT_ env vars for migration
+const DEEPLINK_SCHEME = process.env.KATA_DEEPLINK_SCHEME || process.env.CRAFT_DEEPLINK_SCHEME || 'kata'
 
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
@@ -103,8 +104,8 @@ let sessionManager: SessionManager | null = null
 let pendingDeepLink: string | null = null
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
-// Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Craft Agents [1]")
-app.setName(process.env.CRAFT_APP_NAME || 'Craft Agents')
+// Supports both KATA_ and legacy CRAFT_ env vars for migration
+app.setName(process.env.KATA_APP_NAME || process.env.CRAFT_APP_NAME || 'Kata Desktop')
 
 // Register as default protocol client for craftagents:// URLs
 // This must be done before app.whenReady() on some platforms
