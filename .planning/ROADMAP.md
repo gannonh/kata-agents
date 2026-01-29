@@ -12,6 +12,12 @@ Milestone v0.4.0 Foundation establishes Kata Desktop as an independent, complian
 
 **Dependencies:** None (foundation phase)
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — CI workflows (PR validation + release fix)
+- [ ] 01-02-PLAN.md — Upstream management documentation
+
 **Requirements:**
 - SETUP-01: CI workflow validates builds on PR (GitHub Actions)
 - SETUP-02: CI runs test suite on PR (`bun test`)
@@ -53,7 +59,7 @@ Milestone v0.4.0 Foundation establishes Kata Desktop as an independent, complian
 
 | Phase | Status  | Requirements | Complete |
 |-------|---------|--------------|----------|
-| 1     | Pending | 4            | 0/4      |
+| 1     | Planned | 4            | 0/4      |
 | 2     | Pending | 6            | 0/6      |
 
 **Total:** 0/10 requirements complete
