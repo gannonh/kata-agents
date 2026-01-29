@@ -37,18 +37,18 @@ _Deferred to v0.5.0 or later:_
 
 ## Traceability
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| SETUP-01    | —     | —      |
-| SETUP-02    | —     | —      |
-| SETUP-03    | —     | —      |
-| SETUP-04    | —     | —      |
-| BRAND-01    | —     | —      |
-| BRAND-02    | —     | —      |
-| BRAND-03    | —     | —      |
-| BRAND-04    | —     | —      |
-| BRAND-05    | —     | —      |
-| DIST-01     | —     | —      |
+| Requirement | Phase | Status  |
+|-------------|-------|---------|
+| SETUP-01    | 1     | Pending |
+| SETUP-02    | 1     | Pending |
+| SETUP-03    | 1     | Pending |
+| SETUP-04    | 1     | Pending |
+| BRAND-01    | 2     | Pending |
+| BRAND-02    | 2     | Pending |
+| BRAND-03    | 2     | Pending |
+| BRAND-04    | 2     | Pending |
+| BRAND-05    | 2     | Pending |
+| DIST-01     | 2     | Pending |
 
 ---
 *Last updated: 2026-01-29*
