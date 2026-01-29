@@ -2,6 +2,12 @@
 
 Kata Desktop is a fork of Craft Agents. This document describes how to track and selectively adopt changes from the upstream repository.
 
+## Current Status
+
+> **Note:** As of 2026-01-29, the upstream remote is configured but may point to a legacy URL.
+> Run `git remote -v` to verify. If it shows a different URL than documented below,
+> update it using `git remote set-url upstream https://github.com/AiCodecraft/craft-agents.git`
+
 ## Source Repository
 
 - **URL:** https://github.com/AiCodecraft/craft-agents
