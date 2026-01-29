@@ -41,10 +41,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Product name and metadata (BRAND-01, BRAND-02)
-- [ ] 02-02-PLAN.md — Application icons (BRAND-04)
-- [ ] 02-03-PLAN.md — In-app logos and React components (BRAND-05)
-- [ ] 02-04-PLAN.md — Domain references and release configuration (BRAND-03, DIST-01)
+- [x] 02-01-PLAN.md — Product name and metadata (BRAND-01, BRAND-02)
+- [x] 02-02-PLAN.md — Application icons (BRAND-04)
+- [x] 02-03-PLAN.md — In-app logos and React components (BRAND-05)
+- [x] 02-04-PLAN.md — Domain references and release configuration (BRAND-03, DIST-01)
 
 **Requirements:**
 - BRAND-01: Remove "Craft" from product name and metadata (package.json, electron-builder.yml)
@@ -68,9 +68,9 @@ Plans:
 | Phase | Status   | Requirements | Complete |
 |-------|----------|--------------|----------|
 | 1     | Complete | 4            | 4/4      |
-| 2     | Pending  | 6            | 0/6      |
+| 2     | Complete | 6            | 6/6      |
 
-**Total:** 4/10 requirements complete
+**Total:** 10/10 requirements complete
 
 ---
 
