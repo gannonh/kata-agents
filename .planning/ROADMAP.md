@@ -38,6 +38,14 @@ Plans:
 
 **Dependencies:** Phase 1 (CI must pass before release)
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Product name and metadata (BRAND-01, BRAND-02)
+- [ ] 02-02-PLAN.md — Application icons (BRAND-04)
+- [ ] 02-03-PLAN.md — In-app logos and React components (BRAND-05)
+- [ ] 02-04-PLAN.md — Domain references and release configuration (BRAND-03, DIST-01)
+
 **Requirements:**
 - BRAND-01: Remove "Craft" from product name and metadata (package.json, electron-builder.yml)
 - BRAND-02: Update bundle ID from `com.lukilabs.craft-agent` to `sh.kata.desktop`
@@ -68,18 +76,19 @@ Plans:
 
 ## Coverage Map
 
-| Requirement | Phase | Description |
-|-------------|-------|-------------|
-| SETUP-01    | 1     | CI validates builds on PR |
-| SETUP-02    | 1     | CI runs test suite on PR |
-| SETUP-03    | 1     | CI produces platform artifacts |
-| SETUP-04    | 1     | Upstream management documented |
-| BRAND-01    | 2     | Remove "Craft" from product name |
-| BRAND-02    | 2     | Update bundle ID to kata.sh |
-| BRAND-03    | 2     | Remove craft.do references |
-| BRAND-04    | 2     | Replace application icons |
-| BRAND-05    | 2     | Replace in-app logos |
-| DIST-01     | 2     | Configure GitHub releases |
+| Requirement | Phase | Plan | Description |
+|-------------|-------|------|-------------|
+| SETUP-01    | 1     | 01-01 | CI validates builds on PR |
+| SETUP-02    | 1     | 01-01 | CI runs test suite on PR |
+| SETUP-03    | 1     | 01-01 | CI produces platform artifacts |
+| SETUP-04    | 1     | 01-02 | Upstream management documented |
+| BRAND-01    | 2     | 02-01 | Remove "Craft" from product name |
+| BRAND-02    | 2     | 02-01 | Update bundle ID to kata.sh |
+| BRAND-03    | 2     | 02-04 | Remove craft.do references |
+| BRAND-04    | 2     | 02-02 | Replace application icons |
+| BRAND-05    | 2     | 02-03 | Replace in-app logos |
+| DIST-01     | 2     | 02-04 | Configure GitHub releases |
 
 ---
 *Created: 2026-01-29*
+*Updated: 2026-01-29 — Phase 2 plans added*
