@@ -24,6 +24,9 @@ git remote add upstream https://github.com/AiCodecraft/craft-agents.git
 git fetch upstream
 git checkout -b upstream/sync upstream/main --no-track
 git push origin upstream/sync
+
+# Install pre-push hook to prevent accidental upstream pushes
+git config core.hooksPath .githooks
 ```
 
 > **Note:** If upstream remote already exists but points to a different URL, update it:
@@ -116,6 +119,45 @@ This creates a clear audit trail linking Kata commits to their upstream origins.
 - **main:** Protected, requires PR review
 - **upstream/sync:** Force-pushable (mirrors upstream exactly)
 - **feature/upstream-*:** Standard feature branch rules apply
+
+## Fork Protection
+
+This repo includes safeguards to prevent accidental changes to upstream.
+
+### Pre-push Hook
+
+The `.githooks/pre-push` hook blocks pushes to upstream (except `upstream/sync`). To enable:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+If you need to push to upstream for a legitimate reason (e.g., updating `upstream/sync`), the hook allows that specific branch.
+
+### GitHub CLI Precautions
+
+When using `gh` CLI in a fork, it may default to the upstream repo. Always specify the repo explicitly:
+
+```bash
+# Wrong - may target upstream
+gh pr create
+
+# Right - explicitly targets origin
+gh pr create --repo gannonh/kata-desktop
+```
+
+For automation and scripts, always use the `--repo` flag.
+
+### What's Allowed
+
+| Operation | Allowed | Notes |
+|-----------|---------|-------|
+| `git fetch upstream` | ✓ | Always safe, read-only |
+| `git push origin <branch>` | ✓ | Normal workflow |
+| `git push upstream upstream/sync` | ✓ | Sync branch only |
+| `git push upstream <other>` | ✗ | Blocked by hook |
+| `gh pr create --repo origin` | ✓ | PR on your fork |
+| `gh pr create` (no repo flag) | ⚠ | May target upstream |
 
 ---
 *Last updated: 2026-01-29*
