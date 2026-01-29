@@ -10,20 +10,20 @@
 
 ```
 Phase: 2 of 2 (Rebranding)
-Plan: 3 of 4
-Status: In progress
-Progress: [#######...] 7/10 requirements
+Plan: 4 of 4 (COMPLETE)
+Status: Phase complete
+Progress: [##########] 10/10 requirements
 ```
 
-**Last activity:** 2026-01-29 — Completed 02-03-PLAN.md (In-App Logos and React Components)
+**Last activity:** 2026-01-29 — Completed 02-04-PLAN.md (Domain References and Release Configuration)
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 1/2 |
-| Requirements done | 7/10 |
-| Current phase progress | 3/4 |
+| Phases completed | 2/2 |
+| Requirements done | 10/10 |
+| Current phase progress | 4/4 |
 
 ## Accumulated Context
 
@@ -44,6 +44,9 @@ Progress: [#######...] 7/10 requirements
 | 11 | DMG background | Keep existing neutral swirl pattern | 02-02-SUMMARY.md |
 | 12 | KataLogo component | Simple text-based SVG instead of pixel art | 02-03-SUMMARY.md |
 | 13 | VIEWER_URL disabled | Empty string until Kata infrastructure ready | 02-03-SUMMARY.md |
+| 14 | Slack OAuth disable approach | Return graceful error, keep implementation | 02-04-SUMMARY.md |
+| 15 | Auto-update provider | GitHub releases instead of generic provider | 02-04-SUMMARY.md |
+| 16 | Install scripts source | GitHub Releases API | 02-04-SUMMARY.md |
 
 ### Open Questions
 
@@ -91,10 +94,36 @@ _None_
 - Updated branding.ts with KATA_LOGO constants
 - 3 commits, all verification checks passed
 
+**02-04 Execution (2026-01-29):**
+- Removed/disabled craft.do domain references in 15 files
+- Gracefully disabled Slack OAuth with clear error message
+- Changed auto-update from generic provider to GitHub releases
+- Updated install scripts for GitHub Releases
+- Bumped version to 0.4.0
+- Updated README.md, SECURITY.md, CODE_OF_CONDUCT.md
+- 3 commits, all verification checks passed
+
+## v0.4.0 Release Ready
+
+All requirements complete. Ready to:
+1. Merge `feat/v0.4.0-02-rebranding` branch to `main`
+2. GitHub Actions will detect version change and trigger release
+3. Builds will be created for macOS (arm64/x64), Windows (x64), Linux (x64)
+4. Release will be published to GitHub Releases
+
+### Disabled Features (Require Infrastructure)
+
+| Feature | Status | Dependency |
+|---------|--------|------------|
+| Slack OAuth | Disabled with error message | Needs HTTPS relay server |
+| External docs links | Empty/GitHub fallback | Needs docs.kata.sh |
+| Version manifest | Disabled | Needs version API at kata.sh |
+| MCP docs server | Commented out | Needs docs MCP at kata.sh |
+
 ## Session Continuity
 
-**Last session:** 2026-01-29 21:56 UTC
-**Stopped at:** Completed 02-03-PLAN.md
+**Last session:** 2026-01-29 22:05 UTC
+**Stopped at:** Completed 02-04-PLAN.md (Phase 2 complete)
 **Resume file:** None
 
 ---
