@@ -56,7 +56,7 @@ jobs:
         run: bun install
 
       - name: Build Electron app
-        run: bun run build:electron
+        run: bun run electron:build
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -96,7 +96,7 @@ jobs:
         run: bun install
 
       - name: Build Electron app
-        run: bun run build:electron
+        run: bun run electron:build
 
       - name: Package for Windows
         run: |
@@ -131,7 +131,7 @@ jobs:
         run: bun install
 
       - name: Build Electron app
-        run: bun run build:electron
+        run: bun run electron:build
 
       - name: Package for Linux
         run: |
