@@ -1,6 +1,8 @@
 import { debug } from "../utils/debug";
 
-const VERSIONS_URL = 'https://agents.craft.do/electron';
+// Disable version manifest until kata.sh hosts it
+// Was: 'https://agents.craft.do/electron'
+const VERSIONS_URL = '';
 
 export async function getLatestVersion(): Promise<string | null> {
     try {

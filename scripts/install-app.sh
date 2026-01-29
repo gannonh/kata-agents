@@ -1,9 +1,17 @@
 #!/bin/bash
 
+# Kata Desktop Installer
+# Downloads and installs from GitHub Releases
+#
+# NOTE: This script was adapted from the original Craft Agents installer.
+# It now downloads from GitHub Releases instead of agents.craft.do.
+
 set -e
 
-VERSIONS_URL="https://agents.craft.do/electron"
-DOWNLOAD_DIR="$HOME/.craft-agent/downloads"
+# GitHub Release URL base
+GITHUB_REPO="gannonh/kata-desktop"
+GITHUB_RELEASES_URL="https://github.com/$GITHUB_REPO/releases"
+DOWNLOAD_DIR="$HOME/.kata-desktop/downloads"
 
 # Colors for output
 RED='\033[0;31m'
@@ -74,40 +82,6 @@ download_file() {
     fi
 }
 
-# Simple JSON parser for extracting values when jq is not available
-get_json_value() {
-    local json="$1"
-    local key="$2"
-
-    # Normalize JSON to single line
-    json=$(echo "$json" | tr -d '\n\r\t' | sed 's/ \+/ /g')
-
-    # Extract value using bash regex
-    if [[ $json =~ \"$key\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-        echo "${BASH_REMATCH[1]}"
-        return 0
-    fi
-
-    return 1
-}
-
-# Extract checksum from manifest for a specific platform
-get_checksum_from_manifest() {
-    local json="$1"
-    local platform="$2"
-
-    # Normalize JSON to single line
-    json=$(echo "$json" | tr -d '\n\r\t' | sed 's/ \+/ /g')
-
-    # Extract checksum for platform using bash regex
-    if [[ $json =~ \"$platform\"[^}]*\"sha256\"[[:space:]]*:[[:space:]]*\"([a-f0-9]{64})\" ]]; then
-        echo "${BASH_REMATCH[1]}"
-        return 0
-    fi
-
-    return 1
-}
-
 # Detect architecture
 case "$(uname -m)" in
     x86_64|amd64) arch="x64" ;;
@@ -118,18 +92,20 @@ esac
 # Set platform-specific variables
 if [ "$OS_TYPE" = "darwin" ]; then
     platform="darwin-${arch}"
-    APP_NAME="Craft Agents.app"
+    APP_NAME="Kata Desktop.app"
     INSTALL_DIR="/Applications"
     ext="dmg"
+    filename="Kata-Desktop-${arch}.dmg"
 else
     # Linux only supports x64 currently
     if [ "$arch" != "x64" ]; then
         error "Linux currently only supports x64 architecture. Your architecture: $arch"
     fi
     platform="linux-${arch}"
-    APP_NAME="Craft-Agent-x64.AppImage"
+    APP_NAME="Kata-Desktop-x64.AppImage"
     INSTALL_DIR="$HOME/.local/bin"
     ext="AppImage"
+    filename="Kata-Desktop-x64.AppImage"
 fi
 
 echo ""
@@ -138,14 +114,17 @@ info "Detected platform: $platform"
 mkdir -p "$DOWNLOAD_DIR"
 mkdir -p "$INSTALL_DIR"
 
-# Get latest version
-info "Fetching latest version..."
-latest_json=$(download_file "$VERSIONS_URL/latest")
+# Get latest release from GitHub
+info "Fetching latest release from GitHub..."
 
 if [ "$HAS_JQ" = true ]; then
-    version=$(echo "$latest_json" | jq -r '.version // empty')
+    latest_json=$(download_file "https://api.github.com/repos/$GITHUB_REPO/releases/latest")
+    version=$(echo "$latest_json" | jq -r '.tag_name // empty' | sed 's/^v//')
+    download_url=$(echo "$latest_json" | jq -r ".assets[] | select(.name == \"$filename\") | .browser_download_url // empty")
 else
-    version=$(get_json_value "$latest_json" "version")
+    # Fallback: redirect-based download from latest release
+    version="latest"
+    download_url="$GITHUB_RELEASES_URL/latest/download/$filename"
 fi
 
 if [ -z "$version" ]; then
@@ -154,57 +133,18 @@ fi
 
 info "Latest version: $version"
 
-# Download manifest and extract checksum
-info "Fetching manifest..."
-manifest_json=$(download_file "$VERSIONS_URL/$version/manifest.json")
-
-if [ "$HAS_JQ" = true ]; then
-    checksum=$(echo "$manifest_json" | jq -r ".binaries[\"$platform\"].sha256 // empty")
-    filename=$(echo "$manifest_json" | jq -r ".binaries[\"$platform\"].filename // empty")
-else
-    checksum=$(get_checksum_from_manifest "$manifest_json" "$platform")
-    # Fallback filename if not using jq
-    filename="Craft-Agent-${arch}.${ext}"
-fi
-
-# Validate checksum format (SHA256 = 64 hex characters)
-if [ -z "$checksum" ] || [[ ! "$checksum" =~ ^[a-f0-9]{64}$ ]]; then
-    error "Platform $platform not found in manifest"
-fi
-
-# Use default filename if not in manifest
-if [ -z "$filename" ]; then
-    filename="Craft-Agent-${arch}.${ext}"
-fi
-
-info "Expected checksum: ${checksum:0:16}..."
-
 # Download installer
-installer_url="$VERSIONS_URL/$version/$filename"
 installer_path="$DOWNLOAD_DIR/$filename"
 
 info "Downloading $filename..."
 echo ""
-if ! download_file "$installer_url" "$installer_path" true; then
+if ! download_file "$download_url" "$installer_path" true; then
     rm -f "$installer_path"
     error "Download failed"
 fi
 echo ""
 
-# Verify checksum
-info "Verifying checksum..."
-if [ "$OS_TYPE" = "darwin" ]; then
-    actual=$(shasum -a 256 "$installer_path" | cut -d' ' -f1)
-else
-    actual=$(sha256sum "$installer_path" | cut -d' ' -f1)
-fi
-
-if [ "$actual" != "$checksum" ]; then
-    rm -f "$installer_path"
-    error "Checksum verification failed\n  Expected: $checksum\n  Actual:   $actual"
-fi
-
-success "Checksum verified!"
+success "Download complete!"
 
 # Platform-specific installation
 if [ "$OS_TYPE" = "darwin" ]; then
@@ -212,23 +152,23 @@ if [ "$OS_TYPE" = "darwin" ]; then
     dmg_path="$installer_path"
 
     # Quit the app if it's running (use bundle ID for reliability)
-    APP_BUNDLE_ID="com.lukilabs.craft-agent"
-    if pgrep -x "Craft Agents" >/dev/null 2>&1; then
-        info "Quitting Craft Agents..."
+    APP_BUNDLE_ID="sh.kata.desktop"
+    if pgrep -x "Kata Desktop" >/dev/null 2>&1; then
+        info "Quitting Kata Desktop..."
         osascript -e "tell application id \"$APP_BUNDLE_ID\" to quit" 2>/dev/null || true
         # Wait for app to quit (max 5 seconds) - POSIX compatible loop
         i=0
         while [ $i -lt 10 ]; do
-            if ! pgrep -x "Craft Agents" >/dev/null 2>&1; then
+            if ! pgrep -x "Kata Desktop" >/dev/null 2>&1; then
                 break
             fi
             sleep 0.5
             i=$((i + 1))
         done
         # Force kill if still running
-        if pgrep -x "Craft Agents" >/dev/null 2>&1; then
+        if pgrep -x "Kata Desktop" >/dev/null 2>&1; then
             warn "App didn't quit gracefully. Force quitting (unsaved data may be lost)..."
-            pkill -9 -x "Craft Agents" 2>/dev/null || true
+            pkill -9 -x "Kata Desktop" 2>/dev/null || true
             # Wait longer for macOS to release file handles
             sleep 3
         fi
@@ -275,10 +215,10 @@ if [ "$OS_TYPE" = "darwin" ]; then
     echo ""
     success "Installation complete!"
     echo ""
-    printf "%b\n" "  Craft Agents has been installed to ${BOLD}$INSTALL_DIR/$APP_NAME${NC}"
+    printf "%b\n" "  Kata Desktop has been installed to ${BOLD}$INSTALL_DIR/$APP_NAME${NC}"
     echo ""
     printf "%b\n" "  You can launch it from ${BOLD}Applications${NC} or by running:"
-    printf "%b\n" "    ${BOLD}open -a 'Craft Agents'${NC}"
+    printf "%b\n" "    ${BOLD}open -a 'Kata Desktop'${NC}"
     echo ""
 
 else
@@ -286,14 +226,14 @@ else
     appimage_path="$installer_path"
 
     # New paths
-    APP_DIR="$HOME/.craft-agent/app"
-    WRAPPER_PATH="$INSTALL_DIR/craft-agents"
-    APPIMAGE_INSTALL_PATH="$APP_DIR/Craft-Agent-x64.AppImage"
+    APP_DIR="$HOME/.kata-desktop/app"
+    WRAPPER_PATH="$INSTALL_DIR/kata-desktop"
+    APPIMAGE_INSTALL_PATH="$APP_DIR/Kata-Desktop-x64.AppImage"
 
     # Kill the app if it's running
-    if pgrep -f "Craft-Agent.*AppImage" >/dev/null 2>&1; then
-        info "Stopping Craft Agents..."
-        pkill -f "Craft-Agent.*AppImage" 2>/dev/null || true
+    if pgrep -f "Kata-Desktop.*AppImage" >/dev/null 2>&1; then
+        info "Stopping Kata Desktop..."
+        pkill -f "Kata-Desktop.*AppImage" 2>/dev/null || true
         sleep 2
     fi
 
@@ -313,16 +253,16 @@ else
     info "Creating launcher at $WRAPPER_PATH..."
     cat > "$WRAPPER_PATH" << 'WRAPPER_EOF'
 #!/bin/bash
-# Craft Agent launcher - handles Linux-specific AppImage issues
+# Kata Desktop launcher - handles Linux-specific AppImage issues
 
-APPIMAGE_PATH="$HOME/.craft-agent/app/Craft-Agent-x64.AppImage"
-ELECTRON_CACHE="$HOME/.config/@craft-agent"
-ELECTRON_CACHE_ALT="$HOME/.cache/@craft-agent"
+APPIMAGE_PATH="$HOME/.kata-desktop/app/Kata-Desktop-x64.AppImage"
+ELECTRON_CACHE="$HOME/.config/@kata-desktop"
+ELECTRON_CACHE_ALT="$HOME/.cache/@kata-desktop"
 
 # Verify AppImage exists
 if [ ! -f "$APPIMAGE_PATH" ]; then
-    echo "Error: Craft Agent not found at $APPIMAGE_PATH"
-    echo "Reinstall: curl -fsSL https://agents.craft.do/install-app.sh | bash"
+    echo "Error: Kata Desktop not found at $APPIMAGE_PATH"
+    echo "Reinstall from: https://github.com/gannonh/kata-desktop/releases"
     exit 1
 fi
 
@@ -332,9 +272,9 @@ if [ -z "$DISPLAY" ]; then
 fi
 
 # Clear stale cache referencing AppImage mount paths
-# AppImage creates a new /tmp/.mount_Craft-XXXX each launch, so any cached path is stale
+# AppImage creates a new /tmp/.mount_Kata-XXXX each launch, so any cached path is stale
 for cache_dir in "$ELECTRON_CACHE" "$ELECTRON_CACHE_ALT"; do
-    if [ -d "$cache_dir" ] && grep -rq '/tmp/\.mount_Craft' "$cache_dir" 2>/dev/null; then
+    if [ -d "$cache_dir" ] && grep -rq '/tmp/\.mount_Kata' "$cache_dir" 2>/dev/null; then
         rm -rf "$cache_dir"
     fi
 done
@@ -349,7 +289,7 @@ WRAPPER_EOF
     chmod +x "$WRAPPER_PATH"
 
     # Migrate old installation
-    OLD_APPIMAGE="$INSTALL_DIR/Craft-Agent-x64.AppImage"
+    OLD_APPIMAGE="$INSTALL_DIR/Kata-Desktop-x64.AppImage"
     [ -f "$OLD_APPIMAGE" ] && rm -f "$OLD_APPIMAGE"
 
     echo ""
@@ -360,7 +300,7 @@ WRAPPER_EOF
     printf "%b\n" "  AppImage: ${BOLD}$APPIMAGE_INSTALL_PATH${NC}"
     printf "%b\n" "  Launcher: ${BOLD}$WRAPPER_PATH${NC}"
     echo ""
-    printf "%b\n" "  Run with: ${BOLD}craft-agents${NC}"
+    printf "%b\n" "  Run with: ${BOLD}kata-desktop${NC}"
     echo ""
     printf "%b\n" "  Add to PATH if needed:"
     printf "%b\n" "    ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"

@@ -196,7 +196,7 @@ export async function rebuildMenu(): Promise<void> {
       submenu: [
         {
           label: 'Help & Documentation',
-          click: () => shell.openExternal('https://agents.craft.do/docs')
+          click: () => shell.openExternal('https://github.com/gannonh/kata-desktop')
         },
         {
           label: 'Keyboard Shortcuts',

@@ -432,7 +432,7 @@ When you learn information about the user (their name, timezone, location, langu
 When creating git commits, include Craft Agent as a co-author:
 
 \`\`\`
-Co-Authored-By: Craft Agent <agents-noreply@craft.do>
+Co-Authored-By: Kata Desktop <noreply@kata.sh>
 \`\`\`
 
 ## Permission Modes

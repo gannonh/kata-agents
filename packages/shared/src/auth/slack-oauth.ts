@@ -20,6 +20,25 @@ import type { SlackService } from '../sources/types.ts';
 // Re-export for convenience
 export type { SlackService } from '../sources/types.ts';
 
+/**
+ * Slack OAuth is temporarily disabled for the Kata Desktop fork.
+ *
+ * The original implementation uses agents.craft.do as an HTTPS relay for the OAuth callback.
+ * Slack OAuth REQUIRES HTTPS redirect URIs, and we don't have a replacement relay server.
+ *
+ * To re-enable Slack OAuth in the future:
+ * 1. Set up a Cloudflare Worker or similar HTTPS endpoint as a relay
+ * 2. Update the redirectUri below to point to the new relay
+ * 3. Set SLACK_OAUTH_DISABLED = false
+ *
+ * Original relay URL: https://agents.craft.do/auth/slack/callback
+ */
+export const SLACK_OAUTH_DISABLED = true;
+export const SLACK_OAUTH_DISABLED_REASON =
+  'Slack OAuth is temporarily unavailable. The OAuth relay server (agents.craft.do) ' +
+  'is not available for this fork. This feature will be restored when a replacement ' +
+  'relay is configured at kata.sh.';
+
 // Slack OAuth configuration - must be set via environment variables
 // These are baked into the build at compile time
 const SLACK_CLIENT_ID = process.env.SLACK_OAUTH_CLIENT_ID || '';
@@ -253,6 +272,14 @@ export function getSlackScopes(options: SlackOAuthOptions): string[] {
  * });
  */
 export async function startSlackOAuth(options: SlackOAuthOptions = {}): Promise<SlackOAuthResult> {
+  // Check if Slack OAuth is disabled (no relay server available)
+  if (SLACK_OAUTH_DISABLED) {
+    return {
+      success: false,
+      error: SLACK_OAUTH_DISABLED_REASON,
+    };
+  }
+
   try {
     // Verify OAuth credentials are configured
     if (!isSlackOAuthConfigured()) {

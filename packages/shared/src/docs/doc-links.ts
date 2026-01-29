@@ -3,7 +3,9 @@
  * Summaries provide quick context; "Learn more" opens the full docs.
  */
 
-const DOC_BASE_URL = 'https://agents.craft.do/docs'
+// Disable external docs until kata.sh docs exist
+// Was: 'https://agents.craft.do/docs'
+const DOC_BASE_URL = ''
 
 export type DocFeature =
   | 'sources'

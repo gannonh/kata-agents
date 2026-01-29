@@ -42,9 +42,11 @@ export function getDocsSource(workspaceId: string, workspaceRootPath: string): L
     enabled: false,
     provider: 'mintlify',
     type: 'mcp',
+    // MCP docs server disabled until Kata infrastructure ready
+    // Was: url: 'https://agents.craft.do/docs/mcp'
     mcp: {
       transport: 'http',
-      url: 'https://agents.craft.do/docs/mcp',
+      url: '',  // DISABLED: No Kata docs MCP server yet
       authType: 'none',
     },
     tagline: 'Search Craft Agents documentation and source setup guides',

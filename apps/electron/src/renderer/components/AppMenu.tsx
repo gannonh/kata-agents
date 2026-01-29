@@ -230,7 +230,7 @@ export function AppMenu({
               Help
             </StyledDropdownMenuSubTrigger>
             <StyledDropdownMenuSubContent>
-              <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs')}>
+              <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://github.com/gannonh/kata-desktop')}>
                 <HelpCircle className="h-3.5 w-3.5" />
                 Help & Documentation
                 <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />

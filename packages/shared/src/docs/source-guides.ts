@@ -173,7 +173,7 @@ export function extractDomainFromSource(source: {
       github: 'github.com',
       notion: 'notion.so',
       slack: 'slack.com',
-      craft: 'craft.do',
+      // craft: 'craft.do',  // Disabled for Kata Desktop fork
       exa: 'exa.ai',
       google: 'google.com',
     };
