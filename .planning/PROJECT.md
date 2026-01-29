@@ -45,6 +45,17 @@ A compliant, independent rebrand that preserves all existing functionality while
 - Kata Orchestrator integration — Phase 2, after clean rebrand ships
 - Kata Context integration — future, not yet defined
 
+## Current Milestone: v0.4.0 Foundation
+
+**Goal:** Establish Kata Desktop as an independent, compliant fork with proper tooling before any feature work.
+
+**Target features:**
+- CI/CD pipelines and build automation
+- Upstream management strategy and documentation
+- Complete trademark compliance (remove all Craft references)
+- Kata branding (logos, icons, bundle ID)
+- Domain and distribution infrastructure setup
+
 ## Context
 
 **Origin:** Hard fork of [Craft Agents](https://github.com/AiCodecraft/craft-agents) by Craft Docs Ltd., Apache 2.0 licensed.
