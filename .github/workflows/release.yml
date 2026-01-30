@@ -67,19 +67,36 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Import Code Signing Certificate
+        if: env.CSC_LINK != ''
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          # Decode and import the certificate
+          echo "$CSC_LINK" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
+
       - name: Build Electron app
         run: bun run electron:build
-        env:
-          # Disable code signing in CI (no certificates available)
-          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Package for macOS ${{ matrix.arch }}
         run: |
           cd apps/electron
           npx electron-builder --mac --${{ matrix.arch }} --publish never
         env:
-          # Disable code signing in CI (no certificates available)
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Code signing (if secrets are configured)
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Notarization (if secrets are configured)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Verify macOS artifacts
         run: |
