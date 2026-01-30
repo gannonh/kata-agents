@@ -17,6 +17,31 @@
 
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
+
+/**
+ * Strip executable permissions from script files in the app bundle.
+ * Apple notarization can hang on unsigned executables - JS/MJS files
+ * shouldn't have the executable bit set.
+ */
+function stripScriptExecutablePermissions(appPath) {
+  console.log('afterPack: Stripping executable permissions from script files...');
+  try {
+    // Find all .js, .mjs, .sh files with executable bit and remove it
+    // This prevents notarization issues with unsigned "executables"
+    const cmd = `find "${appPath}" -type f \\( -name "*.js" -o -name "*.mjs" -o -name "*.sh" \\) -perm +111 -exec chmod -x {} \\;`;
+    execSync(cmd, { stdio: 'inherit' });
+
+    // Also strip executable from node_modules bin scripts (often have no extension)
+    // These are Node.js scripts that shouldn't be executable in the app bundle
+    const binCmd = `find "${appPath}" -path "*/node_modules/*/bin/*" -type f -perm +111 -exec chmod -x {} \\;`;
+    execSync(binCmd, { stdio: 'inherit' });
+
+    console.log('afterPack: Script permissions stripped successfully');
+  } catch (err) {
+    console.log(`afterPack: Warning - could not strip permissions: ${err.message}`);
+  }
+}
 
 module.exports = async function afterPack(context) {
   // Only process macOS builds
@@ -27,7 +52,12 @@ module.exports = async function afterPack(context) {
 
   const appPath = context.appOutDir;
   const productName = context.packager.appInfo.productName;
-  const resourcesDir = path.join(appPath, `${productName}.app`, 'Contents', 'Resources');
+  const appBundlePath = path.join(appPath, `${productName}.app`);
+
+  // Strip executable permissions from script files to prevent notarization hangs
+  stripScriptExecutablePermissions(appBundlePath);
+
+  const resourcesDir = path.join(appBundlePath, 'Contents', 'Resources');
   const precompiledAssets = path.join(context.packager.projectDir, 'resources', 'Assets.car');
 
   console.log(`afterPack: projectDir=${context.packager.projectDir}`);
