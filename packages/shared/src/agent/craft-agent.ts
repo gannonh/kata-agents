@@ -824,7 +824,7 @@ export class CraftAgent {
         // Documentation MCP server - disabled until Kata infrastructure ready
         // NOTE: Was 'https://agents.craft.do/docs/mcp' (Mintlify MCP server)
         // Uncomment when Kata docs MCP server is available:
-        // 'kata-desktop-docs': {
+        // 'kata-agents-docs': {
         //   type: 'http',
         //   url: 'https://docs.kata.sh/mcp',
         // },

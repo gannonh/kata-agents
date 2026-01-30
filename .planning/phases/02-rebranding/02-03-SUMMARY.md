@@ -76,10 +76,10 @@ Updated all files that imported Craft icon components:
 | File | Changes |
 |------|---------|
 | SplashScreen.tsx | CraftAgentsSymbol -> KataSymbol, updated comment |
-| WelcomeStep.tsx | Import + usage + "Welcome to Kata Desktop" |
+| WelcomeStep.tsx | Import + usage + "Welcome to Kata Agents" |
 | CompletionStep.tsx | Import + usage |
-| ReauthScreen.tsx | Import + usage + "Kata Desktop" text |
-| AppMenu.tsx | Import + usage + "Quit Kata Desktop" |
+| ReauthScreen.tsx | Import + usage + "Kata Agents" text |
+| AppMenu.tsx | Import + usage + "Quit Kata Agents" |
 | PlaygroundApp.tsx | Import + usage |
 | registry/icons.tsx | Imports + registry entries |
 
@@ -134,6 +134,6 @@ This plan is complete. The renderer now displays Kata branding throughout:
 - Splash screen shows Kata mark
 - App menu shows Kata icon
 - Onboarding screens show Kata branding
-- "Craft Agents" text replaced with "Kata Desktop"
+- "Craft Agents" text replaced with "Kata Agents"
 
 **Note:** Some other files still contain `craft.do` URLs (ChatPage.tsx, AppMenu.tsx for docs, AppShell.tsx). These are out of scope for this plan and would be addressed in a future infrastructure/documentation plan when Kata URLs are available.

@@ -1,5 +1,5 @@
 /**
- * Centralized branding assets for Kata Desktop
+ * Centralized branding assets for Kata Agents
  * Used by OAuth callback pages and branding displays
  */
 

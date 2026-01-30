@@ -1,8 +1,8 @@
-# Kata Desktop — State
+# Kata Agents — State
 
 ## Project Reference
 
-**Core Value:** A compliant, independent rebrand that preserves all existing functionality while establishing Kata Desktop as its own product.
+**Core Value:** A compliant, independent rebrand that preserves all existing functionality while establishing Kata Agents as its own product.
 
 **Current Focus:** v0.4.0 Foundation — CI/CD tooling and trademark compliance
 

@@ -1,4 +1,4 @@
-# Kata Desktop Windows Installer
+# Kata Agents Windows Installer
 # Downloads and installs from GitHub Releases
 #
 # NOTE: This script was adapted from the original Craft Agents installer.
@@ -6,10 +6,10 @@
 
 $ErrorActionPreference = "Stop"
 
-$GITHUB_REPO = "gannonh/kata-desktop"
+$GITHUB_REPO = "gannonh/kata-agents"
 $GITHUB_RELEASES_URL = "https://github.com/$GITHUB_REPO/releases"
-$DOWNLOAD_DIR = "$env:TEMP\kata-desktop-install"
-$APP_NAME = "Kata Desktop"
+$DOWNLOAD_DIR = "$env:TEMP\kata-agents-install"
+$APP_NAME = "Kata Agents"
 
 # Colors for output
 function Write-Info { Write-Host "> $args" -ForegroundColor Blue }
@@ -25,7 +25,7 @@ if ($env:OS -ne "Windows_NT") {
 # Detect architecture
 $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
 $platform = "win32-$arch"
-$filename = "Kata-Desktop-$arch.exe"
+$filename = "Kata-Agents-$arch.exe"
 
 Write-Host ""
 Write-Info "Detected platform: $platform (arch: $arch)"
@@ -115,9 +115,9 @@ if (-not (Test-Path $installerPath)) {
 }
 
 # Close the app if it's running
-$process = Get-Process -Name "Kata Desktop" -ErrorAction SilentlyContinue
+$process = Get-Process -Name "Kata Agents" -ErrorAction SilentlyContinue
 if ($process) {
-    Write-Info "Closing Kata Desktop..."
+    Write-Info "Closing Kata Agents..."
     $process | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
@@ -150,11 +150,11 @@ Write-Info "Cleaning up..."
 Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
 # Add command line shortcut
-Write-Info "Adding 'kata-desktop' command to PATH..."
+Write-Info "Adding 'kata-agents' command to PATH..."
 
-$binDir = "$env:LOCALAPPDATA\Kata Desktop\bin"
-$cmdFile = "$binDir\kata-desktop.cmd"
-$exePath = "$env:LOCALAPPDATA\Programs\Kata Desktop\Kata Desktop.exe"
+$binDir = "$env:LOCALAPPDATA\Kata Agents\bin"
+$cmdFile = "$binDir\kata-agents.cmd"
+$exePath = "$env:LOCALAPPDATA\Programs\Kata Agents\Kata Agents.exe"
 
 # Create bin directory
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
@@ -168,9 +168,9 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$binDir*") {
     $newPath = "$userPath;$binDir"
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Success "Added to PATH (restart terminal to use 'kata-desktop' command)"
+    Write-Success "Added to PATH (restart terminal to use 'kata-agents' command)"
 } else {
-    Write-Success "Command 'kata-desktop' is ready"
+    Write-Success "Command 'kata-agents' is ready"
 }
 
 Write-Host ""
@@ -178,9 +178,9 @@ Write-Host "--------------------------------------------------------------------
 Write-Host ""
 Write-Success "Installation complete!"
 Write-Host ""
-Write-Host "  Kata Desktop has been installed."
+Write-Host "  Kata Agents has been installed."
 Write-Host ""
 Write-Host "  Launch from:"
 Write-Host "    - Start Menu or desktop shortcut"
-Write-Host "    - Command line: kata-desktop (restart terminal first)"
+Write-Host "    - Command line: kata-agents (restart terminal first)"
 Write-Host ""

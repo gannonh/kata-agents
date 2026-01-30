@@ -22,7 +22,7 @@ export interface UrlValidationResult {
 }
 
 // NOTE: This validator was originally designed for Craft MCP URLs (mcp.craft.do).
-// For Kata Desktop, MCP URL validation is simplified to basic URL format checks.
+// For Kata Agents, MCP URL validation is simplified to basic URL format checks.
 // EXAMPLE URLs below use placeholder domains for documentation purposes only.
 const SYSTEM_PROMPT = `You are a URL validator for MCP servers. Your ONLY job is to validate if a URL is a valid MCP server URL.
 

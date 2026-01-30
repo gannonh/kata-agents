@@ -70,7 +70,7 @@ metrics:
 1. **doc-links.ts** - Set `DOC_BASE_URL = ''` (disabled until kata.sh docs exist)
 2. **manifest.ts** - Set `VERSIONS_URL = ''` (disabled until kata.sh hosts version manifest)
 3. **builtin-sources.ts** - Disabled MCP docs URL in placeholder source
-4. **system.ts** - Changed git co-author to `Kata Desktop <noreply@kata.sh>`
+4. **system.ts** - Changed git co-author to `Kata Agents <noreply@kata.sh>`
 5. **craft-agent.ts** - Commented out craft-agents-docs MCP server
 6. **source-guides.ts** - Commented out craft.do provider domain mapping
 7. **menu.ts** - Changed Help menu link to GitHub repo
@@ -104,15 +104,15 @@ Changed example domains from `mcp.craft.do` to generic `mcp.example.com` placeho
 ### Task 3: Documentation Cleanup
 
 **README.md:**
-- Rebranded to Kata Desktop
+- Rebranded to Kata Agents
 - Added fork attribution note
 - Updated installation instructions for GitHub releases
-- Updated deep linking scheme to `katadesktop://`
-- Updated config path to `~/.kata-desktop/`
+- Updated deep linking scheme to `kataagents://`
+- Updated config path to `~/.kata-agents/`
 
 **SECURITY.md:**
 - Changed reporting to GitHub Security Advisories
-- Updated scope for Kata Desktop
+- Updated scope for Kata Agents
 
 **CODE_OF_CONDUCT.md:**
 - Changed enforcement contact to GitHub Issues
@@ -163,7 +163,7 @@ Changed example domains from `mcp.craft.do` to generic `mcp.example.com` placeho
 |------|---------|
 | e985774 | fix(02-04): remove craft.do domain references |
 | 91f3a56 | chore(02-04): bump version to 0.4.0 |
-| 824ecb0 | docs(02-04): update documentation for Kata Desktop |
+| 824ecb0 | docs(02-04): update documentation for Kata Agents |
 
 ## What Remains Disabled (Requires Infrastructure)
 

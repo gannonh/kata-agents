@@ -15,7 +15,7 @@ We expect all participants to:
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported via [GitHub Issues](https://github.com/gannonh/kata-desktop/issues) or by contacting the project maintainer.
+Instances of unacceptable behavior may be reported via [GitHub Issues](https://github.com/gannonh/kata-agents/issues) or by contacting the project maintainer.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

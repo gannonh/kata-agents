@@ -21,7 +21,7 @@ import type { SlackService } from '../sources/types.ts';
 export type { SlackService } from '../sources/types.ts';
 
 /**
- * Slack OAuth is temporarily disabled for the Kata Desktop fork.
+ * Slack OAuth is temporarily disabled for the Kata Agents fork.
  *
  * The original implementation uses agents.craft.do as an HTTPS relay for the OAuth callback.
  * Slack OAuth REQUIRES HTTPS redirect URIs, and we don't have a replacement relay server.

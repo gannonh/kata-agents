@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-We take security seriously. If you discover a security vulnerability in Kata Desktop, please report it responsibly.
+We take security seriously. If you discover a security vulnerability in Kata Agents, please report it responsibly.
 
 ### How to Report
 
@@ -10,7 +10,7 @@ We take security seriously. If you discover a security vulnerability in Kata Des
 
 Instead, please use one of the following methods:
 
-1. **GitHub Security Advisories**: Report via [GitHub Security Advisories](https://github.com/gannonh/kata-desktop/security/advisories)
+1. **GitHub Security Advisories**: Report via [GitHub Security Advisories](https://github.com/gannonh/kata-agents/security/advisories)
 2. **Email**: Contact the maintainer directly
 
 Include the following information:
@@ -28,7 +28,7 @@ Include the following information:
 ### Scope
 
 This policy applies to:
-- The Kata Desktop application
+- The Kata Agents application
 - The `@craft-agent/*` npm packages (as used in this fork)
 - This repository
 
@@ -49,7 +49,7 @@ We only provide security updates for the latest version. Please keep your instal
 
 ## Security Best Practices
 
-When using Kata Desktop:
+When using Kata Agents:
 
 1. **Keep credentials secure**: Never commit `.env` files or credentials
 2. **Use environment variables**: Store secrets in environment variables

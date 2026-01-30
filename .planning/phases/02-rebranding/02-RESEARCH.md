@@ -6,7 +6,7 @@
 
 ## Summary
 
-This research catalogues all Craft-branded assets and references in the codebase that must be updated for Kata Desktop rebranding. The codebase contains extensive Craft branding across:
+This research catalogues all Craft-branded assets and references in the codebase that must be updated for Kata Agents rebranding. The codebase contains extensive Craft branding across:
 
 1. **Application icons** - icns, ico, png files for all platforms
 2. **In-app assets** - SVG logos and React components
@@ -95,7 +95,7 @@ Files to replace with Kata branding:
 // Line 2 - Change:
 "name": "craft-agent"
 // To:
-"name": "kata-desktop"
+"name": "kata-agents"
 
 // Line 4 - Change description
 ```
@@ -124,10 +124,10 @@ Files to replace with Kata branding:
 | Line | Current | Change To |
 |------|---------|-----------|
 | 1 | `appId: com.lukilabs.craft-agent` | `appId: sh.kata.desktop` |
-| 2 | `productName: Craft Agents` | `productName: Kata Desktop` |
+| 2 | `productName: Craft Agents` | `productName: Kata Agents` |
 | 3 | `copyright: Copyright ... Craft Docs Ltd.` | Keep attribution per LICENSE |
-| 72, 80, 105, 138 | `artifactName: "Craft-Agent-${arch}.${ext}"` | `artifactName: "Kata-Desktop-${arch}.${ext}"` |
-| 86 | `title: "Craft Agents"` (DMG) | `title: "Kata Desktop"` |
+| 72, 80, 105, 138 | `artifactName: "Craft-Agent-${arch}.${ext}"` | `artifactName: "Kata-Agents-${arch}.${ext}"` |
+| 86 | `title: "Craft Agents"` (DMG) | `title: "Kata Agents"` |
 | 133 | `maintainer: "Craft Docs Ltd. <...>"` | Update maintainer |
 
 ### 6. Domain References (MEDIUM confidence)
@@ -188,7 +188,7 @@ Files to update:
 - `README.md` - Documentation
 - 40+ renderer files using `craftagents://` URLs
 
-**Recommended new scheme:** `kata://` or `katadesktop://`
+**Recommended new scheme:** `kata://` or `kataagents://`
 
 ### 10. Configuration Directory (MEDIUM confidence)
 
@@ -305,10 +305,10 @@ Current release workflow: `.github/workflows/release.yml`
 4. Workflow auto-creates release `v0.4.0`
 
 **Artifact names after rebranding:**
-- `Kata-Desktop-arm64.dmg`
-- `Kata-Desktop-x64.dmg`
-- `Kata-Desktop-x64.exe`
-- `Kata-Desktop-x64.AppImage`
+- `Kata-Agents-arm64.dmg`
+- `Kata-Agents-x64.dmg`
+- `Kata-Agents-x64.exe`
+- `Kata-Agents-x64.AppImage`
 
 ## Code Examples
 
@@ -349,14 +349,14 @@ export function KataSymbol({ className }: Props) { ... }
 app.setName(process.env.CRAFT_APP_NAME || 'Craft Agents')
 
 // After:
-app.setName(process.env.KATA_APP_NAME || 'Kata Desktop')
+app.setName(process.env.KATA_APP_NAME || 'Kata Agents')
 ```
 
 ## State of the Art
 
 | Old Approach | Current Approach | Impact |
 |--------------|------------------|--------|
-| Craft Agents | Kata Desktop | Product identity |
+| Craft Agents | Kata Agents | Product identity |
 | craftagents:// | kata:// (proposed) | Deep links |
 | com.lukilabs.craft-agent | sh.kata.desktop | Bundle ID |
 | ~/.craft-agent/ | ~/.kata/ (optional) | Config location |

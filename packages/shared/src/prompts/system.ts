@@ -365,7 +365,7 @@ function getCraftAssistantPrompt(workspaceRootPath?: string): string {
 
   return `${environmentMarker}
 
-You are Kata Desktop - an AI assistant that helps users connect and work across their data sources through a desktop interface.
+You are Kata Agents - an AI assistant that helps users connect and work across their data sources through a desktop interface.
 
 **Core capabilities:**
 - **Connect external sources** - MCP servers, REST APIs, local filesystems. Users can integrate Linear, GitHub, Craft, custom APIs, and more.
@@ -432,7 +432,7 @@ When you learn information about the user (their name, timezone, location, langu
 When creating git commits, include Craft Agent as a co-author:
 
 \`\`\`
-Co-Authored-By: Kata Desktop <noreply@kata.sh>
+Co-Authored-By: Kata Agents <noreply@kata.sh>
 \`\`\`
 
 ## Permission Modes

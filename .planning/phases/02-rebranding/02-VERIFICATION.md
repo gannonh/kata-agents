@@ -14,13 +14,13 @@ gaps:
         issue: "Lines 268-276, 1118-1122, 1146-1149, 1559 contain craft.do links and analytics"
     missing:
       - "Update package.json author.email to hello@kata.sh or remove"
-      - "Update package.json homepage to https://github.com/gannonh/kata-desktop"
+      - "Update package.json homepage to https://github.com/gannonh/kata-agents"
       - "Update mermaid demo page meta tags and links to kata.sh or GitHub, or disable demo page generation"
 ---
 
 # Phase 02: Rebranding Verification Report
 
-**Phase Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Desktop identity for distribution.
+**Phase Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Agents identity for distribution.
 
 **Verified:** 2026-01-29T23:35:00Z
 **Status:** gaps_found
@@ -32,14 +32,14 @@ gaps:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Application window title shows "Kata Desktop" | ✓ VERIFIED | index.html line 7: `<title>Kata Desktop</title>` |
-| 2 | macOS menu bar shows "Kata Desktop" application menu | ✓ VERIFIED | menu.ts line 63: `label: 'Kata Desktop'` |
-| 3 | About menu item displays "About Kata Desktop" | ✓ VERIFIED | menu.ts line 65: `label: 'About Kata Desktop'` |
+| 1 | Application window title shows "Kata Agents" | ✓ VERIFIED | index.html line 7: `<title>Kata Agents</title>` |
+| 2 | macOS menu bar shows "Kata Agents" application menu | ✓ VERIFIED | menu.ts line 63: `label: 'Kata Agents'` |
+| 3 | About menu item displays "About Kata Agents" | ✓ VERIFIED | menu.ts line 65: `label: 'About Kata Agents'` |
 | 4 | Bundle ID is "sh.kata.desktop" in build configuration | ✓ VERIFIED | electron-builder.yml line 1: `appId: sh.kata.desktop` |
 | 5 | Application icon displays Kata branding | ✓ VERIFIED | icon.icns exists (93KB, Mac OS X icon format) |
 | 6 | macOS dock icon is Kata mark | ✓ VERIFIED | icon.icns + icon.png (512x512) with Kata branding |
 | 7 | Windows taskbar icon is Kata mark | ✓ VERIFIED | icon.ico exists (105KB) |
-| 8 | DMG installer shows Kata branding | ✓ VERIFIED | electron-builder.yml line 88: `title: "Kata Desktop"` |
+| 8 | DMG installer shows Kata branding | ✓ VERIFIED | electron-builder.yml line 88: `title: "Kata Agents"` |
 | 9 | Splash screen shows Kata mark | ✓ VERIFIED | SplashScreen.tsx imports KataSymbol |
 | 10 | App menu shows Kata icon | ✓ VERIFIED | AppMenu.tsx imports KataSymbol |
 | 11 | Onboarding screens show Kata branding | ✓ VERIFIED | WelcomeStep, CompletionStep, ReauthScreen import KataSymbol |
@@ -56,10 +56,10 @@ gaps:
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `apps/electron/electron-builder.yml` | Build config with Kata branding | ✓ VERIFIED | appId: sh.kata.desktop, productName: Kata Desktop |
-| `apps/electron/src/main/index.ts` | Main process with Kata app name | ✓ VERIFIED | Line 108: app.setName('Kata Desktop') |
-| `apps/electron/src/main/menu.ts` | Menu labels with Kata branding | ✓ VERIFIED | Lines 63, 65, 74, 78 all show "Kata Desktop" |
-| `apps/electron/src/renderer/index.html` | HTML title "Kata Desktop" | ✓ VERIFIED | Line 7: `<title>Kata Desktop</title>` |
+| `apps/electron/electron-builder.yml` | Build config with Kata branding | ✓ VERIFIED | appId: sh.kata.desktop, productName: Kata Agents |
+| `apps/electron/src/main/index.ts` | Main process with Kata app name | ✓ VERIFIED | Line 108: app.setName('Kata Agents') |
+| `apps/electron/src/main/menu.ts` | Menu labels with Kata branding | ✓ VERIFIED | Lines 63, 65, 74, 78 all show "Kata Agents" |
+| `apps/electron/src/renderer/index.html` | HTML title "Kata Agents" | ✓ VERIFIED | Line 7: `<title>Kata Agents</title>` |
 | `apps/electron/resources/icon.icns` | macOS application icon | ✓ VERIFIED | 93KB, Mac OS X icon format |
 | `apps/electron/resources/icon.ico` | Windows application icon | ✓ VERIFIED | 105KB |
 | `apps/electron/resources/icon.png` | Linux application icon (512x512) | ✓ VERIFIED | 512x512 PNG |
@@ -82,7 +82,7 @@ gaps:
 
 | From | To | Via | Status | Details |
 |------|-----|-----|--------|---------|
-| electron-builder.yml | Built application | electron-builder packaging | ✓ WIRED | productName: Kata Desktop |
+| electron-builder.yml | Built application | electron-builder packaging | ✓ WIRED | productName: Kata Agents |
 | assets/brand/mark.svg | apps/electron/src/renderer/assets/kata_mark.svg | Copy | ✓ WIRED | File exists |
 | kata_mark.svg | KataSymbol.tsx | import | ✓ WIRED | Line 1: `import iconSvg from "@/assets/kata_mark.svg"` |
 | KataSymbol.tsx | UI components | React imports | ✓ WIRED | Used in 7 components (SplashScreen, AppMenu, Onboarding, Playground) |
@@ -127,10 +127,10 @@ bun run electron:start
 ```
 
 **Expected:** 
-- Window title shows "Kata Desktop"
+- Window title shows "Kata Agents"
 - macOS dock icon shows Kata mark (amber on dark)
-- macOS menu bar shows "Kata Desktop" application menu
-- About dialog shows "About Kata Desktop"
+- macOS menu bar shows "Kata Agents" application menu
+- About dialog shows "About Kata Agents"
 - Splash screen shows Kata mark
 - Help menu → Help & Documentation opens GitHub repo
 
@@ -141,7 +141,7 @@ bun run electron:start
 **Test:** Build the DMG and check bundle ID
 ```bash
 bun run electron:dist:mac
-mdls -name kMDItemCFBundleIdentifier apps/electron/release/Kata-Desktop*.app
+mdls -name kMDItemCFBundleIdentifier apps/electron/release/Kata-Agents*.app
 ```
 
 **Expected:** `kMDItemCFBundleIdentifier = "sh.kata.desktop"`
@@ -159,7 +159,7 @@ gh release download v0.4.0
 
 **Expected:** 
 - GitHub release v0.4.0 exists
-- Artifacts available: Kata-Desktop-arm64.dmg, Kata-Desktop-x64.dmg, Kata-Desktop-x64.exe, Kata-Desktop-x64.AppImage
+- Artifacts available: Kata-Agents-arm64.dmg, Kata-Agents-x64.dmg, Kata-Agents-x64.exe, Kata-Agents-x64.AppImage
 
 **Why human:** Requires PR merge and CI workflow completion
 
@@ -169,7 +169,7 @@ gh release download v0.4.0
 
 1. **package.json metadata** (apps/electron/package.json)
    - Line 8: `"email": "support@craft.do"` should be `"email": "hello@kata.sh"` or removed
-   - Line 11: `"homepage": "https://agents.craft.do"` should be `"homepage": "https://github.com/gannonh/kata-desktop"`
+   - Line 11: `"homepage": "https://agents.craft.do"` should be `"homepage": "https://github.com/gannonh/kata-agents"`
    - **Impact:** Medium — These are package metadata fields visible in npm registry and package inspectors
    - **Fix:** Update 2 lines in package.json
 
@@ -188,7 +188,7 @@ The following craft.do references are **acceptable** and do NOT block BRAND-03:
 
 These are documentation/attribution comments that explain why features were disabled, which is proper engineering practice.
 
-The phase is **functionally complete** for trademark compliance — the application itself has no Craft branding and displays "Kata Desktop" everywhere. The gaps are metadata cleanup items that don't affect the running application but should be fixed for complete compliance.
+The phase is **functionally complete** for trademark compliance — the application itself has no Craft branding and displays "Kata Agents" everywhere. The gaps are metadata cleanup items that don't affect the running application but should be fixed for complete compliance.
 
 ---
 

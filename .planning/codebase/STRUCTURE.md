@@ -5,7 +5,7 @@
 ## Directory Layout
 
 ```
-kata-desktop/
+kata-agents/
 ├── apps/
 │   ├── electron/              # Main Electron app
 │   │   ├── src/

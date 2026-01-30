@@ -5,7 +5,7 @@ subsystem: branding
 tags: [electron, build-config, ui]
 dependency-graph:
   requires: []
-  provides: [kata-desktop-branding, bundle-id]
+  provides: [kata-agents-branding, bundle-id]
   affects: [02-02, 02-03, 02-04]
 tech-stack:
   added: []
@@ -30,31 +30,31 @@ metrics:
 
 # Phase 2 Plan 1: Product Name and Metadata Summary
 
-**One-liner:** Rebranded user-facing names to Kata Desktop with backward-compatible env var support for migration
+**One-liner:** Rebranded user-facing names to Kata Agents with backward-compatible env var support for migration
 
 ## What Was Done
 
-Updated all user-visible product names from "Craft Agents" to "Kata Desktop" and changed the bundle ID to `sh.kata.desktop`.
+Updated all user-visible product names from "Craft Agents" to "Kata Agents" and changed the bundle ID to `sh.kata.desktop`.
 
 ### Task 1: Update electron-builder configuration
 
 - Changed `appId` from `com.lukilabs.craft-agent` to `sh.kata.desktop`
-- Changed `productName` from `Craft Agents` to `Kata Desktop`
-- Updated all `artifactName` patterns from `Craft-Agent-*` to `Kata-Desktop-*`
-- Updated DMG title to "Kata Desktop"
+- Changed `productName` from `Craft Agents` to `Kata Agents`
+- Updated all `artifactName` patterns from `Craft-Agent-*` to `Kata-Agents-*`
+- Updated DMG title to "Kata Agents"
 - Updated Linux maintainer to "Kata <hello@kata.sh>"
 - Preserved copyright attribution (required by Apache 2.0 license)
 
 ### Task 2: Update main process app name and environment variables
 
-- Changed app name from "Craft Agents" to "Kata Desktop"
+- Changed app name from "Craft Agents" to "Kata Agents"
 - Changed deeplink scheme from `craftagents://` to `kata://`
 - Added backward compatibility: both `KATA_*` and `CRAFT_*` env vars are supported
 - Updated comments to reflect new branding
 
 ### Task 3: Update menu labels and HTML titles
 
-- Updated macOS app menu label to "Kata Desktop"
+- Updated macOS app menu label to "Kata Agents"
 - Updated About, Hide, Quit menu items
 - Updated reset dialog message
 - Updated HTML titles in all entry points
@@ -75,9 +75,9 @@ None - plan executed exactly as written.
 
 All success criteria passed:
 1. `appId: sh.kata.desktop` - PASS
-2. `productName: Kata Desktop` - PASS
-3. `grep -c "Kata Desktop" menu.ts` = 6 (>= 4) - PASS
-4. `<title>Kata Desktop</title>` in index.html - PASS
+2. `productName: Kata Agents` - PASS
+3. `grep -c "Kata Agents" menu.ts` = 6 (>= 4) - PASS
+4. `<title>Kata Agents</title>` in index.html - PASS
 5. `bun run typecheck:all` - PASS
 
 ## Decisions Made

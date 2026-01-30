@@ -230,7 +230,7 @@ export function AppMenu({
               Help
             </StyledDropdownMenuSubTrigger>
             <StyledDropdownMenuSubContent>
-              <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://github.com/gannonh/kata-desktop')}>
+              <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://github.com/gannonh/kata-agents')}>
                 <HelpCircle className="h-3.5 w-3.5" />
                 Help & Documentation
                 <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
@@ -276,7 +276,7 @@ export function AppMenu({
           {/* Quit */}
           <StyledDropdownMenuItem onClick={() => window.electronAPI.menuQuit()}>
             <LogOut className="h-3.5 w-3.5" />
-            Quit Kata Desktop
+            Quit Kata Agents
             <DropdownMenuShortcut className="pl-6">{modKey}Q</DropdownMenuShortcut>
           </StyledDropdownMenuItem>
         </StyledDropdownMenuContent>

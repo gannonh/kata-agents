@@ -1,11 +1,11 @@
-# Kata Desktop
+# Kata Agents
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-Kata Desktop is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
+Kata Agents is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
 
-Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Desktop](https://github.com/gannonh/kata-desktop), and [Kata Context](https://github.com/gannonh/kata-context).
+Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
 
 ## Features
 
@@ -25,17 +25,17 @@ Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gan
 
 ### Download from GitHub Releases
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/gannonh/kata-desktop/releases).
+Download the latest release for your platform from [GitHub Releases](https://github.com/gannonh/kata-agents/releases).
 
-- **macOS**: `Kata-Desktop-arm64.dmg` (Apple Silicon) or `Kata-Desktop-x64.dmg` (Intel)
-- **Windows**: `Kata-Desktop-x64.exe`
-- **Linux**: `Kata-Desktop-x64.AppImage`
+- **macOS**: `Kata-Agents-arm64.dmg` (Apple Silicon) or `Kata-Agents-x64.dmg` (Intel)
+- **Windows**: `Kata-Agents-x64.exe`
+- **Linux**: `Kata-Agents-x64.AppImage`
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/gannonh/kata-desktop.git
-cd kata-desktop
+git clone https://github.com/gannonh/kata-agents.git
+cd kata-agents
 bun install
 bun run electron:start
 ```
@@ -92,7 +92,7 @@ Use **SHIFT+TAB** to cycle through modes in the chat interface.
 ## Architecture
 
 ```
-kata-desktop/
+kata-agents/
 ├── apps/
 │   └── electron/              # Desktop GUI (primary)
 │       └── src/
@@ -124,7 +124,7 @@ bun run electron:start
 # Type checking
 bun run typecheck:all
 
-# Debug logging (writes to ~/Library/Logs/Kata Desktop/)
+# Debug logging (writes to ~/Library/Logs/Kata Agents/)
 # Logs are automatically enabled in development
 ```
 
@@ -144,10 +144,10 @@ See [Google Cloud Console](https://console.cloud.google.com/apis/credentials) to
 
 ## Configuration
 
-Configuration is stored at `~/.kata-desktop/`:
+Configuration is stored at `~/.kata-agents/`:
 
 ```
-~/.kata-desktop/
+~/.kata-agents/
 ├── config.json              # Main config (workspaces, auth type)
 ├── credentials.enc          # Encrypted credentials (AES-256-GCM)
 ├── preferences.json         # User preferences
@@ -170,14 +170,14 @@ Tool responses exceeding ~60KB are automatically summarized using Claude Haiku w
 
 ### Deep Linking
 
-External apps can navigate using `katadesktop://` URLs:
+External apps can navigate using `kataagents://` URLs:
 
 ```
-katadesktop://allChats                    # All chats view
-katadesktop://allChats/chat/session123    # Specific chat
-katadesktop://settings                    # Settings
-katadesktop://sources/source/github       # Source info
-katadesktop://action/new-chat             # Create new chat
+kataagents://allChats                    # All chats view
+kataagents://allChats/chat/session123    # Specific chat
+kataagents://settings                    # Settings
+kataagents://sources/source/github       # Source info
+kataagents://action/new-chat             # Create new chat
 ```
 
 ## Tech Stack

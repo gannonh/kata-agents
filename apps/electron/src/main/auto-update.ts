@@ -3,7 +3,7 @@
  *
  * Handles checking for updates, downloading, and installing via the standard
  * electron-updater library. Updates are served from GitHub Releases.
- * NOTE: Auto-update from agents.craft.do is disabled for the Kata Desktop fork.
+ * NOTE: Auto-update from agents.craft.do is disabled for the Kata Agents fork.
  * Updates are distributed via GitHub Releases instead.
  *
  * Platform behavior:

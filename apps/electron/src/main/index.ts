@@ -105,7 +105,7 @@ let pendingDeepLink: string | null = null
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
 // Supports both KATA_ and legacy CRAFT_ env vars for migration
-app.setName(process.env.KATA_APP_NAME || process.env.CRAFT_APP_NAME || 'Kata Desktop')
+app.setName(process.env.KATA_APP_NAME || process.env.CRAFT_APP_NAME || 'Kata Agents')
 
 // Register as default protocol client for craftagents:// URLs
 // This must be done before app.whenReady() on some platforms

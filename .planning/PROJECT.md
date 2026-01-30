@@ -1,4 +1,4 @@
-# Kata Desktop
+# Kata Agents
 
 ## What This Is
 
@@ -6,7 +6,7 @@ Native desktop client for the Kata ecosystem — a hard fork of Craft Agents reb
 
 ## Core Value
 
-A compliant, independent rebrand that preserves all existing functionality while establishing Kata Desktop as its own product — ready for Kata Orchestrator integration.
+A compliant, independent rebrand that preserves all existing functionality while establishing Kata Agents as its own product — ready for Kata Orchestrator integration.
 
 ## Requirements
 
@@ -47,7 +47,7 @@ A compliant, independent rebrand that preserves all existing functionality while
 
 ## Current Milestone: v0.4.0 Foundation
 
-**Goal:** Establish Kata Desktop as an independent, compliant fork with proper tooling before any feature work.
+**Goal:** Establish Kata Agents as an independent, compliant fork with proper tooling before any feature work.
 
 **Target features:**
 - CI/CD pipelines and build automation
@@ -61,7 +61,7 @@ A compliant, independent rebrand that preserves all existing functionality while
 **Origin:** Hard fork of [Craft Agents](https://github.com/AiCodecraft/craft-agents) by Craft Docs Ltd., Apache 2.0 licensed.
 
 **Legal obligations (from TRADEMARK.md):**
-1. Choose a different name not including "Craft" ✓ (Kata Desktop)
+1. Choose a different name not including "Craft" ✓ (Kata Agents)
 2. Remove or replace all Craft logos and icons
 3. Update bundle ID from `com.lukilabs.craft-agent`
 4. Remove references to `craft.do` domains
@@ -77,7 +77,7 @@ A compliant, independent rebrand that preserves all existing functionality while
 
 **Kata ecosystem:**
 - **Kata Orchestrator** — Multi-agent framework (currently Claude Code plugin)
-- **Kata Desktop** — Native client (this project)
+- **Kata Agents** — Native client (this project)
 - **Kata Context** — Future memory/context API
 
 **Infrastructure planned:**

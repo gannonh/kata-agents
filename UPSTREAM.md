@@ -1,6 +1,6 @@
 # Upstream Management
 
-Kata Desktop is a fork of Craft Agents. This document describes how to track and selectively adopt changes from the upstream repository.
+Kata Agents is a fork of Craft Agents. This document describes how to track and selectively adopt changes from the upstream repository.
 
 ## Current Status
 
@@ -143,7 +143,7 @@ When using `gh` CLI in a fork, it may default to the upstream repo. Always speci
 gh pr create
 
 # Right - explicitly targets origin
-gh pr create --repo gannonh/kata-desktop
+gh pr create --repo gannonh/kata-agents
 ```
 
 For automation and scripts, always use the `--repo` flag.

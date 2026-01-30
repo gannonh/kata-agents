@@ -1,8 +1,8 @@
-# Kata Desktop v0.4.0 — Roadmap
+# Kata Agents v0.4.0 — Roadmap
 
 ## Overview
 
-Milestone v0.4.0 Foundation establishes Kata Desktop as an independent, compliant fork with proper CI/CD tooling before rebranding. Two phases: first build automation and upstream management, then complete trademark compliance and distribution setup.
+Milestone v0.4.0 Foundation establishes Kata Agents as an independent, compliant fork with proper CI/CD tooling before rebranding. Two phases: first build automation and upstream management, then complete trademark compliance and distribution setup.
 
 ---
 
@@ -34,7 +34,7 @@ Plans:
 
 ## Phase 2: Rebranding
 
-**Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Desktop identity for distribution.
+**Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Agents identity for distribution.
 
 **Dependencies:** Phase 1 (CI must pass before release)
 
@@ -55,7 +55,7 @@ Plans:
 - DIST-01: Configure GitHub releases for v0.4.0 distribution
 
 **Success Criteria:**
-1. Application launches with "Kata Desktop" in title bar, About dialog, and system tray
+1. Application launches with "Kata Agents" in title bar, About dialog, and system tray
 2. macOS bundle identifier is `sh.kata.desktop` (verified via `mdls` on built app)
 3. `grep -r "craft.do"` returns no matches in source code (excluding NOTICE, LICENSE, git history)
 4. Application icon in dock/taskbar displays Kata branding (not Craft logo)
