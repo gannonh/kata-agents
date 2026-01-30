@@ -7,8 +7,6 @@ Kata Desktop is a powerful desktop application for working with AI agents, built
 
 Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Desktop](https://github.com/gannonh/kata-desktop), and [Kata Context](https://github.com/gannonh/kata-context).
 
-> **Note:** Kata Desktop is a fork of [Craft Agents](https://github.com/lukilabs/craft-agents-oss), adapted for independent use. See [LICENSE](LICENSE), [NOTICE](NOTICE), and [TRADEMARK.md](TRADEMARK.md) for attribution and trademark information.
-
 ## Features
 
 - **Multi-Session Inbox**: Desktop app with session management, status workflow, and flagging
@@ -195,19 +193,7 @@ katadesktop://action/new-chat             # Create new chat
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-### Attribution
-
-Kata Desktop is a fork of [Craft Agents](https://github.com/lukilabs/craft-agents-oss), originally created by Craft Docs Ltd. See [NOTICE](NOTICE) for full attribution.
-
-### Third-Party Licenses
-
-This project uses the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), which is subject to [Anthropic's Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms).
-
-### Trademark
-
-"Craft" and "Craft Agents" are trademarks of Craft Docs Ltd. See [TRADEMARK.md](TRADEMARK.md) for usage guidelines.
+Apache License 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Contributing
 
