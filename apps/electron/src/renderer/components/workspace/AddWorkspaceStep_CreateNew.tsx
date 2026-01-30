@@ -20,7 +20,7 @@ interface AddWorkspaceStep_CreateNewProps {
  *
  * Fields:
  * - Workspace name (required)
- * - Location: Default (~/.craft-agent/workspaces/) or Custom
+ * - Location: Default (~/.kata-agents/workspaces/) or Custom
  */
 export function AddWorkspaceStep_CreateNew({
   onBack,
@@ -40,7 +40,7 @@ export function AddWorkspaceStep_CreateNew({
   }, [])
 
   const slug = slugify(name)
-  const defaultBasePath = homeDir ? `${homeDir}/.craft-agent/workspaces` : '~/.craft-agent/workspaces'
+  const defaultBasePath = homeDir ? `${homeDir}/.kata-agents/workspaces` : '~/.kata-agents/workspaces'
   const finalPath = locationOption === 'default'
     ? `${defaultBasePath}/${slug}`
     : customPath
@@ -144,7 +144,7 @@ export function AddWorkspaceStep_CreateNew({
             onChange={() => setLocationOption('default')}
             disabled={isCreating}
             title="Default location"
-            subtitle="under .craft-agent folder"
+            subtitle="under .kata-agents folder"
           />
 
           {/* Custom location option */}

@@ -356,7 +356,7 @@ function getCraftAssistantPrompt(workspaceRootPath?: string): string {
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
   // Extract workspaceId from path (last component of the path)
-  // Path format: ~/.craft-agent/workspaces/{workspaceId}
+  // Path format: ~/.kata-agents/workspaces/{workspaceId}
   const pathParts = workspacePath.split('/');
   const workspaceId = pathParts[pathParts.length - 1] || '{workspaceId}';
 

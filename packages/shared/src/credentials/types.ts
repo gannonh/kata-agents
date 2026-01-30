@@ -22,7 +22,7 @@ export type CredentialType =
   | 'claude_oauth'       // Claude OAuth token (Max subscription)
   // Workspace credentials
   | 'workspace_oauth'    // Workspace MCP OAuth token
-  // Source credentials (stored at ~/.craft-agent/workspaces/{ws}/sources/{slug}/)
+  // Source credentials (stored at ~/.kata-agents/workspaces/{ws}/sources/{slug}/)
   | 'source_oauth'       // OAuth tokens for MCP/API sources
   | 'source_bearer'      // Bearer tokens
   | 'source_apikey'      // API keys
