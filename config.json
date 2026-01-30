@@ -1,0 +1,22 @@
+{
+  "id": "ws_deb14c2d",
+  "name": "Kata Agents",
+  "slug": "kata-agents",
+  "defaults": {
+    "model": "claude-sonnet-4-5-20250929",
+    "permissionMode": "safe",
+    "cyclablePermissionModes": [
+      "safe",
+      "ask",
+      "allow-all"
+    ],
+    "thinkingLevel": "think",
+    "enabledSourceSlugs": [],
+    "workingDirectory": "~/dev/kata/kata-agents"
+  },
+  "localMcpServers": {
+    "enabled": true
+  },
+  "createdAt": 1769811581697,
+  "updatedAt": 1769811625742
+}

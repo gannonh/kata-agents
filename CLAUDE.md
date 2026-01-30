@@ -1,0 +1,140 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Kata Agents is a desktop application for working with AI agents, built on the Claude Agent SDK. It provides multi-session management, MCP server integration, REST API connections, and a document-centric workflow in a polished Electron-based UI.
+
+## Build and Development Commands
+
+```bash
+# Install dependencies (uses Bun)
+bun install
+
+# Development with hot reload
+bun run electron:dev
+
+# Build and run
+bun run electron:start
+
+# Type checking
+bun run typecheck:all
+
+# Linting
+bun run lint:electron
+
+# Run tests (uses Bun test runner)
+bun test
+bun test packages/shared          # Run tests for a specific package
+bun test packages/mermaid/src/__tests__/parser.test.ts  # Single test file
+
+# Distribution builds
+bun run electron:dist:mac         # macOS DMG
+bun run electron:dist:win         # Windows NSIS installer
+bun run electron:dist:linux       # Linux AppImage
+
+# Print system prompt (useful for debugging)
+bun run print:system-prompt
+```
+
+## Architecture
+
+This is a Bun monorepo using workspace packages:
+
+```
+apps/
+└── electron/                     # Desktop app (primary)
+    └── src/
+        ├── main/                 # Electron main process (Node.js)
+        │   ├── index.ts          # App entry, window lifecycle, Sentry
+        │   ├── ipc.ts            # IPC handlers for renderer communication
+        │   ├── sessions.ts       # SessionManager - spawns Bun subprocesses for agent execution
+        │   └── window-manager.ts # Multi-window management
+        ├── preload/              # Context bridge (exposes IPC to renderer)
+        └── renderer/             # React UI (Vite + shadcn)
+            ├── atoms/            # Jotai state atoms
+            ├── components/       # React components
+            ├── event-processor/  # Converts SDK events → UI state
+            └── hooks/            # Custom React hooks
+
+packages/
+├── core/                         # Shared TypeScript types
+│   └── src/types/                # Workspace, Session, Message, AgentEvent types
+├── shared/                       # Business logic (agent, auth, config, MCP)
+│   └── src/
+│       ├── agent/                # CraftAgent (wraps Claude Agent SDK)
+│       ├── auth/                 # OAuth flows (Google, Slack, Microsoft, Claude)
+│       ├── config/               # Storage, preferences, theme system
+│       ├── credentials/          # AES-256-GCM encrypted credential storage
+│       ├── mcp/                  # MCP client and validation
+│       ├── prompts/              # System prompt generation
+│       ├── sessions/             # Session persistence (JSONL format)
+│       └── sources/              # External data connections
+├── ui/                           # Shared React components
+│   └── src/components/
+│       ├── chat/                 # SessionViewer, TurnCard
+│       └── markdown/             # Markdown rendering with Shiki
+└── mermaid/                      # Mermaid diagram → SVG renderer
+```
+
+## Key Architectural Patterns
+
+### Agent Execution Model
+
+The Electron main process spawns agent sessions as separate Bun subprocesses. This isolates agent execution and allows background processing:
+
+1. `SessionManager` (main process) spawns a Bun process running the Claude Agent SDK
+2. Agent events stream back via stdout/stderr and are parsed in the main process
+3. Events are forwarded to the renderer via IPC for UI updates
+4. The renderer's `EventProcessor` converts SDK events into UI state
+
+### Permission Modes
+
+Three-level permission system per session (cycle with SHIFT+TAB):
+
+| Mode | Display | Behavior |
+|------|---------|----------|
+| `safe` | Explore | Read-only, blocks write operations |
+| `ask` | Ask to Edit | Prompts for bash commands (default) |
+| `allow-all` | Auto | Auto-approves all commands |
+
+### Configuration Storage
+
+All configuration is stored at `~/.craft-agent/`:
+
+- `config.json` - Main config (workspaces, auth type)
+- `credentials.enc` - AES-256-GCM encrypted credentials
+- `preferences.json` - User preferences
+- `theme.json` - App-level theme
+- `workspaces/{id}/` - Per-workspace data (sessions, sources, skills)
+
+### Package Imports
+
+Use subpath exports for clean imports:
+
+```typescript
+// From @craft-agent/shared
+import { CraftAgent } from '@craft-agent/shared/agent';
+import { loadStoredConfig } from '@craft-agent/shared/config';
+import { getCredentialManager } from '@craft-agent/shared/credentials';
+
+// From @craft-agent/core (types only)
+import type { Session, Message, AgentEvent } from '@craft-agent/core';
+```
+
+## Tech Stack
+
+- **Runtime:** Bun (scripts, tests, subprocess execution)
+- **Desktop:** Electron (main process runs in Node.js)
+- **UI:** React + Vite + shadcn/ui + Tailwind CSS v4
+- **State:** Jotai atoms
+- **AI:** @anthropic-ai/claude-agent-sdk
+- **Build:** esbuild (main/preload) + Vite (renderer)
+
+## Important Conventions
+
+- Environment variables for OAuth are loaded from `.env` at build time via esbuild `--define`
+- Debug logging writes to `~/Library/Logs/Kata Agentss/` on macOS
+- Sessions are persisted as JSONL files in workspace directories
+- MCP servers can be stdio-based (local subprocess) or SSE-based (remote)

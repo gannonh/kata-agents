@@ -1,0 +1,20 @@
+{
+  "id": "github_a1b2c3d4",
+  "name": "GitHub",
+  "slug": "github",
+  "enabled": true,
+  "provider": "github",
+  "type": "mcp",
+  "icon": "https://github.githubassets.com/favicons/favicon.svg",
+  "tagline": "Repository management, code search, issues, pull requests, and project collaboration",
+  "mcp": {
+    "url": "https://api.githubcopilot.com/mcp/",
+    "authType": "oauth"
+  },
+  "isAuthenticated": false,
+  "connectionStatus": "failed",
+  "createdAt": 1738274400000,
+  "updatedAt": 1769814160617,
+  "lastTestedAt": 1769814160617,
+  "connectionError": "HTTP 404: Invalid OAuth error response: SyntaxError: JSON Parse error: Unable to parse JSON string. Raw body: 404 page not found\n"
+}
