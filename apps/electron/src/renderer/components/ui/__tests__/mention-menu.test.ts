@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { isValidMentionTrigger } from '../mention-menu';
+import { isValidMentionTrigger } from '../mention-trigger';
 
 describe('isValidMentionTrigger', () => {
   describe('valid triggers (should open menu)', () => {
