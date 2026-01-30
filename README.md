@@ -5,6 +5,8 @@
 
 Kata Desktop is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
 
+Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Desktop](https://github.com/gannonh/kata-desktop), and [Kata Context](https://github.com/gannonh/kata-context).
+
 > **Note:** Kata Desktop is a fork of [Craft Agents](https://github.com/lukilabs/craft-agents-oss), adapted for independent use. See [LICENSE](LICENSE), [NOTICE](NOTICE), and [TRADEMARK.md](TRADEMARK.md) for attribution and trademark information.
 
 ## Features
