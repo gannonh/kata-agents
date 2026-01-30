@@ -1,13 +1,13 @@
 # Theme Configuration Guide
 
-This guide explains how to customize the visual theme of Craft Agent.
+This guide explains how to customize the visual theme of Kata Agents.
 
 ## Overview
 
-Craft Agent uses a 6-color theme system. You can override specific colors or install preset themes with complete visual styles.
+Kata Agents uses a 6-color theme system. You can override specific colors or install preset themes with complete visual styles.
 
-- **Theme overrides**: `~/.craft-agent/theme.json` - Override specific colors
-- **Preset themes**: `~/.craft-agent/themes/{name}.json` - Complete theme packages
+- **Theme overrides**: `~/.kata-agents/theme.json` - Override specific colors
+- **Preset themes**: `~/.kata-agents/themes/{name}.json` - Complete theme packages
 
 Both are optional - the app has sensible built-in defaults.
 
@@ -35,7 +35,7 @@ Any valid CSS color format is supported:
 
 ## Theme Override File
 
-Create `~/.craft-agent/theme.json` to override specific colors:
+Create `~/.kata-agents/theme.json` to override specific colors:
 
 ```json
 {
@@ -58,7 +58,7 @@ This allows partial dark mode customization - only override what needs to differ
 
 ## Preset Themes
 
-Preset themes are complete theme packages stored at `~/.craft-agent/themes/`. Each preset is a JSON file with theme colors and metadata.
+Preset themes are complete theme packages stored at `~/.kata-agents/themes/`. Each preset is a JSON file with theme colors and metadata.
 
 ### Preset Theme Schema
 
@@ -100,7 +100,7 @@ Preset themes are complete theme packages stored at `~/.craft-agent/themes/`. Ea
 ### Installing Preset Themes
 
 1. Download or create a theme JSON file
-2. Save it to `~/.craft-agent/themes/{name}.json`
+2. Save it to `~/.kata-agents/themes/{name}.json`
 3. Select the theme in Settings → Appearance
 
 ## Scenic Mode
@@ -198,7 +198,7 @@ Theme changes are applied immediately - no restart needed. Edit theme.json and t
 
 ## Creating a Theme
 
-1. Create `~/.craft-agent/theme.json` for overrides or `~/.craft-agent/themes/{name}.json` for a preset
+1. Create `~/.kata-agents/theme.json` for overrides or `~/.kata-agents/themes/{name}.json` for a preset
 2. Add only the colors you want to customize
 3. Optionally add `dark` overrides for dark mode
 
@@ -212,7 +212,7 @@ Theme changes are applied immediately - no restart needed. Edit theme.json and t
 
 **Theme not applying:**
 - Verify JSON syntax is valid
-- Check file is in correct location (`~/.craft-agent/theme.json` for overrides, `~/.craft-agent/themes/` for presets)
+- Check file is in correct location (`~/.kata-agents/theme.json` for overrides, `~/.kata-agents/themes/` for presets)
 - Ensure color values are valid CSS colors
 
 **Colors look wrong in dark mode:**

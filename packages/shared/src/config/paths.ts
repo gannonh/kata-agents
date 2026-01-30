@@ -1,19 +1,20 @@
 /**
- * Centralized path configuration for Craft Agent.
+ * Centralized path configuration for Kata Agents.
  *
- * Supports multi-instance development via CRAFT_CONFIG_DIR environment variable.
- * When running from a numbered folder (e.g., craft-tui-agent-1), the detect-instance.sh
- * script sets CRAFT_CONFIG_DIR to ~/.craft-agent-1, allowing multiple instances to run
+ * Supports multi-instance development via KATA_CONFIG_DIR environment variable.
+ * When running from a numbered folder (e.g., kata-agents-1), the detect-instance.sh
+ * script sets KATA_CONFIG_DIR to ~/.kata-agents-1, allowing multiple instances to run
  * simultaneously with separate configurations.
  *
- * Default (non-numbered folders): ~/.craft-agent/
- * Instance 1 (-1 suffix): ~/.craft-agent-1/
- * Instance 2 (-2 suffix): ~/.craft-agent-2/
+ * Default (non-numbered folders): ~/.kata-agents/
+ * Instance 1 (-1 suffix): ~/.kata-agents-1/
+ * Instance 2 (-2 suffix): ~/.kata-agents-2/
  */
 
 import { homedir } from 'os';
 import { join } from 'path';
 
 // Allow override via environment variable for multi-instance dev
-// Falls back to default ~/.craft-agent/ for production and non-numbered dev folders
-export const CONFIG_DIR = process.env.CRAFT_CONFIG_DIR || join(homedir(), '.craft-agent');
+// Supports both KATA_ (new) and CRAFT_ (legacy) prefixes for backward compatibility
+// Falls back to default ~/.kata-agents/ for production
+export const CONFIG_DIR = process.env.KATA_CONFIG_DIR || process.env.CRAFT_CONFIG_DIR || join(homedir(), '.kata-agents');

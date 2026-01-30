@@ -357,7 +357,7 @@ Brief description of what this plan accomplishes.
 export function createConfigValidateTool(sessionId: string, workspaceRootPath: string) {
   return tool(
     'config_validate',
-    `Validate Craft Agent configuration files.
+    `Validate Kata Agents configuration files.
 
 Use this after editing configuration files to check for errors before they take effect.
 Returns structured validation results with errors, warnings, and suggestions.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Craft Agents is a desktop application for working with AI agents, built on the Claude Agent SDK. It provides multi-session management, MCP server integration, REST API connections, and a document-centric workflow in a polished Electron-based UI.
+Kata Agentss is a desktop application for working with AI agents, built on the Claude Agent SDK. It provides multi-session management, MCP server integration, REST API connections, and a document-centric workflow in a polished Electron-based UI.
 
 ## Build and Development Commands
 
@@ -135,6 +135,6 @@ import type { Session, Message, AgentEvent } from '@craft-agent/core';
 ## Important Conventions
 
 - Environment variables for OAuth are loaded from `.env` at build time via esbuild `--define`
-- Debug logging writes to `~/Library/Logs/Craft Agents/` on macOS
+- Debug logging writes to `~/Library/Logs/Kata Agentss/` on macOS
 - Sessions are persisted as JSONL files in workspace directories
 - MCP servers can be stdio-based (local subprocess) or SSE-based (remote)
