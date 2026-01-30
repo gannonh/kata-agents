@@ -7,6 +7,7 @@ Kata Agents is a powerful desktop application for working with AI agents, built 
 
 Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
 
+![Kata Agents Demo](assets/supercut.gif)
 
 ## Features
 
