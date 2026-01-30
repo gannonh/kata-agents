@@ -1,11 +1,20 @@
 # Kata Agents
 
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/gannonh/kata-agents/releases/tag/v0.4.0)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 Kata Agents is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
 
 Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
+
+## What's New in v0.4.0
+
+- **Complete rebrand** from Craft Agents to Kata Agents
+- **macOS code signing & notarization** for secure installation
+- **GitHub Releases distribution** with auto-update support
+- **CI/CD workflows** for PR validation and multi-platform builds
+
+See [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Features
 
