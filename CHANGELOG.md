@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Complete Kata Agents branding (icons, logos, React components)
-- macOS code signing and notarization support
+- macOS code signing support
 - CI/CD workflows for PR validation and releases
 - GitHub Releases distribution for all platforms
 - Upstream management documentation (UPSTREAM.md)
@@ -18,12 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove all craft.do domain references from active code
 - Update config paths from .craft-agent to .kata-agents
 - Harden GitHub Actions workflows with fork protection
+- Strip executable permissions from bundled scripts to improve notarization compatibility
 
 ### Changed
 - Rebrand from Craft Agents to Kata Agents
 - Bundle ID changed to `sh.kata.desktop`
 - Auto-update provider changed from generic to GitHub Releases
 - Slack OAuth temporarily disabled (requires infrastructure)
+
+### Known Issues
+- **macOS Gatekeeper warning**: Apple notarization is delayed due to a [known service issue](https://developer.apple.com/forums/thread/811968) affecting Electron apps. On first launch, right-click the app and select "Open" to bypass the warning. Notarization will be added in a future release.
 
 ## [0.3.0] - 2026-01-28
 

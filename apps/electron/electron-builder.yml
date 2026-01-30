@@ -15,6 +15,8 @@ files:
   - dist/**/*
   - "!dist/renderer/src/**"
   - "!**/*.map"
+  - "!**/*.sh"
+  - "!**/scripts/**"
   - package.json
   # Bundled assets loaded at runtime via getBundledAssetsDir()
   - dist/assets/docs/**/*
