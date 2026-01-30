@@ -1,83 +1,18 @@
-# Craft Agents
+# Kata Agents
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-Craft Agents is a tool we built so that we (at craft.do) can work effectively with agents. It enables intuitive multitasking, no-fluff connection to any API or Service, sharing sessions, and a more document (vs code) centric workflow - in a beautiful and fluid UI.
+Kata Agents is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
 
-It leans on Claude Code through the Claude Agent SDK - follows what we found great, and improves areas where we've desired improvements.
-
-It's built with Agent Native software principles in mind, and is highly customisable out of the box. One of the first of its kind.
-
-Craft Agents is open source under the Apache 2.0 license - so you are free to remix, change anything. And that's actually possible. We ourselves are building Craft Agents with Craft Agents only - no code editors - so really, any customisation is just a prompt away.
-
-We built Craft Agents because we wanted a better, more opinionated (and preferably non-CLI way) of working with the most powerful agents in the world. We'll continue to improve it, based on our experiences and intuition.
-
-<img width="1578" height="894" alt="image" src="https://github.com/user-attachments/assets/3f1f2fe8-7cf6-4487-99ff-76f6c8c0a3fb" />
-
-## Things that are hard to believe "just work"
-
-**How do I connect to Linear, Gmail, Slack...?**
-Tell the agent "add Linear as a source." It finds public APIs and MCP servers, reads their docs, sets up credentials, and configures everything. No config files, no setup wizards.
-
-[Check out how I just connected to Slack →](https://agents.craft.do/s/DRNQEiy8w2e1v5LPgKl8b)
-
-**I already have my MCP config JSON.**
-Paste it. The agent handles the rest.
-
-**What about local MCPs?**
-Fully supported. Stdio-based MCP servers run as local subprocesses on your machine. Point it at an npx command, a Python script, or any local binary. It just works.
-
-**Can it handle custom APIs?**
-Yes. Paste an OpenAPI spec, some endpoint URLs, screenshots of docs, whatever you have. It figures it out and guides you through the rest.
-
-**APIs too? Not just MCPs?**
-Craft Agents connects to anything. We have it hooked up to a direct Postgres DB behind a jumpbox. Skills + Sources = magic.
-
-**How do I import my Claude Code skills and MCPs?**
-Tell the agent you want to import your skills from Claude Code. It handles the migration.
-
-[Here I imported all my skills in one go →](https://agents.craft.do/s/gWCFqwhObFWaNJIEJmd6j)
-
-**How do I create a new skill?**
-Describe what the skill should do, give it context. The agent takes care of the rest.
-
-**Do I need to restart after changes?**
-No. Everything is instant. Mention new skills or sources with `@`, even mid-conversation.
-
-**So I can just ask it anything?**
-Yes. That's the core idea behind agent-native software. You describe what you want, and it figures out how. That's a good use of tokens.
-
-
-## Installation
-
-### One-Line Install (Recommended)
-
-**macOS / Linux:**
-```bash
-curl -fsSL https://agents.craft.do/install-app.sh | bash
-```
-
-**Windows (PowerShell):**
-```powershell
-irm https://agents.craft.do/install-app.ps1 | iex
-```
-
-### Build from Source
-
-```bash
-git clone https://github.com/lukilabs/craft-agents-oss.git
-cd craft-agents-oss
-bun install
-bun run electron:start
-```
+Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
 
 ## Features
 
 - **Multi-Session Inbox**: Desktop app with session management, status workflow, and flagging
 - **Claude Code Experience**: Streaming responses, tool visualization, real-time updates
-- **Craft MCP Integration**: Access to 32+ Craft document tools (blocks, collections, search, tasks)
-- **Sources**: Connect to MCP servers, REST APIs (Google, Slack, Microsoft), and local filesystems
+- **MCP Integration**: Connect to any MCP server (Linear, GitHub, Notion, and more)
+- **Sources**: Connect to REST APIs (Google, Slack, Microsoft), and local filesystems
 - **Permission Modes**: Three-level system (Explore, Ask to Edit, Auto) with customizable rules
 - **Background Tasks**: Run long-running operations with progress tracking
 - **Dynamic Status System**: Customizable session workflow states (Todo, In Progress, Done, etc.)
@@ -85,6 +20,25 @@ bun run electron:start
 - **Multi-File Diff**: VS Code-style window for viewing all file changes in a turn
 - **Skills**: Specialized agent instructions stored per-workspace
 - **File Attachments**: Drag-drop images, PDFs, Office documents with auto-conversion
+
+## Installation
+
+### Download from GitHub Releases
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/gannonh/kata-agents/releases).
+
+- **macOS**: `Kata-Agents-arm64.dmg` (Apple Silicon) or `Kata-Agents-x64.dmg` (Intel)
+- **Windows**: `Kata-Agents-x64.exe`
+- **Linux**: `Kata-Agents-x64.AppImage`
+
+### Build from Source
+
+```bash
+git clone https://github.com/gannonh/kata-agents.git
+cd kata-agents
+bun install
+bun run electron:start
+```
 
 ## Quick Start
 
@@ -100,7 +54,7 @@ bun run electron:start
 
 - **Inbox/Archive**: Sessions organized by workflow status
 - **Flagging**: Mark important sessions for quick access
-- **Status Workflow**: Todo → In Progress → Needs Review → Done
+- **Status Workflow**: Todo -> In Progress -> Needs Review -> Done
 - **Session Naming**: AI-generated titles or manual naming
 - **Session Persistence**: Full conversation history saved to disk
 
@@ -110,7 +64,7 @@ Connect external data sources to your workspace:
 
 | Type | Examples |
 |------|----------|
-| **MCP Servers** | Craft, Linear, GitHub, Notion, custom servers |
+| **MCP Servers** | Linear, GitHub, Notion, custom servers |
 | **REST APIs** | Google (Gmail, Calendar, Drive), Slack, Microsoft |
 | **Local Files** | Filesystem, Obsidian vaults, Git repos |
 
@@ -138,7 +92,7 @@ Use **SHIFT+TAB** to cycle through modes in the chat interface.
 ## Architecture
 
 ```
-craft-agent/
+kata-agents/
 ├── apps/
 │   └── electron/              # Desktop GUI (primary)
 │       └── src/
@@ -170,7 +124,7 @@ bun run electron:start
 # Type checking
 bun run typecheck:all
 
-# Debug logging (writes to ~/Library/Logs/Craft Agents/)
+# Debug logging (writes to ~/Library/Logs/Kata Agents/)
 # Logs are automatically enabled in development
 ```
 
@@ -190,10 +144,10 @@ See [Google Cloud Console](https://console.cloud.google.com/apis/credentials) to
 
 ## Configuration
 
-Configuration is stored at `~/.craft-agent/`:
+Configuration is stored at `~/.kata-agents/`:
 
 ```
-~/.craft-agent/
+~/.kata-agents/
 ├── config.json              # Main config (workspaces, auth type)
 ├── credentials.enc          # Encrypted credentials (AES-256-GCM)
 ├── preferences.json         # User preferences
@@ -216,14 +170,14 @@ Tool responses exceeding ~60KB are automatically summarized using Claude Haiku w
 
 ### Deep Linking
 
-External apps can navigate using `craftagents://` URLs:
+External apps can navigate using `kataagents://` URLs:
 
 ```
-craftagents://allChats                    # All chats view
-craftagents://allChats/chat/session123    # Specific chat
-craftagents://settings                    # Settings
-craftagents://sources/source/github       # Source info
-craftagents://action/new-chat             # Create new chat
+kataagents://allChats                    # All chats view
+kataagents://allChats/chat/session123    # Specific chat
+kataagents://settings                    # Settings
+kataagents://sources/source/github       # Source info
+kataagents://action/new-chat             # Create new chat
 ```
 
 ## Tech Stack
@@ -239,15 +193,7 @@ craftagents://action/new-chat             # Create new chat
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-### Third-Party Licenses
-
-This project uses the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), which is subject to [Anthropic's Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms).
-
-### Trademark
-
-"Craft" and "Craft Agents" are trademarks of Craft Docs Ltd. See [TRADEMARK.md](TRADEMARK.md) for usage guidelines.
+Apache License 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Contributing
 

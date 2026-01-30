@@ -2118,7 +2118,7 @@ function AppShellContent({
                         <ExternalLink className="h-3 w-3 text-muted-foreground" />
                       </StyledDropdownMenuItem>
                       <StyledDropdownMenuSeparator />
-                      <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs')}>
+                      <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://github.com/gannonh/kata-agents')}>
                         <ExternalLink className="h-3.5 w-3.5" />
                         <span className="flex-1">All Documentation</span>
                       </StyledDropdownMenuItem>

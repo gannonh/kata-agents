@@ -150,7 +150,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Check if a workspace slug already exists (for validation before creation)
   ipcMain.handle(IPC_CHANNELS.CHECK_WORKSPACE_SLUG, async (_event, slug: string) => {
-    const defaultWorkspacesDir = join(homedir(), '.craft-agent', 'workspaces')
+    const defaultWorkspacesDir = join(homedir(), '.kata-agents', 'workspaces')
     const workspacePath = join(defaultWorkspacesDir, slug)
     const exists = existsSync(workspacePath)
     return { exists, path: workspacePath }
@@ -1135,7 +1135,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       }
 
       // Delete the config file
-      const configPath = join(homedir(), '.craft-agent', 'config.json')
+      const configPath = join(homedir(), '.kata-agents', 'config.json')
       await unlink(configPath).catch(() => {
         // Ignore if file doesn't exist
       })
@@ -1363,7 +1363,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         (lowerMsg.includes('tool') && lowerMsg.includes('not') && lowerMsg.includes('support'))
       if (isToolSupportError) {
         const displayModel = modelName?.trim() || SUMMARIZATION_MODEL
-        return { success: false, error: `Model "${displayModel}" does not support tool/function calling. Craft Agent requires a model with tool support (e.g. Claude, GPT-4, Gemini).` }
+        return { success: false, error: `Model "${displayModel}" does not support tool/function calling. Kata Agents requires a model with tool support (e.g. Claude, GPT-4, Gemini).` }
       }
 
       // Model not found — always a failure. Since onboarding is the only place
@@ -1833,7 +1833,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
-  // Get default permissions from ~/.craft-agent/permissions/default.json
+  // Get default permissions from ~/.kata-agents/permissions/default.json
   // Returns raw JSON for UI display (patterns with comments), plus the file path
   ipcMain.handle(IPC_CHANNELS.DEFAULT_PERMISSIONS_GET, async () => {
     const { existsSync, readFileSync } = await import('fs')

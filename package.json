@@ -1,7 +1,7 @@
 {
-  "name": "craft-agent",
-  "version": "0.3.0",
-  "description": "Claude Code-like agent for Craft documents",
+  "name": "kata-agents",
+  "version": "0.4.0",
+  "description": "AI agent desktop application for the Kata ecosystem",
   "type": "module",
   "private": true,
   "workspaces": [

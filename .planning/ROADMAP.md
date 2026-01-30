@@ -1,8 +1,8 @@
-# Kata Desktop v0.4.0 — Roadmap
+# Kata Agents v0.4.0 — Roadmap
 
 ## Overview
 
-Milestone v0.4.0 Foundation establishes Kata Desktop as an independent, compliant fork with proper CI/CD tooling before rebranding. Two phases: first build automation and upstream management, then complete trademark compliance and distribution setup.
+Milestone v0.4.0 Foundation establishes Kata Agents as an independent, compliant fork with proper CI/CD tooling before rebranding. Two phases: first build automation and upstream management, then complete trademark compliance and distribution setup.
 
 ---
 
@@ -34,9 +34,17 @@ Plans:
 
 ## Phase 2: Rebranding
 
-**Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Desktop identity for distribution.
+**Goal:** Complete trademark compliance by removing all Craft references and establishing Kata Agents identity for distribution.
 
 **Dependencies:** Phase 1 (CI must pass before release)
+
+**Plans:** 4 plans
+
+Plans:
+- [x] 02-01-PLAN.md — Product name and metadata (BRAND-01, BRAND-02)
+- [x] 02-02-PLAN.md — Application icons (BRAND-04)
+- [x] 02-03-PLAN.md — In-app logos and React components (BRAND-05)
+- [x] 02-04-PLAN.md — Domain references and release configuration (BRAND-03, DIST-01)
 
 **Requirements:**
 - BRAND-01: Remove "Craft" from product name and metadata (package.json, electron-builder.yml)
@@ -47,7 +55,7 @@ Plans:
 - DIST-01: Configure GitHub releases for v0.4.0 distribution
 
 **Success Criteria:**
-1. Application launches with "Kata Desktop" in title bar, About dialog, and system tray
+1. Application launches with "Kata Agents" in title bar, About dialog, and system tray
 2. macOS bundle identifier is `sh.kata.desktop` (verified via `mdls` on built app)
 3. `grep -r "craft.do"` returns no matches in source code (excluding NOTICE, LICENSE, git history)
 4. Application icon in dock/taskbar displays Kata branding (not Craft logo)
@@ -60,26 +68,27 @@ Plans:
 | Phase | Status   | Requirements | Complete |
 |-------|----------|--------------|----------|
 | 1     | Complete | 4            | 4/4      |
-| 2     | Pending  | 6            | 0/6      |
+| 2     | Complete | 6            | 6/6      |
 
-**Total:** 4/10 requirements complete
+**Total:** 10/10 requirements complete
 
 ---
 
 ## Coverage Map
 
-| Requirement | Phase | Description |
-|-------------|-------|-------------|
-| SETUP-01    | 1     | CI validates builds on PR |
-| SETUP-02    | 1     | CI runs test suite on PR |
-| SETUP-03    | 1     | CI produces platform artifacts |
-| SETUP-04    | 1     | Upstream management documented |
-| BRAND-01    | 2     | Remove "Craft" from product name |
-| BRAND-02    | 2     | Update bundle ID to kata.sh |
-| BRAND-03    | 2     | Remove craft.do references |
-| BRAND-04    | 2     | Replace application icons |
-| BRAND-05    | 2     | Replace in-app logos |
-| DIST-01     | 2     | Configure GitHub releases |
+| Requirement | Phase | Plan | Description |
+|-------------|-------|------|-------------|
+| SETUP-01    | 1     | 01-01 | CI validates builds on PR |
+| SETUP-02    | 1     | 01-01 | CI runs test suite on PR |
+| SETUP-03    | 1     | 01-01 | CI produces platform artifacts |
+| SETUP-04    | 1     | 01-02 | Upstream management documented |
+| BRAND-01    | 2     | 02-01 | Remove "Craft" from product name |
+| BRAND-02    | 2     | 02-01 | Update bundle ID to kata.sh |
+| BRAND-03    | 2     | 02-04 | Remove craft.do references |
+| BRAND-04    | 2     | 02-02 | Replace application icons |
+| BRAND-05    | 2     | 02-03 | Replace in-app logos |
+| DIST-01     | 2     | 02-04 | Configure GitHub releases |
 
 ---
 *Created: 2026-01-29*
+*Updated: 2026-01-29 — Phase 2 plans added*

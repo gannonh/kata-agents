@@ -1,11 +1,15 @@
-# Craft Agents Windows Installer
-# Usage: irm https://agents.craft.do/install-app.ps1 | iex
+# Kata Agents Windows Installer
+# Downloads and installs from GitHub Releases
+#
+# NOTE: This script was adapted from the original Craft Agents installer.
+# It now downloads from GitHub Releases instead of agents.craft.do.
 
 $ErrorActionPreference = "Stop"
 
-$VERSIONS_URL = "https://agents.craft.do/electron"
-$DOWNLOAD_DIR = "$env:TEMP\craft-agent-install"
-$APP_NAME = "Craft Agents"
+$GITHUB_REPO = "gannonh/kata-agents"
+$GITHUB_RELEASES_URL = "https://github.com/$GITHUB_REPO/releases"
+$DOWNLOAD_DIR = "$env:TEMP\kata-agents-install"
+$APP_NAME = "Kata Agents"
 
 # Colors for output
 function Write-Info { Write-Host "> $args" -ForegroundColor Blue }
@@ -21,6 +25,7 @@ if ($env:OS -ne "Windows_NT") {
 # Detect architecture
 $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
 $platform = "win32-$arch"
+$filename = "Kata-Agents-$arch.exe"
 
 Write-Host ""
 Write-Info "Detected platform: $platform (arch: $arch)"
@@ -28,13 +33,19 @@ Write-Info "Detected platform: $platform (arch: $arch)"
 # Create download directory
 New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
 
-# Get latest version
-Write-Info "Fetching latest version..."
+# Get latest release from GitHub
+Write-Info "Fetching latest release from GitHub..."
 try {
-    $latestJson = Invoke-RestMethod -Uri "$VERSIONS_URL/latest" -UseBasicParsing
-    $version = $latestJson.version
+    $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/$GITHUB_REPO/releases/latest" -UseBasicParsing
+    $version = $latestRelease.tag_name -replace '^v', ''
+    $asset = $latestRelease.assets | Where-Object { $_.name -eq $filename }
+    if (-not $asset) {
+        Write-Err "Asset $filename not found in release"
+    }
+    $installerUrl = $asset.browser_download_url
+    $fileSize = $asset.size
 } catch {
-    Write-Err "Failed to fetch latest version: $_"
+    Write-Err "Failed to fetch latest release: $_"
 }
 
 if (-not $version) {
@@ -43,42 +54,8 @@ if (-not $version) {
 
 Write-Info "Latest version: $version"
 
-# Download manifest and extract checksum
-Write-Info "Fetching manifest..."
-try {
-    $manifest = Invoke-RestMethod -Uri "$VERSIONS_URL/$version/manifest.json" -UseBasicParsing
-    # Use Select-Object for property names with hyphens (dot notation doesn't work with variable)
-    $binaryInfo = $manifest.binaries | Select-Object -ExpandProperty $platform -ErrorAction SilentlyContinue
-    if (-not $binaryInfo) {
-        Write-Err "Platform $platform not found in manifest"
-    }
-    $checksum = $binaryInfo.sha256
-    $filename = $binaryInfo.filename
-    $installerUrl = $binaryInfo.url
-} catch {
-    Write-Err "Failed to fetch manifest: $_"
-}
-
-# Validate checksum format
-if (-not $checksum -or $checksum.Length -ne 64) {
-    Write-Err "Invalid checksum in manifest"
-}
-
-# Use default filename if not in manifest
-if (-not $filename) {
-    $filename = "Craft-Agent-$arch.exe"
-}
-
-# Use default URL if not in manifest
-if (-not $installerUrl) {
-    $installerUrl = "$VERSIONS_URL/$version/$filename"
-}
-
-Write-Info "Expected checksum: $($checksum.Substring(0, 16))..."
-
 # Download installer with progress
 $installerPath = Join-Path $DOWNLOAD_DIR $filename
-$fileSize = $binaryInfo.size
 $fileSizeMB = [math]::Round($fileSize / 1MB, 1)
 
 # Clean up any partial download from previous attempts
@@ -137,21 +114,10 @@ if (-not (Test-Path $installerPath)) {
     Write-Err "Download failed: file not found"
 }
 
-# Verify checksum
-Write-Info "Verifying checksum..."
-$actualHash = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToLower()
-
-if ($actualHash -ne $checksum) {
-    Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
-    Write-Err "Checksum verification failed`n  Expected: $checksum`n  Actual:   $actualHash"
-}
-
-Write-Success "Checksum verified!"
-
 # Close the app if it's running
-$process = Get-Process -Name "Craft Agents" -ErrorAction SilentlyContinue
+$process = Get-Process -Name "Kata Agents" -ErrorAction SilentlyContinue
 if ($process) {
-    Write-Info "Closing Craft Agents..."
+    Write-Info "Closing Kata Agents..."
     $process | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
@@ -184,11 +150,11 @@ Write-Info "Cleaning up..."
 Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
 
 # Add command line shortcut
-Write-Info "Adding 'craft-agents' command to PATH..."
+Write-Info "Adding 'kata-agents' command to PATH..."
 
-$binDir = "$env:LOCALAPPDATA\Craft Agents\bin"
-$cmdFile = "$binDir\craft-agents.cmd"
-$exePath = "$env:LOCALAPPDATA\Programs\Craft Agents\Craft Agents.exe"
+$binDir = "$env:LOCALAPPDATA\Kata Agents\bin"
+$cmdFile = "$binDir\kata-agents.cmd"
+$exePath = "$env:LOCALAPPDATA\Programs\Kata Agents\Kata Agents.exe"
 
 # Create bin directory
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
@@ -202,9 +168,9 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$binDir*") {
     $newPath = "$userPath;$binDir"
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Success "Added to PATH (restart terminal to use 'craft-agents' command)"
+    Write-Success "Added to PATH (restart terminal to use 'kata-agents' command)"
 } else {
-    Write-Success "Command 'craft-agents' is ready"
+    Write-Success "Command 'kata-agents' is ready"
 }
 
 Write-Host ""
@@ -212,9 +178,9 @@ Write-Host "--------------------------------------------------------------------
 Write-Host ""
 Write-Success "Installation complete!"
 Write-Host ""
-Write-Host "  Craft Agents has been installed."
+Write-Host "  Kata Agents has been installed."
 Write-Host ""
 Write-Host "  Launch from:"
 Write-Host "    - Start Menu or desktop shortcut"
-Write-Host "    - Command line: craft-agents (restart terminal first)"
+Write-Host "    - Command line: kata-agents (restart terminal first)"
 Write-Host ""

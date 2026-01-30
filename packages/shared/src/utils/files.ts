@@ -418,7 +418,7 @@ function readClipboardMacOS(): FileAttachment[] {
 
   // First, check for file URLs in clipboard (when files are copied in Finder)
   try {
-    const scriptFile = join(tmpdir(), `craft-clipboard-files-${Date.now()}.js`);
+    const scriptFile = join(tmpdir(), `kata-clipboard-files-${Date.now()}.js`);
     const jxaScript = `
 ObjC.import('AppKit');
 ObjC.import('Foundation');
@@ -537,7 +537,7 @@ function readClipboardWindows(): FileAttachment[] {
  * Read image data from Windows clipboard using PowerShell
  */
 function readClipboardImageDataWindows(): FileAttachment | null {
-  const tempFile = join(tmpdir(), `craft-clipboard-${Date.now()}.png`);
+  const tempFile = join(tmpdir(), `kata-clipboard-${Date.now()}.png`);
 
   try {
     // PowerShell script to save clipboard image to file
@@ -633,7 +633,7 @@ function readClipboardLinux(): FileAttachment[] {
  * Read image data from Linux clipboard using xclip
  */
 function readClipboardImageDataLinux(): FileAttachment | null {
-  const tempFile = join(tmpdir(), `craft-clipboard-${Date.now()}.png`);
+  const tempFile = join(tmpdir(), `kata-clipboard-${Date.now()}.png`);
 
   // Try xclip for image/png content
   try {
@@ -682,7 +682,7 @@ function readClipboardImageDataLinux(): FileAttachment | null {
  * Read image data directly from macOS clipboard (for screenshots, copied images)
  */
 function readClipboardImageDataMacOS(): FileAttachment | null {
-  const tempFile = join(tmpdir(), `craft-clipboard-${Date.now()}.png`);
+  const tempFile = join(tmpdir(), `kata-clipboard-${Date.now()}.png`);
 
   // Method 1: Try pngpaste first (most reliable if installed via: brew install pngpaste)
   try {
@@ -697,7 +697,7 @@ function readClipboardImageDataMacOS(): FileAttachment | null {
 
   // Method 2: Use osascript with JXA (JavaScript for Automation)
   try {
-    const scriptFile = join(tmpdir(), `craft-clipboard-script-${Date.now()}.js`);
+    const scriptFile = join(tmpdir(), `kata-clipboard-script-${Date.now()}.js`);
     const jxaScript = `
 ObjC.import('AppKit');
 ObjC.import('Foundation');

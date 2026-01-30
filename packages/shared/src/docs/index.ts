@@ -4,7 +4,7 @@
  * Provides access to built-in documentation that Claude can reference
  * when performing configuration tasks (sources, agents, permissions, etc.).
  *
- * Docs are stored at ~/.craft-agent/docs/ and synced from bundled assets.
+ * Docs are stored at ~/.kata-agents/docs/ and synced from bundled assets.
  * Source content lives in packages/shared/assets/docs/*.md for easier editing.
  */
 
@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 
 import { getBundledAssetsDir } from '../utils/paths.ts';
 import { debug } from '../utils/debug.ts';
 
-const CONFIG_DIR = join(homedir(), '.craft-agent');
+const CONFIG_DIR = join(homedir(), '.kata-agents');
 const DOCS_DIR = join(CONFIG_DIR, 'docs');
 
 // Track if docs have been initialized this session (prevents re-init on hot reload)
@@ -43,8 +43,8 @@ function loadBundledDocs(): Record<string, string> {
   let files: string[];
   try {
     files = existsSync(assetsDir) ? readdirSync(assetsDir) : [];
-  } catch {
-    console.warn(`[docs] Could not read assets dir: ${assetsDir}`);
+  } catch (error) {
+    debug(`[docs] Could not read assets dir: ${assetsDir}`, error);
     return docs;
   }
 
@@ -53,7 +53,7 @@ function loadBundledDocs(): Record<string, string> {
     try {
       docs[filename] = readFileSync(filePath, 'utf-8');
     } catch (error) {
-      console.error(`[docs] Failed to load ${filename}:`, error);
+      debug(`[docs] Failed to load ${filename}:`, error);
     }
   }
 
@@ -79,7 +79,7 @@ export function getDocPath(filename: string): string {
 
 // App root path reference for use in prompts
 // Using ~ for display since actual path varies per system/instance
-export const APP_ROOT = '~/.craft-agent';
+export const APP_ROOT = '~/.kata-agents';
 
 /**
  * Documentation file references for use in error messages and tool descriptions.

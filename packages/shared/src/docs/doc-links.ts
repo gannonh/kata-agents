@@ -3,7 +3,9 @@
  * Summaries provide quick context; "Learn more" opens the full docs.
  */
 
-const DOC_BASE_URL = 'https://agents.craft.do/docs'
+// Disable external docs until kata.sh docs exist
+// Was: 'https://agents.craft.do/docs'
+const DOC_BASE_URL = ''
 
 export type DocFeature =
   | 'sources'
@@ -93,20 +95,25 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/reference/config/config-file',
     title: 'App Settings',
     summary:
-      'Configure global app settings like your default model, authentication method, and workspace list. Settings are stored in ~/.craft-agent/config.json.',
+      'Configure global app settings like your default model, authentication method, and workspace list. Settings are stored in ~/.kata-agents/config.json.',
   },
   preferences: {
     path: '/reference/config/preferences',
     title: 'Preferences',
     summary:
-      'Personal preferences like your name, timezone, and language that help the agent personalize responses. Stored in ~/.craft-agent/preferences.json.',
+      'Personal preferences like your name, timezone, and language that help the agent personalize responses. Stored in ~/.kata-agents/preferences.json.',
   },
 }
 
 /**
- * Get the full documentation URL for a feature
+ * Get the full documentation URL for a feature.
+ * Returns empty string if documentation is not configured (kata.sh docs not yet available).
+ * UI components should check for empty string and handle gracefully (hide link or show disabled state).
  */
 export function getDocUrl(feature: DocFeature): string {
+  if (!DOC_BASE_URL) {
+    return ''
+  }
   return `${DOC_BASE_URL}${DOCS[feature].path}`
 }
 

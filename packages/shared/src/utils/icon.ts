@@ -139,7 +139,7 @@ export async function downloadIcon(
   try {
     const response = await fetch(iconUrl, {
       headers: {
-        'User-Agent': 'Craft-Agent/1.0',
+        'User-Agent': 'Kata-Agents/1.0',
       },
     });
 

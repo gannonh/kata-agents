@@ -2,13 +2,16 @@
 
 ## Reporting a Vulnerability
 
-We take security seriously. If you discover a security vulnerability in Craft Agents, please report it responsibly.
+We take security seriously. If you discover a security vulnerability in Kata Agents, please report it responsibly.
 
 ### How to Report
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
 
-Instead, please send an email to: **security@craft.do**
+Instead, please use one of the following methods:
+
+1. **GitHub Security Advisories**: Report via [GitHub Security Advisories](https://github.com/gannonh/kata-agents/security/advisories)
+2. **Email**: Contact the maintainer directly
 
 Include the following information:
 - Description of the vulnerability
@@ -25,9 +28,9 @@ Include the following information:
 ### Scope
 
 This policy applies to:
-- The Craft Agents desktop application
-- The `@craft-agent/*` npm packages
-- Official Craft Agents repositories
+- The Kata Agents application
+- The `@craft-agent/*` npm packages (as used in this fork)
+- This repository
 
 ### Out of Scope
 
@@ -46,7 +49,7 @@ We only provide security updates for the latest version. Please keep your instal
 
 ## Security Best Practices
 
-When using Craft Agents:
+When using Kata Agents:
 
 1. **Keep credentials secure**: Never commit `.env` files or credentials
 2. **Use environment variables**: Store secrets in environment variables

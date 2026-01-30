@@ -64,7 +64,7 @@ export {
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
 } from './mode-manager.ts';
-// Documentation is served via local files at ~/.craft-agent/docs/
+// Documentation is served via local files at ~/.kata-agents/docs/
 
 // Import and re-export AgentEvent from core (single source of truth)
 import type { AgentEvent } from '@craft-agent/core/types';
@@ -821,12 +821,13 @@ export class CraftAgent {
         preferences: getPreferencesServer(false),
         // Session-scoped tools (SubmitPlan, source_test, etc.)
         session: getSessionScopedTools(sessionId, this.workspaceRootPath),
-        // Craft Agents documentation - always available for searching setup guides
-        // This is a public Mintlify MCP server, no auth needed
-        'craft-agents-docs': {
-          type: 'http',
-          url: 'https://agents.craft.do/docs/mcp',
-        },
+        // Documentation MCP server - disabled until Kata infrastructure ready
+        // NOTE: Was 'https://agents.craft.do/docs/mcp' (Mintlify MCP server)
+        // Uncomment when Kata docs MCP server is available:
+        // 'kata-agents-docs': {
+        //   type: 'http',
+        //   url: 'https://docs.kata.sh/mcp',
+        // },
         // Add user-defined source servers (MCP and API, filtered by local MCP setting)
         // Note: Craft MCP server is now added via sources system
         ...sourceMcpResult.servers,

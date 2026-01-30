@@ -21,30 +21,30 @@ export interface UrlValidationResult {
   typedError?: AgentError;
 }
 
-const SYSTEM_PROMPT = `You are a URL validator for Craft MCP servers. Your ONLY job is to validate if a URL is a valid Craft MCP URL.
+// NOTE: This validator was originally designed for Craft MCP URLs (mcp.craft.do).
+// For Kata Agents, MCP URL validation is simplified to basic URL format checks.
+// EXAMPLE URLs below use placeholder domains for documentation purposes only.
+const SYSTEM_PROMPT = `You are a URL validator for MCP servers. Your ONLY job is to validate if a URL is a valid MCP server URL.
 
 VALID URL EXAMPLES:
-- https://mcp.craft.do/links/DSdsfdsjkf34235/mcp
-- https://mcp.craft.do/links/ABC123/mcp
-- https://mcp.craft.do/links/xY9-abc_123/mcp
+- https://mcp.example.com/links/DSdsfdsjkf34235/mcp
+- https://mcp.example.com/links/ABC123/mcp
+- https://api.service.com/mcp/v1
 
 INVALID URL EXAMPLES AND WHY:
-- mcp.craft.do/links/abc/mcp → Missing https:// protocol
-- http://mcp.craft.do/links/abc/mcp → Must use https://, not http://
-- https://evil.com/mcp.craft.do/links/abc → Wrong domain (must be exactly mcp.craft.do)
-- https://mcp.craft.do.evil.com/links/abc → Wrong domain (subdomain attack)
-- https://user:pass@mcp.craft.do/links/abc → Credentials in URL not allowed
-- https://mcp.craft.do → Missing /links/ path
-- https://google.com → Completely wrong domain
+- mcp.example.com/links/abc/mcp → Missing https:// protocol
+- http://mcp.example.com/links/abc/mcp → Must use https://, not http://
+- https://user:pass@mcp.example.com/links/abc → Credentials in URL not allowed
+- https://example.com → Missing path (just a domain)
 
 VALIDATION RULES:
 1. Protocol must be https://
-2. Hostname must be exactly "mcp.craft.do" (no subdomains, no other domains)
-3. Path should start with /links/
+2. Must be a valid hostname
+3. Path should be non-empty (some path component expected)
 4. No credentials (user:pass@) in the URL
 5. Must be a syntactically valid URL
 6. The input should only be the URL string, nothing else NO sentences OR extra text
-7. Make sure the URL only contains allowed characters (letters, numbers, hyphens, underscores) in the link ID part
+7. Make sure the URL only contains allowed characters
 
 RESPONSE FORMAT:
 Respond with ONLY a JSON object, no other text:

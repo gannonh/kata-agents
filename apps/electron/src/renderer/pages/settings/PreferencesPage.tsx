@@ -1,7 +1,7 @@
 /**
  * PreferencesPage
  *
- * Form-based editor for stored user preferences (~/.craft-agent/preferences.json).
+ * Form-based editor for stored user preferences (~/.kata-agents/preferences.json).
  * Features:
  * - Fixed input fields for known preferences (name, timezone, location, language)
  * - Free-form textarea for notes
@@ -197,12 +197,12 @@ export default function PreferencesPage() {
           {/* Basic Info */}
           <SettingsSection
             title="Basic Info"
-            description="Help Craft Agent personalize responses to you."
+            description="Help Kata Agents personalize responses to you."
           >
             <SettingsCard divided>
               <SettingsInput
                 label="Name"
-                description="How Craft Agent should address you."
+                description="How Kata Agents should address you."
                 value={formState.name}
                 onChange={(v) => updateField('name', v)}
                 placeholder="Your name"
@@ -218,7 +218,7 @@ export default function PreferencesPage() {
               />
               <SettingsInput
                 label="Language"
-                description="Preferred language for Craft Agent's responses."
+                description="Preferred language for Kata Agents's responses."
                 value={formState.language}
                 onChange={(v) => updateField('language', v)}
                 placeholder="e.g., English"
@@ -255,7 +255,7 @@ export default function PreferencesPage() {
           {/* Notes */}
           <SettingsSection
             title="Notes"
-            description="Free-form context that helps Craft Agent understand your preferences."
+            description="Free-form context that helps Kata Agents understand your preferences."
             action={
               // EditPopover for AI-assisted notes editing with "Edit File" as secondary action
               preferencesPath ? (
@@ -274,7 +274,7 @@ export default function PreferencesPage() {
               <SettingsTextarea
                 value={formState.notes}
                 onChange={(v) => updateField('notes', v)}
-                placeholder="Any additional context you'd like Craft Agent to know..."
+                placeholder="Any additional context you'd like Kata Agents to know..."
                 rows={5}
                 inCard
               />

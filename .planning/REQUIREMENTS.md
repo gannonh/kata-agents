@@ -1,4 +1,4 @@
-# Kata Desktop — Requirements
+# Kata Agents — Requirements
 
 ## v0.4.0 Requirements
 

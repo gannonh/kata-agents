@@ -218,7 +218,7 @@ function resolveToolDisplayMeta(
 
   // CLI tool icon resolution for Bash commands
   // Parses the command string to detect known tools (git, npm, docker, etc.)
-  // and resolves their brand icon from ~/.craft-agent/tool-icons/
+  // and resolves their brand icon from ~/.kata-agents/tool-icons/
   if (toolName === 'Bash' && toolInput?.command) {
     const toolIconsDir = getToolIconsDir()
     const match = resolveToolIcon(String(toolInput.command), toolIconsDir)
@@ -676,7 +676,7 @@ export class SessionManager {
 
   /**
    * Broadcast default permissions changed event to all windows
-   * Triggered when ~/.craft-agent/permissions/default.json changes
+   * Triggered when ~/.kata-agents/permissions/default.json changes
    */
   private broadcastDefaultPermissionsChanged(): void {
     if (!this.windowManager) return
@@ -1855,6 +1855,12 @@ export class SessionManager {
       }
 
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(`${VIEWER_URL}/s/api`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1919,6 +1925,12 @@ export class SessionManager {
       }
 
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(`${VIEWER_URL}/s/api/${managed.sharedId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1964,6 +1976,12 @@ export class SessionManager {
 
     try {
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(
         `${VIEWER_URL}/s/api/${managed.sharedId}`,
         { method: 'DELETE' }

@@ -1,28 +1,28 @@
-# Kata Desktop — State
+# Kata Agents — State
 
 ## Project Reference
 
-**Core Value:** A compliant, independent rebrand that preserves all existing functionality while establishing Kata Desktop as its own product.
+**Core Value:** A compliant, independent rebrand that preserves all existing functionality while establishing Kata Agents as its own product.
 
 **Current Focus:** v0.4.0 Foundation — CI/CD tooling and trademark compliance
 
 ## Current Position
 
 ```
-Phase: 1 of 2 (Setup and Tooling) — COMPLETE ✓
-Plan: 2 of 2
-Status: Phase verified, ready for Phase 2
-Progress: [####......] 4/10 requirements
+Phase: 2 of 2 (Rebranding)
+Plan: 4 of 4 (COMPLETE)
+Status: Phase complete
+Progress: [##########] 10/10 requirements
 ```
 
-**Last activity:** 2026-01-29 — Phase 1 verified, all 4 requirements satisfied
+**Last activity:** 2026-01-29 — Completed 02-04-PLAN.md (Domain References and Release Configuration)
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 1/2 |
-| Requirements done | 4/10 |
+| Phases completed | 2/2 |
+| Requirements done | 10/10 |
 | Current phase progress | 4/4 |
 
 ## Accumulated Context
@@ -40,6 +40,13 @@ Progress: [####......] 4/10 requirements
 | 7 | Upstream sync branch | `upstream/sync` mirrors upstream/main | 01-02-SUMMARY.md |
 | 8 | Cherry-pick workflow | Feature branches for selective adoption | 01-02-SUMMARY.md |
 | 9 | Change adoption criteria | By type: bugs/security readily, refactors skip | 01-02-SUMMARY.md |
+| 10 | Env var migration | Support both KATA_ and CRAFT_ prefixes | 02-01-SUMMARY.md |
+| 11 | DMG background | Keep existing neutral swirl pattern | 02-02-SUMMARY.md |
+| 12 | KataLogo component | Simple text-based SVG instead of pixel art | 02-03-SUMMARY.md |
+| 13 | VIEWER_URL disabled | Empty string until Kata infrastructure ready | 02-03-SUMMARY.md |
+| 14 | Slack OAuth disable approach | Return graceful error, keep implementation | 02-04-SUMMARY.md |
+| 15 | Auto-update provider | GitHub releases instead of generic provider | 02-04-SUMMARY.md |
+| 16 | Install scripts source | GitHub Releases API | 02-04-SUMMARY.md |
 
 ### Open Questions
 
@@ -66,10 +73,57 @@ _None_
 - Documented upstream remote setup and sync process
 - Added adoption criteria table by change type
 
+**02-01 Execution (2026-01-29):**
+- Updated electron-builder.yml: bundle ID, product name, artifact names
+- Updated main process: app name, deeplink scheme, backward-compatible env vars
+- Updated menu labels and HTML titles
+- 3 commits, all verification checks passed
+
+**02-02 Execution (2026-01-29):**
+- Generated platform icons from Kata brand assets
+- icon.icns (macOS), icon.png (Linux), icon.svg (source)
+- Updated Liquid Glass icon with mark-only SVG
+- Removed craft-logos/ directory
+- 2 commits, all verification checks passed
+
+**02-03 Execution (2026-01-29):**
+- Replaced craft_logo_c.svg with kata_mark.svg
+- Renamed CraftAgentsSymbol -> KataSymbol, CraftAppIcon -> KataAppIcon
+- Created KataLogo (text-based wordmark) to replace CraftAgentsLogo
+- Updated all component imports (7 files)
+- Updated branding.ts with KATA_LOGO constants
+- 3 commits, all verification checks passed
+
+**02-04 Execution (2026-01-29):**
+- Removed/disabled craft.do domain references in 15 files
+- Gracefully disabled Slack OAuth with clear error message
+- Changed auto-update from generic provider to GitHub releases
+- Updated install scripts for GitHub Releases
+- Bumped version to 0.4.0
+- Updated README.md, SECURITY.md, CODE_OF_CONDUCT.md
+- 3 commits, all verification checks passed
+
+## v0.4.0 Release Ready
+
+All requirements complete. Ready to:
+1. Merge `feat/v0.4.0-02-rebranding` branch to `main`
+2. GitHub Actions will detect version change and trigger release
+3. Builds will be created for macOS (arm64/x64), Windows (x64), Linux (x64)
+4. Release will be published to GitHub Releases
+
+### Disabled Features (Require Infrastructure)
+
+| Feature | Status | Dependency |
+|---------|--------|------------|
+| Slack OAuth | Disabled with error message | Needs HTTPS relay server |
+| External docs links | Empty/GitHub fallback | Needs docs.kata.sh |
+| Version manifest | Disabled | Needs version API at kata.sh |
+| MCP docs server | Commented out | Needs docs MCP at kata.sh |
+
 ## Session Continuity
 
-**Last session:** 2026-01-29 20:40 UTC
-**Stopped at:** Phase 1 verified and complete
+**Last session:** 2026-01-29 22:05 UTC
+**Stopped at:** Completed 02-04-PLAN.md (Phase 2 complete)
 **Resume file:** None
 
 ---
