@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Kata Agentss is a desktop application for working with AI agents, built on the Claude Agent SDK. It provides multi-session management, MCP server integration, REST API connections, and a document-centric workflow in a polished Electron-based UI.
+Kata Agents is a desktop application for working with AI agents, built on the Claude Agent SDK. It provides multi-session management, MCP server integration, REST API connections, and a document-centric workflow in a polished Electron-based UI.
 
 ## Build and Development Commands
 

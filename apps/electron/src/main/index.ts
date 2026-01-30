@@ -86,7 +86,7 @@ import { checkForUpdatesOnLaunch, setWindowManager as setAutoUpdateWindowManager
 log.initialize()
 
 // Enable debug/perf in dev mode (running from source)
-// Note: CRAFT_DEBUG is kept for backward compatibility with existing scripts
+// CRAFT_DEBUG is set for subprocess propagation (see agent/options.ts)
 if (isDebugMode) {
   process.env.CRAFT_DEBUG = '1'
   enableDebug()

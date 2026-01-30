@@ -15,6 +15,5 @@ import { homedir } from 'os';
 import { join } from 'path';
 
 // Allow override via environment variable for multi-instance dev
-// Supports both KATA_ (new) and CRAFT_ (legacy) prefixes for backward compatibility
-// Falls back to default ~/.kata-agents/ for production
+// Supports KATA_CONFIG_DIR and legacy CRAFT_CONFIG_DIR
 export const CONFIG_DIR = process.env.KATA_CONFIG_DIR || process.env.CRAFT_CONFIG_DIR || join(homedir(), '.kata-agents');

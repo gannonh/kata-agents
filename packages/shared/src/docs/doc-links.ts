@@ -106,9 +106,14 @@ export const DOCS: Record<DocFeature, DocInfo> = {
 }
 
 /**
- * Get the full documentation URL for a feature
+ * Get the full documentation URL for a feature.
+ * Returns empty string if documentation is not configured (kata.sh docs not yet available).
+ * UI components should check for empty string and handle gracefully (hide link or show disabled state).
  */
 export function getDocUrl(feature: DocFeature): string {
+  if (!DOC_BASE_URL) {
+    return ''
+  }
   return `${DOC_BASE_URL}${DOCS[feature].path}`
 }
 

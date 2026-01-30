@@ -1855,6 +1855,12 @@ export class SessionManager {
       }
 
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(`${VIEWER_URL}/s/api`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1919,6 +1925,12 @@ export class SessionManager {
       }
 
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(`${VIEWER_URL}/s/api/${managed.sharedId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1964,6 +1976,12 @@ export class SessionManager {
 
     try {
       const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+
+      // Session sharing is disabled until Kata viewer infrastructure is available
+      if (!VIEWER_URL) {
+        return { success: false, error: 'Session sharing is temporarily unavailable. The viewer service is not configured for this fork.' }
+      }
+
       const response = await fetch(
         `${VIEWER_URL}/s/api/${managed.sharedId}`,
         { method: 'DELETE' }

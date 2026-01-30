@@ -5,6 +5,12 @@ import { debug } from "../utils/debug";
 const VERSIONS_URL = '';
 
 export async function getLatestVersion(): Promise<string | null> {
+    // Version checking is disabled until kata.sh hosts a version manifest
+    if (!VERSIONS_URL) {
+      debug('[manifest] Version checking disabled (no VERSIONS_URL configured)');
+      return null;
+    }
+
     try {
       const response = await fetch(`${VERSIONS_URL}/latest`);
       const data = await response.json();
@@ -21,6 +27,12 @@ export async function getLatestVersion(): Promise<string | null> {
 }
 
 export async function getManifest(version: string): Promise<VersionManifest | null> {
+    // Version manifest is disabled until kata.sh hosts it
+    if (!VERSIONS_URL) {
+      debug('[manifest] Manifest disabled (no VERSIONS_URL configured)');
+      return null;
+    }
+
     try {
         const url = `${VERSIONS_URL}/${version}/manifest.json`;
         debug(`[manifest] Getting manifest for version: ${url}`);
