@@ -30,13 +30,13 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Typecheck
+      - name: Typecheck all packages
         run: bun run typecheck:all
 
-      - name: Lint
+      - name: Lint electron
         run: bun run lint:electron
 
-      - name: Test
+      - name: Run all tests
         run: bun test
 
   build-mac:

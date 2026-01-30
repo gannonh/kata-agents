@@ -816,9 +816,9 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }
               >{diffStats.additions}</span>
             )}
             {/* Filename badge */}
-            {activity.toolInput?.file_path && (
+            {typeof activity.toolInput?.file_path === 'string' && (
               <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
-                {(activity.toolInput.file_path as string).split('/').pop()}
+                {activity.toolInput.file_path.split('/').pop()}
               </span>
             )}
           </span>
