@@ -1112,7 +1112,7 @@ async function generateHtml(): Promise<string> {
   <!-- Navigation + theme bar -->
   <div class="theme-bar" id="theme-bar">
     <div class="brand-badge-wrapper">
-      <button class="brand-badge shadow-minimal" id="brand-badge-btn"><svg class="brand-logo" viewBox="0 0 299 300" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M137.879,300.001 L137.875,300.001 C62.3239,300.001 0.966154,239.232 0.0117188,163.908 L2.56478e-10,162.126 L137.879,162.126 L137.879,300.001 Z" fill="#06367A"/><path d="M137.879,0 L137.875,0 C61.729,0 0,61.729 0,137.875 L0,137.878 L137.879,137.878 L137.879,0 Z" fill="#FF51FF"/><path d="M160.558,137.883 L160.561,137.883 C236.707,137.883 298.436,76.1537 298.436,0.00758561 L298.436,0.00562043 L160.558,0.00562043 L160.558,137.883 Z" fill="#007CFF"/><path d="M160.558,162.123 L160.561,162.123 C236.112,162.123 297.471,222.891 298.426,298.216 L298.436,299.998 L160.558,299.998 L160.558,162.123 Z" fill="#0A377B"/></svg><span><strong>Beautiful Mermaid</strong> by Craft</span></button>
+      <button class="brand-badge shadow-minimal" id="brand-badge-btn"><svg class="brand-logo" viewBox="0 0 299 300" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M137.879,300.001 L137.875,300.001 C62.3239,300.001 0.966154,239.232 0.0117188,163.908 L2.56478e-10,162.126 L137.879,162.126 L137.879,300.001 Z" fill="#06367A"/><path d="M137.879,0 L137.875,0 C61.729,0 0,61.729 0,137.875 L0,137.878 L137.879,137.878 L137.879,0 Z" fill="#FF51FF"/><path d="M160.558,137.883 L160.561,137.883 C236.707,137.883 298.436,76.1537 298.436,0.00758561 L298.436,0.00562043 L160.558,0.00562043 L160.558,137.883 Z" fill="#007CFF"/><path d="M160.558,162.123 L160.561,162.123 C236.112,162.123 297.471,222.891 298.426,298.216 L298.436,299.998 L160.558,299.998 L160.558,162.123 Z" fill="#0A377B"/></svg><span><strong>Beautiful Mermaid</strong></span></button>
       <div class="brand-dropdown shadow-modal-small" id="brand-dropdown">
         <a href="https://github.com/gannonh/kata-agents" class="brand-dropdown-item" target="_blank" rel="noopener">
           <svg width="18" height="18" class="brand-dropdown-logo" style="margin-left: -4px;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g transform="translate(3.4502, 3)" fill="#9570BE"><path d="M3.17890888,3.6 L3.17890888,0 L16,0 L16,3.6 L3.17890888,3.6 Z M9.642,7.2 L9.64218223,10.8 L0,10.8 L0,3.6 L16,3.6 L16,7.2 L9.642,7.2 Z M3.17890888,18 L3.178,14.4 L0,14.4 L0,10.8 L16,10.8 L16,18 L3.17890888,18 Z" fill-rule="nonzero"></path></g></svg>
@@ -1142,7 +1142,7 @@ async function generateHtml(): Promise<string> {
     <p class="hero-description">
       An open source library for rendering diagrams, designed for the age of AI: <a href="https://www.npmjs.com/package/beautiful-mermaid" target="_blank" rel="noopener"><code>beautiful-mermaid</code></a>.
       Ultra-fast, fully themeable, and outputs to both SVG and ASCII.<br>
-      Originally built by the team at <a href="https://craft.do" target="_blank" rel="noopener">Craft</a> — because diagrams deserve great design too.
+      Originally built by the team at Craft — because diagrams deserve great design too.
     </p>
     <div class="hero-buttons">
       <a href="https://github.com/gannonh/kata-agents" target="_blank" rel="noopener" class="hero-btn hero-btn-primary">
@@ -1561,7 +1561,7 @@ ${bundleJs}
           <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
         </svg>
       </a>
-      <a href="https://x.com/craftdocs" target="_blank" rel="noopener noreferrer">
+      <a href="https://github.com/gannonh/kata-agents" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
         </svg>

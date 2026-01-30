@@ -1,1 +1,5 @@
 preload = ["./packages/shared/src/network-interceptor.ts"]
+
+[test]
+# Only run tests from source directories, not build artifacts
+preload = ["./packages/shared/src/network-interceptor.ts"]

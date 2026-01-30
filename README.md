@@ -1,11 +1,13 @@
 # Kata Agents
 
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/gannonh/kata-agents/releases/tag/v0.4.0)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 Kata Agents is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
 
 Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
+
+![Kata Agents Demo](assets/supercut.gif)
 
 ## Features
 
@@ -62,32 +64,32 @@ bun run electron:start
 
 Connect external data sources to your workspace:
 
-| Type | Examples |
-|------|----------|
-| **MCP Servers** | Linear, GitHub, Notion, custom servers |
-| **REST APIs** | Google (Gmail, Calendar, Drive), Slack, Microsoft |
-| **Local Files** | Filesystem, Obsidian vaults, Git repos |
+| Type            | Examples                                          |
+| --------------- | ------------------------------------------------- |
+| **MCP Servers** | Linear, GitHub, Notion, custom servers            |
+| **REST APIs**   | Google (Gmail, Calendar, Drive), Slack, Microsoft |
+| **Local Files** | Filesystem, Obsidian vaults, Git repos            |
 
 ### Permission Modes
 
-| Mode | Display | Behavior |
-|------|---------|----------|
-| `safe` | Explore | Read-only, blocks all write operations |
-| `ask` | Ask to Edit | Prompts for approval (default) |
-| `allow-all` | Auto | Auto-approves all commands |
+| Mode        | Display     | Behavior                               |
+| ----------- | ----------- | -------------------------------------- |
+| `safe`      | Explore     | Read-only, blocks all write operations |
+| `ask`       | Ask to Edit | Prompts for approval (default)         |
+| `allow-all` | Auto        | Auto-approves all commands             |
 
 Use **SHIFT+TAB** to cycle through modes in the chat interface.
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Cmd+N` | New chat |
-| `Cmd+1/2/3` | Focus sidebar/list/chat |
-| `Cmd+/` | Keyboard shortcuts dialog |
-| `SHIFT+TAB` | Cycle permission modes |
-| `Enter` | Send message |
-| `Shift+Enter` | New line |
+| Shortcut      | Action                    |
+| ------------- | ------------------------- |
+| `Cmd+N`       | New chat                  |
+| `Cmd+1/2/3`   | Focus sidebar/list/chat   |
+| `Cmd+/`       | Keyboard shortcuts dialog |
+| `SHIFT+TAB`   | Cycle permission modes    |
+| `Enter`       | Send message              |
+| `Shift+Enter` | New line                  |
 
 ## Architecture
 
@@ -182,14 +184,14 @@ kataagents://action/new-chat             # Create new chat
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Runtime | [Bun](https://bun.sh/) |
-| AI | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) |
-| Desktop | [Electron](https://www.electronjs.org/) + React |
-| UI | [shadcn/ui](https://ui.shadcn.com/) + Tailwind CSS v4 |
-| Build | esbuild (main) + Vite (renderer) |
-| Credentials | AES-256-GCM encrypted file storage |
+| Layer       | Technology                                                                                     |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| Runtime     | [Bun](https://bun.sh/)                                                                         |
+| AI          | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) |
+| Desktop     | [Electron](https://www.electronjs.org/) + React                                                |
+| UI          | [shadcn/ui](https://ui.shadcn.com/) + Tailwind CSS v4                                          |
+| Build       | esbuild (main) + Vite (renderer)                                                               |
+| Credentials | AES-256-GCM encrypted file storage                                                             |
 
 ## License
 
