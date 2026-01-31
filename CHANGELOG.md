@@ -27,7 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack OAuth temporarily disabled (requires infrastructure)
 
 ### Known Issues
-- **macOS Gatekeeper warning**: Apple notarization is delayed due to a [known service issue](https://developer.apple.com/forums/thread/811968) affecting Electron apps. On first launch, right-click the app and select "Open" to bypass the warning. Notarization will be added in a future release.
+- **macOS Installation**: Apple notarization is temporarily unavailable due to a [known service issue](https://developer.apple.com/forums/thread/811968) affecting Electron apps. To install on macOS:
+  1. Download the DMG and drag Kata Agents to Applications
+  2. Open Terminal and run: `xattr -cr /Applications/Kata\ Agents.app`
+  3. Open the app normally
+
+  Notarization will be added in a future release once Apple resolves the issue.
 
 ## [0.3.0] - 2026-01-28
 
