@@ -207,23 +207,28 @@ jobs:
           set -e
           echo "Checking for macOS ${{ matrix.arch }} artifacts..."
           ls -la apps/electron/release/
-          if ! ls apps/electron/release/*.dmg 1>/dev/null 2>&1; then
-            echo "::error::DMG file not found"
+          # Check for this job's specific architecture files (not wildcards)
+          if [ ! -f "apps/electron/release/Kata-Agents-${{ matrix.arch }}.dmg" ]; then
+            echo "::error::DMG file for ${{ matrix.arch }} not found"
             exit 1
           fi
-          if ! ls apps/electron/release/*.zip 1>/dev/null 2>&1; then
-            echo "::error::ZIP file not found"
+          if [ ! -f "apps/electron/release/Kata-Agents-${{ matrix.arch }}.zip" ]; then
+            echo "::error::ZIP file for ${{ matrix.arch }} not found"
             exit 1
           fi
+          echo "Found notarized artifacts for ${{ matrix.arch }}"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         with:
           name: macos-${{ matrix.arch }}
+          # IMPORTANT: Only upload this job's specific architecture files
+          # Each job builds both archs but only notarizes its own - uploading all
+          # would cause un-notarized files to overwrite notarized ones in the release
           path: |
-            apps/electron/release/*.dmg
-            apps/electron/release/*.zip
-            apps/electron/release/*.yml
+            apps/electron/release/Kata-Agents-${{ matrix.arch }}.dmg
+            apps/electron/release/Kata-Agents-${{ matrix.arch }}.zip
+            apps/electron/release/latest-mac.yml
 
   build-windows:
     needs: check-version
