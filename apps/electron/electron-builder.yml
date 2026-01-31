@@ -54,15 +54,12 @@ mac:
   # The value must match --app-icon used in actool (see afterPack.js)
   extendInfo:
     CFBundleIconName: AppIcon
+  # NOTE: Do NOT specify arch here - let the CLI --arch flag control it
+  # Specifying both archs causes each CI job to build both, leading to
+  # cross-architecture contamination in releases
   target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
-    - target: zip
-      arch:
-        - arm64
-        - x64
+    - dmg
+    - zip
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
