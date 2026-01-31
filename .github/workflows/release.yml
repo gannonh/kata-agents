@@ -97,12 +97,17 @@ jobs:
           # because Apple's service hangs on DMG submissions but accepts ZIP submissions
 
       - name: Notarize macOS app
-        if: ${{ secrets.APPLE_ID != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Skip notarization if credentials aren't configured
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "Notarization credentials not configured, skipping"
+            exit 0
+          fi
+
           cd apps/electron/release
 
           # Find the app bundle inside the mac directory
