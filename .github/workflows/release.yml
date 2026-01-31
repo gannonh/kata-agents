@@ -102,10 +102,12 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Skip notarization if credentials aren't configured
+          set -e  # Exit on any error
+
+          # FAIL if credentials aren't configured - notarization is REQUIRED
           if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            echo "Notarization credentials not configured, skipping"
-            exit 0
+            echo "::error::Notarization credentials not configured. APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID secrets are required."
+            exit 1
           fi
 
           cd apps/electron/release
@@ -117,9 +119,10 @@ jobs:
             APP_PATH=$(find mac* -name "*.app" -type d 2>/dev/null | head -1)
           fi
 
+          # FAIL if no app bundle found
           if [ -z "$APP_PATH" ]; then
-            echo "Warning: No .app bundle found, skipping notarization"
-            exit 0
+            echo "::error::No .app bundle found in release directory. Build may have failed."
+            exit 1
           fi
 
           echo "Found app bundle: $APP_PATH"
@@ -190,14 +193,26 @@ jobs:
             echo "DMG rebuilt with notarized app: $DMG_PATH"
           fi
 
-          echo "Notarization complete!"
+          # Verify the app is actually notarized
+          echo "Verifying notarization..."
+          if ! spctl -a -v "$APP_PATH" 2>&1 | grep -q "accepted"; then
+            echo "::error::App failed notarization verification"
+            spctl -a -v "$APP_PATH"
+            exit 1
+          fi
+          echo "Notarization verified successfully!"
 
       - name: Verify macOS artifacts
         run: |
+          set -e
           echo "Checking for macOS ${{ matrix.arch }} artifacts..."
           ls -la apps/electron/release/
           if ! ls apps/electron/release/*.dmg 1>/dev/null 2>&1; then
-            echo "Error: DMG file not found"
+            echo "::error::DMG file not found"
+            exit 1
+          fi
+          if ! ls apps/electron/release/*.zip 1>/dev/null 2>&1; then
+            echo "::error::ZIP file not found"
             exit 1
           fi
 
