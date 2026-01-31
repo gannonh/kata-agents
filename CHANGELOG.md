@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-01-30
+
+### Fixed
+- Enable macOS notarization using ZIP submission workaround (Apple's service hangs on DMG submissions)
+- DMG now contains properly notarized app - no more Gatekeeper warnings
+- Fix duplicate yml file conflicts in release workflow
+
 ## [0.4.1] - 2026-01-30
 
 ### Fixed
@@ -33,12 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slack OAuth temporarily disabled (requires infrastructure)
 
 ### Known Issues
-- **macOS Installation**: Apple notarization is temporarily unavailable due to a [known service issue](https://developer.apple.com/forums/thread/811968) affecting Electron apps. To install on macOS:
-  1. Download the DMG and drag Kata Agents to Applications
-  2. Open Terminal and run: `xattr -cr /Applications/Kata\ Agents.app`
-  3. Open the app normally
-
-  Notarization will be added in a future release once Apple resolves the issue.
+- **macOS Installation (v0.4.0 only)**: If you downloaded v0.4.0, you may need to run `xattr -cr /Applications/Kata\ Agents.app` before opening. This is fixed in v0.4.2+.
 
 ## [0.3.0] - 2026-01-28
 

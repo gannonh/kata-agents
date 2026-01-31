@@ -93,12 +93,99 @@ jobs:
           # Code signing (if secrets are configured)
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Notarization temporarily disabled - Apple service hangs on Electron apps
-          # See: https://developer.apple.com/forums/thread/811968
-          # Re-enable by uncommenting when Apple resolves the issue:
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Note: Notarization is done manually below (not via electron-builder)
+          # because Apple's service hangs on DMG submissions but accepts ZIP submissions
+
+      - name: Notarize macOS app
+        if: ${{ secrets.APPLE_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd apps/electron/release
+
+          # Find the app bundle inside the mac directory
+          APP_PATH=$(find . -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            # App might be inside mac-$arch directory
+            APP_PATH=$(find mac* -name "*.app" -type d 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$APP_PATH" ]; then
+            echo "Warning: No .app bundle found, skipping notarization"
+            exit 0
+          fi
+
+          echo "Found app bundle: $APP_PATH"
+
+          # Create a ZIP of the app for notarization (Apple accepts ZIPs reliably)
+          ZIP_PATH="notarize-$(basename "$APP_PATH" .app).zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+          echo "Created ZIP for notarization: $ZIP_PATH"
+
+          # Submit for notarization
+          echo "Submitting for notarization..."
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --timeout 30m
+
+          # Staple the notarization ticket to the app
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple "$APP_PATH"
+
+          # Clean up the notarization ZIP
+          rm "$ZIP_PATH"
+
+          # Recreate the distribution ZIP with the notarized app
+          DIST_ZIP="Kata-Agents-${{ matrix.arch }}.zip"
+          rm -f "$DIST_ZIP"
+          ditto -c -k --keepParent "$APP_PATH" "$DIST_ZIP"
+          echo "Created distribution ZIP: $DIST_ZIP"
+
+          # Recreate the DMG with the notarized app
+          # electron-builder already created a DMG, but it contains the pre-notarized app
+          # We need to replace the app inside or rebuild the DMG
+          DMG_PATH="Kata-Agents-${{ matrix.arch }}.dmg"
+          if [ -f "$DMG_PATH" ]; then
+            echo "Rebuilding DMG with notarized app..."
+
+            # Mount the existing DMG
+            MOUNT_DIR=$(mktemp -d)
+            hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
+
+            # Create a new writable DMG
+            TEMP_DMG="temp-${{ matrix.arch }}.dmg"
+            hdiutil create -size 500m -fs HFS+ -volname "Kata Agents" "$TEMP_DMG"
+            TEMP_MOUNT=$(mktemp -d)
+            hdiutil attach "$TEMP_DMG" -mountpoint "$TEMP_MOUNT" -nobrowse -quiet
+
+            # Copy contents, replacing the app with notarized version
+            cp -R "$MOUNT_DIR"/* "$TEMP_MOUNT"/ 2>/dev/null || true
+            rm -rf "$TEMP_MOUNT"/*.app
+            cp -R "$APP_PATH" "$TEMP_MOUNT"/
+
+            # Create Applications symlink if not present
+            if [ ! -e "$TEMP_MOUNT/Applications" ]; then
+              ln -s /Applications "$TEMP_MOUNT/Applications"
+            fi
+
+            # Unmount both
+            hdiutil detach "$MOUNT_DIR" -quiet
+            hdiutil detach "$TEMP_MOUNT" -quiet
+
+            # Convert to compressed read-only DMG
+            rm "$DMG_PATH"
+            hdiutil convert "$TEMP_DMG" -format UDZO -o "$DMG_PATH"
+            rm "$TEMP_DMG"
+
+            echo "DMG rebuilt with notarized app: $DMG_PATH"
+          fi
+
+          echo "Notarization complete!"
 
       - name: Verify macOS artifacts
         run: |
@@ -257,4 +344,6 @@ jobs:
             artifacts/macos-x64/*.zip
             artifacts/windows-x64/*.exe
             artifacts/linux-x64/*.AppImage
-            artifacts/**/*.yml
+            artifacts/macos-arm64/latest-mac.yml
+            artifacts/windows-x64/latest.yml
+            artifacts/linux-x64/latest-linux.yml
