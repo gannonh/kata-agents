@@ -3,9 +3,11 @@
 [![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/gannonh/kata-agents/releases/tag/v0.4.0)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Kata Agents is a powerful desktop application for working with AI agents, built on the Claude Agent SDK. It enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished Electron-based UI.
+Kata Agents is a powerful productivity app for working with AI agents. Built on the Claude Agent SDK, it enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished, natural language driven UI. **It's like Claude Code meets Slack.**
 
 Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gannonh/kata), [Kata Agents](https://github.com/gannonh/kata-agents), and [Kata Context](https://github.com/gannonh/kata-context).
+
+[kata.sh](https://kata.sh/)
 
 ![Kata Agents Demo](assets/supercut.gif)
 
@@ -13,6 +15,7 @@ Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gan
 
 - **Multi-Session Inbox**: Desktop app with session management, status workflow, and flagging
 - **Claude Code Experience**: Streaming responses, tool visualization, real-time updates
+- **Agent Skills**: Specialized agent instructions stored per-workspace
 - **MCP Integration**: Connect to any MCP server (Linear, GitHub, Notion, and more)
 - **Sources**: Connect to REST APIs (Google, Slack, Microsoft), and local filesystems
 - **Permission Modes**: Three-level system (Explore, Ask to Edit, Auto) with customizable rules
@@ -20,7 +23,6 @@ Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gan
 - **Dynamic Status System**: Customizable session workflow states (Todo, In Progress, Done, etc.)
 - **Theme System**: Cascading themes at app and workspace levels
 - **Multi-File Diff**: VS Code-style window for viewing all file changes in a turn
-- **Skills**: Specialized agent instructions stored per-workspace
 - **File Attachments**: Drag-drop images, PDFs, Office documents with auto-conversion
 
 ## Installation
@@ -105,7 +107,7 @@ kata-agents/
     ├── core/                  # Shared types
     └── shared/                # Business logic
         └── src/
-            ├── agent/         # CraftAgent, permissions
+            ├── agent/         # Kata agent, permissions
             ├── auth/          # OAuth, tokens
             ├── config/        # Storage, preferences, themes
             ├── credentials/   # AES-256-GCM encrypted storage
