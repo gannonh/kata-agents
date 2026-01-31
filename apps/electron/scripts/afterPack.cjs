@@ -7,7 +7,7 @@
  *
  * To regenerate Assets.car after icon changes:
  *   cd apps/electron
- *   xcrun actool "resources/icon.icon" --compile "resources" \
+ *   xcrun actool "resources/AppIcon.icon" --compile "resources" \
  *     --app-icon AppIcon --minimum-deployment-target 26.0 \
  *     --platform macosx --output-partial-info-plist /dev/null
  *

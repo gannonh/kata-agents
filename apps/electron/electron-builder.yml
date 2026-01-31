@@ -49,7 +49,7 @@ asar: false
 
 mac:
   category: public.app-category.productivity
-  icon: resources/icon.icns
+  icon: resources/AppIcon.icns
   # macOS 26+ Liquid Glass: Tell macOS to look for icon in Assets.car
   # The value must match --app-icon used in actool (see afterPack.js)
   extendInfo:
@@ -84,7 +84,7 @@ dmg:
   # Custom background (multi-resolution TIFF with 1x+2x for retina support)
   background: resources/dmg-background.tiff
   # Use app icon as the mounted volume icon in Finder
-  icon: resources/icon.icns
+  icon: resources/AppIcon.icns
   iconSize: 80
   title: "Kata Agents"
   contents:
