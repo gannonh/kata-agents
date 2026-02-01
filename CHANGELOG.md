@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15] - 2026-02-01
+
+### Fixed
+- **ROOT CAUSE**: Network interceptor file path was wrong in electron-builder config
+- Production builds now correctly bundle the interceptor from the monorepo root
+- This was causing the app to hang at startup with "Network interceptor not found" error
+
 ## [0.4.14] - 2026-02-01
 
 ### Fixed
