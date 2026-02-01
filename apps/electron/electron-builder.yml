@@ -70,6 +70,12 @@ mac:
     - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux"
     - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux"
     - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32"
+  # Explicitly copy Bun and interceptor (files: pattern matching is unreliable)
+  extraResources:
+    - from: vendor/bun/bun
+      to: app/vendor/bun/bun
+    - from: packages/shared/src/network-interceptor.ts
+      to: app/packages/shared/src/network-interceptor.ts
   # Use predictable naming for macOS packages (applies to zip; dmg uses its own config below)
   artifactName: "Kata-Agents-${arch}.${ext}"
   # Code signing: set CSC_NAME="Your Name (TEAMID)"

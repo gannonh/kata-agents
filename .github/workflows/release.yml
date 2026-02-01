@@ -85,11 +85,54 @@ jobs:
       - name: Build Electron app
         run: bun run electron:build
 
-      - name: Copy interceptor for packaging
+      - name: Prepare packaging dependencies
         run: |
-          # electron-builder runs from apps/electron, so copy interceptor there
+          # === These steps mirror what build-dmg.sh does locally ===
+
+          # 1. Download Bun binary for target architecture
+          BUN_VERSION="bun-v1.3.5"
+          ARCH="${{ matrix.arch }}"
+          BUN_DOWNLOAD="bun-darwin-$([ "$ARCH" = "arm64" ] && echo "aarch64" || echo "x64")"
+
+          echo "Downloading Bun ${BUN_VERSION} for darwin-${ARCH}..."
+          mkdir -p apps/electron/vendor/bun
+
+          TEMP_DIR=$(mktemp -d)
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${BUN_DOWNLOAD}.zip" -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip"
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt" -o "$TEMP_DIR/SHASUMS256.txt"
+
+          # Verify checksum
+          echo "Verifying checksum..."
+          cd "$TEMP_DIR"
+          grep "${BUN_DOWNLOAD}.zip" SHASUMS256.txt | shasum -a 256 -c -
+          cd - > /dev/null
+
+          # Extract and install
+          unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
+          cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun" apps/electron/vendor/bun/
+          chmod +x apps/electron/vendor/bun/bun
+          rm -rf "$TEMP_DIR"
+
+          echo "Bun binary installed to apps/electron/vendor/bun/"
+          ls -la apps/electron/vendor/bun/
+
+          # 2. Copy SDK from root node_modules (monorepo hoisting)
+          echo "Copying SDK..."
+          mkdir -p apps/electron/node_modules/@anthropic-ai
+          cp -r node_modules/@anthropic-ai/claude-agent-sdk apps/electron/node_modules/@anthropic-ai/
+
+          # 3. Copy network interceptor
+          echo "Copying interceptor..."
           mkdir -p apps/electron/packages/shared/src
           cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
+
+          echo "=== Packaging dependencies ready ==="
+          echo "vendor/bun:"
+          ls -la apps/electron/vendor/bun/
+          echo "node_modules/@anthropic-ai:"
+          ls -la apps/electron/node_modules/@anthropic-ai/
+          echo "packages/shared/src:"
+          ls -la apps/electron/packages/shared/src/
 
       - name: Package for macOS ${{ matrix.arch }}
         run: |
@@ -266,11 +309,50 @@ jobs:
       - name: Build Electron app
         run: bun run electron:build
 
-      - name: Copy interceptor for packaging
+      - name: Prepare packaging dependencies
         shell: bash
         run: |
+          # === These steps mirror what build-win.ps1 does locally ===
+
+          # 1. Download Bun binary for Windows x64 (baseline build - works on all x64 CPUs)
+          BUN_VERSION="bun-v1.3.5"
+          BUN_DOWNLOAD="bun-windows-x64-baseline"
+
+          echo "Downloading Bun ${BUN_VERSION} for Windows x64..."
+          mkdir -p apps/electron/vendor/bun
+
+          TEMP_DIR=$(mktemp -d)
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${BUN_DOWNLOAD}.zip" -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip"
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt" -o "$TEMP_DIR/SHASUMS256.txt"
+
+          # Verify checksum
+          echo "Verifying checksum..."
+          cd "$TEMP_DIR"
+          grep "${BUN_DOWNLOAD}.zip" SHASUMS256.txt | sha256sum -c -
+          cd - > /dev/null
+
+          # Extract and install
+          unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
+          cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun.exe" apps/electron/vendor/bun/
+          rm -rf "$TEMP_DIR"
+
+          echo "Bun binary installed to apps/electron/vendor/bun/"
+          ls -la apps/electron/vendor/bun/
+
+          # 2. Copy SDK from root node_modules (monorepo hoisting)
+          echo "Copying SDK..."
+          mkdir -p apps/electron/node_modules/@anthropic-ai
+          cp -r node_modules/@anthropic-ai/claude-agent-sdk apps/electron/node_modules/@anthropic-ai/
+
+          # 3. Copy network interceptor
+          echo "Copying interceptor..."
           mkdir -p apps/electron/packages/shared/src
           cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
+
+          echo "=== Packaging dependencies ready ==="
+          ls -la apps/electron/vendor/bun/
+          ls -la apps/electron/node_modules/@anthropic-ai/
+          ls -la apps/electron/packages/shared/src/
 
       - name: Package for Windows
         run: |
@@ -325,10 +407,50 @@ jobs:
       - name: Build Electron app
         run: bun run electron:build
 
-      - name: Copy interceptor for packaging
+      - name: Prepare packaging dependencies
         run: |
+          # === These steps mirror what build-linux.sh does locally ===
+
+          # 1. Download Bun binary for Linux x64
+          BUN_VERSION="bun-v1.3.5"
+          BUN_DOWNLOAD="bun-linux-x64"
+
+          echo "Downloading Bun ${BUN_VERSION} for Linux x64..."
+          mkdir -p apps/electron/vendor/bun
+
+          TEMP_DIR=$(mktemp -d)
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${BUN_DOWNLOAD}.zip" -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip"
+          curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt" -o "$TEMP_DIR/SHASUMS256.txt"
+
+          # Verify checksum
+          echo "Verifying checksum..."
+          cd "$TEMP_DIR"
+          grep "${BUN_DOWNLOAD}.zip" SHASUMS256.txt | sha256sum -c -
+          cd - > /dev/null
+
+          # Extract and install
+          unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
+          cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun" apps/electron/vendor/bun/
+          chmod +x apps/electron/vendor/bun/bun
+          rm -rf "$TEMP_DIR"
+
+          echo "Bun binary installed to apps/electron/vendor/bun/"
+          ls -la apps/electron/vendor/bun/
+
+          # 2. Copy SDK from root node_modules (monorepo hoisting)
+          echo "Copying SDK..."
+          mkdir -p apps/electron/node_modules/@anthropic-ai
+          cp -r node_modules/@anthropic-ai/claude-agent-sdk apps/electron/node_modules/@anthropic-ai/
+
+          # 3. Copy network interceptor
+          echo "Copying interceptor..."
           mkdir -p apps/electron/packages/shared/src
           cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
+
+          echo "=== Packaging dependencies ready ==="
+          ls -la apps/electron/vendor/bun/
+          ls -la apps/electron/node_modules/@anthropic-ai/
+          ls -la apps/electron/packages/shared/src/
 
       - name: Package for Linux
         run: |

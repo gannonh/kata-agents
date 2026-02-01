@@ -5,18 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.16] - 2026-02-01
+## [0.4.18] - 2026-02-01
+
+### Fixed
+- **ACTUAL ROOT CAUSE**: CI workflow was missing critical packaging steps that local build scripts do
+- CI now downloads Bun binary for each platform (was completely missing)
+- CI now copies SDK from root node_modules to apps/electron (was completely missing)
+- CI now copies network interceptor (was added previously but insufficient alone)
+- The local `build-dmg.sh`, `build-win.ps1`, and `build-linux.sh` scripts do all three of these steps, but the CI workflow only did the interceptor copy
+- This is why local builds worked but CI builds resulted in apps that hung at startup
+
 ## [0.4.17] - 2026-02-01
 
 ### Fixed
-- **ROOT CAUSE FOUND**: electron-builder respects .gitignore, so vendor/bun/ and packages/shared/src/ were being excluded from the app bundle
-- Removed vendor/ and packages/ from .gitignore (they're created by CI, never committed)
-- Production builds now correctly include all required files
+- Removed vendor/ and packages/ from .gitignore (electron-builder respects .gitignore)
+- Note: This fix was incomplete - the real issue was CI not creating these directories at all
 
+## [0.4.16] - 2026-02-01
 
 ### Fixed
 - CI now explicitly copies the network interceptor before packaging
-- The electron-builder from/to syntax did not work as expected
+- Note: This fix was incomplete - Bun binary and SDK were still missing
 
 ## [0.4.15] - 2026-02-01
 
