@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12] - 2026-02-01
+
+### Added
+- **Diagnostic logging**: Temporary startup diagnostics that write to `~/.kata-agents/startup-debug.log` on every launch
+- Logs critical values: `process.execPath`, `app.isPackaged`, `isPackagedApp()` result, workspace/session info
+- Helps diagnose why production builds behave differently from local builds
+
 ## [0.4.11] - 2026-02-01
 
 ### Fixed
