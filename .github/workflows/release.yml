@@ -85,6 +85,12 @@ jobs:
       - name: Build Electron app
         run: bun run electron:build
 
+      - name: Copy interceptor for packaging
+        run: |
+          # electron-builder runs from apps/electron, so copy interceptor there
+          mkdir -p apps/electron/packages/shared/src
+          cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
+
       - name: Package for macOS ${{ matrix.arch }}
         run: |
           cd apps/electron
@@ -260,6 +266,12 @@ jobs:
       - name: Build Electron app
         run: bun run electron:build
 
+      - name: Copy interceptor for packaging
+        shell: bash
+        run: |
+          mkdir -p apps/electron/packages/shared/src
+          cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
+
       - name: Package for Windows
         run: |
           cd apps/electron
@@ -312,6 +324,11 @@ jobs:
 
       - name: Build Electron app
         run: bun run electron:build
+
+      - name: Copy interceptor for packaging
+        run: |
+          mkdir -p apps/electron/packages/shared/src
+          cp packages/shared/src/network-interceptor.ts apps/electron/packages/shared/src/
 
       - name: Package for Linux
         run: |
