@@ -128,14 +128,13 @@ export async function rebuildMenu(): Promise<void> {
         { role: 'zoomIn' as const },
         { role: 'zoomOut' as const },
         { role: 'resetZoom' as const },
-        // Dev tools only in development
-        ...(!isPackagedApp() ? [
-          { type: 'separator' as const },
-          { role: 'reload' as const },
-          { role: 'forceReload' as const },
-          { type: 'separator' as const },
-          { role: 'toggleDevTools' as const }
-        ] : [])
+        // Dev tools - enabled in all builds for debugging
+        // TODO: Remove devtools from production after fixing startup hang
+        { type: 'separator' as const },
+        { role: 'reload' as const },
+        { role: 'forceReload' as const },
+        { type: 'separator' as const },
+        { role: 'toggleDevTools' as const }
       ]
     },
 

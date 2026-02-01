@@ -11,6 +11,12 @@
 </head>
 <body>
   <script>
+    // Debug: Log renderer startup to help diagnose splash screen hangs
+    console.log('[renderer] HTML loaded, protocol:', location.protocol);
+    console.log('[renderer] electronAPI available:', typeof window.electronAPI !== 'undefined');
+    window.addEventListener('error', (e) => console.error('[renderer] Global error:', e.message, e.filename, e.lineno));
+    window.addEventListener('unhandledrejection', (e) => console.error('[renderer] Unhandled rejection:', e.reason));
+
     // React DevTools - only in development (when running via Vite dev server)
     if (location.protocol === 'file:' || location.hostname === 'localhost') {
       const s = document.createElement('script');

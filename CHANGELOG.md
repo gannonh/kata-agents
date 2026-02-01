@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.19] - 2026-02-01
+
+### Added
+- **Debug build**: Enabled DevTools in production (View menu > Toggle Developer Tools)
+- Added console logging throughout renderer initialization to diagnose splash screen hang
+- Logs track: HTML load, electronAPI availability, React mount, App initialization, IPC calls
+
 ## [0.4.18] - 2026-02-01
 
 ### Fixed
