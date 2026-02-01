@@ -3,6 +3,12 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
+// DIAGNOSTIC: Log startup info on every launch (even production)
+// This writes to ~/.kata-agents/startup-debug.log
+// TODO: Remove once production issues are resolved
+import { logStartupDiagnostics, logIsPackagedResult, logDiagnostic } from './startup-diagnostics'
+logStartupDiagnostics()
+
 import { app, BrowserWindow } from 'electron'
 import { createHash } from 'crypto'
 import { hostname, homedir } from 'os'
@@ -93,6 +99,9 @@ if (isDebugMode) {
   enableDebug()
   setPerfEnabled(true)
 }
+
+// DIAGNOSTIC: Log the isPackaged detection result
+logIsPackagedResult(isPackagedApp(), isDebugMode)
 
 // Custom URL scheme for deeplinks (e.g., kata://auth-complete)
 // Supports both KATA_ and legacy CRAFT_ env vars for migration
