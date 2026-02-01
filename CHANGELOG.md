@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.16] - 2026-02-01
+## [0.4.17] - 2026-02-01
+
+### Fixed
+- **ROOT CAUSE FOUND**: electron-builder respects .gitignore, so vendor/bun/ and packages/shared/src/ were being excluded from the app bundle
+- Removed vendor/ and packages/ from .gitignore (they're created by CI, never committed)
+- Production builds now correctly include all required files
+
 
 ### Fixed
 - CI now explicitly copies the network interceptor before packaging
