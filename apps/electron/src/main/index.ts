@@ -184,13 +184,28 @@ async function createInitialWindows(): Promise<void> {
     let restoredCount = 0
 
     for (const saved of savedState.windows) {
+      // Extract workspaceId from URL if available (more reliable than saved.workspaceId
+      // which can become stale if user switches workspaces and the state isn't saved properly)
+      let workspaceId = saved.workspaceId
+      if (saved.url) {
+        try {
+          const url = new URL(saved.url)
+          const urlWorkspaceId = url.searchParams.get('workspaceId')
+          if (urlWorkspaceId && validWorkspaceIds.includes(urlWorkspaceId)) {
+            workspaceId = urlWorkspaceId
+          }
+        } catch {
+          // URL parsing failed, use saved.workspaceId
+        }
+      }
+
       // Skip invalid workspaces
-      if (!validWorkspaceIds.includes(saved.workspaceId)) continue
+      if (!validWorkspaceIds.includes(workspaceId)) continue
 
       // Restore main window with focused mode if it was saved
-      mainLog.info(`Restoring window: workspaceId=${saved.workspaceId}, focused=${saved.focused ?? false}, url=${saved.url ?? 'none'}`)
+      mainLog.info(`Restoring window: workspaceId=${workspaceId}, focused=${saved.focused ?? false}, url=${saved.url ?? 'none'}`)
       const win = windowManager.createWindow({
-        workspaceId: saved.workspaceId,
+        workspaceId,
         focused: saved.focused,
         restoreUrl: saved.url,
       })
@@ -205,9 +220,12 @@ async function createInitialWindows(): Promise<void> {
     }
   }
 
-  // Default: open window for first workspace
-  windowManager.createWindow({ workspaceId: workspaces[0].id })
-  mainLog.info(`Created window for first workspace: ${workspaces[0].name}`)
+  // Default: open window for active workspace (from config), fallback to first
+  const config = loadStoredConfig()
+  const activeWsId = config?.activeWorkspaceId
+  const targetWorkspace = workspaces.find(ws => ws.id === activeWsId) ?? workspaces[0]
+  windowManager.createWindow({ workspaceId: targetWorkspace.id })
+  mainLog.info(`Created window for workspace: ${targetWorkspace.name}`)
 }
 
 app.whenReady().then(async () => {

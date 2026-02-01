@@ -29,10 +29,10 @@ bun test
 bun test packages/shared          # Run tests for a specific package
 bun test packages/mermaid/src/__tests__/parser.test.ts  # Single test file
 
-# Distribution builds
-bun run electron:dist:mac         # macOS DMG
-bun run electron:dist:win         # Windows NSIS installer
-bun run electron:dist:linux       # Linux AppImage
+# Distribution builds (run from apps/electron directory)
+cd apps/electron && bun run dist:mac         # macOS DMG
+cd apps/electron && bun run dist:mac:x64     # macOS DMG (Intel)
+cd apps/electron && bun run dist:win         # Windows NSIS installer
 
 # Print system prompt (useful for debugging)
 bun run print:system-prompt
@@ -101,7 +101,7 @@ Three-level permission system per session (cycle with SHIFT+TAB):
 
 ### Configuration Storage
 
-All configuration is stored at `~/.craft-agent/`:
+All configuration is stored at `~/.kata-agents/`:
 
 - `config.json` - Main config (workspaces, auth type)
 - `credentials.enc` - AES-256-GCM encrypted credentials
@@ -135,6 +135,7 @@ import type { Session, Message, AgentEvent } from '@craft-agent/core';
 ## Important Conventions
 
 - Environment variables for OAuth are loaded from `.env` at build time via esbuild `--define`
-- Debug logging writes to `~/Library/Logs/Kata Agentss/` on macOS
+- Debug logging writes to `~/Library/Logs/@craft-agent/electron/` on macOS
 - Sessions are persisted as JSONL files in workspace directories
 - MCP servers can be stdio-based (local subprocess) or SSE-based (remote)
+- To reset window state (useful when debugging session display issues): `rm ~/.kata-agents/window-state.json`
