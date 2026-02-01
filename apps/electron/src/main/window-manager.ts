@@ -323,6 +323,15 @@ export class WindowManager {
   }
 
   /**
+   * Get workspace ID for a given window
+   */
+  getWindowWorkspaceId(window: BrowserWindow): string | undefined {
+    const webContentsId = window.webContents.id
+    const managed = this.windows.get(webContentsId)
+    return managed?.workspaceId
+  }
+
+  /**
    * Get ALL windows for a workspace (main window + tab content windows)
    * Used for broadcasting events to all windows showing the same workspace
    */

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.20] - 2026-02-01
+
+### Fixed
+- **ROOT CAUSE**: Missing `getWindowWorkspaceId()` method in WindowManager
+- The `getSessions()` IPC call failed with "windowManager.getWindowWorkspaceId is not a function"
+- This prevented the renderer from loading sessions, causing the splash screen to hang forever
+- Added the missing method to WindowManager class
+
 ## [0.4.19] - 2026-02-01
 
 ### Added
