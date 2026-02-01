@@ -40,16 +40,31 @@ function createTestDataDir(): string {
   return testDataDir
 }
 
+// Check if running in CI (Linux headless)
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true'
+
 export const test = base.extend<ElectronFixtures>({
   electronApp: async ({}, use) => {
     const testDataDir = createTestDataDir()
 
+    // Base args
+    const args = [
+      path.join(__dirname, '../../dist/main.cjs'),
+      // Use unique user data dir to avoid single-instance lock conflicts
+      `--user-data-dir=${testDataDir}`
+    ]
+
+    // Add CI-specific flags for Linux headless environment
+    if (isCI) {
+      args.push(
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage'
+      )
+    }
+
     const app = await electron.launch({
-      args: [
-        path.join(__dirname, '../../dist/main.cjs'),
-        // Use unique user data dir to avoid single-instance lock conflicts
-        `--user-data-dir=${testDataDir}`
-      ],
+      args,
       env: {
         ...process.env,
         NODE_ENV: 'test',
