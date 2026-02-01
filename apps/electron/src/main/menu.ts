@@ -1,4 +1,5 @@
 import { Menu, app, shell, BrowserWindow } from 'electron'
+import { isPackagedApp } from './is-packaged'
 import { IPC_CHANNELS } from '../shared/types'
 import type { WindowManager } from './window-manager'
 import { mainLog } from './logger'
@@ -128,7 +129,7 @@ export async function rebuildMenu(): Promise<void> {
         { role: 'zoomOut' as const },
         { role: 'resetZoom' as const },
         // Dev tools only in development
-        ...(!app.isPackaged ? [
+        ...(!isPackagedApp() ? [
           { type: 'separator' as const },
           { role: 'reload' as const },
           { role: 'forceReload' as const },
@@ -152,7 +153,7 @@ export async function rebuildMenu(): Promise<void> {
     },
 
     // Debug menu (development only)
-    ...(!app.isPackaged ? [{
+    ...(!isPackagedApp() ? [{
       label: 'Debug',
       submenu: [
         {
