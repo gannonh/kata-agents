@@ -772,15 +772,20 @@ export class SessionManager {
   }
 
   async initialize(): Promise<void> {
+    const { logDiagnostic } = await import('./startup-diagnostics')
+    logDiagnostic('SessionManager.initialize() started')
+
     // Set path to Claude Code executable (cli.js from SDK)
     // In packaged app: use app.getAppPath() (points to app folder, ASAR is disabled)
     // In development: use process.cwd()
     const basePath = isPackagedApp() ? app.getAppPath() : process.cwd()
+    logDiagnostic(`basePath: ${basePath}`)
 
     // In monorepos, dependencies may be hoisted to the root node_modules
     // Try local first, then check monorepo root (two levels up from apps/electron)
     const sdkRelativePath = join('node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js')
     let cliPath = join(basePath, sdkRelativePath)
+    logDiagnostic(`Checking CLI path: ${cliPath}`)
     if (!existsSync(cliPath) && !isPackagedApp()) {
       // Try monorepo root (../../node_modules from apps/electron)
       const monorepoRoot = join(basePath, '..', '..')
@@ -789,16 +794,19 @@ export class SessionManager {
     if (!existsSync(cliPath)) {
       const error = `Claude Code SDK not found at ${cliPath}. The app package may be corrupted.`
       sessionLog.error(error)
+      logDiagnostic(`ERROR: ${error}`)
       throw new Error(error)
     }
     sessionLog.info('Setting pathToClaudeCodeExecutable:', cliPath)
     setPathToClaudeCodeExecutable(cliPath)
+    logDiagnostic('CLI path set')
 
     // Set path to fetch interceptor for SDK subprocess
     // This interceptor captures API errors and adds metadata to MCP tool schemas
     // In monorepos, packages may be at the root level, not inside apps/electron
     const interceptorRelativePath = join('packages', 'shared', 'src', 'network-interceptor.ts')
     let interceptorPath = join(basePath, interceptorRelativePath)
+    logDiagnostic(`Checking interceptor path: ${interceptorPath}`)
     if (!existsSync(interceptorPath) && !isPackagedApp()) {
       // Try monorepo root (../../packages from apps/electron)
       const monorepoRoot = join(basePath, '..', '..')
@@ -807,11 +815,13 @@ export class SessionManager {
     if (!existsSync(interceptorPath)) {
       const error = `Network interceptor not found at ${interceptorPath}. The app package may be corrupted.`
       sessionLog.error(error)
+      logDiagnostic(`ERROR: ${error}`)
       throw new Error(error)
     }
     // Set interceptor path (used for --preload flag with bun)
     sessionLog.info('Setting interceptorPath:', interceptorPath)
     setInterceptorPath(interceptorPath)
+    logDiagnostic('Interceptor path set')
 
     // In packaged app: use bundled Bun binary
     // In development: use system 'bun' command
@@ -822,21 +832,29 @@ export class SessionManager {
       // On macOS/Linux, bun is in the app files (basePath). See electron-builder.yml for details.
       const bunBasePath = process.platform === 'win32' ? process.resourcesPath : basePath
       const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary)
+      logDiagnostic(`Checking Bun path: ${bunPath}`)
       if (!existsSync(bunPath)) {
         const error = `Bundled Bun runtime not found at ${bunPath}. The app package may be corrupted.`
         sessionLog.error(error)
+        logDiagnostic(`ERROR: ${error}`)
         throw new Error(error)
       }
       sessionLog.info('Setting executable:', bunPath)
       setExecutable(bunPath)
+      logDiagnostic('Bun executable set')
     }
     // In development: use system 'bun' (works on Windows now, supports --preload for interceptor)
 
     // Set up authentication environment variables (critical for SDK to work)
+    logDiagnostic('Calling reinitializeAuth()...')
     await this.reinitializeAuth()
+    logDiagnostic('reinitializeAuth() completed')
 
     // Load existing sessions from disk
+    logDiagnostic('Calling loadSessionsFromDisk()...')
     this.loadSessionsFromDisk()
+    logDiagnostic('loadSessionsFromDisk() completed')
+    logDiagnostic('SessionManager.initialize() completed')
   }
 
   // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
