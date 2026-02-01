@@ -1,6 +1,6 @@
 {
   "name": "kata-agents",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "description": "AI agent desktop application for the Kata ecosystem",
   "type": "module",
   "private": true,

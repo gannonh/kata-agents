@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/electron",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "description": "Electron desktop app for Kata Agents",
   "main": "dist/main.cjs",
   "private": true,
