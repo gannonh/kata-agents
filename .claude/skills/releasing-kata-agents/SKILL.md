@@ -10,7 +10,7 @@ Guide the release process for the Kata Agents Electron desktop application.
 ## Release Flow Overview
 
 ```
-1. Run tests locally
+1. Check status / run checks
 2. Bump version in package.json AND apps/electron/package.json
 3. Update CHANGELOG.md
 4. Create release branch and PR
@@ -20,7 +20,39 @@ Guide the release process for the Kata Agents Electron desktop application.
 
 ## Step 1: Pre-Release Verification
 
-Before starting a release, ensure the codebase is ready:
+Our workflow is PR-driven:
+- **Development** happens on feature branches
+- **Releases** happen on release branches created from main
+
+### 1a. Ensure you're ready to release
+
+Before creating a release branch, verify:
+
+1. **Check current branch**: Must be on `main` (not a feature branch)
+   ```bash
+   git branch --show-current
+   ```
+
+2. **If on a feature branch**: The PR must pass CI and be merged first
+   ```bash
+   # Check PR status
+   gh pr status
+
+   # Monitor PR CI checks
+   gh pr checks --watch 2>&1 | tail -10
+
+   # After PR merges, switch to main
+   git checkout main && git pull
+   ```
+
+3. **Verify working directory is clean**:
+   ```bash
+   git status  # Should show "nothing to commit, working tree clean"
+   ```
+
+### 1b. Run pre-release checks
+
+Once on main with a clean working directory, verify the codebase is ready:
 
 ```bash
 # Run all tests
@@ -127,8 +159,12 @@ gh pr create --title "Release vX.Y.Z" --body "## Release vX.Y.Z
 - [ ] Tests passing
 - [ ] Local production build tested"
 ```
+## Step 7a: Monitor PR Status Checks
 
-## Step 7: Merge and Monitor CI
+- PR cannot be merged unless `validate` GitHub Actions CI workflow passes
+- Monitor status checks on the PR before merging
+
+## Step 7b: Merge and Monitor CI
 
 ```bash
 # Merge the PR (after review if required)
