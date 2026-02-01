@@ -66,5 +66,3 @@ sources/
 sessions/
 statuses/config.json
 labels/
-# symlink to /Users/gannonhall/.claude/skills
-skills
