@@ -173,12 +173,20 @@ export class WindowManager {
       // Restore from saved URL - need to adapt for dev vs prod
       if (VITE_DEV_SERVER_URL) {
         // In dev mode, replace the base URL but keep the path and query
+        // IMPORTANT: Always override workspaceId from saved window state, not URL.
+        // The URL's workspaceId can be stale if user switched workspaces. See #14.
         try {
           const savedUrl = new URL(restoreUrl)
           const devUrl = new URL(VITE_DEV_SERVER_URL)
-          // Preserve pathname and search from saved URL, use dev server host
+          // Preserve pathname from saved URL, use dev server host
           devUrl.pathname = savedUrl.pathname
-          devUrl.search = savedUrl.search
+          // Copy query params but override workspaceId with correct one from window state
+          savedUrl.searchParams.forEach((value, key) => {
+            if (key !== 'workspaceId') {
+              devUrl.searchParams.set(key, value)
+            }
+          })
+          devUrl.searchParams.set('workspaceId', workspaceId)
           window.loadURL(devUrl.toString())
         } catch {
           // Fallback if URL parsing fails
@@ -190,10 +198,14 @@ export class WindowManager {
         // In prod, always extract query params and load from current __dirname.
         // Never load file:// URLs directly — the path may be stale (e.g. Linux AppImage
         // mounts to a different /tmp dir on each launch). See #13.
+        // IMPORTANT: Always override workspaceId from saved window state, not URL.
+        // The URL's workspaceId can be stale if user switched workspaces. See #14.
         try {
           const savedUrl = new URL(restoreUrl)
           const query: Record<string, string> = {}
           savedUrl.searchParams.forEach((value, key) => { query[key] = value })
+          // Override workspaceId with the correct one from window state
+          query.workspaceId = workspaceId
           window.loadFile(join(__dirname, 'renderer/index.html'), { query })
         } catch {
           window.loadFile(join(__dirname, 'renderer/index.html'), { query: { workspaceId } })
