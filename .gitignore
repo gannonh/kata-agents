@@ -12,6 +12,11 @@ apps/electron/release
 coverage
 *.lcov
 
+# Playwright e2e test artifacts
+playwright-report/
+test-results/
+.playwright/
+
 # logs
 logs
 _.log
