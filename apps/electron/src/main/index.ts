@@ -7,6 +7,7 @@ import { app, BrowserWindow } from 'electron'
 import { createHash } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
+import { isPackagedApp } from './is-packaged'
 
 // Initialize Sentry error tracking as early as possible after app import.
 // Only enabled in production (packaged) builds to avoid noise during development.
@@ -19,7 +20,7 @@ import * as Sentry from '@sentry/electron/main'
 //   3. Add @sentry/esbuild-plugin to scripts/electron-build-main.ts (handles main process maps)
 Sentry.init({
   dsn: process.env.SENTRY_ELECTRON_INGEST_URL,
-  environment: app.isPackaged ? 'production' : 'development',
+  environment: isPackagedApp() ? 'production' : 'development',
   release: app.getVersion(),
   // Enabled whenever the ingest URL is available — works in both production (baked via CI)
   // and development (injected via .env / 1Password). Filter by environment in Sentry dashboard.
@@ -309,7 +310,7 @@ app.whenReady().then(async () => {
     // Initialize auto-update (check immediately on launch)
     // Skip in dev mode to avoid replacing /Applications app and launching it instead
     setAutoUpdateWindowManager(windowManager)
-    if (app.isPackaged) {
+    if (isPackagedApp()) {
       checkForUpdatesOnLaunch().catch(err => {
         mainLog.error('[auto-update] Launch check failed:', err)
       })

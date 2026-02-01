@@ -1,4 +1,5 @@
 import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
+import { isPackagedApp } from './is-packaged'
 import { windowLog } from './logger'
 import { join } from 'path'
 import { existsSync } from 'fs'
@@ -156,7 +157,7 @@ export class WindowManager {
     })
 
     // Enable right-click context menu in development
-    if (!app.isPackaged) {
+    if (!isPackagedApp()) {
       window.webContents.on('context-menu', (_event, params) => {
         Menu.buildFromTemplate([
           { label: 'Inspect Element', click: () => window.webContents.inspectElement(params.x, params.y) },

@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { isPackagedApp } from './is-packaged'
 import * as Sentry from '@sentry/electron/main'
 import { join } from 'path'
 import { existsSync } from 'fs'
@@ -773,13 +774,13 @@ export class SessionManager {
     // Set path to Claude Code executable (cli.js from SDK)
     // In packaged app: use app.getAppPath() (points to app folder, ASAR is disabled)
     // In development: use process.cwd()
-    const basePath = app.isPackaged ? app.getAppPath() : process.cwd()
+    const basePath = isPackagedApp() ? app.getAppPath() : process.cwd()
 
     // In monorepos, dependencies may be hoisted to the root node_modules
     // Try local first, then check monorepo root (two levels up from apps/electron)
     const sdkRelativePath = join('node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js')
     let cliPath = join(basePath, sdkRelativePath)
-    if (!existsSync(cliPath) && !app.isPackaged) {
+    if (!existsSync(cliPath) && !isPackagedApp()) {
       // Try monorepo root (../../node_modules from apps/electron)
       const monorepoRoot = join(basePath, '..', '..')
       cliPath = join(monorepoRoot, sdkRelativePath)
@@ -797,7 +798,7 @@ export class SessionManager {
     // In monorepos, packages may be at the root level, not inside apps/electron
     const interceptorRelativePath = join('packages', 'shared', 'src', 'network-interceptor.ts')
     let interceptorPath = join(basePath, interceptorRelativePath)
-    if (!existsSync(interceptorPath) && !app.isPackaged) {
+    if (!existsSync(interceptorPath) && !isPackagedApp()) {
       // Try monorepo root (../../packages from apps/electron)
       const monorepoRoot = join(basePath, '..', '..')
       interceptorPath = join(monorepoRoot, interceptorRelativePath)
@@ -813,7 +814,7 @@ export class SessionManager {
 
     // In packaged app: use bundled Bun binary
     // In development: use system 'bun' command
-    if (app.isPackaged) {
+    if (isPackagedApp()) {
       // Use platform-specific binary name (bun.exe on Windows, bun on macOS/Linux)
       const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun'
       // On Windows, bun.exe is in extraResources (process.resourcesPath) to avoid EBUSY errors.

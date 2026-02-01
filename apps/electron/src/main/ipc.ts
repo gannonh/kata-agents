@@ -1,4 +1,5 @@
 import { app, ipcMain, nativeTheme, nativeImage, dialog, shell, BrowserWindow } from 'electron'
+import { isPackagedApp } from './is-packaged'
 import { readFile, readdir, stat, realpath, mkdir, writeFile, unlink, rm } from 'fs/promises'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { normalize, isAbsolute, join, basename, dirname, resolve, relative, sep } from 'path'
@@ -726,7 +727,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Check if running in debug mode (from source)
   ipcMain.handle(IPC_CHANNELS.IS_DEBUG_MODE, () => {
-    return !app.isPackaged
+    return !isPackagedApp()
   })
 
   // Get git branch for a directory (returns null if not a git repo or git unavailable)

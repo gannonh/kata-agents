@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10] - 2026-02-01
+
+### Fixed
+- **CRITICAL**: Fix production app failing to detect packaged state when `asar: false` is set
+- Production app now correctly identifies bundled Bun runtime instead of searching for system `bun`
+- Sessions now persist and display correctly in production builds
+- Fixes "Failed to spawn Claude Code process: spawn bun ENOENT" error on fresh installs
+
+### Added
+- New `isPackagedApp()` utility that reliably detects packaged apps by checking executable paths
+- Works on all platforms: macOS (.app bundle), Windows (Program Files), Linux (AppImage)
+
 ## [0.4.8] - 2026-01-31
 
 ### Fixed
