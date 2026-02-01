@@ -308,22 +308,29 @@ export default function App() {
   // Check auth state and get window's workspace ID on mount
   useEffect(() => {
     const initialize = async () => {
+      console.log('[App] initialize() starting...')
       try {
         // Get this window's workspace ID (passed via URL query param from main process)
+        console.log('[App] Calling getWindowWorkspace()...')
         const wsId = await window.electronAPI.getWindowWorkspace()
+        console.log('[App] getWindowWorkspace() returned:', wsId)
         setWindowWorkspaceId(wsId)
 
+        console.log('[App] Calling getSetupNeeds()...')
         const needs = await window.electronAPI.getSetupNeeds()
+        console.log('[App] getSetupNeeds() returned:', needs)
         setSetupNeeds(needs)
 
         if (needs.isFullyConfigured) {
+          console.log('[App] Setting appState to ready')
           setAppState('ready')
         } else {
           // New user or needs setup - show onboarding
+          console.log('[App] Setting appState to onboarding')
           setAppState('onboarding')
         }
       } catch (error) {
-        console.error('Failed to check auth state:', error)
+        console.error('[App] Failed to check auth state:', error)
         // If check fails, show onboarding to be safe
         setAppState('onboarding')
       }
@@ -352,10 +359,16 @@ export default function App() {
   // Load workspaces, sessions, model, notifications setting, and drafts when app is ready
   useEffect(() => {
     if (appState !== 'ready') return
+    console.log('[App] appState is ready, loading data...')
 
-    window.electronAPI.getWorkspaces().then(setWorkspaces)
+    window.electronAPI.getWorkspaces().then((ws) => {
+      console.log('[App] getWorkspaces() returned:', ws.length, 'workspaces')
+      setWorkspaces(ws)
+    })
     window.electronAPI.getNotificationsEnabled().then(setNotificationsEnabled)
+    console.log('[App] Calling getSessions()...')
     window.electronAPI.getSessions().then((loadedSessions) => {
+      console.log('[App] getSessions() returned:', loadedSessions.length, 'sessions')
       // Initialize per-session atoms and metadata map
       // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
@@ -375,6 +388,7 @@ export default function App() {
       }
       setSessionOptions(optionsMap)
       // Mark sessions as loaded for splash screen
+      console.log('[App] Setting sessionsLoaded = true')
       setSessionsLoaded(true)
 
       // If window was opened with a specific session (via "Open in New Window"), select it

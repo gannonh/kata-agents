@@ -1,3 +1,5 @@
+console.log('[renderer/main.tsx] Module loaded')
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { init as sentryInit } from '@sentry/electron/renderer'
@@ -92,15 +94,21 @@ function Root() {
   return <App />
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <Sentry.ErrorBoundary fallback={<CrashFallback />}>
-      <JotaiProvider>
-        <ThemeProvider>
-          <Root />
-          <Toaster />
-        </ThemeProvider>
-      </JotaiProvider>
-    </Sentry.ErrorBoundary>
-  </React.StrictMode>
-)
+console.log('[renderer/main.tsx] About to render React app')
+try {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <Sentry.ErrorBoundary fallback={<CrashFallback />}>
+        <JotaiProvider>
+          <ThemeProvider>
+            <Root />
+            <Toaster />
+          </ThemeProvider>
+        </JotaiProvider>
+      </Sentry.ErrorBoundary>
+    </React.StrictMode>
+  )
+  console.log('[renderer/main.tsx] React render() called successfully')
+} catch (err) {
+  console.error('[renderer/main.tsx] React render failed:', err)
+}
