@@ -239,21 +239,32 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  logDiagnostic('\n=== app.whenReady() started ===')
+
   // Register bundled assets root so all seeding functions can find their files
   // (docs, permissions, themes, tool-icons resolve via getBundledAssetsDir)
   setBundledAssetsRoot(__dirname)
+  logDiagnostic('setBundledAssetsRoot done')
 
   // Initialize bundled docs
+  logDiagnostic('initializeDocs starting...')
   initializeDocs()
+  logDiagnostic('initializeDocs done')
 
   // Ensure default permissions file exists (copies bundled default.json on first run)
+  logDiagnostic('ensureDefaultPermissions starting...')
   ensureDefaultPermissions()
+  logDiagnostic('ensureDefaultPermissions done')
 
   // Seed tool icons to ~/.kata-agents/tool-icons/ (copies bundled SVGs on first run)
+  logDiagnostic('ensureToolIcons starting...')
   ensureToolIcons()
+  logDiagnostic('ensureToolIcons done')
 
   // Register thumbnail:// protocol handler (scheme was registered earlier, before app.whenReady)
+  logDiagnostic('registerThumbnailHandler starting...')
   registerThumbnailHandler()
+  logDiagnostic('registerThumbnailHandler done')
 
   // Note: electron-updater handles pending updates internally via autoInstallOnAppQuit
 
@@ -281,26 +292,41 @@ app.whenReady().then(async () => {
 
   try {
     // Initialize window manager
+    logDiagnostic('Creating WindowManager...')
     windowManager = new WindowManager()
+    logDiagnostic('WindowManager created')
 
     // Create the application menu (needs windowManager for New Window action)
+    logDiagnostic('Creating application menu...')
     createApplicationMenu(windowManager)
+    logDiagnostic('Application menu created')
 
     // Initialize session manager
+    logDiagnostic('Creating SessionManager...')
     sessionManager = new SessionManager()
+    logDiagnostic('SessionManager created')
     sessionManager.setWindowManager(windowManager)
+    logDiagnostic('WindowManager set on SessionManager')
 
     // Initialize notification service
+    logDiagnostic('Initializing notification service...')
     initNotificationService(windowManager)
+    logDiagnostic('Notification service initialized')
 
     // Register IPC handlers (must happen before window creation)
+    logDiagnostic('Registering IPC handlers...')
     registerIpcHandlers(sessionManager, windowManager)
+    logDiagnostic('IPC handlers registered')
 
     // Create initial windows (restores from saved state or opens first workspace)
+    logDiagnostic('Creating initial windows...')
     await createInitialWindows()
+    logDiagnostic('Initial windows created')
 
     // Initialize auth (must happen after window creation for error reporting)
+    logDiagnostic('Initializing SessionManager (auth)...')
     await sessionManager.initialize()
+    logDiagnostic('SessionManager initialized')
 
     // Set Sentry context tags for error grouping (no PII — just config classification).
     // Runs after init so config and auth state are available.
