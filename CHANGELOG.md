@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.16] - 2026-02-01
+
+### Fixed
+- CI now explicitly copies the network interceptor before packaging
+- The electron-builder from/to syntax did not work as expected
+
 ## [0.4.15] - 2026-02-01
 
 ### Fixed
