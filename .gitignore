@@ -62,7 +62,7 @@ sshkey
 id_rsa*
 id_ed25519*
 
-# Credentials files
+# Credentials files & misc
 credentials.enc
 *.credentials
 .secrets/
@@ -71,3 +71,4 @@ sources/
 sessions/
 statuses/config.json
 labels/
+config.json
