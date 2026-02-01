@@ -6,6 +6,7 @@ import { existsSync } from 'fs'
 import { rm, readFile } from 'fs/promises'
 import { CraftAgent, type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest } from '@craft-agent/shared/agent'
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
+import { logSessionDiagnostics, logError } from './startup-diagnostics'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
 import {
@@ -898,8 +899,16 @@ export class SessionManager {
       }
 
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
+
+      // DIAGNOSTIC: Log workspace and session info
+      const sessionWorkspaceIds = Array.from(this.sessions.values()).map(s => ({
+        sessionId: s.id,
+        workspaceId: s.workspace.id,
+      }))
+      logSessionDiagnostics(workspaces, totalSessions, sessionWorkspaceIds)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
+      logError('loadSessionsFromDisk', error)
     }
   }
 

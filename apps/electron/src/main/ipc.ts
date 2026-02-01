@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
 import { ipcLog, windowLog } from './logger'
+import { logGetSessionsCall, logDiagnostic } from './startup-diagnostics'
 import { WindowManager } from './window-manager'
 import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AuthType, type ApiSetupInfo, type SendMessageOptions } from '../shared/types'
@@ -119,10 +120,18 @@ async function validateFilePath(filePath: string): Promise<string> {
 
 export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager): void {
   // Get all sessions
-  ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async () => {
+  ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async (_event) => {
     const end = perf.start('ipc.getSessions')
     const sessions = sessionManager.getSessions()
     end()
+
+    // DIAGNOSTIC: Log getSessions call
+    // Get the workspaceId from the calling window
+    const win = BrowserWindow.fromWebContents(_event.sender)
+    const callerWorkspaceId = win ? windowManager.getWindowWorkspaceId(win) : undefined
+    logGetSessionsCall(callerWorkspaceId, sessions.length)
+    logDiagnostic(`  Session workspaceIds in response: ${[...new Set(sessions.map(s => s.workspaceId))].join(', ')}`)
+
     return sessions
   })
 
