@@ -39,58 +39,60 @@ jobs:
       - name: Run all tests
         run: bun test
 
-  build-mac:
-    needs: validate
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
-        with:
-          node-version: '20'
-
-      - name: Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build Electron app
-        run: bun run electron:build
-        env:
-          # Disable code signing in CI (no certificates available)
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Package for macOS arm64
-        run: |
-          cd apps/electron
-          npx electron-builder --mac --arm64 --publish never
-        env:
-          # Disable code signing in CI (no certificates available)
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Verify DMG was created
-        run: |
-          if ! ls apps/electron/release/*.dmg 1>/dev/null 2>&1; then
-            echo "Error: DMG file not found"
-            exit 1
-          fi
-          echo "Found DMG:"
-          ls -la apps/electron/release/*.dmg
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
-        with:
-          name: macos-arm64
-          path: apps/electron/release/*.dmg
-          retention-days: 7
+  # NOTE: macOS builds disabled to reduce CI costs (macos-latest is 10x more expensive)
+  # Uncomment to re-enable
+  # build-mac:
+  #   needs: validate
+  #   runs-on: macos-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+  #
+  #     - name: Setup Bun
+  #       uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+  #       with:
+  #         node-version: '20'
+  #
+  #     - name: Cache Bun dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ~/.bun/install/cache
+  #         key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-bun-
+  #
+  #     - name: Install dependencies
+  #       run: bun install
+  #
+  #     - name: Build Electron app
+  #       run: bun run electron:build
+  #       env:
+  #         # Disable code signing in CI (no certificates available)
+  #         CSC_IDENTITY_AUTO_DISCOVERY: false
+  #
+  #     - name: Package for macOS arm64
+  #       run: |
+  #         cd apps/electron
+  #         npx electron-builder --mac --arm64 --publish never
+  #       env:
+  #         # Disable code signing in CI (no certificates available)
+  #         CSC_IDENTITY_AUTO_DISCOVERY: false
+  #
+  #     - name: Verify DMG was created
+  #       run: |
+  #         if ! ls apps/electron/release/*.dmg 1>/dev/null 2>&1; then
+  #           echo "Error: DMG file not found"
+  #           exit 1
+  #         fi
+  #         echo "Found DMG:"
+  #         ls -la apps/electron/release/*.dmg
+  #
+  #     - name: Upload macOS artifact
+  #       uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+  #       with:
+  #         name: macos-arm64
+  #         path: apps/electron/release/*.dmg
+  #         retention-days: 7
