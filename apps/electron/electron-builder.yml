@@ -27,7 +27,9 @@ files:
   # Include SDK for subprocess execution
   - node_modules/@anthropic-ai/claude-agent-sdk/**/*
   # Include network interceptor for API error capture and MCP schema injection
-  - packages/shared/src/network-interceptor.ts
+  # Path is relative to monorepo root (electron-builder runs from apps/electron but resolves from root)
+  - from: ../../packages/shared/src/network-interceptor.ts
+    to: packages/shared/src/network-interceptor.ts
   # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
   # Exclude everything else from node_modules
