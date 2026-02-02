@@ -17,6 +17,7 @@ import {
 import { CrossfadeAvatar } from "@/components/ui/avatar"
 import { FadingText } from "@/components/ui/fading-text"
 import { WorkspaceCreationScreen } from "@/components/workspace"
+import { GitStatusBadge } from "@/components/git/GitStatusBadge"
 import type { Workspace } from "../../../shared/types"
 
 interface WorkspaceSwitcherProps {
@@ -50,6 +51,7 @@ export function WorkspaceSwitcher({
   // Cache stores { dataUrl, sourceUrl } to detect when icon file changes
   const [iconCache, setIconCache] = useState<Record<string, { dataUrl: string; sourceUrl: string }>>({})
   const selectedWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
+  const workspaceRootPath = selectedWorkspace?.rootPath ?? null
 
   // Fetch workspace icons via IPC (converts local files to data URLs)
   useEffect(() => {
@@ -157,8 +159,22 @@ export function WorkspaceSwitcher({
               <FadingText className="ml-1 font-sans min-w-0 text-sm" fadeWidth={36}>
                 {selectedWorkspace?.name || 'Select workspace'}
               </FadingText>
+              {/* Git status badge - shows branch name when in a git repo */}
+              <GitStatusBadge
+                workspaceId={activeWorkspaceId}
+                workspaceRootPath={workspaceRootPath}
+                className="ml-1"
+              />
               <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
             </>
+          )}
+          {/* Git status badge in collapsed mode - icon only with tooltip */}
+          {isCollapsed && (
+            <GitStatusBadge
+              workspaceId={activeWorkspaceId}
+              workspaceRootPath={workspaceRootPath}
+              isCollapsed={true}
+            />
           )}
         </button>
       </DropdownMenuTrigger>
