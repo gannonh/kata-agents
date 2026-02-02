@@ -1,10 +1,12 @@
 import * as React from 'react'
-import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
+import { useMemo, useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react'
 import type { ToolDisplayMeta } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   XCircle,
   Circle,
@@ -128,6 +130,9 @@ const SIZE_CONFIG = {
   /** Number of items before which we apply staggered animation */
   staggeredAnimationLimit: 10,
 } as const
+
+/** Max height in pixels for collapsible message content */
+const MAX_HEIGHT = 540
 
 // ============================================================================
 // Types
@@ -1122,6 +1127,14 @@ export function ResponseCard({
   // Dark mode detection - scroll fade only shown in dark mode
   const [isDarkMode, setIsDarkMode] = useState(false)
 
+  // Per-message collapse state
+  // When expandContent is true/undefined, we start expanded and allow user to collapse
+  // When expandContent is false, we start collapsed and allow user to expand
+  const [isCollapsed, setIsCollapsed] = useState(expandContent === false)
+  // Track if content exceeds 540px natural height (only then show toggle)
+  const [isCollapsible, setIsCollapsible] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+
   // Detect dark mode from document class and listen for changes
   useEffect(() => {
     const checkDarkMode = () => {
@@ -1134,6 +1147,27 @@ export function ResponseCard({
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
     return () => observer.disconnect()
   }, [])
+
+  // Measure content height to determine if collapsible (exceeds 540px)
+  // Use ResizeObserver to handle dynamic content changes
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el || isStreaming) return
+
+    const checkCollapsible = () => {
+      const scrollHeight = el.scrollHeight
+      setIsCollapsible(scrollHeight > MAX_HEIGHT)
+    }
+
+    // Initial check
+    checkCollapsible()
+
+    // Watch for size changes (images loading, etc.)
+    const resizeObserver = new ResizeObserver(checkCollapsible)
+    resizeObserver.observe(el)
+
+    return () => resizeObserver.disconnect()
+  }, [isStreaming, text])
 
   const handleCopy = useCallback(async () => {
     try {
@@ -1184,10 +1218,8 @@ export function ResponseCard({
     return null
   }
 
-  // MAX_HEIGHT is only applied when expandContent is explicitly false
-  // When expandContent is true or undefined, content expands to full height
-  const MAX_HEIGHT = 540
-  const shouldConstrainHeight = expandContent === false
+  // shouldConstrainHeight is true when user has collapsed this message or default is collapsed
+  const shouldConstrainHeight = isCollapsed
 
   // Completed response or plan - show with optional max height and footer
   if (isCompleted || variant === 'plan') {
@@ -1196,20 +1228,43 @@ export function ResponseCard({
     return (
       <>
         <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden relative group">
-          {/* Fullscreen button - top right corner, visible on hover */}
-          <button
-            onClick={() => setIsFullscreen(true)}
-            className={cn(
-              "absolute top-2 right-2 p-1 rounded-[6px] transition-all z-10 select-none",
-              "opacity-0 group-hover:opacity-100",
-              "bg-background shadow-minimal",
-              "text-muted-foreground/50 hover:text-foreground",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
+          {/* Top-right action buttons - visible on hover */}
+          <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+            {/* Collapse/Expand toggle - only shown when content is collapsible */}
+            {isCollapsible && (
+              <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className={cn(
+                  "p-1 rounded-[6px] transition-all select-none",
+                  "opacity-0 group-hover:opacity-100",
+                  "bg-background shadow-minimal",
+                  "text-muted-foreground/50 hover:text-foreground",
+                  "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
+                )}
+                title={isCollapsed ? "Expand" : "Collapse"}
+              >
+                {isCollapsed ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                )}
+              </button>
             )}
-            title="View Fullscreen"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
+            {/* Fullscreen button */}
+            <button
+              onClick={() => setIsFullscreen(true)}
+              className={cn(
+                "p-1 rounded-[6px] transition-all select-none",
+                "opacity-0 group-hover:opacity-100",
+                "bg-background shadow-minimal",
+                "text-muted-foreground/50 hover:text-foreground",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
+              )}
+              title="View Fullscreen"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {/* Plan header - only shown for plan variant */}
           {isPlan && (
@@ -1224,13 +1279,14 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Scrollable content area with subtle fade at edges (dark mode only) */}
+          {/* Scrollable content area with fade at bottom when collapsed */}
           <div
-            className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto"
+            ref={contentRef}
+            className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto relative"
             style={{
-              ...(shouldConstrainHeight && { maxHeight: MAX_HEIGHT }),
-              // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
-              ...(isDarkMode && {
+              ...(shouldConstrainHeight && { maxHeight: MAX_HEIGHT, overflow: 'hidden' }),
+              // Subtle fade at top and bottom edges (16px) - only in dark mode when not collapsed
+              ...(!shouldConstrainHeight && isDarkMode && {
                 maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
               }),
@@ -1243,6 +1299,15 @@ export function ResponseCard({
             >
               {text}
             </Markdown>
+            {/* Gradient fade overlay when collapsed */}
+            {shouldConstrainHeight && isCollapsible && (
+              <div
+                className="absolute bottom-0 left-0 right-0 h-16 pointer-events-none"
+                style={{
+                  background: 'linear-gradient(to bottom, transparent, var(--background))',
+                }}
+              />
+            )}
           </div>
 
           {/* Footer with actions */}
