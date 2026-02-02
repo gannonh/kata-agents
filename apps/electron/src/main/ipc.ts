@@ -18,7 +18,7 @@ import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { getGitStatus } from '@craft-agent/shared/git'
+import { getGitStatus, getPrStatus } from '@craft-agent/shared/git'
 import { MarkItDown } from 'markitdown-js'
 
 /**
@@ -771,6 +771,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         detachedHead: null,
       }
     }
+  })
+
+  // Get PR status for the current branch (async, returns PrInfo or null)
+  // Uses gh CLI - returns null if no PR exists or gh unavailable
+  ipcMain.handle(IPC_CHANNELS.PR_STATUS, async (_event, dirPath: string) => {
+    return getPrStatus(dirPath)
   })
 
   // Git Bash detection and configuration (Windows only)

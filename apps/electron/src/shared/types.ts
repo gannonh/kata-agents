@@ -51,8 +51,8 @@ import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/type
 export type { LoadedSkill, SkillMetadata };
 
 // Import git types
-import type { GitState } from '@craft-agent/shared/git';
-export type { GitState };
+import type { GitState, PrInfo } from '@craft-agent/shared/git';
+export type { GitState, PrInfo };
 
 
 /**
@@ -684,6 +684,7 @@ export const IPC_CHANNELS = {
   // Git operations
   GET_GIT_BRANCH: 'git:getBranch',  // Legacy: simple branch string
   GIT_STATUS: 'git:status',          // Full GitState (async)
+  PR_STATUS: 'pr:status',            // PR info for current branch (async)
 
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
@@ -949,6 +950,7 @@ export interface ElectronAPI {
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
   getGitStatus(dirPath: string): Promise<GitState>
+  getPrStatus(dirPath: string): Promise<PrInfo | null>
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>
