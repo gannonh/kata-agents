@@ -43,9 +43,10 @@ export function isPackagedApp(): boolean {
   // (process.execPath is reliable before app.whenReady, unlike app.getAppPath)
   const execPath = process.execPath.toLowerCase()
 
-  // macOS: Check if inside a .app bundle
+  // macOS: Check if inside a .app bundle, BUT not if it's the development
+  // Electron binary in node_modules (which also lives inside Electron.app)
   if (process.platform === 'darwin') {
-    if (execPath.includes('.app/contents/')) {
+    if (execPath.includes('.app/contents/') && !execPath.includes('node_modules')) {
       _isPackaged = true
       return true
     }
