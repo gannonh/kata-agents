@@ -10,6 +10,7 @@ import {
   DatabaseZap,
   ChevronDown,
   Loader2,
+  GitBranch,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@craft-agent/ui'
 
@@ -58,7 +59,7 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { FileAttachment, LoadedSource, LoadedSkill, GitState } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelName } from '@craft-agent/shared/agent/thinking-levels'
@@ -1661,7 +1662,7 @@ function WorkingDirectoryBadge({
   const [recentDirs, setRecentDirs] = React.useState<string[]>([])
   const [popoverOpen, setPopoverOpen] = React.useState(false)
   const [homeDir, setHomeDir] = React.useState<string>('')
-  const [gitBranch, setGitBranch] = React.useState<string | null>(null)
+  const [gitState, setGitState] = React.useState<GitState | null>(null)
   const [filter, setFilter] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
 
@@ -1673,14 +1674,16 @@ function WorkingDirectoryBadge({
     })
   }, [])
 
-  // Fetch git branch when working directory changes
+  // Fetch git status when working directory changes (includes branch + detached HEAD)
   React.useEffect(() => {
     if (workingDirectory) {
-      window.electronAPI?.getGitBranch?.(workingDirectory).then((branch: string | null) => {
-        setGitBranch(branch)
+      window.electronAPI?.getGitStatus?.(workingDirectory).then((state: GitState) => {
+        setGitState(state)
+      }).catch(() => {
+        setGitState(null)
       })
     } else {
-      setGitBranch(null)
+      setGitState(null)
     }
   }, [workingDirectory])
 
@@ -1736,6 +1739,13 @@ function WorkingDirectoryBadge({
   const hasFolder = !!workingDirectory && workingDirectory !== sessionFolderPath
   const folderName = hasFolder ? (getPathBasename(workingDirectory) || 'Folder') : 'Work in Folder'
 
+  // Git branch display text
+  const gitBranchDisplay = gitState?.isRepo
+    ? gitState.isDetached
+      ? gitState.detachedHead ?? 'detached'
+      : gitState.branch
+    : null
+
   // Show reset option when a folder is selected and it differs from session folder
   const showReset = hasFolder && sessionFolderPath && sessionFolderPath !== workingDirectory
 
@@ -1750,7 +1760,15 @@ function WorkingDirectoryBadge({
         <span className="shrink min-w-0 overflow-hidden">
           <FreeFormInputContextBadge
             icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName}
+            label={
+              gitBranchDisplay ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate">{folderName}</span>
+                  <GitBranch className="h-3 w-3 shrink-0 opacity-50" />
+                  <span className="truncate font-mono text-[11px] opacity-70">{gitBranchDisplay}</span>
+                </span>
+              ) : folderName
+            }
             isExpanded={isEmptySession}
             hasSelection={hasFolder}
             showChevron={true}
@@ -1760,7 +1778,7 @@ function WorkingDirectoryBadge({
                 <span className="flex flex-col gap-0.5">
                   <span className="font-medium">Working directory</span>
                   <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">on {gitBranch}</span>}
+                  {gitBranchDisplay && <span className="text-xs opacity-70">on {gitBranchDisplay}</span>}
                 </span>
               ) : "Choose working directory"
             }
