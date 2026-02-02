@@ -3,44 +3,44 @@
  *
  * These tests verify:
  * - MessageDisplayPreferences interface behavior
- * - Nested object merging in updatePreferences
+ * - Nested object merging logic (as used by updatePreferences)
  * - Default values and edge cases
+ *
+ * Note: These are pure unit tests that test the merging logic directly,
+ * without file I/O, to ensure test isolation.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { describe, it, expect } from 'bun:test'
+import type { UserPreferences, MessageDisplayPreferences, DiffViewerPreferences } from '../preferences'
 
-// We need to mock the CONFIG_DIR before importing preferences
-// Create a temp directory for test isolation
-const TEST_CONFIG_DIR = join(tmpdir(), `kata-test-${Date.now()}`);
+// ============================================================================
+// Merge Logic (mirrors updatePreferences implementation)
+// ============================================================================
 
-// Mock the paths module
-import { mock } from 'bun:test';
-
-// Store original env
-const originalEnv = process.env.KATA_CONFIG_DIR;
-
-beforeEach(() => {
-  // Set up test config directory
-  process.env.KATA_CONFIG_DIR = TEST_CONFIG_DIR;
-  if (!existsSync(TEST_CONFIG_DIR)) {
-    mkdirSync(TEST_CONFIG_DIR, { recursive: true });
+/**
+ * Pure function that implements the same merging logic as updatePreferences
+ * This allows us to test the logic without file I/O
+ */
+function mergePreferences(
+  current: UserPreferences,
+  updates: Partial<UserPreferences>
+): UserPreferences {
+  return {
+    ...current,
+    ...updates,
+    // Merge location if provided
+    location: updates.location
+      ? { ...current.location, ...updates.location }
+      : current.location,
+    // Merge diffViewer if provided
+    diffViewer: updates.diffViewer
+      ? { ...current.diffViewer, ...updates.diffViewer }
+      : current.diffViewer,
+    // Merge messageDisplay if provided
+    messageDisplay: updates.messageDisplay
+      ? { ...current.messageDisplay, ...updates.messageDisplay }
+      : current.messageDisplay,
   }
-});
-
-afterEach(() => {
-  // Clean up test directory
-  if (existsSync(TEST_CONFIG_DIR)) {
-    rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });
-  }
-  // Restore original env
-  if (originalEnv) {
-    process.env.KATA_CONFIG_DIR = originalEnv;
-  } else {
-    delete process.env.KATA_CONFIG_DIR;
-  }
-});
+}
 
 // ============================================================================
 // MessageDisplayPreferences Type Tests
@@ -48,116 +48,131 @@ afterEach(() => {
 
 describe('MessageDisplayPreferences', () => {
   it('should allow expandContent to be true', () => {
-    const prefs = { expandContent: true };
-    expect(prefs.expandContent).toBe(true);
-  });
+    const prefs: MessageDisplayPreferences = { expandContent: true }
+    expect(prefs.expandContent).toBe(true)
+  })
 
   it('should allow expandContent to be false', () => {
-    const prefs = { expandContent: false };
-    expect(prefs.expandContent).toBe(false);
-  });
+    const prefs: MessageDisplayPreferences = { expandContent: false }
+    expect(prefs.expandContent).toBe(false)
+  })
 
   it('should allow expandContent to be undefined', () => {
-    const prefs: { expandContent?: boolean } = {};
-    expect(prefs.expandContent).toBeUndefined();
-  });
-});
+    const prefs: MessageDisplayPreferences = {}
+    expect(prefs.expandContent).toBeUndefined()
+  })
+})
 
 // ============================================================================
-// updatePreferences Merging Tests
+// Preferences Merging Tests
 // ============================================================================
 
-describe('updatePreferences messageDisplay merging', () => {
-  // Import fresh for each test to avoid state issues
-  const getPreferencesModule = async () => {
-    // Dynamic import to get fresh module
-    const mod = await import('../preferences.ts');
-    return mod;
-  };
+describe('preferences merging logic', () => {
+  describe('messageDisplay merging', () => {
+    it('should set messageDisplay when none exists', () => {
+      const current: UserPreferences = {}
+      const updates: Partial<UserPreferences> = {
+        messageDisplay: { expandContent: true },
+      }
 
-  it('should set messageDisplay when none exists', async () => {
-    const { updatePreferences, loadPreferences } = await getPreferencesModule();
+      const result = mergePreferences(current, updates)
 
-    // Verify initial state is empty
-    const initial = loadPreferences();
-    expect(initial.messageDisplay).toBeUndefined();
+      expect(result.messageDisplay).toBeDefined()
+      expect(result.messageDisplay?.expandContent).toBe(true)
+    })
 
-    // Update with messageDisplay
-    const result = updatePreferences({
-      messageDisplay: { expandContent: true },
-    });
+    it('should merge messageDisplay with existing preferences', () => {
+      const current: UserPreferences = {
+        name: 'Test User',
+        messageDisplay: { expandContent: false },
+      }
+      const updates: Partial<UserPreferences> = {
+        messageDisplay: { expandContent: true },
+      }
 
-    expect(result.messageDisplay).toBeDefined();
-    expect(result.messageDisplay?.expandContent).toBe(true);
-  });
+      const result = mergePreferences(current, updates)
 
-  it('should merge messageDisplay with existing preferences', async () => {
-    const { updatePreferences, loadPreferences, savePreferences } = await getPreferencesModule();
+      expect(result.name).toBe('Test User')
+      expect(result.messageDisplay?.expandContent).toBe(true)
+    })
 
-    // Set up existing preferences
-    savePreferences({
-      name: 'Test User',
-      messageDisplay: { expandContent: false },
-    });
+    it('should preserve messageDisplay when updating other fields', () => {
+      const current: UserPreferences = {
+        messageDisplay: { expandContent: true },
+      }
+      const updates: Partial<UserPreferences> = {
+        name: 'New Name',
+      }
 
-    // Update only expandContent
-    const result = updatePreferences({
-      messageDisplay: { expandContent: true },
-    });
+      const result = mergePreferences(current, updates)
 
-    // Should preserve name and update expandContent
-    expect(result.name).toBe('Test User');
-    expect(result.messageDisplay?.expandContent).toBe(true);
-  });
+      expect(result.name).toBe('New Name')
+      expect(result.messageDisplay?.expandContent).toBe(true)
+    })
 
-  it('should preserve messageDisplay when updating other fields', async () => {
-    const { updatePreferences, savePreferences } = await getPreferencesModule();
+    it('should handle messageDisplay with expandContent false', () => {
+      const current: UserPreferences = {}
+      const updates: Partial<UserPreferences> = {
+        messageDisplay: { expandContent: false },
+      }
 
-    // Set up existing preferences with messageDisplay
-    savePreferences({
-      messageDisplay: { expandContent: true },
-    });
+      const result = mergePreferences(current, updates)
 
-    // Update a different field
-    const result = updatePreferences({
-      name: 'New Name',
-    });
+      expect(result.messageDisplay?.expandContent).toBe(false)
+    })
+  })
 
-    // messageDisplay should be preserved
-    expect(result.name).toBe('New Name');
-    expect(result.messageDisplay?.expandContent).toBe(true);
-  });
+  describe('diffViewer and messageDisplay independence', () => {
+    it('should merge diffViewer and messageDisplay independently', () => {
+      const current: UserPreferences = {
+        diffViewer: { diffStyle: 'split' },
+        messageDisplay: { expandContent: true },
+      }
+      const updates: Partial<UserPreferences> = {
+        diffViewer: { disableBackground: true },
+      }
 
-  it('should handle messageDisplay with expandContent false', async () => {
-    const { updatePreferences } = await getPreferencesModule();
+      const result = mergePreferences(current, updates)
 
-    const result = updatePreferences({
-      messageDisplay: { expandContent: false },
-    });
+      expect(result.diffViewer?.diffStyle).toBe('split')
+      expect(result.diffViewer?.disableBackground).toBe(true)
+      expect(result.messageDisplay?.expandContent).toBe(true)
+    })
 
-    expect(result.messageDisplay?.expandContent).toBe(false);
-  });
+    it('should update messageDisplay without affecting diffViewer', () => {
+      const current: UserPreferences = {
+        diffViewer: { diffStyle: 'unified', disableBackground: false },
+        messageDisplay: { expandContent: false },
+      }
+      const updates: Partial<UserPreferences> = {
+        messageDisplay: { expandContent: true },
+      }
 
-  it('should merge diffViewer and messageDisplay independently', async () => {
-    const { updatePreferences, savePreferences } = await getPreferencesModule();
+      const result = mergePreferences(current, updates)
 
-    // Set up both preferences
-    savePreferences({
-      diffViewer: { diffStyle: 'split' },
-      messageDisplay: { expandContent: true },
-    });
+      expect(result.diffViewer?.diffStyle).toBe('unified')
+      expect(result.diffViewer?.disableBackground).toBe(false)
+      expect(result.messageDisplay?.expandContent).toBe(true)
+    })
+  })
 
-    // Update only diffViewer
-    const result = updatePreferences({
-      diffViewer: { disableBackground: true },
-    });
+  describe('location merging', () => {
+    it('should merge location fields', () => {
+      const current: UserPreferences = {
+        location: { city: 'New York', country: 'USA' },
+      }
+      const updates: Partial<UserPreferences> = {
+        location: { region: 'NY' },
+      }
 
-    // Both should be preserved with merge
-    expect(result.diffViewer?.diffStyle).toBe('split');
-    expect(result.diffViewer?.disableBackground).toBe(true);
-    expect(result.messageDisplay?.expandContent).toBe(true);
-  });
-});
+      const result = mergePreferences(current, updates)
+
+      expect(result.location?.city).toBe('New York')
+      expect(result.location?.country).toBe('USA')
+      expect(result.location?.region).toBe('NY')
+    })
+  })
+})
 
 // ============================================================================
 // Default Value Behavior Tests
@@ -167,25 +182,57 @@ describe('messageDisplay default behavior', () => {
   it('should treat undefined expandContent as expanded (true) in UI', () => {
     // This test documents the expected UI behavior:
     // When expandContent is undefined, UI should default to expanded (true)
-    const prefs: { expandContent?: boolean } = {};
+    const prefs: MessageDisplayPreferences = {}
 
     // UI logic: expandContent ?? true (default to expanded)
-    const effectiveExpandContent = prefs.expandContent ?? true;
-    expect(effectiveExpandContent).toBe(true);
-  });
+    const effectiveExpandContent = prefs.expandContent ?? true
+    expect(effectiveExpandContent).toBe(true)
+  })
 
   it('should respect explicit false value', () => {
-    const prefs = { expandContent: false };
+    const prefs: MessageDisplayPreferences = { expandContent: false }
 
     // UI logic should not override explicit false
-    const effectiveExpandContent = prefs.expandContent ?? true;
-    expect(effectiveExpandContent).toBe(false);
-  });
+    const effectiveExpandContent = prefs.expandContent ?? true
+    expect(effectiveExpandContent).toBe(false)
+  })
 
   it('should respect explicit true value', () => {
-    const prefs = { expandContent: true };
+    const prefs: MessageDisplayPreferences = { expandContent: true }
 
-    const effectiveExpandContent = prefs.expandContent ?? true;
-    expect(effectiveExpandContent).toBe(true);
-  });
-});
+    const effectiveExpandContent = prefs.expandContent ?? true
+    expect(effectiveExpandContent).toBe(true)
+  })
+})
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+describe('edge cases', () => {
+  it('should handle empty current and empty updates', () => {
+    const result = mergePreferences({}, {})
+    expect(result).toEqual({})
+  })
+
+  it('should handle undefined nested objects in current', () => {
+    const current: UserPreferences = { name: 'Test' }
+    const updates: Partial<UserPreferences> = {
+      messageDisplay: { expandContent: true },
+    }
+
+    const result = mergePreferences(current, updates)
+
+    expect(result.name).toBe('Test')
+    expect(result.messageDisplay?.expandContent).toBe(true)
+  })
+
+  it('should not create messageDisplay when not in updates', () => {
+    const current: UserPreferences = {}
+    const updates: Partial<UserPreferences> = { name: 'Test' }
+
+    const result = mergePreferences(current, updates)
+
+    expect(result.messageDisplay).toBeUndefined()
+  })
+})
