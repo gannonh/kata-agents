@@ -239,6 +239,8 @@ export interface TurnCardProps {
   isLastResponse?: boolean
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
+  /** Whether to expand message content by default (true/undefined = expanded, false = 540px max-height) */
+  expandContent?: boolean
 }
 
 // ============================================================================
@@ -1076,6 +1078,8 @@ export interface ResponseCardProps {
   isLastResponse?: boolean
   /** Whether to show the Accept Plan button (default: true) */
   showAcceptPlan?: boolean
+  /** Whether to expand content by default (true/undefined = expanded, false = 540px max-height) */
+  expandContent?: boolean
 }
 
 /**
@@ -1106,6 +1110,7 @@ export function ResponseCard({
   onAcceptWithCompact,
   isLastResponse = true,
   showAcceptPlan = true,
+  expandContent,
 }: ResponseCardProps) {
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(text)
@@ -1179,9 +1184,12 @@ export function ResponseCard({
     return null
   }
 
+  // MAX_HEIGHT is only applied when expandContent is explicitly false
+  // When expandContent is true or undefined, content expands to full height
   const MAX_HEIGHT = 540
+  const shouldConstrainHeight = expandContent === false
 
-  // Completed response or plan - show with max height and footer
+  // Completed response or plan - show with optional max height and footer
   if (isCompleted || variant === 'plan') {
     const isPlan = variant === 'plan'
 
@@ -1220,7 +1228,7 @@ export function ResponseCard({
           <div
             className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto"
             style={{
-              maxHeight: MAX_HEIGHT,
+              ...(shouldConstrainHeight && { maxHeight: MAX_HEIGHT }),
               // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
               ...(isDarkMode && {
                 maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
@@ -1322,7 +1330,7 @@ export function ResponseCard({
       <div
         className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto"
         style={{
-          maxHeight: MAX_HEIGHT,
+          ...(shouldConstrainHeight && { maxHeight: MAX_HEIGHT }),
           // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
           ...(isDarkMode && {
             maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
@@ -1466,6 +1474,7 @@ export const TurnCard = React.memo(function TurnCard({
   onAcceptPlanWithCompact,
   isLastResponse,
   sessionFolderPath,
+  expandContent,
 }: TurnCardProps) {
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -1755,6 +1764,7 @@ export const TurnCard = React.memo(function TurnCard({
             onAccept={onAcceptPlan}
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
+            expandContent={expandContent}
           />
         </div>
       )}

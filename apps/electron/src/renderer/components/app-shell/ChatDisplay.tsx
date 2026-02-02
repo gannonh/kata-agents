@@ -435,13 +435,21 @@ export function ChatDisplay({
   // These settings are stored in ~/.kata-agents/preferences.json (not localStorage)
   const [diffViewerSettings, setDiffViewerSettings] = useState<Partial<DiffViewerSettings>>({})
 
-  // Load diff viewer settings from preferences on mount
+  // Message display preference - whether to expand content by default
+  // When undefined or true, messages expand fully. When false, 540px max-height is applied.
+  const [expandContent, setExpandContent] = useState<boolean | undefined>(undefined)
+
+  // Load preferences (diffViewer and messageDisplay) on mount
   useEffect(() => {
     window.electronAPI.readPreferences().then(({ content }) => {
       try {
         const prefs = JSON.parse(content)
         if (prefs.diffViewer) {
           setDiffViewerSettings(prefs.diffViewer)
+        }
+        // Load expandContent preference (undefined = expanded by default)
+        if (prefs.messageDisplay?.expandContent !== undefined) {
+          setExpandContent(prefs.messageDisplay.expandContent)
         }
       } catch {
         // Ignore parse errors, use defaults
@@ -863,6 +871,7 @@ export function ChatDisplay({
                         hasEditOrWriteActivities={turn.activities.some(a =>
                           a.toolName === 'Edit' || a.toolName === 'Write'
                         )}
+                        expandContent={expandContent}
                         onOpenMultiFileDiff={() => {
                           // Collect all Edit/Write activities from this turn
                           const changes: FileChange[] = []
