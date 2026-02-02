@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 4 - PR Integration (IN PROGRESS)
-Plan: 02 of 03 complete
-Status: Plan 04-02 complete, continuing to 04-03
-Progress: [████      ] 5/12 requirements (partial Phase 4)
+Phase: 4 - PR Integration (COMPLETE)
+Plan: —
+Status: Phase 4 verified, ready for Phase 5
+Progress: [████      ] 7/12 requirements (2/5 phases)
 ```
 
-**Last activity:** 2026-02-02 — Completed 04-02-PLAN.md (PR Badge UI)
+**Last activity:** 2026-02-02 — Phase 4 complete (PR Integration)
 
 ## Shipped Milestones
 
@@ -31,8 +31,8 @@ Progress: [████      ] 5/12 requirements (partial Phase 4)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 4 (in progress) |
-| Total plans | 11 |
+| Total phases | 4 |
+| Total plans | 12 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -41,32 +41,25 @@ Progress: [████      ] 5/12 requirements (partial Phase 4)
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | In Progress (2/3 plans) | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
-| 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
+| 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Complete ✓ | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
 
-## Phase 4 Progress
+## Phase 4 Summary
 
-**Plan 04-01 (PR Service Module):** Complete
-- PrInfo interface with number, title, state, isDraft, url
-- getPrStatus(dirPath) using gh CLI with promisified execFile
-- 5 second timeout, graceful degradation (returns null on any error)
-- PR_STATUS IPC channel wired end-to-end
-- window.electronAPI.getPrStatus(dirPath) available to renderer
+**PR badge in workspace UI:**
+- PrService module using gh CLI (graceful degradation if unavailable)
+- PR_STATUS IPC channel wired to renderer
+- PrBadge component in chat input toolbar (next to GitBranchBadge)
+- Status-colored icons (green=open, purple=merged, red=closed, gray=draft)
 
-**Plan 04-02 (PR Badge UI):** Complete
-- PrBadge component in FreeFormInput.tsx
-- Status-colored icons: green (open), purple (merged), red (closed), gray (draft)
-- Tooltip shows PR title and status
-- Click opens PR in browser
-- Graceful degradation (hidden when no PR)
-
-**Commits:** 3 commits on feat/v0.6.0-04-pr-integration
+**Commits:** 4 commits on feat/v0.6.0-04-pr-integration
+**Verification:** 7/7 must-haves passed
 
 ## Accumulated Context
 
@@ -88,7 +81,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 | Phase | Research Needed | Notes |
 |-------|-----------------|-------|
 | 3 | NO | Complete |
-| 4 | NO | gh CLI integration complete |
+| 4 | NO | Complete |
 | 5 | YES | File watching performance in Electron needs validation |
 | 6 | NO | Simple prompt injection |
 
@@ -109,15 +102,9 @@ _None_
 | Version manifest | Disabled | Needs version API at kata.sh |
 | MCP docs server | Commented out | Needs docs MCP at kata.sh |
 
-## Session Continuity
-
-Last session: 2026-02-02T21:51Z
-Stopped at: Completed 04-02-PLAN.md
-Resume file: .planning/phases/04-pr-integration/04-03-PLAN.md
-
 ## Next Steps
 
-Execute Plan 04-03 -> `/kata:execute-phase`
+Plan Phase 5 -> `/kata:discuss-phase 5` or `/kata:plan-phase 5`
 
 ---
-*Last updated: 2026-02-02 after 04-02-PLAN.md complete*
+*Last updated: 2026-02-02 after Phase 4 complete*

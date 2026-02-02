@@ -15,10 +15,10 @@
 
 ### PR Integration
 
-- [ ] **PR-01**: User can see linked PR title when current branch has an open PR
-- [ ] **PR-02**: User can see PR status (open, draft, merged, closed)
-- [ ] **PR-03**: User can click PR badge to open PR in browser
-- [ ] **PR-04**: User sees graceful degradation when `gh` CLI is not available
+- [x] **PR-01**: User can see linked PR title when current branch has an open PR
+- [x] **PR-02**: User can see PR status (open, draft, merged, closed)
+- [x] **PR-03**: User can click PR badge to open PR in browser
+- [x] **PR-04**: User sees graceful degradation when `gh` CLI is not available
 
 ### Real-Time Updates
 
@@ -62,17 +62,17 @@ _Explicit exclusions for v0.6.0_
 | GIT-01 | Phase 3 | Complete ✓ |
 | GIT-02 | Phase 3 | Complete ✓ |
 | GIT-03 | Phase 3 | Complete ✓ |
-| PR-01 | Phase 4 | Pending |
-| PR-02 | Phase 4 | Pending |
-| PR-03 | Phase 4 | Pending |
-| PR-04 | Phase 4 | Pending |
+| PR-01 | Phase 4 | Complete ✓ |
+| PR-02 | Phase 4 | Complete ✓ |
+| PR-03 | Phase 4 | Complete ✓ |
+| PR-04 | Phase 4 | Complete ✓ |
 | LIVE-01 | Phase 5 | Pending |
 | LIVE-02 | Phase 5 | Pending |
 | LIVE-03 | Phase 5 | Pending |
 | CTX-01 | Phase 6 | Pending |
 | CTX-02 | Phase 6 | Pending |
 
-**Coverage:** 12/12 requirements mapped (3/12 complete)
+**Coverage:** 12/12 requirements mapped (7/12 complete)
 
 ---
-*Updated: 2026-02-02 after Phase 3 complete*
+*Updated: 2026-02-02 after Phase 4 complete*

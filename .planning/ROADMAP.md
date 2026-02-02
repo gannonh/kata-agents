@@ -54,8 +54,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Create PR service module and wire to IPC layer
-- [ ] 04-02-PLAN.md — Create PrBadge UI component
+- [x] 04-01-PLAN.md — Create PR service module and wire to IPC layer
+- [x] 04-02-PLAN.md — Create PrBadge UI component
 
 **Requirements:**
 - PR-01: User can see linked PR title when current branch has an open PR
@@ -177,9 +177,9 @@ Plans:
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Planned | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
-| 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
+| 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 ---
@@ -196,4 +196,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-02 after Phase 4 planning complete*
+*Last updated: 2026-02-02 after Phase 4 complete*
