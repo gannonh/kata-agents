@@ -12,3 +12,20 @@ export interface GitState {
   /** Short commit hash when in detached HEAD state */
   detachedHead: string | null
 }
+
+/**
+ * PR information for a branch.
+ * All fields correspond to gh pr view --json output.
+ */
+export interface PrInfo {
+  /** PR number (e.g., 123) */
+  number: number
+  /** PR title */
+  title: string
+  /** PR state: OPEN, CLOSED, or MERGED */
+  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  /** Whether this is a draft PR */
+  isDraft: boolean
+  /** URL to view the PR on GitHub */
+  url: string
+}
