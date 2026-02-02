@@ -2,21 +2,22 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-01-30)
+See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** A compliant, independent rebrand preserving all functionality
-**Current focus:** Planning next milestone
+**Current focus:** v0.5.0 Git Integration
 
 ## Current Position
 
 ```
-Milestone: v0.4.0 Foundation ✅ SHIPPED
-Phase: Complete
-Status: Ready for next milestone
-Progress: [##########] 10/10 requirements
+Milestone: v0.5.0 Git Integration
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Progress: [          ] 0/? requirements
 ```
 
-**Last activity:** 2026-01-30 — Completed v0.4.0 milestone
+**Last activity:** 2026-02-01 — Milestone v0.5.0 started
 
 ## Shipped Milestones
 
@@ -58,7 +59,7 @@ _None_
 
 ## Next Steps
 
-Start next milestone with `/kata:new-milestone`
+Define requirements → `/kata:plan-phase`
 
 ---
-*Last updated: 2026-01-30 after v0.4.0 milestone*
+*Last updated: 2026-02-01 after v0.5.0 milestone started*
