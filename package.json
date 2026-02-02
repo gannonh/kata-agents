@@ -11,9 +11,12 @@
   ],
   "scripts": {
     "test": "bun test ./packages/ ./apps/electron/src/renderer/lib/",
+    "test:watch": "bun test --watch ./packages/ ./apps/electron/src/renderer/lib/",
+    "test:coverage": "bun test --coverage ./packages/ ./apps/electron/src/renderer/lib/",
     "test:e2e": "cd apps/electron && bun run test:e2e",
     "test:e2e:ui": "cd apps/electron && bun run test:e2e:ui",
     "test:e2e:debug": "cd apps/electron && bun run test:e2e:debug",
+    "test:e2e:headed": "cd apps/electron && bun run test:e2e:headed",
     "typecheck": "cd packages/shared && bun run tsc --noEmit",
     "typecheck:all": "cd packages/core && bun run tsc --noEmit && cd ../shared && bun run tsc --noEmit && cd ../mermaid && bun run tsc --noEmit && cd ../ui && bun run tsc --noEmit",
     "lint:electron": "cd apps/electron && bun run lint",

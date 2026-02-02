@@ -23,14 +23,19 @@ function createTestDataDir(): string {
   mkdirSync(testDataDir, { recursive: true })
   mkdirSync(path.join(testDataDir, 'workspaces', 'test-workspace'), { recursive: true })
 
-  // Create minimal config.json with a test workspace and auth to skip onboarding
+  // Create minimal config.json with a test workspace
+  // Note: Main bypass is via KATA_TEST_MODE=1 in IPC handler, but we still provide
+  // valid config structure so the app can load workspaces if needed
+  const workspaceDir = path.join(testDataDir, 'workspaces', 'test-workspace')
   const config = {
     authType: 'api_key',
+    anthropicBaseUrl: 'http://localhost:11434', // Fake URL for keyless provider path
     workspaces: [
       {
         id: 'test-workspace',
         name: 'Test Workspace',
-        path: path.join(testDataDir, 'workspaces', 'test-workspace')
+        rootPath: workspaceDir, // Must be rootPath, not path
+        createdAt: Date.now(),
       }
     ],
     activeWorkspaceId: 'test-workspace'
@@ -111,6 +116,18 @@ export const test = base.extend<ElectronFixtures>({
 
     // Extra wait for animations to complete
     await window.waitForTimeout(1000)
+
+    // Handle onboarding if it appears (click through "Get Started" / "Continue" buttons)
+    try {
+      // Check for welcome/onboarding screens and click through them
+      const getStartedButton = window.getByRole('button', { name: /Get Started|Continue/i })
+      if (await getStartedButton.isVisible({ timeout: 2000 })) {
+        await getStartedButton.click()
+        await window.waitForTimeout(500)
+      }
+    } catch {
+      // No onboarding screen, continue
+    }
 
     await use(window)
   }

@@ -10,6 +10,7 @@ import {
   DatabaseZap,
   ChevronDown,
   Loader2,
+  GitBranch,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@craft-agent/ui'
 
@@ -58,7 +59,7 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { FileAttachment, LoadedSource, LoadedSkill, GitState } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelName } from '@craft-agent/shared/agent/thinking-levels'
@@ -1403,6 +1404,11 @@ export function FreeFormInput({
               isEmptySession={isEmptySession}
             />
           )}
+
+          {/* 4. Git Branch Badge - separate from working directory */}
+          {onWorkingDirectoryChange && (
+            <GitBranchBadge workingDirectory={workingDirectory} />
+          )}
           </div>
 
           {/* Spacer */}
@@ -1661,7 +1667,6 @@ function WorkingDirectoryBadge({
   const [recentDirs, setRecentDirs] = React.useState<string[]>([])
   const [popoverOpen, setPopoverOpen] = React.useState(false)
   const [homeDir, setHomeDir] = React.useState<string>('')
-  const [gitBranch, setGitBranch] = React.useState<string | null>(null)
   const [filter, setFilter] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
 
@@ -1672,17 +1677,6 @@ function WorkingDirectoryBadge({
       if (dir) setHomeDir(dir)
     })
   }, [])
-
-  // Fetch git branch when working directory changes
-  React.useEffect(() => {
-    if (workingDirectory) {
-      window.electronAPI?.getGitBranch?.(workingDirectory).then((branch: string | null) => {
-        setGitBranch(branch)
-      })
-    } else {
-      setGitBranch(null)
-    }
-  }, [workingDirectory])
 
   // Reset filter and focus input when popover opens
   React.useEffect(() => {
@@ -1760,7 +1754,6 @@ function WorkingDirectoryBadge({
                 <span className="flex flex-col gap-0.5">
                   <span className="font-medium">Working directory</span>
                   <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">on {gitBranch}</span>}
                 </span>
               ) : "Choose working directory"
             }
@@ -1853,5 +1846,70 @@ function WorkingDirectoryBadge({
         </CommandPrimitive>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/**
+ * GitBranchBadge - Shows current git branch as a separate badge
+ * Displays nothing for non-git directories
+ */
+function GitBranchBadge({
+  workingDirectory,
+}: {
+  workingDirectory?: string
+}) {
+  const [gitState, setGitState] = React.useState<GitState | null>(null)
+
+  // Fetch git status when working directory changes
+  React.useEffect(() => {
+    if (workingDirectory) {
+      window.electronAPI?.getGitStatus?.(workingDirectory).then((state: GitState) => {
+        setGitState(state)
+      }).catch(() => {
+        setGitState(null)
+      })
+    } else {
+      setGitState(null)
+    }
+  }, [workingDirectory])
+
+  // Don't render if not a git repo
+  if (!gitState?.isRepo) {
+    return null
+  }
+
+  // Determine branch display text
+  const branchDisplay = gitState.isDetached
+    ? gitState.detachedHead ?? 'detached'
+    : gitState.branch
+
+  if (!branchDisplay) {
+    return null
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          data-testid="git-branch-badge"
+          data-git-branch={branchDisplay}
+          data-git-detached={gitState.isDetached}
+          className={cn(
+            'flex items-center gap-1 px-2 py-1 rounded-md shrink-0',
+            'text-xs text-muted-foreground',
+            'hover:bg-foreground/5 transition-colors',
+          )}
+        >
+          <GitBranch className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-mono truncate max-w-[120px]">{branchDisplay}</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        {gitState.isDetached
+          ? `Detached HEAD at ${branchDisplay}`
+          : `Branch: ${branchDisplay}`
+        }
+      </TooltipContent>
+    </Tooltip>
   )
 }

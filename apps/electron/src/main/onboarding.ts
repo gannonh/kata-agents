@@ -26,6 +26,23 @@ import type { SessionManager } from './sessions'
 export function registerOnboardingHandlers(sessionManager: SessionManager): void {
   // Get current auth state
   ipcMain.handle(IPC_CHANNELS.ONBOARDING_GET_AUTH_STATE, async () => {
+    // E2E Test Mode: Skip auth checks entirely to allow tests to reach main UI
+    // Tests set KATA_TEST_MODE=1 via the Electron launch environment
+    if (process.env.KATA_TEST_MODE === '1') {
+      mainLog.info('[Onboarding:Main] E2E test mode detected, bypassing auth check')
+      return {
+        authState: {
+          billing: { type: 'api_key', hasCredentials: true, apiKey: null, claudeOAuthToken: null },
+          workspace: { hasWorkspace: true, active: null },
+        },
+        setupNeeds: {
+          needsBillingConfig: false,
+          needsCredentials: false,
+          isFullyConfigured: true,
+        },
+      }
+    }
+
     const authState = await getAuthState()
     const setupNeeds = getSetupNeeds(authState)
     return { authState, setupNeeds }
