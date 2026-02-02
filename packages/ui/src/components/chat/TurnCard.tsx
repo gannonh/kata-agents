@@ -1512,6 +1512,13 @@ function TodoList({ todos }: TodoListProps) {
  *
  * Memoized to prevent re-renders of completed turns during session switches.
  * Only complete, non-streaming turns are memoized - active turns always re-render.
+ *
+ * TODO(performance): For conversations with many large expanded messages (e.g., 10+
+ * messages with 5000+ px content each), consider implementing virtual scrolling
+ * at the SessionViewer level to reduce DOM size and improve scroll performance.
+ * Current implementation renders all messages in the DOM which may cause scroll
+ * jank with very large conversations. Libraries like react-window or
+ * @tanstack/react-virtual could help.
  */
 export const TurnCard = React.memo(function TurnCard({
   sessionId,
