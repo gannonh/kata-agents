@@ -1,0 +1,78 @@
+import simpleGit, { type SimpleGit, type StatusResult } from 'simple-git'
+
+import type { GitState } from './types'
+
+/**
+ * Check if a directory is inside a git repository.
+ * Uses git rev-parse which is fast and doesn't spawn extra processes.
+ */
+export async function isGitRepository(dirPath: string): Promise<boolean> {
+  try {
+    const git: SimpleGit = simpleGit(dirPath)
+    await git.revparse(['--is-inside-work-tree'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Get git status for a directory.
+ * Returns null values for non-git directories (graceful degradation).
+ *
+ * IMPORTANT: This function is async-only to prevent main process blocking.
+ * Never use execSync or synchronous git operations.
+ */
+export async function getGitStatus(dirPath: string): Promise<GitState> {
+  // Default state for non-git directories
+  const defaultState: GitState = {
+    branch: null,
+    isRepo: false,
+    isDetached: false,
+    detachedHead: null,
+  }
+
+  try {
+    const git: SimpleGit = simpleGit(dirPath, {
+      maxConcurrentProcesses: 5, // Prevent subprocess spam
+      timeout: {
+        block: 5000, // 5 second timeout
+      },
+    })
+
+    // Quick check if this is a git repo
+    try {
+      await git.revparse(['--is-inside-work-tree'])
+    } catch {
+      return defaultState // Not a git repo
+    }
+
+    // Get branch info
+    const status: StatusResult = await git.status()
+
+    // Check for detached HEAD state
+    const isDetached = status.detached
+    let detachedHead: string | null = null
+
+    if (isDetached) {
+      // Get short commit hash for detached HEAD display
+      try {
+        const result = await git.revparse(['--short', 'HEAD'])
+        detachedHead = result.trim()
+      } catch {
+        // If revparse fails, leave detachedHead as null
+      }
+    }
+
+    return {
+      branch: status.current,
+      isRepo: true,
+      isDetached,
+      detachedHead,
+    }
+  } catch (error) {
+    // Log error but return safe default (don't crash on git errors)
+    console.error('[GitService] Error getting git status:', error)
+    return defaultState
+  }
+}
