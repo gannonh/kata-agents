@@ -2,7 +2,7 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-01)
+See: .planning/PROJECT.md (updated 2026-02-02)
 
 **Core value:** A compliant, independent rebrand preserving all functionality
 **Current focus:** v0.6.0 Git Integration
@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-01)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: Not started (defining requirements)
+Phase: 3 - Core Git Service
 Plan: —
-Status: Defining requirements
-Progress: [          ] 0/? requirements
+Status: Ready for planning
+Progress: [          ] 0/12 requirements
 ```
 
-**Last activity:** 2026-02-02 — Milestone v0.6.0 started
+**Last activity:** 2026-02-02 — Roadmap created for v0.6.0
 
 ## Shipped Milestones
 
@@ -35,11 +35,41 @@ Progress: [          ] 0/? requirements
 | Total plans | 6 |
 | Total requirements | 10 |
 
+## Current Milestone Overview
+
+**v0.6.0 Git Integration**
+
+| Phase | Name | Status | Requirements |
+|-------|------|--------|--------------|
+| 3 | Core Git Service | Ready | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Blocked by 3 | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
+| 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
+| 7 | Polish and Edge Cases | Blocked by 6 | — |
+
+**Critical path:** 3 -> 4 -> 5 -> 6 -> 7
+**Differentiator phase:** Phase 6 (AI Context) - unique value proposition
+
 ## Accumulated Context
 
 ### Decisions Made
 
 See PROJECT.md Key Decisions table for full list with outcomes.
+
+**v0.6.0 Decisions:**
+- Use simple-git for git operations (8.5M weekly downloads, TypeScript-native)
+- Use gh CLI for PR data (already authenticated on developer machines)
+- Workspace-scoped state (Map<workspaceId, GitState>) for multi-workspace support
+- Selective file watching (.git/index, .git/HEAD, .git/refs/) to avoid performance issues
+
+### Research Flags
+
+| Phase | Research Needed | Notes |
+|-------|-----------------|-------|
+| 3 | NO | Standard git operations, established patterns |
+| 4 | MAYBE | gh CLI integration patterns if unclear |
+| 5 | YES | File watching performance in Electron needs validation |
+| 6 | NO | Simple prompt injection |
 
 ### Open Questions
 
@@ -60,7 +90,7 @@ _None_
 
 ## Next Steps
 
-Define requirements → `/kata:plan-phase`
+Plan Phase 3 -> `/kata:plan-phase 3`
 
 ---
-*Last updated: 2026-02-02 after v0.6.0 milestone started*
+*Last updated: 2026-02-02 after v0.6.0 roadmap created*

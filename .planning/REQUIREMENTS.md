@@ -59,18 +59,20 @@ _Explicit exclusions for v0.6.0_
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GIT-01 | — | Pending |
-| GIT-02 | — | Pending |
-| GIT-03 | — | Pending |
-| PR-01 | — | Pending |
-| PR-02 | — | Pending |
-| PR-03 | — | Pending |
-| PR-04 | — | Pending |
-| LIVE-01 | — | Pending |
-| LIVE-02 | — | Pending |
-| LIVE-03 | — | Pending |
-| CTX-01 | — | Pending |
-| CTX-02 | — | Pending |
+| GIT-01 | Phase 3 | Pending |
+| GIT-02 | Phase 3 | Pending |
+| GIT-03 | Phase 3 | Pending |
+| PR-01 | Phase 4 | Pending |
+| PR-02 | Phase 4 | Pending |
+| PR-03 | Phase 4 | Pending |
+| PR-04 | Phase 4 | Pending |
+| LIVE-01 | Phase 5 | Pending |
+| LIVE-02 | Phase 5 | Pending |
+| LIVE-03 | Phase 5 | Pending |
+| CTX-01 | Phase 6 | Pending |
+| CTX-02 | Phase 6 | Pending |
+
+**Coverage:** 12/12 requirements mapped
 
 ---
-*Created: 2026-02-02 for v0.6.0 milestone*
+*Updated: 2026-02-02 with phase mappings from v0.6.0 roadmap*
