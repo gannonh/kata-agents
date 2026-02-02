@@ -18,6 +18,7 @@ import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
+import { getGitStatus } from '@craft-agent/shared/git'
 import { MarkItDown } from 'markitdown-js'
 
 /**
@@ -740,6 +741,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // Get git branch for a directory (returns null if not a git repo or git unavailable)
+  // Legacy handler - kept for backward compatibility (FreeFormInput.tsx)
   ipcMain.handle(IPC_CHANNELS.GET_GIT_BRANCH, (_event, dirPath: string) => {
     try {
       const branch = execSync('git rev-parse --abbrev-ref HEAD', {
@@ -752,6 +754,22 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     } catch {
       // Not a git repo, git not installed, or other error
       return null
+    }
+  })
+
+  // Get full git status for a directory (async, returns GitState)
+  // Uses simple-git for detached HEAD handling and full status
+  ipcMain.handle(IPC_CHANNELS.GIT_STATUS, async (_event, dirPath: string) => {
+    try {
+      return await getGitStatus(dirPath)
+    } catch (error) {
+      ipcLog.error('[GIT_STATUS] Unexpected error:', error)
+      return {
+        branch: null,
+        isRepo: false,
+        isDetached: false,
+        detachedHead: null,
+      }
     }
   })
 

@@ -50,6 +50,10 @@ export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
 import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/types';
 export type { LoadedSkill, SkillMetadata };
 
+// Import git types
+import type { GitState } from '@craft-agent/shared/git';
+export type { GitState };
+
 
 /**
  * File/directory entry in a skill folder
@@ -678,7 +682,8 @@ export const IPC_CHANNELS = {
   WINDOW_GET_FOCUS_STATE: 'window:getFocusState',
 
   // Git operations
-  GET_GIT_BRANCH: 'git:getBranch',
+  GET_GIT_BRANCH: 'git:getBranch',  // Legacy: simple branch string
+  GIT_STATUS: 'git:status',          // Full GitState (async)
 
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
@@ -943,6 +948,7 @@ export interface ElectronAPI {
 
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
+  getGitStatus(dirPath: string): Promise<GitState>
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>
