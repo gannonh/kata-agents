@@ -21,24 +21,25 @@ const MAX_HEIGHT = 540
 // ============================================================================
 
 describe('expandContent prop behavior', () => {
+  // Helper to derive collapsed state (mirrors TurnCard logic)
+  function deriveIsCollapsed(expandContent: boolean | undefined): boolean {
+    return expandContent === false
+  }
+
   describe('initial collapsed state derivation', () => {
     it('should start expanded when expandContent is true', () => {
-      const expandContent = true
-      // Initial isCollapsed = expandContent === false
-      const isCollapsed = expandContent === false
+      const isCollapsed = deriveIsCollapsed(true)
       expect(isCollapsed).toBe(false)
     })
 
     it('should start collapsed when expandContent is false', () => {
-      const expandContent = false
-      const isCollapsed = expandContent === false
+      const isCollapsed = deriveIsCollapsed(false)
       expect(isCollapsed).toBe(true)
     })
 
     it('should start expanded when expandContent is undefined', () => {
-      const expandContent = undefined
       // undefined === false is false, so starts expanded
-      const isCollapsed = expandContent === false
+      const isCollapsed = deriveIsCollapsed(undefined)
       expect(isCollapsed).toBe(false)
     })
   })
