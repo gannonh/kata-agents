@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 3 - Core Git Service (COMPLETE)
-Plan: —
-Status: Phase 3 verified, ready for Phase 4
-Progress: [██        ] 3/12 requirements (1/5 phases)
+Phase: 4 - PR Integration (IN PROGRESS)
+Plan: 01 of 03 complete
+Status: Plan 04-01 complete, continuing to 04-02
+Progress: [███       ] 4/12 requirements (partial Phase 4)
 ```
 
-**Last activity:** 2026-02-02 — Phase 3 complete (Core Git Service)
+**Last activity:** 2026-02-02 — Completed 04-01-PLAN.md (PR Service Module)
 
 ## Shipped Milestones
 
@@ -31,8 +31,8 @@ Progress: [██        ] 3/12 requirements (1/5 phases)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 3 |
-| Total plans | 10 |
+| Total phases | 4 (in progress) |
+| Total plans | 11 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -42,7 +42,7 @@ Progress: [██        ] 3/12 requirements (1/5 phases)
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Ready | PR-01, PR-02, PR-03, PR-04 |
+| 4 | PR Integration | In Progress (1/3 plans) | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
@@ -50,16 +50,16 @@ Progress: [██        ] 3/12 requirements (1/5 phases)
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
 
-## Phase 3 Summary
+## Phase 4 Progress
 
-**Git branch display in workspace UI:**
-- GitService module with simple-git (async-only operations)
-- GIT_STATUS IPC channel wired to renderer
-- Workspace-keyed state atoms (Map<workspaceId, GitState>)
-- GitBranchBadge in chat input toolbar (user approved placement)
+**Plan 04-01 (PR Service Module):** Complete
+- PrInfo interface with number, title, state, isDraft, url
+- getPrStatus(dirPath) using gh CLI with promisified execFile
+- 5 second timeout, graceful degradation (returns null on any error)
+- PR_STATUS IPC channel wired end-to-end
+- window.electronAPI.getPrStatus(dirPath) available to renderer
 
-**Commits:** 12 commits on feat/v0.6.0-03-core-git-service
-**Verification:** 12/12 must-haves passed
+**Commits:** 2 commits on feat/v0.6.0-04-pr-integration
 
 ## Accumulated Context
 
@@ -80,7 +80,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 | Phase | Research Needed | Notes |
 |-------|-----------------|-------|
 | 3 | NO | Complete |
-| 4 | MAYBE | gh CLI integration patterns if unclear |
+| 4 | NO | gh CLI integration complete |
 | 5 | YES | File watching performance in Electron needs validation |
 | 6 | NO | Simple prompt injection |
 
@@ -101,9 +101,15 @@ _None_
 | Version manifest | Disabled | Needs version API at kata.sh |
 | MCP docs server | Commented out | Needs docs MCP at kata.sh |
 
+## Session Continuity
+
+Last session: 2026-02-02T20:46Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-pr-integration/04-02-PLAN.md
+
 ## Next Steps
 
-Plan Phase 4 -> `/kata:plan-phase 4`
+Execute Plan 04-02 -> `/kata:execute-phase`
 
 ---
-*Last updated: 2026-02-02 after Phase 3 complete*
+*Last updated: 2026-02-02 after 04-01-PLAN.md complete*
