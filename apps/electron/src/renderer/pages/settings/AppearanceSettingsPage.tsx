@@ -23,6 +23,7 @@ import {
   SettingsRow,
   SettingsSegmentedControl,
   SettingsMenuSelect,
+  SettingsToggle,
 } from '@/components/settings'
 import { Info_DataTable, SortableHeader } from '@/components/info/Info_DataTable'
 import { Info_Badge } from '@/components/info/Info_Badge'
@@ -99,6 +100,9 @@ export default function AppearanceSettingsPage() {
   // Resolved path to tool-icons.json (needed for EditPopover and "Edit File" action)
   const [toolIconsJsonPath, setToolIconsJsonPath] = useState<string | null>(null)
 
+  // Message display preference: expand content by default
+  const [expandContent, setExpandContent] = useState(true)
+
   // Load preset themes on mount
   useEffect(() => {
     const loadThemes = async () => {
@@ -135,6 +139,41 @@ export default function AppearanceSettingsPage() {
     load()
   }, [])
 
+  // Load message display preference on mount
+  useEffect(() => {
+    const load = async () => {
+      if (!window.electronAPI) return
+      try {
+        const { content } = await window.electronAPI.readPreferences()
+        const prefs = JSON.parse(content)
+        // Default to true if not set (undefined or true = expanded)
+        setExpandContent(prefs.messageDisplay?.expandContent !== false)
+      } catch {
+        // Default to expanded if preferences can't be loaded
+        setExpandContent(true)
+      }
+    }
+    load()
+  }, [])
+
+  // Handle expand content toggle change
+  const handleExpandContentChange = async (checked: boolean) => {
+    setExpandContent(checked)
+    if (!window.electronAPI) return
+    try {
+      const { content } = await window.electronAPI.readPreferences()
+      const prefs = JSON.parse(content)
+      prefs.messageDisplay = { ...prefs.messageDisplay, expandContent: checked }
+      prefs.updatedAt = Date.now()
+      await window.electronAPI.writePreferences(JSON.stringify(prefs, null, 2))
+    } catch {
+      // If preferences malformed, create fresh with just messageDisplay
+      await window.electronAPI.writePreferences(
+        JSON.stringify({ messageDisplay: { expandContent: checked }, updatedAt: Date.now() }, null, 2)
+      )
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
       <PanelHeader
@@ -145,6 +184,18 @@ export default function AppearanceSettingsPage() {
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
             <div className="space-y-8">
+
+              {/* Display */}
+              <SettingsSection title="Display">
+                <SettingsCard>
+                  <SettingsToggle
+                    label="Expand message content"
+                    description="Show full message content by default"
+                    checked={expandContent}
+                    onCheckedChange={handleExpandContentChange}
+                  />
+                </SettingsCard>
+              </SettingsSection>
 
               {/* Theme & Font */}
               <SettingsSection title="Theme">

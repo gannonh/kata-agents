@@ -20,6 +20,15 @@ export interface DiffViewerPreferences {
   disableBackground?: boolean;
 }
 
+/**
+ * Message display preferences
+ * Persisted to preferences.json as a user-level setting
+ */
+export interface MessageDisplayPreferences {
+  /** Whether to expand message content by default (true = expanded, false = collapsed at 540px) */
+  expandContent?: boolean;
+}
+
 export interface UserPreferences {
   name?: string;
   timezone?: string;
@@ -29,6 +38,8 @@ export interface UserPreferences {
   notes?: string;
   // Diff viewer display preferences
   diffViewer?: DiffViewerPreferences;
+  // Message display preferences
+  messageDisplay?: MessageDisplayPreferences;
   // When the preferences were last updated
   updatedAt?: number;
 }
@@ -66,6 +77,10 @@ export function updatePreferences(updates: Partial<UserPreferences>): UserPrefer
     diffViewer: updates.diffViewer
       ? { ...current.diffViewer, ...updates.diffViewer }
       : current.diffViewer,
+    // Merge messageDisplay if provided
+    messageDisplay: updates.messageDisplay
+      ? { ...current.messageDisplay, ...updates.messageDisplay }
+      : current.messageDisplay,
   };
   savePreferences(updated);
   return updated;

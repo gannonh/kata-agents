@@ -3,5 +3,5 @@ preload = ["./packages/shared/src/network-interceptor.ts"]
 [test]
 # Only run tests from source directories, not build artifacts
 preload = ["./packages/shared/src/network-interceptor.ts"]
-# Exclude Playwright e2e tests (they use a different test runner)
-ignore = ["**/e2e/**"]
+# Note: Bun doesn't support test ignore patterns yet (see https://github.com/oven-sh/bun/issues/21395)
+# E2E tests use .e2e.ts extension to avoid being picked up by bun test
