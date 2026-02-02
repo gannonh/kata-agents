@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ```
 Milestone: v0.6.0 Git Integration
 Phase: 3 - Core Git Service
-Plan: 01 of 3 complete
+Plan: 02 of 3 complete
 Status: In progress
-Progress: [#         ] 1/12 requirements (GIT-01 partial)
+Progress: [##        ] 2/12 requirements (GIT-01 partial)
 ```
 
-**Last activity:** 2026-02-02 — Completed 03-01-PLAN.md (GitService Foundation)
+**Last activity:** 2026-02-02 — Completed 03-02-PLAN.md (IPC Layer Wiring)
 
 ## Shipped Milestones
 
@@ -61,6 +61,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Use gh CLI for PR data (already authenticated on developer machines)
 - Workspace-scoped state (Map<workspaceId, GitState>) for multi-workspace support
 - Selective file watching (.git/index, .git/HEAD, .git/refs/) to avoid performance issues
+- Keep GET_GIT_BRANCH handler for backward compatibility (FreeFormInput.tsx uses it)
 
 ### Research Flags
 
@@ -91,12 +92,12 @@ _None_
 ## Session Continuity
 
 Last session: 2026-02-02
-Stopped at: Completed 03-01-PLAN.md
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Execute 03-02-PLAN.md (Git State Management) -> `/kata:execute-phase`
+Execute 03-03-PLAN.md (Git State Management) -> `/kata:execute-phase`
 
 ---
-*Last updated: 2026-02-02 after 03-01-PLAN.md completed*
+*Last updated: 2026-02-02 after 03-02-PLAN.md completed*
