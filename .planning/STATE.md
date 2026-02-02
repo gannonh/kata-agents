@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 3 - Core Git Service
-Plan: 03 of 4 complete
-Status: In progress
-Progress: [###       ] 3/4 Phase 3 plans complete
+Phase: 3 - Core Git Service (COMPLETE)
+Plan: —
+Status: Phase 3 verified, ready for Phase 4
+Progress: [██        ] 3/12 requirements (1/5 phases)
 ```
 
-**Last activity:** 2026-02-02 — Completed 03-03-PLAN.md (Renderer State Management)
+**Last activity:** 2026-02-02 — Phase 3 complete (Core Git Service)
 
 ## Shipped Milestones
 
@@ -31,9 +31,9 @@ Progress: [###       ] 3/4 Phase 3 plans complete
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 2 |
-| Total plans | 6 |
-| Total requirements | 10 |
+| Total phases | 3 |
+| Total plans | 10 |
+| Total requirements | 13 |
 
 ## Current Milestone Overview
 
@@ -41,14 +41,25 @@ Progress: [###       ] 3/4 Phase 3 plans complete
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | In Progress (3/4 plans) | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Blocked by 3 | PR-01, PR-02, PR-03, PR-04 |
+| 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Ready | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
+
+## Phase 3 Summary
+
+**Git branch display in workspace UI:**
+- GitService module with simple-git (async-only operations)
+- GIT_STATUS IPC channel wired to renderer
+- Workspace-keyed state atoms (Map<workspaceId, GitState>)
+- GitBranchBadge in chat input toolbar (user approved placement)
+
+**Commits:** 12 commits on feat/v0.6.0-03-core-git-service
+**Verification:** 12/12 must-haves passed
 
 ## Accumulated Context
 
@@ -62,12 +73,13 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Workspace-scoped state (Map<workspaceId, GitState>) for multi-workspace support
 - Selective file watching (.git/index, .git/HEAD, .git/refs/) to avoid performance issues
 - Keep GET_GIT_BRANCH handler for backward compatibility (FreeFormInput.tsx uses it)
+- Git branch badge placed in chat input toolbar (better visibility than sidebar)
 
 ### Research Flags
 
 | Phase | Research Needed | Notes |
 |-------|-----------------|-------|
-| 3 | NO | Standard git operations, established patterns |
+| 3 | NO | Complete |
 | 4 | MAYBE | gh CLI integration patterns if unclear |
 | 5 | YES | File watching performance in Electron needs validation |
 | 6 | NO | Simple prompt injection |
@@ -89,15 +101,9 @@ _None_
 | Version manifest | Disabled | Needs version API at kata.sh |
 | MCP docs server | Commented out | Needs docs MCP at kata.sh |
 
-## Session Continuity
-
-Last session: 2026-02-02
-Stopped at: Completed 03-03-PLAN.md
-Resume file: None
-
 ## Next Steps
 
-Execute 03-04-PLAN.md (GitStatusBadge UI Component) -> `/kata:execute-phase`
+Plan Phase 4 -> `/kata:plan-phase 4`
 
 ---
-*Last updated: 2026-02-02 after 03-03-PLAN.md completed*
+*Last updated: 2026-02-02 after Phase 3 complete*

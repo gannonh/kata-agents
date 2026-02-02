@@ -21,10 +21,10 @@
 **Plans:** 4 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Create GitService module with simple-git
-- [ ] 03-02-PLAN.md — Wire GitService to IPC layer
-- [ ] 03-03-PLAN.md — Create renderer state management (Jotai atoms)
-- [ ] 03-04-PLAN.md — Create GitStatusBadge UI component
+- [x] 03-01-PLAN.md — Create GitService module with simple-git
+- [x] 03-02-PLAN.md — Wire GitService to IPC layer
+- [x] 03-03-PLAN.md — Create renderer state management (Jotai atoms)
+- [x] 03-04-PLAN.md — Create GitStatusBadge UI component
 
 **Requirements:**
 - GIT-01: User can see current git branch name in workspace UI
@@ -172,11 +172,11 @@ Plans:
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | Planned (4 plans) | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Pending | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Pending | LIVE-01, LIVE-02, LIVE-03 |
-| 6 | AI Context Injection | Pending | CTX-01, CTX-02 |
-| 7 | Polish and Edge Cases | Pending | — |
+| 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Ready | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
+| 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
+| 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 ---
 
@@ -192,4 +192,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-02 after Phase 3 planning*
+*Last updated: 2026-02-02 after Phase 3 complete*

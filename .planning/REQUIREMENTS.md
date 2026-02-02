@@ -9,9 +9,9 @@
 
 ### Git Status Display
 
-- [ ] **GIT-01**: User can see current git branch name in workspace UI
-- [ ] **GIT-02**: User sees no git indicator when workspace is not a git repository
-- [ ] **GIT-03**: User can see git status update when switching workspaces
+- [x] **GIT-01**: User can see current git branch name in workspace UI
+- [x] **GIT-02**: User sees no git indicator when workspace is not a git repository
+- [x] **GIT-03**: User can see git status update when switching workspaces
 
 ### PR Integration
 
@@ -59,9 +59,9 @@ _Explicit exclusions for v0.6.0_
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GIT-01 | Phase 3 | Pending |
-| GIT-02 | Phase 3 | Pending |
-| GIT-03 | Phase 3 | Pending |
+| GIT-01 | Phase 3 | Complete ✓ |
+| GIT-02 | Phase 3 | Complete ✓ |
+| GIT-03 | Phase 3 | Complete ✓ |
 | PR-01 | Phase 4 | Pending |
 | PR-02 | Phase 4 | Pending |
 | PR-03 | Phase 4 | Pending |
@@ -72,7 +72,7 @@ _Explicit exclusions for v0.6.0_
 | CTX-01 | Phase 6 | Pending |
 | CTX-02 | Phase 6 | Pending |
 
-**Coverage:** 12/12 requirements mapped
+**Coverage:** 12/12 requirements mapped (3/12 complete)
 
 ---
-*Updated: 2026-02-02 with phase mappings from v0.6.0 roadmap*
+*Updated: 2026-02-02 after Phase 3 complete*
