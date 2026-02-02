@@ -4,7 +4,8 @@
  * Stores git status per workspace ID to support multi-workspace scenarios.
  * Each workspace has independent git state (branch, isRepo, etc).
  *
- * Pattern matches existing atoms/sources.ts and atoms/sessions.ts.
+ * Uses Map-based state isolation for per-workspace git status,
+ * similar in purpose to sessions.ts but using explicit Map management.
  */
 
 import { atom } from 'jotai'

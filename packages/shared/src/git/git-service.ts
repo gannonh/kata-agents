@@ -4,14 +4,18 @@ import type { GitState } from './types'
 
 /**
  * Check if a directory is inside a git repository.
- * Uses git rev-parse which is fast and doesn't spawn extra processes.
+ * Uses git rev-parse which is fast (single subprocess call via simple-git).
  */
 export async function isGitRepository(dirPath: string): Promise<boolean> {
   try {
     const git: SimpleGit = simpleGit(dirPath)
     await git.revparse(['--is-inside-work-tree'])
     return true
-  } catch {
+  } catch (error) {
+    // Expected for non-git directories; log for debugging permission/path issues
+    if (process.env.DEBUG_GIT) {
+      console.debug('[GitService] isGitRepository check failed:', dirPath, error)
+    }
     return false
   }
 }
@@ -43,8 +47,12 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
     // Quick check if this is a git repo
     try {
       await git.revparse(['--is-inside-work-tree'])
-    } catch {
-      return defaultState // Not a git repo
+    } catch (error) {
+      // Expected for non-git directories; log for debugging permission/path issues
+      if (process.env.DEBUG_GIT) {
+        console.debug('[GitService] Not a git repo or check failed:', dirPath, error)
+      }
+      return defaultState
     }
 
     // Get branch info
@@ -59,8 +67,9 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
       try {
         const result = await git.revparse(['--short', 'HEAD'])
         detachedHead = result.trim()
-      } catch {
-        // If revparse fails, leave detachedHead as null
+      } catch (error) {
+        // In detached state but couldn't get commit hash - log warning
+        console.warn('[GitService] In detached HEAD but could not get commit hash:', error)
       }
     }
 

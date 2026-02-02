@@ -1891,6 +1891,9 @@ function GitBranchBadge({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
+          data-testid="git-branch-badge"
+          data-git-branch={branchDisplay}
+          data-git-detached={gitState.isDetached}
           className={cn(
             'flex items-center gap-1 px-2 py-1 rounded-md shrink-0',
             'text-xs text-muted-foreground',

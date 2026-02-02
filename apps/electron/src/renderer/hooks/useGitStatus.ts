@@ -53,9 +53,22 @@ export function useGitStatus(
     setLoading({ workspaceId, loading: true })
 
     try {
-      // Fetch git status via IPC
-      const state = await window.electronAPI.getGitStatus(workspaceRootPath)
-      setGitState({ workspaceId, state })
+      // Fetch git status via IPC (optional chaining for safety)
+      const state = await window.electronAPI?.getGitStatus?.(workspaceRootPath)
+      if (state) {
+        setGitState({ workspaceId, state })
+      } else {
+        // electronAPI not available (e.g., outside Electron)
+        setGitState({
+          workspaceId,
+          state: {
+            branch: null,
+            isRepo: false,
+            isDetached: false,
+            detachedHead: null,
+          },
+        })
+      }
     } catch (error) {
       console.error('[useGitStatus] Failed to fetch git status:', error)
       // Set default non-repo state on error
@@ -73,16 +86,13 @@ export function useGitStatus(
     }
   }, [workspaceId, workspaceRootPath, setGitState, setLoading])
 
-  // Fetch git status when workspace changes
+  // Fetch git status when workspace changes (only if not already cached)
+  // Caches state per workspace; use refresh() to force re-fetch stale data
   useEffect(() => {
-    if (workspaceId && workspaceRootPath) {
-      // Only fetch if we don't have state yet for this workspace
-      const existingState = getGitState(workspaceId)
-      if (!existingState) {
-        refresh()
-      }
+    if (workspaceId && workspaceRootPath && !gitState) {
+      refresh()
     }
-  }, [workspaceId, workspaceRootPath, refresh, getGitState])
+  }, [workspaceId, workspaceRootPath, gitState, refresh])
 
   return {
     gitState,

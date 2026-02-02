@@ -69,6 +69,9 @@ export function GitStatusBadge({
       <Tooltip>
         <TooltipTrigger asChild>
           <div
+            data-testid="git-status-badge"
+            data-git-branch={displayText}
+            data-git-detached={gitState.isDetached}
             className={cn(
               'flex items-center justify-center h-7 w-7 rounded-md',
               'text-muted-foreground hover:bg-foreground/5 transition-colors',
@@ -90,6 +93,9 @@ export function GitStatusBadge({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
+          data-testid="git-status-badge"
+          data-git-branch={displayText}
+          data-git-detached={gitState.isDetached}
           className={cn(
             'flex items-center gap-1.5 px-2 py-1 rounded-md',
             'text-xs text-muted-foreground',

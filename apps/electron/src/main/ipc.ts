@@ -760,7 +760,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Get full git status for a directory (async, returns GitState)
   // Uses simple-git for detached HEAD handling and full status
   ipcMain.handle(IPC_CHANNELS.GIT_STATUS, async (_event, dirPath: string) => {
-    return getGitStatus(dirPath)
+    try {
+      return await getGitStatus(dirPath)
+    } catch (error) {
+      ipcLog.error('[GIT_STATUS] Unexpected error:', error)
+      return {
+        branch: null,
+        isRepo: false,
+        isDetached: false,
+        detachedHead: null,
+      }
+    }
   })
 
   // Git Bash detection and configuration (Windows only)
