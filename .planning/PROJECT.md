@@ -39,7 +39,7 @@ A compliant, independent rebrand that preserves all existing functionality while
 
 ### Active
 
-<!-- v0.5.0 Git Integration milestone -->
+<!-- v0.6.0 Git Integration milestone -->
 
 - [ ] Display current git branch in workspace UI
 - [ ] Show linked PR title and status when one exists
@@ -56,7 +56,7 @@ A compliant, independent rebrand that preserves all existing functionality while
 - Kata Context integration — future, not yet defined
 - Custom MCP server hosting — use third-party or self-hosted
 
-## Current Milestone: v0.5.0 Git Integration
+## Current Milestone: v0.6.0 Git Integration
 
 **Goal:** Show developers their git context (branch, PR) in the workspace UI while working with the agent.
 
@@ -128,4 +128,4 @@ A compliant, independent rebrand that preserves all existing functionality while
 | Support both KATA_ and CRAFT_ env vars | Backward compatibility for existing users | ✓ Good |
 
 ---
-*Last updated: 2026-02-01 after v0.5.0 milestone started*
+*Last updated: 2026-02-02 after v0.6.0 milestone started*

@@ -5,31 +5,32 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** A compliant, independent rebrand preserving all functionality
-**Current focus:** v0.5.0 Git Integration
+**Current focus:** v0.6.0 Git Integration
 
 ## Current Position
 
 ```
-Milestone: v0.5.0 Git Integration
+Milestone: v0.6.0 Git Integration
 Phase: Not started (defining requirements)
 Plan: —
 Status: Defining requirements
 Progress: [          ] 0/? requirements
 ```
 
-**Last activity:** 2026-02-01 — Milestone v0.5.0 started
+**Last activity:** 2026-02-02 — Milestone v0.6.0 started
 
 ## Shipped Milestones
 
 | Version | Name | Shipped | Phases | Requirements |
 |---------|------|---------|--------|--------------|
+| v0.5.0 | — | 2026-02 | — | — |
 | v0.4.0 | Foundation | 2026-01-30 | 2 | 10/10 |
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Milestones shipped | 1 |
+| Milestones shipped | 2 |
 | Total phases | 2 |
 | Total plans | 6 |
 | Total requirements | 10 |
@@ -62,4 +63,4 @@ _None_
 Define requirements → `/kata:plan-phase`
 
 ---
-*Last updated: 2026-02-01 after v0.5.0 milestone started*
+*Last updated: 2026-02-02 after v0.6.0 milestone started*
