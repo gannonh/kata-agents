@@ -18,6 +18,14 @@
 
 **Depends on:** None (foundation for this milestone)
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Create GitService module with simple-git
+- [ ] 03-02-PLAN.md — Wire GitService to IPC layer
+- [ ] 03-03-PLAN.md — Create renderer state management (Jotai atoms)
+- [ ] 03-04-PLAN.md — Create GitStatusBadge UI component
+
 **Requirements:**
 - GIT-01: User can see current git branch name in workspace UI
 - GIT-02: User sees no git indicator when workspace is not a git repository
@@ -42,6 +50,8 @@
 **Goal:** User sees linked PR information when current branch has an open pull request.
 
 **Depends on:** Phase 3 (requires git branch detection)
+
+**Plans:** (created by /kata:plan-phase)
 
 **Requirements:**
 - PR-01: User can see linked PR title when current branch has an open PR
@@ -69,6 +79,8 @@
 
 **Depends on:** Phase 4 (real-time updates apply to both git and PR)
 
+**Plans:** (created by /kata:plan-phase)
+
 **Requirements:**
 - LIVE-01: Git status refreshes automatically when .git directory changes
 - LIVE-02: PR status refreshes periodically (every 5-10 minutes)
@@ -94,6 +106,8 @@
 
 **Depends on:** Phase 4 (needs both branch and PR data)
 
+**Plans:** (created by /kata:plan-phase)
+
 **Requirements:**
 - CTX-01: Agent receives git context (branch, PR) in conversation
 - CTX-02: Git context is workspace-specific (each workspace has its own state)
@@ -116,6 +130,8 @@
 **Goal:** Handle edge cases and improve reliability of git integration.
 
 **Depends on:** Phase 6 (all core functionality complete)
+
+**Plans:** (created by /kata:plan-phase)
 
 **Requirements:** None (polish phase, no new requirements)
 
@@ -156,7 +172,7 @@
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | Pending | GIT-01, GIT-02, GIT-03 |
+| 3 | Core Git Service | Planned (4 plans) | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Pending | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Pending | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Pending | CTX-01, CTX-02 |
@@ -176,4 +192,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-02 during v0.6.0 roadmap creation*
+*Last updated: 2026-02-02 after Phase 3 planning*
