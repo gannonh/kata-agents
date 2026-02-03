@@ -19,6 +19,7 @@ import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@cra
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { getGitStatus, getPrStatus } from '@craft-agent/shared/git'
+import { GitWatcher } from './lib/git-watcher'
 import { MarkItDown } from 'markitdown-js'
 
 /**
@@ -119,7 +120,72 @@ async function validateFilePath(filePath: string): Promise<string> {
   return realPath
 }
 
+// Git file watchers per workspace (workspace directory path -> GitWatcher)
+const gitWatchers = new Map<string, GitWatcher>()
+
+/**
+ * Broadcast git status change to all windows.
+ * Called by GitWatcher when .git files change.
+ */
+function broadcastGitChange(workspaceDir: string): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.GIT_STATUS_CHANGED, workspaceDir)
+    }
+  }
+}
+
+/**
+ * Start git file watcher for a workspace directory.
+ * Stops any existing watcher for the same directory first.
+ */
+function startGitWatcher(workspaceDir: string): void {
+  // Stop existing watcher if any
+  const existing = gitWatchers.get(workspaceDir)
+  if (existing) {
+    existing.stop()
+    gitWatchers.delete(workspaceDir)
+  }
+
+  // Create and start new watcher
+  const watcher = new GitWatcher(workspaceDir, () => {
+    broadcastGitChange(workspaceDir)
+  })
+
+  if (watcher.start()) {
+    gitWatchers.set(workspaceDir, watcher)
+    ipcLog.debug('[GitWatcher] Started for:', workspaceDir)
+  }
+}
+
+/**
+ * Stop git file watcher for a workspace directory.
+ */
+function stopGitWatcher(workspaceDir: string): void {
+  const watcher = gitWatchers.get(workspaceDir)
+  if (watcher) {
+    watcher.stop()
+    gitWatchers.delete(workspaceDir)
+    ipcLog.debug('[GitWatcher] Stopped for:', workspaceDir)
+  }
+}
+
+/**
+ * Stop all git file watchers (for app shutdown).
+ */
+function stopAllGitWatchers(): void {
+  for (const watcher of gitWatchers.values()) {
+    watcher.stop()
+  }
+  gitWatchers.clear()
+}
+
 export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager): void {
+  // Clean up all git watchers on app quit
+  app.on('before-quit', () => {
+    stopAllGitWatchers()
+  })
+
   // Get all sessions
   ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async (_event) => {
     const end = perf.start('ipc.getSessions')
@@ -761,7 +827,14 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Uses simple-git for detached HEAD handling and full status
   ipcMain.handle(IPC_CHANNELS.GIT_STATUS, async (_event, dirPath: string) => {
     try {
-      return await getGitStatus(dirPath)
+      const status = await getGitStatus(dirPath)
+
+      // Start git watcher for this directory if it's a git repo and no watcher exists
+      if (status.isRepo && !gitWatchers.has(dirPath)) {
+        startGitWatcher(dirPath)
+      }
+
+      return status
     } catch (error) {
       ipcLog.error('[GIT_STATUS] Unexpected error:', error)
       return {
