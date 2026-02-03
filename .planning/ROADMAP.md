@@ -83,7 +83,12 @@ Plans:
 
 **Depends on:** Phase 4 (real-time updates apply to both git and PR)
 
-**Plans:** (created by /kata:plan-phase)
+**Plans:** 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Create GitWatcher with chokidar and IPC broadcast
+- [ ] 05-02-PLAN.md — Add focus-aware PR polling to renderer
+- [ ] 05-03-PLAN.md — Connect useGitStatus to GitWatcher events and focus
 
 **Requirements:**
 - LIVE-01: Git status refreshes automatically when .git directory changes
@@ -98,9 +103,9 @@ Plans:
 
 **Implementation Notes:**
 - Watch selective .git paths only (.git/index, .git/HEAD, .git/refs/)
-- Debounce file system events (300-500ms)
+- Debounce file system events (100ms)
 - Clean up watchers on workspace switch
-- Coordinate with SessionManager to avoid subprocess conflicts
+- chokidar v4.x for cross-platform file watching
 
 ---
 
@@ -178,7 +183,7 @@ Plans:
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 5 | Real-Time Updates | Planned | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
@@ -196,4 +201,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-02 after Phase 4 complete*
+*Last updated: 2026-02-02 after Phase 5 planning*
