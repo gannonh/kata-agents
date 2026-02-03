@@ -686,6 +686,9 @@ export const IPC_CHANNELS = {
   GIT_STATUS: 'git:status',          // Full GitState (async)
   PR_STATUS: 'pr:status',            // PR info for current branch (async)
 
+  // Git real-time events (main -> renderer broadcast)
+  GIT_STATUS_CHANGED: 'git:statusChanged',  // Payload: workspaceDir string
+
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
   GITBASH_BROWSE: 'gitbash:browse',
@@ -951,6 +954,9 @@ export interface ElectronAPI {
   getGitBranch(dirPath: string): Promise<string | null>
   getGitStatus(dirPath: string): Promise<GitState>
   getPrStatus(dirPath: string): Promise<PrInfo | null>
+
+  // Git status change listener (for real-time updates)
+  onGitStatusChanged(callback: (workspaceDir: string) => void): () => void
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>

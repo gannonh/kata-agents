@@ -62,13 +62,15 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import type { FileAttachment, LoadedSource, LoadedSkill, GitState, PrInfo } from '../../../../shared/types'
+import type { FileAttachment, LoadedSource, LoadedSkill, GitState } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelName } from '@craft-agent/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { EscapeInterruptOverlay } from './EscapeInterruptOverlay'
+import { useGitStatus } from '@/hooks/useGitStatus'
+import { usePrStatus } from '@/hooks/usePrStatus'
 
 /**
  * Format token count for display (e.g., 1500 -> "1.5k", 200000 -> "200k")
@@ -246,6 +248,12 @@ export function FreeFormInput({
     if (!appShellCtx || !workspaceId) return null
     return appShellCtx.workspaces.find(w => w.id === workspaceId)?.rootPath ?? null
   }, [appShellCtx, workspaceId])
+
+  // Get live git state (drives GitBranchBadge + PrBadge via useGitStatus real-time pipeline)
+  // Use working directory when set, fall back to workspace root
+  const gitPath = workingDirectory || workspaceRootPath
+  const { gitState } = useGitStatus(workspaceId ?? null, gitPath ?? null)
+  const currentBranch = gitState?.branch ?? null
 
   // Shuffle placeholder order once per mount so each session feels fresh
   const shuffledPlaceholder = React.useMemo(
@@ -1410,12 +1418,12 @@ export function FreeFormInput({
 
           {/* 4. Git Branch Badge - separate from working directory */}
           {onWorkingDirectoryChange && (
-            <GitBranchBadge workingDirectory={workingDirectory} />
+            <GitBranchBadge gitState={gitState} />
           )}
 
           {/* 5. PR Badge - adjacent to git branch */}
           {onWorkingDirectoryChange && (
-            <PrBadge workingDirectory={workingDirectory} />
+            <PrBadge workingDirectory={workingDirectory} currentBranch={currentBranch} />
           )}
           </div>
 
@@ -1862,31 +1870,10 @@ function WorkingDirectoryBadge({
  * Displays nothing for non-git directories
  */
 function GitBranchBadge({
-  workingDirectory,
+  gitState,
 }: {
-  workingDirectory?: string
+  gitState: GitState | null
 }) {
-  const [gitState, setGitState] = React.useState<GitState | null>(null)
-
-  // Fetch git status when working directory changes
-  React.useEffect(() => {
-    if (workingDirectory) {
-      window.electronAPI?.getGitStatus?.(workingDirectory)
-        .then((state: GitState) => {
-          setGitState(state)
-        })
-        .catch((error) => {
-          console.error('[GitBranchBadge] Failed to fetch git status via IPC:', {
-            workingDirectory,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          setGitState(null)
-        })
-    } else {
-      setGitState(null)
-    }
-  }, [workingDirectory])
-
   // Don't render if not a git repo
   if (!gitState?.isRepo) {
     return null
@@ -1934,29 +1921,12 @@ function GitBranchBadge({
  */
 function PrBadge({
   workingDirectory,
+  currentBranch,
 }: {
   workingDirectory?: string
+  currentBranch?: string | null
 }) {
-  const [prInfo, setPrInfo] = React.useState<PrInfo | null>(null)
-
-  // Fetch PR status when working directory changes
-  React.useEffect(() => {
-    if (workingDirectory) {
-      window.electronAPI?.getPrStatus?.(workingDirectory)
-        .then((info: PrInfo | null) => {
-          setPrInfo(info)
-        })
-        .catch((error) => {
-          console.error('[PrBadge] Failed to fetch PR status via IPC:', {
-            workingDirectory,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          setPrInfo(null)
-        })
-    } else {
-      setPrInfo(null)
-    }
-  }, [workingDirectory])
+  const { prInfo } = usePrStatus(workingDirectory, currentBranch ?? null)
 
   // Don't render if no PR
   if (!prInfo) {

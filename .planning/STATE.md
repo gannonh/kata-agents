@@ -11,19 +11,19 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 4 - PR Integration (COMPLETE)
-Plan: —
-Status: Phase 4 verified, ready for Phase 5
-Progress: [████      ] 7/12 requirements (2/5 phases)
+Phase: 5 - Real-Time Updates (COMPLETE + gap closure)
+Plan: 04 of 04 (all complete including gap closure)
+Status: Phase complete (verified 12/12 must-haves)
+Progress: [██████    ] 10/12 requirements (3/5 phases)
 ```
 
-**Last activity:** 2026-02-02 — Completed quick task 001: Fill test coverage gaps
+**Last activity:** 2026-02-03 — Phase 5 gap closure complete (12/12 must-haves)
 
 ## Quick Tasks
 
 | ID | Name | Status | Summary |
 |----|------|--------|---------|
-| 001 | Fill test coverage gaps | Complete ✓ | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
+| 001 | Fill test coverage gaps | Complete | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
 
 ## Shipped Milestones
 
@@ -37,8 +37,8 @@ Progress: [████      ] 7/12 requirements (2/5 phases)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 4 |
-| Total plans | 12 |
+| Total phases | 5 |
+| Total plans | 16 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -47,25 +47,32 @@ Progress: [████      ] 7/12 requirements (2/5 phases)
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Complete ✓ | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Complete ✓ | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
 
-## Phase 4 Summary
+## Phase 5 Summary
 
-**PR badge in workspace UI:**
-- PrService module using gh CLI (graceful degradation if unavailable)
-- PR_STATUS IPC channel wired to renderer
-- PrBadge component in chat input toolbar (next to GitBranchBadge)
-- Status-colored icons (green=open, purple=merged, red=closed, gray=draft)
+**Real-time git status updates:**
+- GitWatcher with chokidar v4 watching .git/HEAD, .git/index, .git/refs/
+- GIT_STATUS_CHANGED IPC broadcast to all renderer windows
+- useGitStatus hook listens for file watcher events + window focus
+- usePrStatus hook with polling and PrBadge refactored for live updates
+- 100ms debounce on focus refresh to avoid duplicate fetches
 
-**Commits:** 4 commits on feat/v0.6.0-04-pr-integration
-**Verification:** 7/7 must-haves passed
+**Plans:**
+- 05-01: GitWatcher + chokidar + IPC broadcast
+- 05-02: usePrStatus hook + PrBadge refactor
+- 05-03: useGitStatus real-time updates
+- 05-04: Gap closure -- wire GitBranchBadge to live gitState prop (UAT fix)
+
+**Commits:** 8 commits on feat/v0.6.0-05-real-time-updates
+**Verification:** 9/9 must-haves passed + 3/3 UAT gaps closed
 
 ## Accumulated Context
 
@@ -81,6 +88,11 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Keep GET_GIT_BRANCH handler for backward compatibility (FreeFormInput.tsx uses it)
 - Git branch badge placed in chat input toolbar (better visibility than sidebar)
 - PR badge colors match GitHub conventions (green/purple/red/gray)
+- Focus-aware PR polling: useGitStatus in FreeFormInput provides branch to PrBadge
+- GitBranchBadge as pure display component (no local fetch, receives gitState prop)
+- Use chokidar v4 for cross-platform .git file watching (native fs.watch unreliable)
+- Auto-start git watcher on first GIT_STATUS request (lazy initialization)
+- 100ms delay on focus refresh to deduplicate with file watcher events
 
 ### Research Flags
 
@@ -88,7 +100,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 |-------|-----------------|-------|
 | 3 | NO | Complete |
 | 4 | NO | Complete |
-| 5 | YES | File watching performance in Electron needs validation |
+| 5 | NO | Complete |
 | 6 | NO | Simple prompt injection |
 
 ### Open Questions
@@ -108,9 +120,15 @@ _None_
 | Version manifest | Disabled | Needs version API at kata.sh |
 | MCP docs server | Commented out | Needs docs MCP at kata.sh |
 
+## Session Continuity
+
+Last session: 2026-02-03T18:47Z
+Stopped at: Completed 05-04-PLAN.md (gap closure)
+Resume file: None
+
 ## Next Steps
 
-Plan Phase 5 -> `/kata:discuss-phase 5` or `/kata:plan-phase 5`
+Plan Phase 6 -> `/kata:discuss-phase 6` or `/kata:plan-phase 6`
 
 ---
-*Last updated: 2026-02-02 after quick task 001-01*
+*Last updated: 2026-02-03 after 05-04 gap closure plan*

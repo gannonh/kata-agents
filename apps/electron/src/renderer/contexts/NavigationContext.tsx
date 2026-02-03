@@ -153,10 +153,12 @@ export function NavigationProvider({
     return session.todoState === 'done' || session.todoState === 'cancelled'
   }, [])
 
-  // Helper: Filter sessions by ChatFilter
+  // Helper: Filter sessions by ChatFilter (scoped to active workspace)
   const filterSessionsByFilter = useCallback(
     (filter: ChatFilter): SessionMeta[] => {
       return sessionMetas.filter((session) => {
+        // Scope to active workspace to prevent cross-workspace session leaking
+        if (workspaceId && session.workspaceId !== workspaceId) return false
         switch (filter.kind) {
           case 'allChats':
             return true
@@ -169,7 +171,7 @@ export function NavigationProvider({
         }
       })
     },
-    [sessionMetas]
+    [sessionMetas, workspaceId]
   )
 
   // Helper: Get first session ID for a filter
