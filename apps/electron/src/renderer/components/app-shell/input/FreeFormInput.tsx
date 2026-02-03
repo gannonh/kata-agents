@@ -250,7 +250,9 @@ export function FreeFormInput({
   }, [appShellCtx, workspaceId])
 
   // Get live git state (drives GitBranchBadge + PrBadge via useGitStatus real-time pipeline)
-  const { gitState } = useGitStatus(workspaceId ?? null, workspaceRootPath ?? null)
+  // Use working directory when set, fall back to workspace root
+  const gitPath = workingDirectory || workspaceRootPath
+  const { gitState } = useGitStatus(workspaceId ?? null, gitPath ?? null)
   const currentBranch = gitState?.branch ?? null
 
   // Shuffle placeholder order once per mount so each session feels fresh
