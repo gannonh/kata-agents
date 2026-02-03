@@ -416,6 +416,17 @@ const api: ElectronAPI = {
   getPrStatus: (dirPath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PR_STATUS, dirPath),
 
+  // Git status change listener (for real-time updates)
+  onGitStatusChanged: (callback: (workspaceDir: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, workspaceDir: string) => {
+      callback(workspaceDir)
+    }
+    ipcRenderer.on(IPC_CHANNELS.GIT_STATUS_CHANGED, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.GIT_STATUS_CHANGED, handler)
+    }
+  },
+
   // Git Bash (Windows)
   checkGitBash: () => ipcRenderer.invoke(IPC_CHANNELS.GITBASH_CHECK),
   browseForGitBash: () => ipcRenderer.invoke(IPC_CHANNELS.GITBASH_BROWSE),
