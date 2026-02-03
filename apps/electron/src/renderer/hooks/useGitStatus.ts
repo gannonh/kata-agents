@@ -8,7 +8,7 @@
  *   const { gitState, isLoading, refresh } = useGitStatus(workspaceId, workspaceRootPath)
  */
 
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   gitStateForWorkspaceAtom,
@@ -45,6 +45,9 @@ export function useGitStatus(
 
   const gitState = workspaceId ? getGitState(workspaceId) : null
   const isLoading = workspaceId ? getLoading(workspaceId) : false
+
+  // Track window focus for LIVE-03
+  const [isFocused, setIsFocused] = useState(true)
 
   const refresh = useCallback(async () => {
     if (!workspaceId || !workspaceRootPath) return
@@ -108,6 +111,26 @@ export function useGitStatus(
 
     return unsubscribe
   }, [workspaceRootPath, refresh])
+
+  // Listen for window focus changes (LIVE-03)
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onWindowFocusChange?.((focused) => {
+      setIsFocused(focused)
+    })
+    return unsubscribe
+  }, [])
+
+  // Refresh git status when window gains focus (LIVE-03)
+  useEffect(() => {
+    if (isFocused && workspaceId && workspaceRootPath) {
+      // Add small delay to avoid duplicate fetches with file watcher
+      const timer = setTimeout(() => {
+        console.debug('[useGitStatus] Window focused, refreshing')
+        refresh()
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [isFocused, workspaceId, workspaceRootPath, refresh])
 
   return {
     gitState,
