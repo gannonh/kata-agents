@@ -119,7 +119,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 06-01-PLAN.md — Create formatGitContext, wire into CraftAgent and SessionManager
+- [x] 06-01-PLAN.md — Create formatGitContext, wire into CraftAgent and SessionManager
 
 **Requirements:**
 - CTX-01: Agent receives git context (branch, PR) in conversation
@@ -188,8 +188,8 @@ Plans:
 | 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Complete | LIVE-01, LIVE-02, LIVE-03 |
-| 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
-| 7 | Polish and Edge Cases | Blocked by 6 | — |
+| 6 | AI Context Injection | Complete | CTX-01, CTX-02 |
+| 7 | Polish and Edge Cases | Ready | — |
 
 ---
 
@@ -205,4 +205,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-03 after Phase 6 planning complete*
+*Last updated: 2026-02-03 after Phase 6 execution complete*

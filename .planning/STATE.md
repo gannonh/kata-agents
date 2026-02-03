@@ -13,8 +13,8 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 Milestone: v0.6.0 Git Integration
 Phase: 6 - AI Context Injection (COMPLETE)
 Plan: 01 of 01 (complete)
-Status: Phase complete (14/14 requirements across 4/5 phases)
-Progress: [████████  ] 14/14 requirements (4/5 phases)
+Status: Phase complete (verified 5/5 must-haves)
+Progress: [████████  ] 12/12 requirements (4/5 phases)
 ```
 
 **Last activity:** 2026-02-03 -- Completed 06-01-PLAN.md (git context injection)
@@ -39,7 +39,7 @@ Progress: [████████  ] 14/14 requirements (4/5 phases)
 | Milestones shipped | 2 |
 | Total phases | 6 |
 | Total plans | 17 |
-| Total requirements | 14 |
+| Total requirements | 13 |
 
 ## Current Milestone Overview
 
@@ -69,7 +69,8 @@ Progress: [████████  ] 14/14 requirements (4/5 phases)
 **Plans:**
 - 06-01: formatGitContext + CraftAgent wiring + SessionManager integration
 
-**Commits:** 3 commits on feat/v0.6.0-06-ai-context-injection
+**Commits:** 4 commits on feat/v0.6.0-06-ai-context-injection
+**Verification:** 5/5 must-haves passed
 
 ## Accumulated Context
 
