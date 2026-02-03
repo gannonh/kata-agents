@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 5 - Real-Time Updates (IN PROGRESS)
-Plan: 01 complete, 03 remaining
-Status: In progress
-Progress: [█████     ] 9/12 requirements (2/5 phases, 2/3 phase 5 plans)
+Phase: 5 - Real-Time Updates (COMPLETE)
+Plan: 03 of 03 (all complete)
+Status: Phase complete
+Progress: [██████    ] 12/12 requirements (3/5 phases complete)
 ```
 
-**Last activity:** 2026-02-03 — Completed 05-01-PLAN.md (GitWatcher with IPC broadcast)
+**Last activity:** 2026-02-03 — Completed 05-03-PLAN.md (useGitStatus real-time updates)
 
 ## Quick Tasks
 
@@ -49,23 +49,26 @@ Progress: [█████     ] 9/12 requirements (2/5 phases, 2/3 phase 5 plan
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | In Progress (2/3 plans) | LIVE-01, LIVE-02, LIVE-03 |
+| 5 | Real-Time Updates | Complete (3/3 plans) | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
 
-## Phase 4 Summary
+## Phase 5 Summary
 
-**PR badge in workspace UI:**
-- PrService module using gh CLI (graceful degradation if unavailable)
-- PR_STATUS IPC channel wired to renderer
-- PrBadge component in chat input toolbar (next to GitBranchBadge)
-- Status-colored icons (green=open, purple=merged, red=closed, gray=draft)
+**Real-time git status updates:**
+- GitWatcher with chokidar v4 watching .git/HEAD, .git/index, .git/refs/
+- GIT_STATUS_CHANGED IPC broadcast to all renderer windows
+- useGitStatus hook listens for file watcher events + window focus
+- usePrStatus hook with polling and PrBadge refactored for live updates
+- 100ms debounce on focus refresh to avoid duplicate fetches
 
-**Commits:** 4 commits on feat/v0.6.0-04-pr-integration
-**Verification:** 7/7 must-haves passed
+**Plans:**
+- 05-01: GitWatcher + chokidar + IPC broadcast
+- 05-02: usePrStatus hook + PrBadge refactor
+- 05-03: useGitStatus real-time updates
 
 ## Accumulated Context
 
@@ -84,6 +87,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Focus-aware PR polling: useGitStatus in FreeFormInput provides branch to PrBadge
 - Use chokidar v4 for cross-platform .git file watching (native fs.watch unreliable)
 - Auto-start git watcher on first GIT_STATUS request (lazy initialization)
+- 100ms delay on focus refresh to deduplicate with file watcher events
 
 ### Research Flags
 
@@ -91,7 +95,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 |-------|-----------------|-------|
 | 3 | NO | Complete |
 | 4 | NO | Complete |
-| 5 | NO | chokidar validated for selective .git watching |
+| 5 | NO | Complete |
 | 6 | NO | Simple prompt injection |
 
 ### Open Questions
@@ -114,12 +118,12 @@ _None_
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 05-01-PLAN.md
-Resume file: .planning/phases/05-real-time-updates/05-03-PLAN.md
+Stopped at: Completed 05-03-PLAN.md (Phase 5 complete)
+Resume file: None
 
 ## Next Steps
 
-Execute Plan 05-03 (renderer-side hook consuming GIT_STATUS_CHANGED events)
+Execute Phase 6 (AI Context Injection) - CTX-01, CTX-02
 
 ---
-*Last updated: 2026-02-03 after completing 05-01-PLAN.md*
+*Last updated: 2026-02-03 after completing 05-03-PLAN.md*
