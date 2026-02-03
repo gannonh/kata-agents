@@ -22,9 +22,9 @@
 
 ### Real-Time Updates
 
-- [ ] **LIVE-01**: Git status refreshes automatically when .git directory changes
-- [ ] **LIVE-02**: PR status refreshes periodically (every 5-10 minutes)
-- [ ] **LIVE-03**: Git status refreshes when workspace gains focus
+- [x] **LIVE-01**: Git status refreshes automatically when .git directory changes
+- [x] **LIVE-02**: PR status refreshes periodically (every 5-10 minutes)
+- [x] **LIVE-03**: Git status refreshes when workspace gains focus
 
 ### AI Context
 
@@ -66,13 +66,13 @@ _Explicit exclusions for v0.6.0_
 | PR-02 | Phase 4 | Complete ✓ |
 | PR-03 | Phase 4 | Complete ✓ |
 | PR-04 | Phase 4 | Complete ✓ |
-| LIVE-01 | Phase 5 | Pending |
-| LIVE-02 | Phase 5 | Pending |
-| LIVE-03 | Phase 5 | Pending |
+| LIVE-01 | Phase 5 | Complete ✓ |
+| LIVE-02 | Phase 5 | Complete ✓ |
+| LIVE-03 | Phase 5 | Complete ✓ |
 | CTX-01 | Phase 6 | Pending |
 | CTX-02 | Phase 6 | Pending |
 
-**Coverage:** 12/12 requirements mapped (7/12 complete)
+**Coverage:** 12/12 requirements mapped (10/12 complete)
 
 ---
-*Updated: 2026-02-02 after Phase 4 complete*
+*Updated: 2026-02-03 after Phase 5 complete*

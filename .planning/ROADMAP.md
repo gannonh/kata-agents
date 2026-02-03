@@ -86,9 +86,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Create GitWatcher with chokidar and IPC broadcast
-- [ ] 05-02-PLAN.md — Add focus-aware PR polling to renderer
-- [ ] 05-03-PLAN.md — Connect useGitStatus to GitWatcher events and focus
+- [x] 05-01-PLAN.md — Create GitWatcher with chokidar and IPC broadcast
+- [x] 05-02-PLAN.md — Add focus-aware PR polling to renderer
+- [x] 05-03-PLAN.md — Connect useGitStatus to GitWatcher events and focus
 
 **Requirements:**
 - LIVE-01: Git status refreshes automatically when .git directory changes
@@ -183,7 +183,7 @@ Plans:
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Planned | LIVE-01, LIVE-02, LIVE-03 |
+| 5 | Real-Time Updates | Complete | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
@@ -201,4 +201,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-02 after Phase 5 planning*
+*Last updated: 2026-02-03 after Phase 5 execution*
