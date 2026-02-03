@@ -94,6 +94,21 @@ export function useGitStatus(
     }
   }, [workspaceId, workspaceRootPath, gitState, refresh])
 
+  // Listen for git changes from file watcher (LIVE-01)
+  useEffect(() => {
+    if (!workspaceRootPath) return
+
+    const unsubscribe = window.electronAPI?.onGitStatusChanged?.((changedDir: string) => {
+      // Only refresh if the change is for our workspace
+      if (changedDir === workspaceRootPath) {
+        console.debug('[useGitStatus] Git change detected, refreshing')
+        refresh()
+      }
+    })
+
+    return unsubscribe
+  }, [workspaceRootPath, refresh])
+
   return {
     gitState,
     isLoading,
