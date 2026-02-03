@@ -12,18 +12,18 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 ```
 Milestone: v0.6.0 Git Integration
 Phase: 5 - Real-Time Updates (IN PROGRESS)
-Plan: 02 of 03 in phase
+Plan: 01 complete, 03 remaining
 Status: In progress
 Progress: [█████     ] 9/12 requirements (2/5 phases, 2/3 phase 5 plans)
 ```
 
-**Last activity:** 2026-02-03 — Completed 05-02-PLAN.md (focus-aware PR polling)
+**Last activity:** 2026-02-03 — Completed 05-01-PLAN.md (GitWatcher with IPC broadcast)
 
 ## Quick Tasks
 
 | ID | Name | Status | Summary |
 |----|------|--------|---------|
-| 001 | Fill test coverage gaps | Complete ✓ | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
+| 001 | Fill test coverage gaps | Complete | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
 
 ## Shipped Milestones
 
@@ -47,8 +47,8 @@ Progress: [█████     ] 9/12 requirements (2/5 phases, 2/3 phase 5 plan
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Complete ✓ | PR-01, PR-02, PR-03, PR-04 |
+| 3 | Core Git Service | Complete | GIT-01, GIT-02, GIT-03 |
+| 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | In Progress (2/3 plans) | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
@@ -82,6 +82,8 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Git branch badge placed in chat input toolbar (better visibility than sidebar)
 - PR badge colors match GitHub conventions (green/purple/red/gray)
 - Focus-aware PR polling: useGitStatus in FreeFormInput provides branch to PrBadge
+- Use chokidar v4 for cross-platform .git file watching (native fs.watch unreliable)
+- Auto-start git watcher on first GIT_STATUS request (lazy initialization)
 
 ### Research Flags
 
@@ -89,7 +91,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 |-------|-----------------|-------|
 | 3 | NO | Complete |
 | 4 | NO | Complete |
-| 5 | YES | File watching performance in Electron needs validation |
+| 5 | NO | chokidar validated for selective .git watching |
 | 6 | NO | Simple prompt injection |
 
 ### Open Questions
@@ -112,12 +114,12 @@ _None_
 ## Session Continuity
 
 Last session: 2026-02-03
-Stopped at: Completed 05-02-PLAN.md
+Stopped at: Completed 05-01-PLAN.md
 Resume file: .planning/phases/05-real-time-updates/05-03-PLAN.md
 
 ## Next Steps
 
-Execute Plan 05-03 (useGitStatus focus-aware refresh)
+Execute Plan 05-03 (renderer-side hook consuming GIT_STATUS_CHANGED events)
 
 ---
-*Last updated: 2026-02-03 after completing 05-02-PLAN.md*
+*Last updated: 2026-02-03 after completing 05-01-PLAN.md*
