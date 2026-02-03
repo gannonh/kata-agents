@@ -116,7 +116,10 @@ Plans:
 
 **Depends on:** Phase 4 (needs both branch and PR data)
 
-**Plans:** (created by /kata:plan-phase)
+**Plans:** 1 plan
+
+Plans:
+- [ ] 06-01-PLAN.md — Create formatGitContext, wire into CraftAgent and SessionManager
 
 **Requirements:**
 - CTX-01: Agent receives git context (branch, PR) in conversation
@@ -129,9 +132,9 @@ Plans:
 4. Git context does not bloat system prompt (concise format)
 
 **Implementation Notes:**
-- Inject into agent system prompt
-- Format: "Current branch: feature/user-auth, PR #42 (Fix user auth) - Open"
-- Update context when git state changes
+- Inject into user messages (not system prompt) for prompt caching
+- Format: `<git_context>Current branch: feature/user-auth\nPR #42: Fix user auth (OPEN)</git_context>`
+- Update context when git state changes via fresh fetch before each message
 
 ---
 
@@ -202,4 +205,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-03 after Phase 5 gap closure complete*
+*Last updated: 2026-02-03 after Phase 6 planning complete*
