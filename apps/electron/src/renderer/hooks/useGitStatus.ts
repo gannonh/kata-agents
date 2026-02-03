@@ -8,7 +8,7 @@
  *   const { gitState, isLoading, refresh } = useGitStatus(workspaceId, workspaceRootPath)
  */
 
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   gitStateForWorkspaceAtom,
@@ -48,9 +48,16 @@ export function useGitStatus(
 
   // Track window focus for LIVE-03
   const [isFocused, setIsFocused] = useState(true)
+  // Deduplication: skip refresh if one completed within threshold
+  const lastFetchTimeRef = useRef<number>(0)
+  const DEDUP_THRESHOLD_MS = 500
 
   const refresh = useCallback(async () => {
     if (!workspaceId || !workspaceRootPath) return
+
+    const now = Date.now()
+    if (now - lastFetchTimeRef.current < DEDUP_THRESHOLD_MS) return
+    lastFetchTimeRef.current = now
 
     // Set loading state
     setLoading({ workspaceId, loading: true })
@@ -73,8 +80,11 @@ export function useGitStatus(
         })
       }
     } catch (error) {
-      console.error('[useGitStatus] Failed to fetch git status:', error)
-      // Set default non-repo state on error
+      console.error('[useGitStatus] Failed to fetch git status:', {
+        workspaceId,
+        workspaceRootPath,
+        error: error instanceof Error ? error.message : String(error),
+      })
       setGitState({
         workspaceId,
         state: {
@@ -89,8 +99,8 @@ export function useGitStatus(
     }
   }, [workspaceId, workspaceRootPath, setGitState, setLoading])
 
-  // Fetch git status when workspace changes (only if not already cached)
-  // Caches state per workspace; use refresh() to force re-fetch stale data
+  // Fetch git status when workspace changes (only if not already fetched)
+  // null means either "not fetched yet" or "not a git repo"; use refresh() to force re-fetch
   useEffect(() => {
     if (workspaceId && workspaceRootPath && !gitState) {
       refresh()
@@ -109,7 +119,7 @@ export function useGitStatus(
       }
     })
 
-    return unsubscribe
+    return () => unsubscribe?.()
   }, [workspaceRootPath, refresh])
 
   // Listen for window focus changes (LIVE-03)
@@ -117,7 +127,7 @@ export function useGitStatus(
     const unsubscribe = window.electronAPI?.onWindowFocusChange?.((focused) => {
       setIsFocused(focused)
     })
-    return unsubscribe
+    return () => unsubscribe?.()
   }, [])
 
   // Refresh git status when window gains focus (LIVE-03)

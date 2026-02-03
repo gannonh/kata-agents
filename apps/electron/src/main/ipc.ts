@@ -120,8 +120,9 @@ async function validateFilePath(filePath: string): Promise<string> {
   return realPath
 }
 
-// Git file watchers per workspace (workspace directory path -> GitWatcher)
-const gitWatchers = new Map<string, GitWatcher>()
+// Git file watchers per directory path -> { watcher, lastAccessed timestamp }
+const MAX_GIT_WATCHERS = 5
+const gitWatchers = new Map<string, { watcher: GitWatcher; lastAccessed: number }>()
 
 /**
  * Broadcast git status change to all windows.
@@ -136,16 +137,35 @@ function broadcastGitChange(workspaceDir: string): void {
 }
 
 /**
- * Start git file watcher for a workspace directory.
+ * Evict least-recently-accessed git watchers when limit is exceeded.
+ */
+function evictStaleGitWatchers(): void {
+  if (gitWatchers.size <= MAX_GIT_WATCHERS) return
+
+  const entries = [...gitWatchers.entries()].sort((a, b) => a[1].lastAccessed - b[1].lastAccessed)
+  const toEvict = entries.slice(0, gitWatchers.size - MAX_GIT_WATCHERS)
+  for (const [dir, { watcher }] of toEvict) {
+    watcher.stop()
+    gitWatchers.delete(dir)
+    ipcLog.debug('[GitWatcher] Evicted stale watcher for:', dir)
+  }
+}
+
+/**
+ * Start git file watcher for a directory.
  * Stops any existing watcher for the same directory first.
+ * Evicts stale watchers if the limit is exceeded.
  */
 function startGitWatcher(workspaceDir: string): void {
   // Stop existing watcher if any
   const existing = gitWatchers.get(workspaceDir)
   if (existing) {
-    existing.stop()
+    existing.watcher.stop()
     gitWatchers.delete(workspaceDir)
   }
+
+  // Evict stale watchers before adding a new one
+  evictStaleGitWatchers()
 
   // Create and start new watcher
   const watcher = new GitWatcher(workspaceDir, () => {
@@ -153,18 +173,18 @@ function startGitWatcher(workspaceDir: string): void {
   })
 
   if (watcher.start()) {
-    gitWatchers.set(workspaceDir, watcher)
+    gitWatchers.set(workspaceDir, { watcher, lastAccessed: Date.now() })
     ipcLog.debug('[GitWatcher] Started for:', workspaceDir)
   }
 }
 
 /**
- * Stop git file watcher for a workspace directory.
+ * Stop git file watcher for a directory.
  */
 function stopGitWatcher(workspaceDir: string): void {
-  const watcher = gitWatchers.get(workspaceDir)
-  if (watcher) {
-    watcher.stop()
+  const entry = gitWatchers.get(workspaceDir)
+  if (entry) {
+    entry.watcher.stop()
     gitWatchers.delete(workspaceDir)
     ipcLog.debug('[GitWatcher] Stopped for:', workspaceDir)
   }
@@ -174,7 +194,7 @@ function stopGitWatcher(workspaceDir: string): void {
  * Stop all git file watchers (for app shutdown).
  */
 function stopAllGitWatchers(): void {
-  for (const watcher of gitWatchers.values()) {
+  for (const { watcher } of gitWatchers.values()) {
     watcher.stop()
   }
   gitWatchers.clear()
@@ -829,14 +849,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     try {
       const status = await getGitStatus(dirPath)
 
-      // Start git watcher for this directory if it's a git repo and no watcher exists
-      if (status.isRepo && !gitWatchers.has(dirPath)) {
+      // Start or touch git watcher for this directory
+      const existingEntry = gitWatchers.get(dirPath)
+      if (existingEntry) {
+        existingEntry.lastAccessed = Date.now()
+      } else if (status.isRepo) {
         startGitWatcher(dirPath)
       }
 
       return status
     } catch (error) {
-      ipcLog.error('[GIT_STATUS] Unexpected error:', error)
+      ipcLog.error('[GIT_STATUS] Unexpected error:', { dirPath, error: error instanceof Error ? error.message : error })
       return {
         branch: null,
         isRepo: false,

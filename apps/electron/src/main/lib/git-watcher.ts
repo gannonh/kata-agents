@@ -8,7 +8,7 @@
  * Watched paths:
  * - .git/HEAD - Branch reference (changes on checkout, branch switch)
  * - .git/index - Staging area (changes on add, reset, commit)
- * - .git/refs/heads/ - Local branch tips (changes on commit, fetch)
+ * - .git/refs/heads/ - Local branch tips (changes on commit, pull, merge)
  * - .git/refs/remotes/ - Remote refs (changes on fetch, pull)
  */
 
@@ -82,7 +82,11 @@ export class GitWatcher {
       })
       .on('error', (error) => {
         debug('[GitWatcher] Error:', error)
-        this.onError?.(error)
+        try {
+          this.onError?.(error)
+        } catch (callbackError) {
+          debug('[GitWatcher] Error in error handler:', callbackError)
+        }
       })
       .on('ready', () => {
         debug('[GitWatcher] Ready:', this.workspaceDir)
@@ -98,7 +102,11 @@ export class GitWatcher {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
-      this.onGitChange()
+      try {
+        this.onGitChange()
+      } catch (error) {
+        debug('[GitWatcher] Error in change callback:', error)
+      }
     }, this.debounceMs)
   }
 

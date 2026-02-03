@@ -44,13 +44,16 @@ export function usePrStatus(
   const [isLoading, setIsLoading] = useState(false)
   const [isFocused, setIsFocused] = useState(true)
   const lastBranchRef = useRef<string | null>(null)
+  // Deduplication: skip fetch if one completed within threshold
+  const lastFetchTimeRef = useRef<number>(0)
+  const DEDUP_THRESHOLD_MS = 2000
 
   // Track window focus state
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onWindowFocusChange?.((focused) => {
       setIsFocused(focused)
     })
-    return unsubscribe
+    return () => unsubscribe?.()
   }, [])
 
   // Fetch PR status
@@ -60,12 +63,19 @@ export function usePrStatus(
       return
     }
 
+    const now = Date.now()
+    if (now - lastFetchTimeRef.current < DEDUP_THRESHOLD_MS) return
+    lastFetchTimeRef.current = now
+
     setIsLoading(true)
     try {
       const info = await window.electronAPI?.getPrStatus?.(workingDirectory)
       setPrInfo(info ?? null)
     } catch (error) {
-      console.error('[usePrStatus] Fetch failed:', error)
+      console.error('[usePrStatus] Fetch failed:', {
+        workingDirectory,
+        error: error instanceof Error ? error.message : String(error),
+      })
       setPrInfo(null)
     } finally {
       setIsLoading(false)
@@ -86,7 +96,7 @@ export function usePrStatus(
     lastBranchRef.current = currentBranch
   }, [currentBranch, fetchPrStatus])
 
-  // Refresh on window focus (LIVE-03 related - keep PR fresh)
+  // Refresh on window focus (ensures PR info is current when user returns)
   useEffect(() => {
     if (isFocused && workingDirectory) {
       fetchPrStatus()
