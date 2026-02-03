@@ -69,9 +69,10 @@ Progress: [██████    ] 10/12 requirements (3/5 phases)
 - 05-01: GitWatcher + chokidar + IPC broadcast
 - 05-02: usePrStatus hook + PrBadge refactor
 - 05-03: useGitStatus real-time updates
+- 05-04: Gap closure -- wire GitBranchBadge to live gitState prop (UAT fix)
 
-**Commits:** 7 commits on feat/v0.6.0-05-real-time-updates
-**Verification:** 9/9 must-haves passed
+**Commits:** 8 commits on feat/v0.6.0-05-real-time-updates
+**Verification:** 9/9 must-haves passed + 3/3 UAT gaps closed
 
 ## Accumulated Context
 
@@ -88,6 +89,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Git branch badge placed in chat input toolbar (better visibility than sidebar)
 - PR badge colors match GitHub conventions (green/purple/red/gray)
 - Focus-aware PR polling: useGitStatus in FreeFormInput provides branch to PrBadge
+- GitBranchBadge as pure display component (no local fetch, receives gitState prop)
 - Use chokidar v4 for cross-platform .git file watching (native fs.watch unreliable)
 - Auto-start git watcher on first GIT_STATUS request (lazy initialization)
 - 100ms delay on focus refresh to deduplicate with file watcher events
@@ -120,8 +122,8 @@ _None_
 
 ## Session Continuity
 
-Last session: 2026-02-03
-Stopped at: Phase 5 complete and verified
+Last session: 2026-02-03T18:47Z
+Stopped at: Completed 05-04-PLAN.md (gap closure)
 Resume file: None
 
 ## Next Steps
@@ -129,4 +131,4 @@ Resume file: None
 Plan Phase 6 -> `/kata:discuss-phase 6` or `/kata:plan-phase 6`
 
 ---
-*Last updated: 2026-02-03 after Phase 5 verification*
+*Last updated: 2026-02-03 after 05-04 gap closure plan*
