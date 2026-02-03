@@ -249,9 +249,9 @@ export function FreeFormInput({
     return appShellCtx.workspaces.find(w => w.id === workspaceId)?.rootPath ?? null
   }, [appShellCtx, workspaceId])
 
-  // Get git state for PR refresh trigger (branch changes trigger PR re-fetch)
-  const { gitState: prGitState } = useGitStatus(workspaceId ?? null, workspaceRootPath ?? null)
-  const currentBranch = prGitState?.branch ?? null
+  // Get live git state (drives GitBranchBadge + PrBadge via useGitStatus real-time pipeline)
+  const { gitState } = useGitStatus(workspaceId ?? null, workspaceRootPath ?? null)
+  const currentBranch = gitState?.branch ?? null
 
   // Shuffle placeholder order once per mount so each session feels fresh
   const shuffledPlaceholder = React.useMemo(
@@ -1416,7 +1416,7 @@ export function FreeFormInput({
 
           {/* 4. Git Branch Badge - separate from working directory */}
           {onWorkingDirectoryChange && (
-            <GitBranchBadge workingDirectory={workingDirectory} />
+            <GitBranchBadge gitState={gitState} />
           )}
 
           {/* 5. PR Badge - adjacent to git branch */}
@@ -1868,31 +1868,10 @@ function WorkingDirectoryBadge({
  * Displays nothing for non-git directories
  */
 function GitBranchBadge({
-  workingDirectory,
+  gitState,
 }: {
-  workingDirectory?: string
+  gitState: GitState | null
 }) {
-  const [gitState, setGitState] = React.useState<GitState | null>(null)
-
-  // Fetch git status when working directory changes
-  React.useEffect(() => {
-    if (workingDirectory) {
-      window.electronAPI?.getGitStatus?.(workingDirectory)
-        .then((state: GitState) => {
-          setGitState(state)
-        })
-        .catch((error) => {
-          console.error('[GitBranchBadge] Failed to fetch git status via IPC:', {
-            workingDirectory,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          setGitState(null)
-        })
-    } else {
-      setGitState(null)
-    }
-  }, [workingDirectory])
-
   // Don't render if not a git repo
   if (!gitState?.isRepo) {
     return null
