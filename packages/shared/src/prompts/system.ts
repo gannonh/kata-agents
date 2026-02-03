@@ -7,6 +7,7 @@ import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
 import { APP_VERSION } from '../version/index.ts';
 import { globSync } from 'glob';
 import os from 'os';
+import type { GitState, PrInfo } from '../git/types.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -496,4 +497,34 @@ All MCP tools require two metadata fields (schema-enforced):
 - **\`_intent\`** (required): Brief description of what you're trying to accomplish (1-2 sentences)
 
 These help with UI feedback and result summarization.`;
+}
+
+/**
+ * Format git context for injection into user messages.
+ * Returns concise XML-tagged context for the agent, or empty string if no git info.
+ * Designed to be lightweight (~100-200 chars) to avoid prompt bloat.
+ */
+export function formatGitContext(gitState?: GitState | null, prInfo?: PrInfo | null): string {
+  if (!gitState || !gitState.isRepo) {
+    return '';
+  }
+
+  const lines: string[] = [];
+
+  if (gitState.isDetached && gitState.detachedHead) {
+    lines.push(`Detached HEAD: ${gitState.detachedHead}`);
+  } else if (gitState.branch) {
+    lines.push(`Current branch: ${gitState.branch}`);
+  }
+
+  if (prInfo) {
+    const draft = prInfo.isDraft ? ', Draft' : '';
+    lines.push(`PR #${prInfo.number}: ${prInfo.title} (${prInfo.state}${draft})`);
+  }
+
+  if (lines.length === 0) {
+    return '';
+  }
+
+  return `<git_context>\n${lines.join('\n')}\n</git_context>`;
 }
