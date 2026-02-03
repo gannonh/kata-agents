@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 3 - Core Git Service (COMPLETE)
+Phase: 4 - PR Integration (COMPLETE)
 Plan: —
-Status: Phase 3 verified, ready for Phase 4
-Progress: [██        ] 3/12 requirements (1/5 phases)
+Status: Phase 4 verified, ready for Phase 5
+Progress: [████      ] 7/12 requirements (2/5 phases)
 ```
 
-**Last activity:** 2026-02-02 — Phase 3 complete (Core Git Service)
+**Last activity:** 2026-02-02 — Phase 4 complete (PR Integration)
 
 ## Shipped Milestones
 
@@ -31,8 +31,8 @@ Progress: [██        ] 3/12 requirements (1/5 phases)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 3 |
-| Total plans | 10 |
+| Total phases | 4 |
+| Total plans | 12 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -42,24 +42,24 @@ Progress: [██        ] 3/12 requirements (1/5 phases)
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
-| 4 | PR Integration | Ready | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Blocked by 4 | LIVE-01, LIVE-02, LIVE-03 |
-| 6 | AI Context Injection | Blocked by 4 | CTX-01, CTX-02 |
+| 4 | PR Integration | Complete ✓ | PR-01, PR-02, PR-03, PR-04 |
+| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - unique value proposition
 
-## Phase 3 Summary
+## Phase 4 Summary
 
-**Git branch display in workspace UI:**
-- GitService module with simple-git (async-only operations)
-- GIT_STATUS IPC channel wired to renderer
-- Workspace-keyed state atoms (Map<workspaceId, GitState>)
-- GitBranchBadge in chat input toolbar (user approved placement)
+**PR badge in workspace UI:**
+- PrService module using gh CLI (graceful degradation if unavailable)
+- PR_STATUS IPC channel wired to renderer
+- PrBadge component in chat input toolbar (next to GitBranchBadge)
+- Status-colored icons (green=open, purple=merged, red=closed, gray=draft)
 
-**Commits:** 12 commits on feat/v0.6.0-03-core-git-service
-**Verification:** 12/12 must-haves passed
+**Commits:** 4 commits on feat/v0.6.0-04-pr-integration
+**Verification:** 7/7 must-haves passed
 
 ## Accumulated Context
 
@@ -74,13 +74,14 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Selective file watching (.git/index, .git/HEAD, .git/refs/) to avoid performance issues
 - Keep GET_GIT_BRANCH handler for backward compatibility (FreeFormInput.tsx uses it)
 - Git branch badge placed in chat input toolbar (better visibility than sidebar)
+- PR badge colors match GitHub conventions (green/purple/red/gray)
 
 ### Research Flags
 
 | Phase | Research Needed | Notes |
 |-------|-----------------|-------|
 | 3 | NO | Complete |
-| 4 | MAYBE | gh CLI integration patterns if unclear |
+| 4 | NO | Complete |
 | 5 | YES | File watching performance in Electron needs validation |
 | 6 | NO | Simple prompt injection |
 
@@ -103,7 +104,7 @@ _None_
 
 ## Next Steps
 
-Plan Phase 4 -> `/kata:plan-phase 4`
+Plan Phase 5 -> `/kata:discuss-phase 5` or `/kata:plan-phase 5`
 
 ---
-*Last updated: 2026-02-02 after Phase 3 complete*
+*Last updated: 2026-02-02 after Phase 4 complete*

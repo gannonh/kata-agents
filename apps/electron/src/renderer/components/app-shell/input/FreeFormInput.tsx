@@ -11,6 +11,9 @@ import {
   ChevronDown,
   Loader2,
   GitBranch,
+  GitPullRequest,
+  GitPullRequestDraft,
+  GitMerge,
 } from 'lucide-react'
 import { Icon_Home, Icon_Folder } from '@craft-agent/ui'
 
@@ -59,7 +62,7 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import type { FileAttachment, LoadedSource, LoadedSkill, GitState } from '../../../../shared/types'
+import type { FileAttachment, LoadedSource, LoadedSkill, GitState, PrInfo } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelName } from '@craft-agent/shared/agent/thinking-levels'
@@ -1409,6 +1412,11 @@ export function FreeFormInput({
           {onWorkingDirectoryChange && (
             <GitBranchBadge workingDirectory={workingDirectory} />
           )}
+
+          {/* 5. PR Badge - adjacent to git branch */}
+          {onWorkingDirectoryChange && (
+            <PrBadge workingDirectory={workingDirectory} />
+          )}
           </div>
 
           {/* Spacer */}
@@ -1863,11 +1871,17 @@ function GitBranchBadge({
   // Fetch git status when working directory changes
   React.useEffect(() => {
     if (workingDirectory) {
-      window.electronAPI?.getGitStatus?.(workingDirectory).then((state: GitState) => {
-        setGitState(state)
-      }).catch(() => {
-        setGitState(null)
-      })
+      window.electronAPI?.getGitStatus?.(workingDirectory)
+        .then((state: GitState) => {
+          setGitState(state)
+        })
+        .catch((error) => {
+          console.error('[GitBranchBadge] Failed to fetch git status via IPC:', {
+            workingDirectory,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          setGitState(null)
+        })
     } else {
       setGitState(null)
     }
@@ -1909,6 +1923,93 @@ function GitBranchBadge({
           ? `Detached HEAD at ${branchDisplay}`
           : `Branch: ${branchDisplay}`
         }
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * PrBadge - Shows PR information as a clickable badge
+ * Displays nothing when no PR exists or gh CLI unavailable
+ */
+function PrBadge({
+  workingDirectory,
+}: {
+  workingDirectory?: string
+}) {
+  const [prInfo, setPrInfo] = React.useState<PrInfo | null>(null)
+
+  // Fetch PR status when working directory changes
+  React.useEffect(() => {
+    if (workingDirectory) {
+      window.electronAPI?.getPrStatus?.(workingDirectory)
+        .then((info: PrInfo | null) => {
+          setPrInfo(info)
+        })
+        .catch((error) => {
+          console.error('[PrBadge] Failed to fetch PR status via IPC:', {
+            workingDirectory,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          setPrInfo(null)
+        })
+    } else {
+      setPrInfo(null)
+    }
+  }, [workingDirectory])
+
+  // Don't render if no PR
+  if (!prInfo) {
+    return null
+  }
+
+  // Determine icon based on state
+  let StatusIcon = GitPullRequest
+  if (prInfo.isDraft) {
+    StatusIcon = GitPullRequestDraft
+  } else if (prInfo.state === 'MERGED') {
+    StatusIcon = GitMerge
+  }
+
+  // Determine color based on state
+  let statusColor = 'text-green-500'
+  if (prInfo.state === 'MERGED') {
+    statusColor = 'text-purple-500'
+  } else if (prInfo.state === 'CLOSED') {
+    statusColor = 'text-red-500'
+  } else if (prInfo.isDraft) {
+    statusColor = 'text-muted-foreground'
+  }
+
+  const handleClick = () => {
+    window.electronAPI?.openUrl?.(prInfo.url)
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-testid="pr-badge"
+          data-pr-number={prInfo.number}
+          data-pr-state={prInfo.state}
+          data-pr-draft={prInfo.isDraft}
+          onClick={handleClick}
+          className={cn(
+            'flex items-center gap-1 px-2 py-1 rounded-md shrink-0',
+            'text-xs',
+            'hover:bg-foreground/5 transition-colors cursor-pointer',
+          )}
+        >
+          <StatusIcon className={cn('h-3.5 w-3.5 shrink-0', statusColor)} />
+          <span className="font-mono">#{prInfo.number}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[300px]">
+        <p className="font-medium truncate">{prInfo.title}</p>
+        <p className="text-muted-foreground text-xs">
+          {prInfo.isDraft ? 'Draft' : prInfo.state.toLowerCase()} pull request
+        </p>
       </TooltipContent>
     </Tooltip>
   )

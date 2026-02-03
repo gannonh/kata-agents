@@ -1,2 +1,3 @@
 export { getGitStatus, isGitRepository } from './git-service'
-export type { GitState } from './types'
+export { getPrStatus } from './pr-service'
+export type { GitState, PrInfo } from './types'
