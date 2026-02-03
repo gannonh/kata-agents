@@ -17,7 +17,13 @@ Status: Phase 4 verified, ready for Phase 5
 Progress: [████      ] 7/12 requirements (2/5 phases)
 ```
 
-**Last activity:** 2026-02-02 — Phase 4 complete (PR Integration)
+**Last activity:** 2026-02-02 — Quick task 001: pr-service test coverage
+
+## Quick Tasks
+
+| ID | Name | Status | Summary |
+|----|------|--------|---------|
+| 001 | Fill test coverage gaps | In progress | 001-SUMMARY.md |
 
 ## Shipped Milestones
 
@@ -107,4 +113,4 @@ _None_
 Plan Phase 5 -> `/kata:discuss-phase 5` or `/kata:plan-phase 5`
 
 ---
-*Last updated: 2026-02-02 after Phase 4 complete*
+*Last updated: 2026-02-02 after quick task 001-01*
