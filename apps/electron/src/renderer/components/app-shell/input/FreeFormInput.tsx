@@ -1871,11 +1871,17 @@ function GitBranchBadge({
   // Fetch git status when working directory changes
   React.useEffect(() => {
     if (workingDirectory) {
-      window.electronAPI?.getGitStatus?.(workingDirectory).then((state: GitState) => {
-        setGitState(state)
-      }).catch(() => {
-        setGitState(null)
-      })
+      window.electronAPI?.getGitStatus?.(workingDirectory)
+        .then((state: GitState) => {
+          setGitState(state)
+        })
+        .catch((error) => {
+          console.error('[GitBranchBadge] Failed to fetch git status via IPC:', {
+            workingDirectory,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          setGitState(null)
+        })
     } else {
       setGitState(null)
     }
@@ -1936,11 +1942,17 @@ function PrBadge({
   // Fetch PR status when working directory changes
   React.useEffect(() => {
     if (workingDirectory) {
-      window.electronAPI?.getPrStatus?.(workingDirectory).then((info: PrInfo | null) => {
-        setPrInfo(info)
-      }).catch(() => {
-        setPrInfo(null)
-      })
+      window.electronAPI?.getPrStatus?.(workingDirectory)
+        .then((info: PrInfo | null) => {
+          setPrInfo(info)
+        })
+        .catch((error) => {
+          console.error('[PrBadge] Failed to fetch PR status via IPC:', {
+            workingDirectory,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          setPrInfo(null)
+        })
     } else {
       setPrInfo(null)
     }
@@ -1952,20 +1964,22 @@ function PrBadge({
   }
 
   // Determine icon based on state
-  const StatusIcon = prInfo.isDraft
-    ? GitPullRequestDraft
-    : prInfo.state === 'MERGED'
-    ? GitMerge
-    : GitPullRequest
+  let StatusIcon = GitPullRequest
+  if (prInfo.isDraft) {
+    StatusIcon = GitPullRequestDraft
+  } else if (prInfo.state === 'MERGED') {
+    StatusIcon = GitMerge
+  }
 
   // Determine color based on state
-  const statusColor = prInfo.state === 'MERGED'
-    ? 'text-purple-500'
-    : prInfo.state === 'CLOSED'
-    ? 'text-red-500'
-    : prInfo.isDraft
-    ? 'text-muted-foreground'
-    : 'text-green-500'
+  let statusColor = 'text-green-500'
+  if (prInfo.state === 'MERGED') {
+    statusColor = 'text-purple-500'
+  } else if (prInfo.state === 'CLOSED') {
+    statusColor = 'text-red-500'
+  } else if (prInfo.isDraft) {
+    statusColor = 'text-muted-foreground'
+  }
 
   const handleClick = () => {
     window.electronAPI?.openUrl?.(prInfo.url)

@@ -16,16 +16,17 @@ export interface GitState {
 /**
  * PR information for a branch.
  * All fields correspond to gh pr view --json output.
+ * Immutable - fields are readonly to prevent accidental mutation.
  */
 export interface PrInfo {
   /** PR number (e.g., 123) */
-  number: number
+  readonly number: number
   /** PR title */
-  title: string
+  readonly title: string
   /** PR state: OPEN, CLOSED, or MERGED */
-  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  readonly state: 'OPEN' | 'CLOSED' | 'MERGED'
   /** Whether this is a draft PR */
-  isDraft: boolean
+  readonly isDraft: boolean
   /** URL to view the PR on GitHub */
-  url: string
+  readonly url: string
 }
