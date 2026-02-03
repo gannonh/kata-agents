@@ -6,7 +6,7 @@
  * Run with: bun run print:system-prompt
  */
 
-import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext } from './system.ts';
+import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext, formatGitContext } from './system.ts';
 import { formatSessionState } from '../agent/mode-manager.ts';
 
 // ANSI color codes for terminal output
@@ -144,13 +144,26 @@ printSection(
 printAnnotation('Contains: working_directory path, working_directory_context explanation');
 printAnnotation('If project context file exists, includes <project_context_file> tag (agent reads via Read tool)');
 
-// 6. Recovery Context (example)
+// 6. Git Context
+const gitContext = formatGitContext(
+  { branch: 'feature/auth', isRepo: true, isDetached: false, detachedHead: null },
+  { number: 42, title: 'Add user authentication', state: 'OPEN', isDraft: false, url: 'https://github.com/org/repo/pull/42' }
+);
+printSection(
+  '6. GIT CONTEXT - formatGitContext()',
+  gitContext || '(empty - not a git repo)',
+  colors.magenta
+);
+printAnnotation('Shows current branch and PR info when available');
+printAnnotation('Injected per-message alongside working directory context');
+
+// 7. Recovery Context (example)
 const exampleRecoveryContext = `<recovery_context>
 This session was interrupted and is being recovered. Here's a summary of the previous conversation:
 [Summary of previous messages would appear here]
 </recovery_context>`;
 printSection(
-  '6. RECOVERY CONTEXT - buildRecoveryContext() [only on resume]',
+  '7. RECOVERY CONTEXT - buildRecoveryContext() [only on resume]',
   exampleRecoveryContext,
   colors.magenta
 );
@@ -180,6 +193,11 @@ local-mcp: enabled (stdio subprocess servers supported)
 <working_directory>/Users/example/projects/my-app</working_directory>
 
 <working_directory_context>The user explicitly selected this as the working directory for this session.</working_directory_context>
+
+<git_context>
+Current branch: feature/auth
+PR #42: Add user authentication (OPEN)
+</git_context>
 
 <project_context_file>CLAUDE.md</project_context_file>
 
@@ -215,9 +233,10 @@ ${colors.bold}Dynamic User Message Components (per message):${colors.reset}
   3. Source State                        ${colors.dim}// formatSourceState()${colors.reset}
   4. Workspace Capabilities              ${colors.dim}// formatWorkspaceCapabilities()${colors.reset}
   5. Working Directory + project_context_file  ${colors.dim}// getWorkingDirectoryContext()${colors.reset}
-  6. Recovery Context (on resume only)   ${colors.dim}// buildRecoveryContext()${colors.reset}
-  7. File Attachments                    ${colors.dim}// Inline paths or base64${colors.reset}
-  8. User Message Text                   ${colors.dim}// The actual user input${colors.reset}
+  6. Git Context                         ${colors.dim}// formatGitContext()${colors.reset}
+  7. Recovery Context (on resume only)   ${colors.dim}// buildRecoveryContext()${colors.reset}
+  8. File Attachments                    ${colors.dim}// Inline paths or base64${colors.reset}
+  9. User Message Text                   ${colors.dim}// The actual user input${colors.reset}
 
 ${colors.bold}Key Files:${colors.reset}
   packages/shared/src/prompts/system.ts          ${colors.dim}// Main prompt assembly${colors.reset}

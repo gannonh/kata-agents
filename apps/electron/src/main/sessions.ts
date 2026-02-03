@@ -54,6 +54,7 @@ import { type ThinkingLevel, DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
 import { listLabels } from '@craft-agent/shared/labels/storage'
 import { extractLabelId } from '@craft-agent/shared/labels'
+import { getGitStatus, getPrStatus } from '@craft-agent/shared/git'
 
 /**
  * Sanitize message content for use as session title.
@@ -2288,6 +2289,15 @@ export class SessionManager {
       // Also update the agent's session config if agent exists
       if (managed.agent) {
         managed.agent.updateWorkingDirectory(path)
+        // Refresh git context for new working directory
+        Promise.all([
+          getGitStatus(path),
+          getPrStatus(path),
+        ]).then(([gitState, prInfo]) => {
+          managed.agent?.updateGitContext(gitState, prInfo)
+        }).catch(() => {
+          // Non-fatal
+        })
       }
       this.persistSession(managed)
       // Notify renderer of the working directory change
@@ -2591,6 +2601,22 @@ export class SessionManager {
       sessionLog.info('Message:', message)
       sessionLog.info('Agent model:', agent.getModel())
       sessionLog.info('process.cwd():', process.cwd())
+
+      // Fetch fresh git context for AI awareness (CTX-01, CTX-02)
+      // Uses working directory from managed session -- workspace-specific
+      if (managed.workingDirectory) {
+        try {
+          const [gitState, prInfo] = await Promise.all([
+            getGitStatus(managed.workingDirectory),
+            getPrStatus(managed.workingDirectory),
+          ])
+          agent.updateGitContext(gitState, prInfo)
+        } catch (error) {
+          // Non-fatal: git context is nice-to-have, don't block message send
+          sessionLog.debug('[sendMessage] Failed to fetch git context:', error)
+        }
+      }
+      sendSpan.mark('git.context')
 
       // Set ultrathink override if enabled (single-shot - resets after query)
       // This boosts the session's thinkingLevel to 'max' for this message only
