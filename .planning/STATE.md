@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 5 - Real-Time Updates (COMPLETE)
-Plan: 03 of 03 (all complete)
-Status: Phase complete
+Phase: 5 - Real-Time Updates (COMPLETE + gap closure)
+Plan: 04 of 04 (all complete including gap closure)
+Status: Phase complete (verified 12/12 must-haves)
 Progress: [██████    ] 10/12 requirements (3/5 phases)
 ```
 
-**Last activity:** 2026-02-03 — Phase 5 verified (9/9 must-haves passed)
+**Last activity:** 2026-02-03 — Phase 5 gap closure complete (12/12 must-haves)
 
 ## Quick Tasks
 
@@ -38,7 +38,7 @@ Progress: [██████    ] 10/12 requirements (3/5 phases)
 |--------|-------|
 | Milestones shipped | 2 |
 | Total phases | 5 |
-| Total plans | 15 |
+| Total plans | 16 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
