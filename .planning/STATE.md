@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 4 - PR Integration (COMPLETE)
-Plan: —
-Status: Phase 4 verified, ready for Phase 5
-Progress: [████      ] 7/12 requirements (2/5 phases)
+Phase: 5 - Real-Time Updates (IN PROGRESS)
+Plan: 02 of 03 in phase
+Status: In progress
+Progress: [█████     ] 9/12 requirements (2/5 phases, 2/3 phase 5 plans)
 ```
 
-**Last activity:** 2026-02-02 — Completed quick task 001: Fill test coverage gaps
+**Last activity:** 2026-02-03 — Completed 05-02-PLAN.md (focus-aware PR polling)
 
 ## Quick Tasks
 
@@ -49,7 +49,7 @@ Progress: [████      ] 7/12 requirements (2/5 phases)
 |-------|------|--------|--------------|
 | 3 | Core Git Service | Complete ✓ | GIT-01, GIT-02, GIT-03 |
 | 4 | PR Integration | Complete ✓ | PR-01, PR-02, PR-03, PR-04 |
-| 5 | Real-Time Updates | Ready | LIVE-01, LIVE-02, LIVE-03 |
+| 5 | Real-Time Updates | In Progress (2/3 plans) | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Ready | CTX-01, CTX-02 |
 | 7 | Polish and Edge Cases | Blocked by 6 | — |
 
@@ -81,6 +81,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Keep GET_GIT_BRANCH handler for backward compatibility (FreeFormInput.tsx uses it)
 - Git branch badge placed in chat input toolbar (better visibility than sidebar)
 - PR badge colors match GitHub conventions (green/purple/red/gray)
+- Focus-aware PR polling: useGitStatus in FreeFormInput provides branch to PrBadge
 
 ### Research Flags
 
@@ -108,9 +109,15 @@ _None_
 | Version manifest | Disabled | Needs version API at kata.sh |
 | MCP docs server | Commented out | Needs docs MCP at kata.sh |
 
+## Session Continuity
+
+Last session: 2026-02-03
+Stopped at: Completed 05-02-PLAN.md
+Resume file: .planning/phases/05-real-time-updates/05-03-PLAN.md
+
 ## Next Steps
 
-Plan Phase 5 -> `/kata:discuss-phase 5` or `/kata:plan-phase 5`
+Execute Plan 05-03 (useGitStatus focus-aware refresh)
 
 ---
-*Last updated: 2026-02-02 after quick task 001-01*
+*Last updated: 2026-02-03 after completing 05-02-PLAN.md*
