@@ -826,19 +826,13 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return !isPackagedApp()
   })
 
-  // Get git branch for a directory (returns null if not a git repo or git unavailable)
-  // Legacy handler - kept for backward compatibility (FreeFormInput.tsx)
-  ipcMain.handle(IPC_CHANNELS.GET_GIT_BRANCH, (_event, dirPath: string) => {
+  // Legacy handler - deprecated, use GIT_STATUS instead.
+  // Kept for backward compatibility; delegates to async GitService.
+  ipcMain.handle(IPC_CHANNELS.GET_GIT_BRANCH, async (_event, dirPath: string) => {
     try {
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-        cwd: dirPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],  // Suppress stderr output
-        timeout: 5000,  // 5 second timeout
-      }).trim()
-      return branch || null
+      const status = await getGitStatus(dirPath)
+      return status.branch
     } catch {
-      // Not a git repo, git not installed, or other error
       return null
     }
   })
