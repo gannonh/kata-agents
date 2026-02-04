@@ -66,28 +66,18 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
 
 ---
 
-### Phase 1: Live E2E Test Suite
+### Phase 1: Live E2E Test Suite ✓
 
 **Goal:** E2E tests verify core user workflows end-to-end with real credentials.
 
-**Depends on:** None (live infrastructure already exists via live.fixture.ts and demo:* scripts)
+**Status:** Completed 2026-02-04
 
 **Requirements:** E2E-01, E2E-02, E2E-03, E2E-04, E2E-05, E2E-06, E2E-07
 
-**Success Criteria:**
-1. `bun run test:e2e:live` script runs live tests against `~/.kata-agents-demo/` environment
-2. Auth test verifies app loads with credentials, no onboarding wizard appears
-3. Chat test sends message to agent, verifies streaming response renders with turn cards
-4. Session test creates, renames, switches, deletes sessions with persistence verification
-5. Git status test verifies branch badge shows correct branch in demo repo
-6. Permission mode test cycles through safe/ask/allow-all, verifies UI updates
-
-**Plans:** 3 plans
-
 Plans:
-- [ ] 01-01-PLAN.md — Test infrastructure setup (credential validation, test script)
-- [ ] 01-02-PLAN.md — Auth and chat live tests (E2E-03, E2E-04)
-- [ ] 01-03-PLAN.md — Session, git, permission tests (E2E-05, E2E-06, E2E-07)
+- [x] 01-01-PLAN.md — Test infrastructure setup (credential validation, test script)
+- [x] 01-02-PLAN.md — Auth and chat live tests (E2E-03, E2E-04)
+- [x] 01-03-PLAN.md — Session, git, permission tests (E2E-05, E2E-06, E2E-07)
 
 ---
 
@@ -114,9 +104,9 @@ Plans:
 |-----------|--------|--------|-------|--------------|----------|
 | v0.4.0 Foundation | Shipped | 2 | 6 | 10 | 100% |
 | v0.6.0 Git Integration | Shipped | 5 | 14 | 12 | 100% |
-| v0.7.0 Testing Infrastructure | In Progress | 2 | 3 | 10 | 0% |
+| v0.7.0 Testing Infrastructure | In Progress | 2 | 3 | 10 | 70% |
 | v0.8.0 Kata Infrastructure | Planned | — | — | — | — |
 
 ---
 
-_Last updated: 2026-02-04_
+_Last updated: 2026-02-04 after Phase 1 completion_

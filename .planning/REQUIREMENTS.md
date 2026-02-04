@@ -8,13 +8,13 @@
 
 ## Live E2E Tests
 
-- [ ] **E2E-01**: Live fixture infrastructure uses `~/.kata-agents-demo/` with real OAuth credentials
-- [ ] **E2E-02**: `bun run test:e2e:live` script runs live tests separately from CI smoke tests
-- [ ] **E2E-03**: Auth test verifies app loads with real credentials, no onboarding wizard
-- [ ] **E2E-04**: Chat round-trip test sends message, verifies streaming response renders
-- [ ] **E2E-05**: Session lifecycle tests create, rename, switch, delete sessions with persistence verification
-- [ ] **E2E-06**: Git status test verifies branch badge shows correct branch in demo repo
-- [ ] **E2E-07**: Permission mode test cycles through safe/ask/allow-all and verifies indicator updates
+- [x] **E2E-01**: Live fixture infrastructure uses `~/.kata-agents-demo/` with real OAuth credentials
+- [x] **E2E-02**: `bun run test:e2e:live` script runs live tests separately from CI smoke tests
+- [x] **E2E-03**: Auth test verifies app loads with real credentials, no onboarding wizard
+- [x] **E2E-04**: Chat round-trip test sends message, verifies streaming response renders
+- [x] **E2E-05**: Session lifecycle tests create, rename, switch, delete sessions with persistence verification
+- [x] **E2E-06**: Git status test verifies branch badge shows correct branch in demo repo
+- [x] **E2E-07**: Permission mode test cycles through safe/ask/allow-all and verifies indicator updates
 
 ## Future (Deferred)
 
@@ -29,15 +29,15 @@
 
 ## Traceability
 
-| Requirement | Phase   | Plan | Status  |
-|-------------|---------|------|---------|
-| E2E-01      | Phase 1 | —    | Pending |
-| E2E-02      | Phase 1 | —    | Pending |
-| E2E-03      | Phase 1 | —    | Pending |
-| E2E-04      | Phase 1 | —    | Pending |
-| E2E-05      | Phase 1 | —    | Pending |
-| E2E-06      | Phase 1 | —    | Pending |
-| E2E-07      | Phase 1 | —    | Pending |
-| COV-01      | Phase 2 | —    | Pending |
-| COV-02      | Phase 2 | —    | Pending |
-| COV-03      | Phase 2 | —    | Pending |
+| Requirement | Phase   | Plan  | Status   |
+|-------------|---------|-------|----------|
+| E2E-01      | Phase 1 | 01-01 | Complete |
+| E2E-02      | Phase 1 | 01-01 | Complete |
+| E2E-03      | Phase 1 | 01-02 | Complete |
+| E2E-04      | Phase 1 | 01-02 | Complete |
+| E2E-05      | Phase 1 | 01-03 | Complete |
+| E2E-06      | Phase 1 | 01-03 | Complete |
+| E2E-07      | Phase 1 | 01-03 | Complete |
+| COV-01      | Phase 2 | —     | Pending  |
+| COV-02      | Phase 2 | —     | Pending  |
+| COV-03      | Phase 2 | —     | Pending  |
