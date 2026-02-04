@@ -13,8 +13,8 @@
  */
 
 import { watch, type FSWatcher } from 'chokidar'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { readFileSync, statSync } from 'node:fs'
 import { debug } from '@craft-agent/shared/utils'
 
 // Debounce delay in milliseconds (100ms for rapid git operations like rebase)
@@ -23,6 +23,43 @@ const DEBOUNCE_MS = 100
 interface GitWatcherOptions {
   debounceMs?: number
   onError?: (error: Error) => void
+}
+
+/**
+ * Resolve the actual .git directory for a workspace.
+ * Handles normal repos (.git is a directory), worktrees and submodules
+ * (.git is a file containing a gitdir pointer).
+ * Returns the absolute path to the git directory, or null if not a git repo.
+ */
+function resolveGitDir(workspaceDir: string): string | null {
+  const gitPath = join(workspaceDir, '.git')
+
+  try {
+    const stat = statSync(gitPath)
+
+    if (stat.isDirectory()) {
+      // Normal repository: .git is a directory
+      return gitPath
+    }
+
+    if (stat.isFile()) {
+      // Worktree or submodule: .git is a file with "gitdir: <path>"
+      const content = readFileSync(gitPath, 'utf-8').trim()
+      const match = content.match(/^gitdir:\s*(.+)$/)
+      if (!match) {
+        debug('[GitWatcher] .git file does not contain gitdir pointer:', gitPath)
+        return null
+      }
+      const gitdir = match[1].trim()
+      // Resolve relative paths against the workspace directory
+      return resolve(workspaceDir, gitdir)
+    }
+
+    return null
+  } catch {
+    // ENOENT (no .git), permission errors, etc.
+    return null
+  }
 }
 
 /**
@@ -49,10 +86,9 @@ export class GitWatcher {
    * @returns true if watching started, false if not a git repo
    */
   start(): boolean {
-    const gitDir = join(this.workspaceDir, '.git')
+    const gitDir = resolveGitDir(this.workspaceDir)
 
-    // Verify .git exists
-    if (!existsSync(gitDir)) {
+    if (!gitDir) {
       debug('[GitWatcher] Not a git repository:', this.workspaceDir)
       return false
     }
@@ -82,6 +118,16 @@ export class GitWatcher {
       })
       .on('error', (error) => {
         debug('[GitWatcher] Error:', error)
+
+        // Detect Linux inotify watch limit exhaustion
+        const errorAny = error as NodeJS.ErrnoException
+        if (errorAny.message?.includes('ENOSPC') || errorAny.code === 'ENOSPC') {
+          debug(
+            '[GitWatcher] File watcher limit reached. On Linux, increase inotify watches:',
+            'echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p'
+          )
+        }
+
         try {
           this.onError?.(error)
         } catch (callbackError) {
