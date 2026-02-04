@@ -149,6 +149,32 @@ The demo setup creates:
 
 Auth works because `credentials.enc` is read from the hardcoded path `~/.kata-agents/credentials.enc` regardless of `KATA_CONFIG_DIR`.
 
+### Running Live Tests
+
+**Prerequisites:**
+- Valid OAuth credentials in `~/.kata-agents/credentials.enc` (authenticate via the app first)
+- The fixture validates credentials exist and provides a clear error if missing
+
+**Scripts:**
+
+```bash
+# From apps/electron directory
+
+# Run all live tests
+bun run test:e2e:live
+
+# Run live tests in debug mode (step-through debugging)
+bun run test:e2e:live:debug
+
+# Run live tests in headed mode (watch execution)
+bun run test:e2e:live:headed
+```
+
+**Notes:**
+- Live tests are in `e2e/tests/live/` and use `live.fixture.ts`
+- They exercise the real Claude API and take longer than mock tests
+- Use longer timeouts (30s+) for API calls
+
 ## Configuration
 
 See `playwright.config.ts` for:
