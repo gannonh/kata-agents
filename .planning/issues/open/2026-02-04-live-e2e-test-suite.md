@@ -3,6 +3,7 @@ created: 2026-02-04T15:30
 title: Live E2E Test Suite - Comprehensive Tests with Real Credentials
 area: testing
 provenance: github:gannonh/kata-agents#60
+linked_phase: 1
 files:
   - apps/electron/e2e/fixtures/live.fixture.ts
   - apps/electron/e2e/fixtures/electron.fixture.ts

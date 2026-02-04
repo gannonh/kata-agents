@@ -3,6 +3,7 @@ created: 2026-02-02T22:15
 title: Fill test coverage gaps
 area: testing
 provenance: github:gannonh/kata-agents#52
+linked_phase: 2
 files:
   - packages/shared/src/git/pr-service.ts
   - packages/shared/src/git/__tests__/
