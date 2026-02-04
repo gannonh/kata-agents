@@ -37,8 +37,8 @@ Progress: [██████████] 15/15 plans (5/5 phases complete)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 6 |
-| Total plans | 17 |
+| Total phases | 7 |
+| Total plans | 20 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -56,21 +56,23 @@ Progress: [██████████] 15/15 plans (5/5 phases complete)
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - complete
 
-## Phase 6 Summary
+## Phase 7 Summary
 
-**Git context injection into agent messages:**
-- `formatGitContext()` produces compact XML-tagged context from GitState + PrInfo
-- CraftAgent injects git context into both text and SDK user messages
-- SessionManager fetches fresh git state before each `agent.chat()` call
-- Git context refreshes on working directory change
-- Non-git directories produce empty context (graceful absence)
-- 10 unit tests covering all formatting edge cases
+**Defensive error handling, legacy cleanup, and integration tests:**
+- `resolveGitDir()` handles worktrees and submodules (.git as file with gitdir pointer)
+- ENOSPC errors produce actionable Linux inotify instructions
+- `existsSync` guards in GitService prevent simple-git console noise
+- GET_GIT_BRANCH handler replaced execSync with async getGitStatus delegation
+- @deprecated annotations on GET_GIT_BRANCH, getGitBranch across types/preload/IPC
+- 10 integration tests for GitWatcher (start/stop, worktree, change detection, performance)
 
 **Plans:**
-- 06-01: formatGitContext + CraftAgent wiring + SessionManager integration
+- 07-01: Defensive error handling (worktree, existsSync, ENOSPC)
+- 07-02: Deprecate legacy GET_GIT_BRANCH execSync handler
+- 07-03: GitWatcher integration tests
 
-**Commits:** 4 commits on feat/v0.6.0-06-ai-context-injection
-**Verification:** 5/5 must-haves passed
+**Commits:** 8 commits on fix/v0.6.0-07-polish-and-edge-cases
+**Verification:** 17/17 must-haves passed
 
 ## Accumulated Context
 
@@ -129,7 +131,7 @@ Resume file: None
 
 ## Next Steps
 
-All Phase 7 plans complete. v0.6.0 milestone ready for final review.
+Milestone complete. Audit milestone -> `/kata:kata-audit-milestone`
 
 ---
-*Last updated: 2026-02-04 after 07-03 plan execution*
+*Last updated: 2026-02-04 after Phase 7 execution complete*
