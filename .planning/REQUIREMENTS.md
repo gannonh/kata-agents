@@ -29,15 +29,15 @@
 
 ## Traceability
 
-| Requirement | Phase | Plan |
-|-------------|-------|------|
-| COV-01 | — | — |
-| COV-02 | — | — |
-| COV-03 | — | — |
-| E2E-01 | — | — |
-| E2E-02 | — | — |
-| E2E-03 | — | — |
-| E2E-04 | — | — |
-| E2E-05 | — | — |
-| E2E-06 | — | — |
-| E2E-07 | — | — |
+| Requirement | Phase   | Plan | Status  |
+|-------------|---------|------|---------|
+| E2E-01      | Phase 1 | —    | Pending |
+| E2E-02      | Phase 1 | —    | Pending |
+| E2E-03      | Phase 1 | —    | Pending |
+| E2E-04      | Phase 1 | —    | Pending |
+| E2E-05      | Phase 1 | —    | Pending |
+| E2E-06      | Phase 1 | —    | Pending |
+| E2E-07      | Phase 1 | —    | Pending |
+| COV-01      | Phase 2 | —    | Pending |
+| COV-02      | Phase 2 | —    | Pending |
+| COV-03      | Phase 2 | —    | Pending |

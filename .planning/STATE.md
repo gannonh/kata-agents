@@ -1,89 +1,90 @@
-# Kata Agents — State
+# Project State: Kata Agents
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-04)
+**Core Value:** Developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
 
-**Core value:** A developer-centric AI desktop client that understands your git workflow
-**Current focus:** v0.7.0 Testing Infrastructure
+**Current Focus:** v0.7.0 Testing Infrastructure — Establish baseline test coverage and live E2E testing capabilities with real credentials.
+
+---
 
 ## Current Position
 
+**Milestone:** v0.7.0 Testing Infrastructure
+**Phase:** 1 - Live E2E Test Suite
+**Plan:** Not started
+**Status:** Roadmap created, awaiting phase planning
+
 ```
-Milestone: v0.7.0 Testing Infrastructure
-Phase: Not started (defining requirements)
-Status: Defining requirements
-Progress: [          ] 0/0 plans
+Progress: [░░░░░░░░░░] 0% (0/10 requirements)
 ```
 
-**Last activity:** 2026-02-04 -- Milestone v0.7.0 started
-
-## Quick Tasks
-
-| ID | Name | Status | Summary |
-|----|------|--------|---------|
-| 001 | Fill test coverage gaps | Complete | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
-
-## Shipped Milestones
-
-| Version | Name | Shipped | Phases | Requirements |
-|---------|------|---------|--------|--------------|
-| v0.6.0 | Git Integration | 2026-02-04 | 5 | 12/12 |
-| v0.5.0 | — | 2026-02 | — | — |
-| v0.4.0 | Foundation | 2026-01-30 | 2 | 10/10 |
+---
 
 ## Performance Metrics
 
-| Metric | Value |
-|--------|-------|
-| Milestones shipped | 3 |
-| Total phases | 7 |
-| Total plans | 20 |
-| Total requirements | 22 |
+**Milestone velocity:**
+- v0.4.0: 10 requirements in 2 phases (6 plans)
+- v0.6.0: 12 requirements in 5 phases (14 plans)
+- v0.7.0: 10 requirements in 2 phases (0 plans) — In Progress
+
+**Current milestone:**
+- Started: 2026-02-04
+- Target completion: 2026-02-06
+- Days elapsed: 0
+- Phases completed: 0/3
+- Plans completed: 0/TBD
+
+---
 
 ## Accumulated Context
 
-### Decisions Made
+### Key Decisions
 
-See PROJECT.md Key Decisions table for full list with outcomes.
+**Testing strategy (2026-02-04):**
+- Unit tests focus on critical business logic (pr-service, git-service patterns)
+- Live E2E tests use real credentials in `~/.kata-agents-demo/` isolation
+- Coverage gaps documented with rationale (not 100% coverage goal)
+- Separate test scripts for CI smoke tests vs live E2E tests
 
-### Open Questions
+### Active Todos
 
-_None_
+- [ ] Plan Phase 1: Live E2E Test Suite
+- [ ] Plan Phase 2: Unit Test Coverage
 
-### Milestone Scope Issues
+### Known Blockers
 
-Issues pulled into current milestone scope:
-- "E2E Testing Infrastructure - Mock API & Feature Integration Tests" (from: .planning/issues/open/2026-02-02-e2e-testing-infrastructure.md, GitHub: #49)
-- "Fill test coverage gaps" (from: .planning/issues/open/2026-02-02-fill-test-coverage-gaps.md, GitHub: #52)
-- "Live E2E Test Suite - Comprehensive Tests with Real Credentials" (from: .planning/issues/open/2026-02-04-live-e2e-test-suite.md, GitHub: #60)
+None.
 
-### Pending Issues
+### Technical Debt
 
-3 open issues in `.planning/issues/open/` (all pulled into v0.7.0 scope)
+**From v0.6.0:**
+- GitStatusBadge.tsx exists but unused (inline GitBranchBadge used instead)
+- Deprecated GET_GIT_BRANCH channel retained for backward compatibility
+- isGitRepository() exported but not called externally
 
-### Blockers
+**Testing debt (addressed in v0.7.0):**
+- pr-service.ts has no unit tests
+- No live E2E tests with real credentials
+- Coverage reporting not configured
 
-_None_
-
-## Disabled Features
-
-| Feature | Status | Dependency |
-|---------|--------|------------|
-| Slack OAuth | Disabled with error message | Needs HTTPS relay server |
-| External docs links | Empty/GitHub fallback | Needs docs.kata.sh |
-| Version manifest | Disabled | Needs version API at kata.sh |
-| MCP docs server | Commented out | Needs docs MCP at kata.sh |
+---
 
 ## Session Continuity
 
-Last session: 2026-02-04
-Stopped at: Defining v0.7.0 requirements
-Resume file: None
+**Next action:** Run `/kata:kata-plan-phase 1` to decompose Phase 1 into executable plans.
 
-## Next Steps
+**Context for next agent:**
+- Phase 1 focuses on live E2E tests with real credentials
+- Live infrastructure already exists (live.fixture.ts, demo:* scripts)
+- Tests run against `~/.kata-agents-demo/` with real OAuth from `~/.kata-agents/credentials.enc`
+- See apps/electron/e2e/README.md for existing setup
 
-Define requirements and create roadmap for v0.7.0
+**Files to review:**
+- `.planning/ROADMAP.md` — Full roadmap structure
+- `.planning/REQUIREMENTS.md` — All requirements with traceability
+- `packages/shared/src/git/git-service.test.ts` — Unit test pattern reference
 
 ---
-*Last updated: 2026-02-04 after v0.7.0 milestone started*
+
+_Last updated: 2026-02-04 after roadmap creation_
