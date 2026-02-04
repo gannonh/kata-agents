@@ -15,12 +15,15 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { execSync } from 'child_process'
 import { homedir } from 'os'
+import { existsSync } from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const DEMO_CONFIG_DIR = path.join(homedir(), '.kata-agents-demo')
+/** Path to demo config directory used for live tests */
+export const DEMO_CONFIG_DIR = path.join(homedir(), '.kata-agents-demo')
 const PROJECT_ROOT = path.resolve(__dirname, '../../../../')
+const CREDENTIALS_PATH = path.join(homedir(), '.kata-agents', 'credentials.enc')
 
 type LiveFixtures = {
   electronApp: ElectronApplication
@@ -29,6 +32,14 @@ type LiveFixtures = {
 
 export const test = base.extend<LiveFixtures>({
   electronApp: async ({}, use) => {
+    // Validate credentials exist before launching
+    if (!existsSync(CREDENTIALS_PATH)) {
+      throw new Error(
+        `Live E2E tests require credentials.\n` +
+        `Run the app first and authenticate via OAuth to create ~/.kata-agents/credentials.enc`
+      )
+    }
+
     // Ensure demo environment exists (no-op if already seeded)
     execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'inherit' })
     execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'inherit' })
