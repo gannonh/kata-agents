@@ -502,7 +502,7 @@ These help with UI feedback and result summarization.`;
 /**
  * Format git context for injection into user messages.
  * Returns concise XML-tagged context for the agent, or empty string if no git info.
- * Designed to be lightweight (~100-200 chars) to avoid prompt bloat.
+ * Includes current branch (or detached HEAD) and PR information when available.
  */
 export function formatGitContext(gitState?: GitState | null, prInfo?: PrInfo | null): string {
   if (!gitState || !gitState.isRepo) {

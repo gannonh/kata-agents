@@ -2290,13 +2290,15 @@ export class SessionManager {
       if (managed.agent) {
         managed.agent.updateWorkingDirectory(path)
         // Refresh git context for new working directory
-        Promise.all([
+        Promise.allSettled([
           getGitStatus(path),
           getPrStatus(path),
-        ]).then(([gitState, prInfo]) => {
+        ]).then(([gitResult, prResult]) => {
+          const gitState = gitResult.status === 'fulfilled' ? gitResult.value : null
+          const prInfo = prResult.status === 'fulfilled' ? prResult.value : null
           managed.agent?.updateGitContext(gitState, prInfo)
-        }).catch(() => {
-          // Non-fatal
+        }).catch((error) => {
+          sessionLog.info('[updateWorkingDirectory] Failed to refresh git context:', error instanceof Error ? error.message : String(error))
         })
       }
       this.persistSession(managed)
@@ -2603,17 +2605,20 @@ export class SessionManager {
       sessionLog.info('process.cwd():', process.cwd())
 
       // Fetch fresh git context for AI awareness (CTX-01, CTX-02)
-      // Uses working directory from managed session -- workspace-specific
+      // Uses working directory from managed session (workspace-specific).
+      // Refreshed on each message to capture branch changes, checkouts, and PR updates.
       if (managed.workingDirectory) {
         try {
-          const [gitState, prInfo] = await Promise.all([
+          const [gitResult, prResult] = await Promise.allSettled([
             getGitStatus(managed.workingDirectory),
             getPrStatus(managed.workingDirectory),
           ])
+          const gitState = gitResult.status === 'fulfilled' ? gitResult.value : null
+          const prInfo = prResult.status === 'fulfilled' ? prResult.value : null
           agent.updateGitContext(gitState, prInfo)
         } catch (error) {
           // Non-fatal: git context is nice-to-have, don't block message send
-          sessionLog.debug('[sendMessage] Failed to fetch git context:', error)
+          sessionLog.info('[sendMessage] Failed to fetch git context:', error instanceof Error ? error.message : String(error))
         }
       }
       sendSpan.mark('git.context')

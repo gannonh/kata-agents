@@ -6,6 +6,7 @@
  * - getPrStatus returns null when gh CLI not installed (ENOENT)
  * - getPrStatus returns null when no PR exists for branch
  * - getPrStatus returns null when gh CLI not authenticated
+ * - getPrStatus returns null silently for non-git directories
  * - Unexpected errors are logged and return null
  */
 import { describe, it, expect, mock, beforeEach, afterEach, spyOn } from 'bun:test'
@@ -175,6 +176,21 @@ describe('getPrStatus', () => {
       const result = await getPrStatus('/repo/path')
 
       expect(result).toBeNull()
+    })
+  })
+
+  describe('not a git repository', () => {
+    it('should return null silently for non-git directory', async () => {
+      const consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {})
+      mockExecResult = {
+        error: createError('1', 'failed to run git: fatal: not a git repository (or any of the parent directories): .git\n'),
+      }
+
+      const result = await getPrStatus('/tmp/not-a-repo')
+
+      expect(result).toBeNull()
+      expect(consoleErrorSpy).not.toHaveBeenCalled()
+      consoleErrorSpy.mockRestore()
     })
   })
 

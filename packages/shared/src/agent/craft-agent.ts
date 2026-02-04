@@ -2901,9 +2901,14 @@ Please continue the conversation naturally from where we left off.
   /**
    * Update the cached git context for injection into user messages.
    * Called by SessionManager before each message send with fresh git state.
+   * Workspace-specific: reflects the working directory's git state.
    */
   updateGitContext(gitState?: GitState | null, prInfo?: PrInfo | null): void {
-    this.gitContext = formatGitContext(gitState, prInfo);
+    try {
+      this.gitContext = formatGitContext(gitState, prInfo);
+    } catch {
+      this.gitContext = '';
+    }
   }
 
   /**
