@@ -1661,7 +1661,7 @@ export const TurnCard = React.memo(function TurnCard({
   const isThinking = shouldShowThinkingIndicator(turnPhase, isBuffering)
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" data-testid="assistant-turn-card" data-streaming={isStreaming}>
       {/* Activity Section */}
       {hasActivities && (
         <div className="group select-none">

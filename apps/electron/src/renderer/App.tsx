@@ -1347,7 +1347,7 @@ export default function App() {
           )}
 
           {/* Main UI - always rendered, splash fades away to reveal it */}
-          <div className="h-full flex flex-col text-foreground">
+          <div data-testid="app-main-content" className="h-full flex flex-col text-foreground">
             <div className="flex-1 min-h-0">
               <AppShell
                 contextValue={appShellContextValue}
