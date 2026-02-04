@@ -4,7 +4,7 @@
 
 **Core Value:** Developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
 
-**Current Focus:** v0.7.0 Testing Infrastructure — Establish baseline test coverage and live E2E testing capabilities with real credentials.
+**Current Focus:** v0.7.0 Testing Infrastructure -- Establish baseline test coverage and live E2E testing capabilities with real credentials.
 
 ---
 
@@ -12,11 +12,11 @@
 
 **Milestone:** v0.7.0 Testing Infrastructure
 **Phase:** 1 - Live E2E Test Suite
-**Plan:** 1 of 3
-**Status:** In progress
+**Plan:** 3 of 3
+**Status:** Phase complete
 
 ```
-Progress: [█░░░░░░░░░] 10% (1/10 requirements)
+Progress: [█████░░░░░] 50% (5/10 requirements)
 ```
 
 ---
@@ -26,14 +26,14 @@ Progress: [█░░░░░░░░░] 10% (1/10 requirements)
 **Milestone velocity:**
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
-- v0.7.0: 10 requirements in 2 phases (3 plans) — In Progress
+- v0.7.0: 10 requirements in 2 phases (6 plans) -- In Progress
 
 **Current milestone:**
 - Started: 2026-02-04
 - Target completion: 2026-02-06
 - Days elapsed: 0
-- Phases completed: 0/2
-- Plans completed: 1/6
+- Phases completed: 1/2
+- Plans completed: 3/6
 
 ---
 
@@ -44,6 +44,7 @@ Progress: [█░░░░░░░░░] 10% (1/10 requirements)
 | ID | Decision | Rationale | Date |
 |----|----------|-----------|------|
 | live-fixture-validation | Validate credentials.enc exists before launching app in live fixture | Prevents confusing test failures when credentials are missing | 2026-02-04 |
+| git-test-dynamic-branch | Dynamic branch detection instead of hardcoded 'main' | Demo repo may be on different branch; test verifies badge shows actual branch | 2026-02-04 |
 
 **Testing strategy (2026-02-04):**
 - Unit tests focus on critical business logic (pr-service, git-service patterns)
@@ -54,9 +55,11 @@ Progress: [█░░░░░░░░░] 10% (1/10 requirements)
 ### Active Todos
 
 - [x] Plan Phase 1: Live E2E Test Suite
-- [ ] Execute 01-02-PLAN.md (First Live Test)
-- [ ] Execute 01-03-PLAN.md (Message Streaming Test)
+- [x] Execute 01-01-PLAN.md (Test Infrastructure)
+- [x] Execute 01-02-PLAN.md (Auth & Chat Tests)
+- [x] Execute 01-03-PLAN.md (Session, Git, Permission Tests)
 - [ ] Plan Phase 2: Unit Test Coverage
+- [ ] Execute Phase 2 plans
 
 ### Known Blockers
 
@@ -71,29 +74,29 @@ None.
 
 **Testing debt (addressed in v0.7.0):**
 - pr-service.ts has no unit tests
-- No live E2E tests with real credentials
+- ~~No live E2E tests with real credentials~~ (RESOLVED: 5 live E2E tests now)
 - Coverage reporting not configured
 
 ---
 
 ## Session Continuity
 
-**Last session:** 2026-02-04 22:12 UTC
-**Stopped at:** Completed 01-01-PLAN.md
+**Last session:** 2026-02-04 22:20 UTC
+**Stopped at:** Completed 01-03-PLAN.md (Phase 1 complete)
 **Resume file:** None
 
-**Next action:** Execute `/kata:kata-execute-phase` for 01-02-PLAN.md
+**Next action:** Plan Phase 2 (Unit Test Coverage)
 
 **Context for next agent:**
-- 01-01 established: live fixture with credential validation, test:e2e:live script, tests/live/ directory
-- Ready for first live test implementation
-- See `.planning/phases/active/01-live-e2e-test-suite/01-01-SUMMARY.md` for details
+- Phase 1 complete: 5 live E2E tests passing (E2E-03 through E2E-07)
+- All tests run via `bun run test:e2e:live` in ~47 seconds
+- Ready for Phase 2: Unit test coverage
+- See `.planning/phases/active/01-live-e2e-test-suite/01-03-SUMMARY.md` for details
 
 **Files to review:**
-- `apps/electron/e2e/fixtures/live.fixture.ts` — Enhanced live fixture
-- `apps/electron/e2e/README.md` — Updated documentation
-- `.planning/phases/active/01-live-e2e-test-suite/01-02-PLAN.md` — Next plan
+- `apps/electron/e2e/tests/live/*.live.e2e.ts` -- All live E2E tests
+- `.planning/phases/active/01-live-e2e-test-suite/01-*-SUMMARY.md` -- Phase 1 summaries
 
 ---
 
-_Last updated: 2026-02-04 after completing 01-01-PLAN.md_
+_Last updated: 2026-02-04 after completing 01-03-PLAN.md_
