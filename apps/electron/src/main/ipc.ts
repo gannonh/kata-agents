@@ -826,13 +826,14 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return !isPackagedApp()
   })
 
-  // Legacy handler - deprecated, use GIT_STATUS instead.
-  // Kept for backward compatibility; delegates to async GitService.
+  // Legacy handler kept for backward compatibility. Use GIT_STATUS instead.
+  // TODO: Remove after migrating all callers to getGitStatus.
   ipcMain.handle(IPC_CHANNELS.GET_GIT_BRANCH, async (_event, dirPath: string) => {
     try {
       const status = await getGitStatus(dirPath)
       return status.branch
-    } catch {
+    } catch (error) {
+      console.error('[IPC] Unexpected error in GET_GIT_BRANCH handler:', error)
       return null
     }
   })

@@ -50,14 +50,16 @@ function resolveGitDir(workspaceDir: string): string | null {
         debug('[GitWatcher] .git file does not contain gitdir pointer:', gitPath)
         return null
       }
-      const gitdir = match[1].trim()
       // Resolve relative paths against the workspace directory
-      return resolve(workspaceDir, gitdir)
+      return resolve(workspaceDir, match[1])
     }
 
     return null
-  } catch {
-    // ENOENT (no .git), permission errors, etc.
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException
+    if (nodeError.code !== 'ENOENT') {
+      debug('[GitWatcher] Error accessing .git path:', gitPath, error)
+    }
     return null
   }
 }

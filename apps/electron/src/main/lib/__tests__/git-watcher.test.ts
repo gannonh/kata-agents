@@ -10,7 +10,7 @@
  * - Constructor accepts onError option
  * - Performance: start() completes quickly for repos with 1000+ files
  */
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, afterEach } from 'bun:test'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mkdirSync, rmSync, writeFileSync } from 'fs'
