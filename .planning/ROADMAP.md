@@ -82,7 +82,12 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
 5. Git status test verifies branch badge shows correct branch in demo repo
 6. Permission mode test cycles through safe/ask/allow-all, verifies UI updates
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Test infrastructure setup (credential validation, test script)
+- [ ] 01-02-PLAN.md — Auth and chat live tests (E2E-03, E2E-04)
+- [ ] 01-03-PLAN.md — Session, git, permission tests (E2E-05, E2E-06, E2E-07)
 
 ---
 
@@ -109,7 +114,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
 |-----------|--------|--------|-------|--------------|----------|
 | v0.4.0 Foundation | Shipped | 2 | 6 | 10 | 100% |
 | v0.6.0 Git Integration | Shipped | 5 | 14 | 12 | 100% |
-| v0.7.0 Testing Infrastructure | In Progress | 2 | 0 | 10 | 0% |
+| v0.7.0 Testing Infrastructure | In Progress | 2 | 3 | 10 | 0% |
 | v0.8.0 Kata Infrastructure | Planned | — | — | — | — |
 
 ---
