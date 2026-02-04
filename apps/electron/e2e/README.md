@@ -74,6 +74,81 @@ test('send message', async ({ mainWindow }) => {
 })
 ```
 
+## Live Tests (Real Credentials)
+
+Live tests use the demo environment (`~/.kata-agents-demo/`) with real OAuth credentials from `~/.kata-agents/credentials.enc`. They exercise the full auth path with no mocking.
+
+### Setup
+
+```bash
+# From monorepo root
+
+# Seed demo environment (config, workspace, sessions, skills, sources)
+bun run demo:setup
+
+# Create demo git repo at ~/kata-agents-demo-repo/
+bun run demo:repo
+
+# Or do both and launch the app in dev mode
+bun run demo:launch
+```
+
+### Writing Live Tests
+
+Use `live.fixture.ts` instead of `electron.fixture.ts`:
+
+```typescript
+import { test, expect } from '../fixtures/live.fixture'
+
+test('send real message', async ({ mainWindow }) => {
+  // This hits the real Claude API -- use longer timeouts
+  const chatPage = new ChatPage(mainWindow)
+  await chatPage.sendMessage('Say hello')
+  await chatPage.waitForResponse({ timeout: 30_000 })
+})
+```
+
+Key differences from mock tests:
+- No `KATA_TEST_MODE` env var (real auth path)
+- `KATA_CONFIG_DIR` points to `~/.kata-agents-demo/`
+- Demo directory persists across test runs (not cleaned up)
+- Longer default timeouts for real API calls
+- Requires valid OAuth credentials in `~/.kata-agents/credentials.enc`
+
+### Demo Commands
+
+| Command | Description |
+|---------|-------------|
+| `bun run demo:setup` | Seed demo environment (no-op if exists) |
+| `bun run demo:reset` | Wipe and recreate demo environment |
+| `bun run demo:launch` | Setup + launch app in dev mode |
+| `bun run demo:repo` | Create demo git repo (no-op if exists) |
+
+### Demo Environment
+
+The demo setup creates:
+
+```
+~/.kata-agents-demo/
+├── config.json                    # Global config (oauth_token auth)
+└── workspaces/demo-workspace/
+    ├── config.json                # Workspace config
+    ├── sessions/                  # 4 seeded sessions
+    │   ├── 260201-bright-meadow/  # Code Review (in-progress, flagged)
+    │   ├── 260201-swift-river/    # API Integration (todo)
+    │   ├── 260202-quiet-forest/   # Debug Session (needs-review)
+    │   └── 260202-golden-dawn/    # Quick Question (done)
+    ├── sources/filesystem/        # Filesystem MCP source
+    ├── skills/                    # Copied from project skills/
+    ├── statuses/                  # Default status config
+    ├── labels/                    # Default label config
+    └── .claude-plugin/            # Plugin manifest
+
+~/kata-agents-demo-repo/           # Separate demo git repo (working dir)
+```
+
+Auth works because `credentials.enc` is read from the hardcoded path `~/.kata-agents/credentials.enc` regardless of `KATA_CONFIG_DIR`.
+
 ## Configuration
 
 See `playwright.config.ts` for:
