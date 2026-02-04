@@ -37,6 +37,14 @@ export async function getPrStatus(dirPath: string): Promise<PrInfo | null> {
       return null
     }
 
+    // Expected: Not a git repository (e.g., non-git workspace directory)
+    if (err.stderr?.includes('not a git repository')) {
+      if (process.env.DEBUG_GIT) {
+        console.debug('[PrService] Not a git repository:', dirPath)
+      }
+      return null
+    }
+
     // Expected: No PR exists for this branch (gh exits with specific message)
     if (
       err.stderr?.includes('no pull requests found') ||

@@ -28,8 +28,8 @@
 
 ### AI Context
 
-- [ ] **CTX-01**: Agent receives git context (branch, PR) in conversation
-- [ ] **CTX-02**: Git context is workspace-specific (each workspace has its own state)
+- [x] **CTX-01**: Agent receives git context (branch, PR) in conversation
+- [x] **CTX-02**: Git context is workspace-specific (each workspace has its own state)
 
 ---
 
@@ -69,10 +69,10 @@ _Explicit exclusions for v0.6.0_
 | LIVE-01 | Phase 5 | Complete ✓ |
 | LIVE-02 | Phase 5 | Complete ✓ |
 | LIVE-03 | Phase 5 | Complete ✓ |
-| CTX-01 | Phase 6 | Pending |
-| CTX-02 | Phase 6 | Pending |
+| CTX-01 | Phase 6 | Complete ✓ |
+| CTX-02 | Phase 6 | Complete ✓ |
 
-**Coverage:** 12/12 requirements mapped (10/12 complete)
+**Coverage:** 12/12 requirements mapped (12/12 complete)
 
 ---
-*Updated: 2026-02-03 after Phase 5 complete*
+*Updated: 2026-02-03 after Phase 6 complete*

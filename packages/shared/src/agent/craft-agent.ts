@@ -2,7 +2,8 @@ import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessag
 import { getDefaultOptions, resetClaudeConfigCheck } from './options.ts';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
-import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext } from '../prompts/system.ts';
+import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext, formatGitContext } from '../prompts/system.ts';
+import type { GitState, PrInfo } from '../git/types.ts';
 // Plan types are used by UI components; not needed in craft-agent.ts since Safe Mode is user-controlled
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
@@ -403,6 +404,8 @@ export class CraftAgent {
   // Cached context window size from modelUsage (for real-time usage_update events)
   // This is captured from the first result message and reused for subsequent usage updates
   private cachedContextWindow?: number;
+  /** Cached git context string, updated before each message send */
+  private gitContext: string = '';
 
   /**
    * Get the session ID for mode operations.
@@ -2207,6 +2210,11 @@ Please continue the conversation naturally from where we left off.
       parts.push(workingDirContext);
     }
 
+    // Add git context (branch, PR info) for AI awareness
+    if (this.gitContext) {
+      parts.push(this.gitContext);
+    }
+
     // Add file attachments with stored path info (agent uses Read tool to access content)
     // Text files are NOT embedded inline to prevent context overflow from large files
     if (attachments) {
@@ -2262,6 +2270,11 @@ Please continue the conversation naturally from where we left off.
     const workingDirContextSdk = getWorkingDirectoryContext(effectiveWorkingDirSdk, isSessionRootSdk, this.config.session?.sdkCwd);
     if (workingDirContextSdk) {
       contentBlocks.push({ type: 'text', text: workingDirContextSdk });
+    }
+
+    // Add git context (branch, PR info) for AI awareness
+    if (this.gitContext) {
+      contentBlocks.push({ type: 'text', text: this.gitContext });
     }
 
     // Add attachments - images/PDFs are uploaded inline, text files are path-only
@@ -2882,6 +2895,19 @@ Please continue the conversation naturally from where we left off.
   updateWorkingDirectory(path: string): void {
     if (this.config.session) {
       this.config.session.workingDirectory = path;
+    }
+  }
+
+  /**
+   * Update the cached git context for injection into user messages.
+   * Called by SessionManager before each message send with fresh git state.
+   * Workspace-specific: reflects the working directory's git state.
+   */
+  updateGitContext(gitState?: GitState | null, prInfo?: PrInfo | null): void {
+    try {
+      this.gitContext = formatGitContext(gitState, prInfo);
+    } catch {
+      this.gitContext = '';
     }
   }
 
