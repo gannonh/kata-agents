@@ -682,7 +682,8 @@ export const IPC_CHANNELS = {
   WINDOW_GET_FOCUS_STATE: 'window:getFocusState',
 
   // Git operations
-  GET_GIT_BRANCH: 'git:getBranch',  // Legacy: simple branch string
+  /** @deprecated Use GIT_STATUS instead. Kept for backward compatibility. */
+  GET_GIT_BRANCH: 'git:getBranch',
   GIT_STATUS: 'git:status',          // Full GitState (async)
   PR_STATUS: 'pr:status',            // PR info for current branch (async)
 
@@ -951,6 +952,7 @@ export interface ElectronAPI {
   onThemePreferencesChange(callback: (preferences: { mode: string; colorTheme: string; font: string }) => void): () => void
 
   // Git operations
+  /** @deprecated Use getGitStatus instead. Returns branch string only, no detached HEAD info. */
   getGitBranch(dirPath: string): Promise<string | null>
   getGitStatus(dirPath: string): Promise<GitState>
   getPrStatus(dirPath: string): Promise<PrInfo | null>

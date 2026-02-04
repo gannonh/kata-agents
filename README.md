@@ -15,7 +15,7 @@ Part of the Kata ecosystem, alongside [Kata Orchestrator](https://github.com/gan
 
 - **Multi-Session Inbox**: Desktop app with session management, status workflow, and flagging
 - **Claude Code Experience**: Streaming responses, tool visualization, real-time updates
-- **Git Integration**: Live branch display, PR status badge, and real-time updates via file watching
+- **Git Integration**: Live branch display, PR status badge, real-time updates, worktree and submodule support
 - **Agent Skills**: Specialized agent instructions stored per-workspace
 - **MCP Integration**: Connect to any MCP server (Linear, GitHub, Notion, and more)
 - **Sources**: Connect to REST APIs (Google, Slack, Microsoft), and local filesystems

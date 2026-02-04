@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 6 - AI Context Injection (COMPLETE)
-Plan: 01 of 01 (complete)
-Status: Phase complete (verified 5/5 must-haves)
-Progress: [████████  ] 12/12 requirements (4/5 phases)
+Phase: 7 - Polish and Edge Cases (COMPLETE)
+Plan: 03 of 03 (complete)
+Status: Phase 7 complete. All v0.6.0 plans executed.
+Progress: [██████████] 15/15 plans (5/5 phases complete)
 ```
 
-**Last activity:** 2026-02-03 -- Completed 06-01-PLAN.md (git context injection)
+**Last activity:** 2026-02-04 -- Completed 07-03-PLAN.md (GitWatcher integration tests)
 
 ## Quick Tasks
 
@@ -37,8 +37,8 @@ Progress: [████████  ] 12/12 requirements (4/5 phases)
 | Metric | Value |
 |--------|-------|
 | Milestones shipped | 2 |
-| Total phases | 6 |
-| Total plans | 17 |
+| Total phases | 7 |
+| Total plans | 20 |
 | Total requirements | 13 |
 
 ## Current Milestone Overview
@@ -51,26 +51,28 @@ Progress: [████████  ] 12/12 requirements (4/5 phases)
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Complete | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Complete | CTX-01, CTX-02 |
-| 7 | Polish and Edge Cases | Ready | — |
+| 7 | Polish and Edge Cases | Complete (3/3 plans) | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - complete
 
-## Phase 6 Summary
+## Phase 7 Summary
 
-**Git context injection into agent messages:**
-- `formatGitContext()` produces compact XML-tagged context from GitState + PrInfo
-- CraftAgent injects git context into both text and SDK user messages
-- SessionManager fetches fresh git state before each `agent.chat()` call
-- Git context refreshes on working directory change
-- Non-git directories produce empty context (graceful absence)
-- 10 unit tests covering all formatting edge cases
+**Defensive error handling, legacy cleanup, and integration tests:**
+- `resolveGitDir()` handles worktrees and submodules (.git as file with gitdir pointer)
+- ENOSPC errors produce actionable Linux inotify instructions
+- `existsSync` guards in GitService prevent simple-git console noise
+- GET_GIT_BRANCH handler replaced execSync with async getGitStatus delegation
+- @deprecated annotations on GET_GIT_BRANCH, getGitBranch across types/preload/IPC
+- 10 integration tests for GitWatcher (start/stop, worktree, change detection, performance)
 
 **Plans:**
-- 06-01: formatGitContext + CraftAgent wiring + SessionManager integration
+- 07-01: Defensive error handling (worktree, existsSync, ENOSPC)
+- 07-02: Deprecate legacy GET_GIT_BRANCH execSync handler
+- 07-03: GitWatcher integration tests
 
-**Commits:** 4 commits on feat/v0.6.0-06-ai-context-injection
-**Verification:** 5/5 must-haves passed
+**Commits:** 8 commits on fix/v0.6.0-07-polish-and-edge-cases
+**Verification:** 17/17 must-haves passed
 
 ## Accumulated Context
 
@@ -92,6 +94,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Auto-start git watcher on first GIT_STATUS request (lazy initialization)
 - 100ms delay on focus refresh to deduplicate with file watcher events
 - XML-tagged git context (~100-200 chars) injected per user message, matching existing patterns
+- Parse .git file gitdir pointer for worktree/submodule resolution (statSync + readFileSync)
 
 ### Research Flags
 
@@ -101,6 +104,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 | 4 | NO | Complete |
 | 5 | NO | Complete |
 | 6 | NO | Complete |
+| 7 | NO | Complete |
 
 ### Open Questions
 
@@ -121,13 +125,13 @@ _None_
 
 ## Session Continuity
 
-Last session: 2026-02-03T22:29Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-02-04T13:04Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Plan Phase 7 -> `/kata:discuss-phase 7` or `/kata:plan-phase 7`
+Milestone complete. Audit milestone -> `/kata:kata-audit-milestone`
 
 ---
-*Last updated: 2026-02-03 after 06-01 plan execution*
+*Last updated: 2026-02-04 after Phase 7 execution complete*

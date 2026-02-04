@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import simpleGit, { type SimpleGit, type StatusResult } from 'simple-git'
 
 import type { GitState } from './types'
@@ -7,6 +8,11 @@ import type { GitState } from './types'
  * Uses git rev-parse which is fast (single subprocess call via simple-git).
  */
 export async function isGitRepository(dirPath: string): Promise<boolean> {
+  // Avoid simple-git errors for non-existent directories
+  if (!existsSync(dirPath)) {
+    return false
+  }
+
   try {
     const git: SimpleGit = simpleGit(dirPath)
     await git.revparse(['--is-inside-work-tree'])
@@ -34,6 +40,11 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
     isRepo: false,
     isDetached: false,
     detachedHead: null,
+  }
+
+  // Avoid simple-git errors for non-existent directories
+  if (!existsSync(dirPath)) {
+    return defaultState
   }
 
   try {
@@ -69,7 +80,7 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
         detachedHead = result.trim()
       } catch (error) {
         // In detached state but couldn't get commit hash - log warning
-        console.warn('[GitService] In detached HEAD but could not get commit hash:', error)
+        console.warn('[GitService] In detached HEAD but could not get commit hash:', dirPath, error)
       }
     }
 
@@ -81,7 +92,7 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
     }
   } catch (error) {
     // Log error but return safe default (don't crash on git errors)
-    console.error('[GitService] Error getting git status:', error)
+    console.error('[GitService] Error getting git status:', dirPath, error)
     return defaultState
   }
 }

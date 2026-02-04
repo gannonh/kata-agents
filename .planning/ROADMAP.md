@@ -144,7 +144,12 @@ Plans:
 
 **Depends on:** Phase 6 (all core functionality complete)
 
-**Plans:** (created by /kata:plan-phase)
+**Plans:** 3 plans
+
+Plans:
+- [x] 07-01-PLAN.md — Defensive error handling (worktree support, existsSync guard, ENOSPC)
+- [x] 07-02-PLAN.md — Deprecate legacy GET_GIT_BRANCH execSync handler
+- [x] 07-03-PLAN.md — GitWatcher integration tests
 
 **Requirements:** None (polish phase, no new requirements)
 
@@ -189,7 +194,7 @@ Plans:
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Complete | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Complete | CTX-01, CTX-02 |
-| 7 | Polish and Edge Cases | Ready | — |
+| 7 | Polish and Edge Cases | Complete | — |
 
 ---
 
@@ -205,4 +210,4 @@ See: `.planning/milestones/v0.4.0-ROADMAP.md`
 
 ---
 
-*Last updated: 2026-02-03 after Phase 6 execution complete*
+*Last updated: 2026-02-04 after Phase 7 execution complete*
