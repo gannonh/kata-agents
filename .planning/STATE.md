@@ -11,13 +11,13 @@ See: .planning/PROJECT.md (updated 2026-02-02)
 
 ```
 Milestone: v0.6.0 Git Integration
-Phase: 6 - AI Context Injection (COMPLETE)
-Plan: 01 of 01 (complete)
-Status: Phase complete (verified 5/5 must-haves)
-Progress: [████████  ] 12/12 requirements (4/5 phases)
+Phase: 7 - Polish and Edge Cases (IN PROGRESS)
+Plan: 02 of 03 (complete)
+Status: Executing Wave 1
+Progress: [█████████ ] 14/15 plans (5/5 phases in progress)
 ```
 
-**Last activity:** 2026-02-03 -- Completed 06-01-PLAN.md (git context injection)
+**Last activity:** 2026-02-04 -- Completed 07-02-PLAN.md (async GET_GIT_BRANCH handler)
 
 ## Quick Tasks
 
@@ -51,7 +51,7 @@ Progress: [████████  ] 12/12 requirements (4/5 phases)
 | 4 | PR Integration | Complete | PR-01, PR-02, PR-03, PR-04 |
 | 5 | Real-Time Updates | Complete | LIVE-01, LIVE-02, LIVE-03 |
 | 6 | AI Context Injection | Complete | CTX-01, CTX-02 |
-| 7 | Polish and Edge Cases | Ready | — |
+| 7 | Polish and Edge Cases | In Progress (1/3 plans) | — |
 
 **Critical path:** 3 -> 4 -> 5 -> 6 -> 7
 **Differentiator phase:** Phase 6 (AI Context) - complete
@@ -92,6 +92,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 - Auto-start git watcher on first GIT_STATUS request (lazy initialization)
 - 100ms delay on focus refresh to deduplicate with file watcher events
 - XML-tagged git context (~100-200 chars) injected per user message, matching existing patterns
+- Parse .git file gitdir pointer for worktree/submodule resolution (statSync + readFileSync)
 
 ### Research Flags
 
@@ -101,6 +102,7 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 | 4 | NO | Complete |
 | 5 | NO | Complete |
 | 6 | NO | Complete |
+| 7 | NO | Complete |
 
 ### Open Questions
 
@@ -121,13 +123,13 @@ _None_
 
 ## Session Continuity
 
-Last session: 2026-02-03T22:29Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-02-04T12:59Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
 
 ## Next Steps
 
-Plan Phase 7 -> `/kata:discuss-phase 7` or `/kata:plan-phase 7`
+Execute 07-02-PLAN.md and 07-03-PLAN.md to complete Phase 7.
 
 ---
-*Last updated: 2026-02-03 after 06-01 plan execution*
+*Last updated: 2026-02-04 after 07-01 plan execution*
