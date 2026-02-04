@@ -1,0 +1,86 @@
+/**
+ * Live E2E Test Fixture
+ *
+ * Uses the demo environment (~/.kata-agents-demo/) with real OAuth credentials
+ * from ~/.kata-agents/credentials.enc. No KATA_TEST_MODE -- this exercises
+ * the full auth path.
+ *
+ * The demo directory is NOT cleaned up after tests (persistent across runs).
+ * Call `bun run demo:setup` to seed it, or `bun run demo:reset` to recreate.
+ */
+
+import { test as base, _electron as electron } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { execSync } from 'child_process'
+import { homedir } from 'os'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const DEMO_CONFIG_DIR = path.join(homedir(), '.kata-agents-demo')
+const PROJECT_ROOT = path.resolve(__dirname, '../../../../')
+
+type LiveFixtures = {
+  electronApp: ElectronApplication
+  mainWindow: Page
+}
+
+export const test = base.extend<LiveFixtures>({
+  electronApp: async ({}, use) => {
+    // Ensure demo environment exists (no-op if already seeded)
+    execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'inherit' })
+    execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'inherit' })
+
+    const args = [
+      path.join(__dirname, '../../dist/main.cjs'),
+      `--user-data-dir=${DEMO_CONFIG_DIR}`,
+    ]
+
+    const app = await electron.launch({
+      args,
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        KATA_CONFIG_DIR: DEMO_CONFIG_DIR,
+        // No KATA_TEST_MODE -- uses real auth via shared credentials.enc
+      },
+      timeout: 30_000,
+    })
+
+    await use(app)
+    await app.close()
+    // Demo dir is NOT cleaned up -- persistent across test runs
+  },
+
+  mainWindow: async ({ electronApp }, use) => {
+    const window = await electronApp.firstWindow()
+    await window.waitForLoadState('domcontentloaded')
+
+    // Wait for splash screen to disappear (longer timeout for real API)
+    try {
+      await window.waitForFunction(() => {
+        const elements = document.querySelectorAll('*')
+        for (const el of elements) {
+          if (el.className && typeof el.className === 'string' && el.className.includes('z-splash')) {
+            const style = getComputedStyle(el)
+            if (style.opacity !== '0' && style.display !== 'none') {
+              return false
+            }
+          }
+        }
+        return true
+      }, { timeout: 60_000 })
+    } catch {
+      // Splash may already be gone
+    }
+
+    // Extra settle time for real API initialization
+    await window.waitForTimeout(2000)
+
+    await use(window)
+  },
+})
+
+export { expect } from '@playwright/test'
