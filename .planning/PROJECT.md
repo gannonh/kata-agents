@@ -47,7 +47,16 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 ### Active
 
-_None — define requirements for next milestone with `/kata:kata-add-milestone`_
+<!-- v0.7.0 Testing Infrastructure milestone -->
+
+- [ ] Mock API server for E2E chat flow testing without real credentials
+- [ ] Mock MCP servers for tool discovery and execution testing
+- [ ] Git integration E2E tests with real repo fixtures
+- [ ] Session and workspace lifecycle E2E tests
+- [ ] Unit test coverage for uncovered modules (pr-service, etc.)
+- [ ] Live E2E test suite with real credentials for local validation
+- [ ] Two-tier test strategy: CI smoke tests + local live tests
+- [ ] Coverage reporting and gap identification
 
 ### Future
 
@@ -62,7 +71,8 @@ _None — define requirements for next milestone with `/kata:kata-add-milestone`
 
 ## Current State
 
-**Shipped:** v0.6.0 Git Integration (2026-02-04)
+**Current milestone:** v0.7.0 Testing Infrastructure
+**Last shipped:** v0.6.0 Git Integration (2026-02-04)
 
 **Codebase:**
 - 88 files changed in v0.6.0
@@ -132,4 +142,4 @@ _None — define requirements for next milestone with `/kata:kata-add-milestone`
 | Parse .git file gitdir pointer for worktrees | Handles worktrees and submodules transparently | ✓ Good |
 
 ---
-*Last updated: 2026-02-04 after v0.6.0 milestone*
+*Last updated: 2026-02-04 after v0.7.0 milestone started*

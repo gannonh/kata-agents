@@ -5,18 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-04)
 
 **Core value:** A developer-centric AI desktop client that understands your git workflow
-**Current focus:** Planning next milestone
+**Current focus:** v0.7.0 Testing Infrastructure
 
 ## Current Position
 
 ```
-Milestone: v0.6.0 Git Integration — SHIPPED
-Phase: Complete
-Status: Milestone archived, ready for next milestone
-Progress: [██████████] 14/14 plans (5/5 phases complete)
+Milestone: v0.7.0 Testing Infrastructure
+Phase: Not started (defining requirements)
+Status: Defining requirements
+Progress: [          ] 0/0 plans
 ```
 
-**Last activity:** 2026-02-04 -- v0.6.0 milestone complete
+**Last activity:** 2026-02-04 -- Milestone v0.7.0 started
 
 ## Quick Tasks
 
@@ -51,9 +51,16 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 
 _None_
 
+### Milestone Scope Issues
+
+Issues pulled into current milestone scope:
+- "E2E Testing Infrastructure - Mock API & Feature Integration Tests" (from: .planning/issues/open/2026-02-02-e2e-testing-infrastructure.md, GitHub: #49)
+- "Fill test coverage gaps" (from: .planning/issues/open/2026-02-02-fill-test-coverage-gaps.md, GitHub: #52)
+- "Live E2E Test Suite - Comprehensive Tests with Real Credentials" (from: .planning/issues/open/2026-02-04-live-e2e-test-suite.md, GitHub: #60)
+
 ### Pending Issues
 
-2 open issues in `.planning/issues/open/`
+3 open issues in `.planning/issues/open/` (all pulled into v0.7.0 scope)
 
 ### Blockers
 
@@ -71,12 +78,12 @@ _None_
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: v0.6.0 milestone complete
+Stopped at: Defining v0.7.0 requirements
 Resume file: None
 
 ## Next Steps
 
-Start next milestone: `/kata:kata-add-milestone`
+Define requirements and create roadmap for v0.7.0
 
 ---
-*Last updated: 2026-02-04 after v0.6.0 milestone complete*
+*Last updated: 2026-02-04 after v0.7.0 milestone started*
