@@ -45,6 +45,8 @@ Progress: [█████░░░░░] 50% (5/10 requirements)
 |----|----------|-----------|------|
 | live-fixture-validation | Validate credentials.enc exists before launching app in live fixture | Prevents confusing test failures when credentials are missing | 2026-02-04 |
 | git-test-dynamic-branch | Dynamic branch detection instead of hardcoded 'main' | Demo repo may be on different branch; test verifies badge shows actual branch | 2026-02-04 |
+| data-testid-streaming | Add data-streaming attribute alongside data-testid on TurnCard | Allows tests to wait for streaming completion with attribute selector | 2026-02-04 |
+| multi-instance-lock | Skip single-instance lock when KATA_CONFIG_DIR is set | Enables parallel test runs with different config directories | 2026-02-04 |
 
 **Testing strategy (2026-02-04):**
 - Unit tests focus on critical business logic (pr-service, git-service patterns)
