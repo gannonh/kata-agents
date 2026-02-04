@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-04
+
+### Added
+- Git branch display in workspace UI with real-time updates via chokidar file watching
+- PR badge showing linked pull request title, status, and click-to-open in browser
+- Focus-aware PR polling with configurable refresh interval
+- AI context injection: agent receives current branch and PR info per message
+- Worktree and submodule support in GitWatcher with gitdir pointer resolution
+- Async GitService delegation replacing legacy execSync GET_GIT_BRANCH handler
+
+### Fixed
+- existsSync guard prevents simple-git console noise on non-git directories
+- PrService handles non-git directories silently
+- Git status scoped to working directory instead of workspace root
+- Session filters scoped to active workspace
+- ENOSPC errors produce actionable Linux inotify instructions
+
+### Changed
+- Git branch badge moved from WorkspaceSwitcher to chat input toolbar
+- PrBadge refactored to use usePrStatus hook with focus-aware polling
+
 ## [0.5.0] - 2026-02-01
 
 ### Added

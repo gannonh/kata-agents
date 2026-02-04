@@ -2,11 +2,11 @@
 
 ## What This Is
 
-Native desktop client for the Kata ecosystem — a hard fork of Craft Agents rebranded and positioned as the desktop interface for Kata's multi-agent orchestration platform. v0.4.0 shipped with full trademark compliance and CI/CD infrastructure.
+Native desktop client for the Kata ecosystem with integrated git context. Built on the Claude Agent SDK, it provides multi-session management, MCP server integration, and developer-focused features like real-time git branch/PR display and AI-aware git context injection.
 
 ## Core Value
 
-A compliant, independent rebrand that preserves all existing functionality while establishing Kata Agents as its own product — ready for Kata Orchestrator integration.
+A developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
 
 ## Requirements
 
@@ -37,13 +37,17 @@ A compliant, independent rebrand that preserves all existing functionality while
 - ✓ CI/CD workflows for PR validation and releases — v0.4.0
 - ✓ Upstream management documentation — v0.4.0
 
-### Active
-
 <!-- v0.6.0 Git Integration milestone -->
 
-- [ ] Display current git branch in workspace UI
-- [ ] Show linked PR title and status when one exists
-- [ ] Research and implement optimal UI placement for git status
+- ✓ Display current git branch in workspace UI — v0.6.0
+- ✓ Show linked PR title and status when one exists — v0.6.0
+- ✓ Git status refreshes automatically on file changes and focus — v0.6.0
+- ✓ Agent receives git context (branch, PR) per message — v0.6.0
+- ✓ Worktree and submodule support — v0.6.0
+
+### Active
+
+_None — define requirements for next milestone with `/kata:kata-add-milestone`_
 
 ### Future
 
@@ -56,23 +60,14 @@ A compliant, independent rebrand that preserves all existing functionality while
 - Kata Context integration — future, not yet defined
 - Custom MCP server hosting — use third-party or self-hosted
 
-## Current Milestone: v0.6.0 Git Integration
-
-**Goal:** Show developers their git context (branch, PR) in the workspace UI while working with the agent.
-
-**Target features:**
-- Git branch display in workspace
-- Linked PR title and status
-- Thoughtful UI placement (research-driven)
-
 ## Current State
 
-**Shipped:** v0.4.0 Foundation (2026-01-30)
+**Shipped:** v0.6.0 Git Integration (2026-02-04)
 
 **Codebase:**
-- 191 files changed since fork
-- 8,048 lines added, 837 removed
-- 2 phases, 6 plans completed
+- 88 files changed in v0.6.0
+- 11,701 lines added, 66 removed
+- 7 phases, 20 plans completed (cumulative)
 
 **Tech stack:**
 - Electron + React + Vite + shadcn/ui
@@ -126,6 +121,15 @@ A compliant, independent rebrand that preserves all existing functionality while
 | GitHub Releases for auto-update | No custom infrastructure needed initially | ✓ Good |
 | Graceful disable for Slack OAuth | Keep implementation, show clear error message | ✓ Good |
 | Support both KATA_ and CRAFT_ env vars | Backward compatibility for existing users | ✓ Good |
+| Use simple-git for git operations | 8.5M weekly downloads, TypeScript-native, async-only | ✓ Good |
+| Use gh CLI for PR data | Already authenticated on developer machines, no token management | ✓ Good |
+| Workspace-scoped git state (Map) | Each workspace tracks git context independently | ✓ Good |
+| Git branch badge in chat input toolbar | Better visibility than sidebar, near user's focus area | ✓ Good |
+| PR badge colors match GitHub conventions | Familiar UX for developers (green/purple/red/gray) | ✓ Good |
+| XML-tagged git context per user message | Prompt caching friendly, concise, matches existing patterns | ✓ Good |
+| chokidar v4 for .git file watching | Native fs.watch unreliable cross-platform | ✓ Good |
+| Auto-start git watcher on first GIT_STATUS request | Lazy init avoids overhead for non-git workspaces | ✓ Good |
+| Parse .git file gitdir pointer for worktrees | Handles worktrees and submodules transparently | ✓ Good |
 
 ---
-*Last updated: 2026-02-02 after v0.6.0 milestone started*
+*Last updated: 2026-02-04 after v0.6.0 milestone*

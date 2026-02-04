@@ -1,6 +1,6 @@
 # Kata Agents
 
-[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/gannonh/kata-agents/releases/tag/v0.4.0)
+[![Version](https://img.shields.io/badge/version-0.6.0-green.svg)](https://github.com/gannonh/kata-agents/releases/tag/v0.6.0)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Kata Agents is a powerful productivity app for working with AI agents. Built on the Claude Agent SDK, it enables intuitive multitasking, seamless connection to APIs and services, and a document-centric workflow in a polished, natural language driven UI. **It's like Claude Code meets Slack.**
@@ -83,6 +83,16 @@ Connect external data sources to your workspace:
 
 Use **SHIFT+TAB** to cycle through modes in the chat interface.
 
+### Git Integration
+
+Git context is displayed in the chat input toolbar and injected into agent conversations:
+
+- **Branch badge**: Current git branch name, updates in real-time via file watching
+- **PR badge**: Linked pull request title and status (open/draft/merged/closed), click to open in browser
+- **AI awareness**: Agent receives branch and PR context per message
+- **Worktree/submodule support**: Handles `.git` file gitdir pointers transparently
+- **Graceful degradation**: No git indicator for non-git directories, helpful message when `gh` CLI is unavailable
+
 ### Keyboard Shortcuts
 
 | Shortcut      | Action                    |
@@ -112,6 +122,7 @@ kata-agents/
             ├── auth/          # OAuth, tokens
             ├── config/        # Storage, preferences, themes
             ├── credentials/   # AES-256-GCM encrypted storage
+            ├── git/           # Git service, PR service
             ├── sessions/      # Session persistence
             ├── sources/       # MCP, API, local sources
             └── statuses/      # Dynamic status system
