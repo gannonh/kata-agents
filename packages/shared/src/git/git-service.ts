@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import simpleGit, { type SimpleGit, type StatusResult } from 'simple-git'
 
 import type { GitState } from './types'
@@ -7,6 +8,11 @@ import type { GitState } from './types'
  * Uses git rev-parse which is fast (single subprocess call via simple-git).
  */
 export async function isGitRepository(dirPath: string): Promise<boolean> {
+  // Pre-check: simple-git throws synchronously if dir doesn't exist
+  if (!existsSync(dirPath)) {
+    return false
+  }
+
   try {
     const git: SimpleGit = simpleGit(dirPath)
     await git.revparse(['--is-inside-work-tree'])
@@ -34,6 +40,11 @@ export async function getGitStatus(dirPath: string): Promise<GitState> {
     isRepo: false,
     isDetached: false,
     detachedHead: null,
+  }
+
+  // Pre-check: simple-git throws synchronously if dir doesn't exist
+  if (!existsSync(dirPath)) {
+    return defaultState
   }
 
   try {
