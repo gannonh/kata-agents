@@ -51,6 +51,10 @@ See PROJECT.md Key Decisions table for full list with outcomes.
 
 _None_
 
+### Pending Issues
+
+2 open issues in `.planning/issues/open/`
+
 ### Blockers
 
 _None_
