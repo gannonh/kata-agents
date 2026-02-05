@@ -89,12 +89,13 @@ Plans:
 
 **Requirements:** COV-01, COV-02, COV-03
 
-**Success Criteria:**
-1. Developer runs `bun test --coverage` and sees coverage report with module-level percentages
-2. pr-service.ts has unit tests covering happy path and error cases (gh CLI unavailable, non-git directory)
-3. Coverage gaps document identifies tested vs untested modules with rationale for deferred tests
+**Plans:** 2 plans
 
-**Plans:** TBD
+Plans:
+- [ ] 02-01-PLAN.md — Coverage configuration (bunfig.toml settings, exclude release artifacts)
+- [ ] 02-02-PLAN.md — Coverage gaps documentation (COVERAGE.md with analysis and rationale)
+
+**Note:** COV-02 (pr-service.ts unit tests) was discovered to already exist during planning. Comprehensive tests at `packages/shared/src/git/__tests__/pr-service.test.ts`.
 
 ---
 
@@ -104,9 +105,9 @@ Plans:
 |-----------|--------|--------|-------|--------------|----------|
 | v0.4.0 Foundation | Shipped | 2 | 6 | 10 | 100% |
 | v0.6.0 Git Integration | Shipped | 5 | 14 | 12 | 100% |
-| v0.7.0 Testing Infrastructure | In Progress | 2 | 3 | 10 | 70% |
+| v0.7.0 Testing Infrastructure | In Progress | 2 | 5 | 10 | 70% |
 | v0.8.0 Kata Infrastructure | Planned | — | — | — | — |
 
 ---
 
-_Last updated: 2026-02-04 after Phase 1 completion_
+_Last updated: 2026-02-05 after Phase 2 planning_
