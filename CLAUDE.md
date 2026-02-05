@@ -132,6 +132,14 @@ import type { Session, Message, AgentEvent } from '@craft-agent/core';
 - **AI:** @anthropic-ai/claude-agent-sdk
 - **Build:** esbuild (main/preload) + Vite (renderer)
 
+## Releases
+
+- **Version files to bump:** `package.json` (root) AND `apps/electron/package.json` — both must match
+- **No `.claude-plugin/plugin.json`** — this project is an Electron app, not a Claude Code plugin
+- **CHANGELOG.md** follows Keep a Changelog format
+- **Only bump versions when there are end-user-facing changes.** Internal milestones (test infrastructure, docs-only) should not trigger version bumps or build releases.
+- **pr_workflow is enabled** — release work goes on a `release/vX.Y.Z` branch, merged via PR
+
 ## Important Conventions
 
 - Environment variables for OAuth are loaded from `.env` at build time via esbuild `--define`
