@@ -18,8 +18,8 @@ test.describe('Live Status', () => {
     // There should be some status-related elements
     const statusCount = await statusIndicator.count()
 
-    // Sessions should have status indicators
-    expect(statusCount).toBeGreaterThanOrEqual(0)
+    // Sessions should have status-related elements
+    expect(statusCount).toBeGreaterThan(0)
   })
 
   test('status dropdown shows available statuses', async ({ mainWindow }) => {
@@ -43,7 +43,7 @@ test.describe('Live Status', () => {
       await mainWindow.keyboard.press('Escape')
 
       // Document whether status options are in context menu
-      expect(hasStatus || true).toBeTruthy()
+      expect(hasStatus).toBeTruthy()
     }
   })
 

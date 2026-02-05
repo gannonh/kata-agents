@@ -17,7 +17,7 @@ test.describe('Live MCPs', () => {
 
     const hasSources = await sourcesSection.first().isVisible({ timeout: 5000 }).catch(() => false)
 
-    expect(hasSources || true).toBeTruthy()
+    expect(hasSources).toBeTruthy()
   })
 
   test('MCP sources list shows configured servers', async ({ mainWindow }) => {
@@ -39,7 +39,7 @@ test.describe('Live MCPs', () => {
       const hasItems = await mcpItem.first().isVisible({ timeout: 3000 }).catch(() => false)
       const hasEmpty = await emptyState.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasItems || hasEmpty || true).toBeTruthy()
+      expect(hasItems || hasEmpty).toBeTruthy()
     }
   })
 
@@ -60,7 +60,7 @@ test.describe('Live MCPs', () => {
 
       const hasStatus = await statusIndicator.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasStatus || true).toBeTruthy()
+      expect(hasStatus).toBeTruthy()
     }
   })
 
@@ -82,7 +82,7 @@ test.describe('Live MCPs', () => {
 
       const hasAdd = await addButton.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasAdd || true).toBeTruthy()
+      expect(hasAdd).toBeTruthy()
     }
   })
 
@@ -105,7 +105,7 @@ test.describe('Live MCPs', () => {
 
       const hasToggle = await mcpToggle.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasToggle || true).toBeTruthy()
+      expect(hasToggle).toBeTruthy()
     }
 
     // Close settings

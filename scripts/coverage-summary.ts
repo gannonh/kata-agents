@@ -72,6 +72,12 @@ async function main() {
     }
   }
 
+  if (entries.length === 0) {
+    console.error("No coverage data parsed. Test execution may have failed.");
+    console.error("Run `bun test --coverage` directly to diagnose.");
+    process.exit(1);
+  }
+
   // Aggregate by area
   const areas = new Map<string, CoverageEntry[]>();
 

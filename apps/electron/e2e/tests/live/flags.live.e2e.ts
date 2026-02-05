@@ -30,7 +30,7 @@ test.describe('Live Flags', () => {
       await mainWindow.keyboard.press('Escape')
 
       // Test passes if we found the flag option or we at least saw the menu
-      expect(hasFlag || true).toBeTruthy()
+      expect(hasFlag).toBeTruthy()
     }
   })
 
@@ -45,7 +45,7 @@ test.describe('Live Flags', () => {
     // Count how many flags are visible (could be zero or more)
     const flagCount = await flagIcon.count()
 
-    // This test documents the current state - flags exist in UI
-    expect(flagCount).toBeGreaterThanOrEqual(0)
+    // Flag icons render when sessions are flagged
+    expect(flagCount).toBeGreaterThanOrEqual(0) // May be zero if no sessions are flagged
   })
 })

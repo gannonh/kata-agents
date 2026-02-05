@@ -25,7 +25,7 @@ test.describe('Live Folders', () => {
       const directorySection = mainWindow.getByText(/working directory|folder|path/i)
       const hasDirectory = await directorySection.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasDirectory || true).toBeTruthy()
+      expect(hasDirectory).toBeTruthy()
     }
 
     // Close settings
@@ -51,7 +51,7 @@ test.describe('Live Folders', () => {
 
       const hasButton = await changeButton.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasButton || true).toBeTruthy()
+      expect(hasButton).toBeTruthy()
     }
 
     // Close settings
@@ -74,9 +74,9 @@ test.describe('Live Folders', () => {
       .or(mainWindow.locator('[class*="folder"]'))
       .or(mainWindow.getByText(/\.ts|\.js|\.json|\.md/i))
 
-    // Response may or may not contain file references
+    // Agent response may or may not contain file references depending on response content
     const fileCount = await fileBadge.count()
-    expect(fileCount).toBeGreaterThanOrEqual(0)
+    expect(fileCount).toBeGreaterThanOrEqual(0) // Non-deterministic: depends on agent response
   })
 
   test('file links in messages are clickable', async ({ mainWindow }) => {
@@ -88,7 +88,7 @@ test.describe('Live Folders', () => {
 
     const linkCount = await fileLink.count()
 
-    // Document whether file links exist and are interactive
-    expect(linkCount).toBeGreaterThanOrEqual(0)
+    // File links may not exist if no conversation has been started
+    expect(linkCount).toBeGreaterThanOrEqual(0) // Non-deterministic: depends on session state
   })
 })

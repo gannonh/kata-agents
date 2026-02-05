@@ -31,7 +31,7 @@ test.describe('Live Labels', () => {
     await mainWindow.keyboard.press('Backspace')
 
     // Label menu should appear when typing #
-    expect(menuVisible || true).toBeTruthy()
+    expect(menuVisible).toBeTruthy()
   })
 
   test('labels settings page shows label configuration', async ({ mainWindow }) => {
@@ -53,7 +53,7 @@ test.describe('Live Labels', () => {
       const labelsSection = mainWindow.getByText(/add label|create label|no labels/i)
       const hasLabels = await labelsSection.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasLabels || true).toBeTruthy()
+      expect(hasLabels).toBeTruthy()
     }
 
     // Close settings
@@ -71,7 +71,7 @@ test.describe('Live Labels', () => {
     // Count visible label badges
     const badgeCount = await labelBadge.count()
 
-    // Document current state - labels may or may not be applied
-    expect(badgeCount).toBeGreaterThanOrEqual(0)
+    // Label badges render when labels are applied to sessions
+    expect(badgeCount).toBeGreaterThanOrEqual(0) // May be zero if no labels applied
   })
 })

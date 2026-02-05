@@ -2,16 +2,13 @@
  * E2E-05: Session lifecycle tests
  * Create, rename, switch, delete sessions with persistence verification.
  */
-import { test, expect } from '../../fixtures/live.fixture'
+import { test, expect, DEMO_CONFIG_DIR } from '../../fixtures/live.fixture'
 import { _electron as electron } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { homedir } from 'os'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-const DEMO_CONFIG_DIR = path.join(homedir(), '.kata-agents-demo')
 
 test.describe('Live Session Lifecycle', () => {
   test.setTimeout(120_000)

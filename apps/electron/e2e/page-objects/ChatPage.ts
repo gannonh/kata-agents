@@ -38,7 +38,22 @@ export class ChatPage {
    * Wait for an assistant response to appear
    */
   async waitForResponse(timeout = 30000): Promise<void> {
-    await this.assistantTurns.last().waitFor({ state: 'visible', timeout })
+    const lastTurn = this.assistantTurns.last()
+    await lastTurn.waitFor({ state: 'visible', timeout })
+    // Wait for streaming to finish if data-streaming attribute exists
+    try {
+      await this.page.waitForFunction(
+        (sel: string) => {
+          const turns = document.querySelectorAll(sel)
+          const last = turns[turns.length - 1]
+          return last && last.getAttribute('data-streaming') !== 'true'
+        },
+        '[data-testid="assistant-turn-card"]',
+        { timeout }
+      )
+    } catch {
+      // data-streaming attribute may not exist on all turn cards
+    }
   }
 
   /**

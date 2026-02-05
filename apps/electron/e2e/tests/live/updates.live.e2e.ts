@@ -30,7 +30,7 @@ test.describe('Live Updates', () => {
     // Close settings
     await mainWindow.keyboard.press('Escape')
 
-    expect(hasButton || true).toBeTruthy()
+    expect(hasButton).toBeTruthy()
   })
 
   test('version number is displayed in settings', async ({ mainWindow }) => {
@@ -71,7 +71,7 @@ test.describe('Live Updates', () => {
 
       const hasResult = await resultMessage.first().isVisible({ timeout: 5000 }).catch(() => false)
 
-      expect(hasResult || true).toBeTruthy()
+      expect(hasResult).toBeTruthy()
     }
 
     // Close settings
@@ -94,6 +94,6 @@ test.describe('Live Updates', () => {
     // Close settings
     await mainWindow.keyboard.press('Escape')
 
-    expect(hasToggle || true).toBeTruthy()
+    expect(hasToggle).toBeTruthy()
   })
 })

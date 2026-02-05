@@ -41,9 +41,15 @@ export const test = base.extend<LiveFixtures>({
     }
 
     // Ensure demo environment exists (no-op if already seeded)
-    // Suppress output - these scripts are idempotent and only log "already exists" messages
-    execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'pipe' })
-    execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'pipe' })
+    try {
+      execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'pipe' })
+      execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'pipe' })
+    } catch (e) {
+      const stderr = e instanceof Error && 'stderr' in e ? String((e as any).stderr) : ''
+      throw new Error(
+        `Demo setup failed. Run manually: bun run demo:reset\n${stderr}`
+      )
+    }
 
     const args = [
       path.join(__dirname, '../../dist/main.cjs'),
@@ -84,8 +90,9 @@ export const test = base.extend<LiveFixtures>({
         }
         return true
       }, { timeout: 60_000 })
-    } catch {
-      // Splash may already be gone
+    } catch (e) {
+      // Splash may already be gone, but log for debugging
+      console.log('Splash screen wait skipped:', e instanceof Error ? e.message : 'timeout')
     }
 
     // Extra settle time for real API initialization

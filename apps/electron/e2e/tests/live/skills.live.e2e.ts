@@ -18,7 +18,7 @@ test.describe('Live Skills', () => {
     const hasSkills = await skillsSection.first().isVisible({ timeout: 5000 }).catch(() => false)
 
     // Skills section should be visible in sidebar
-    expect(hasSkills || true).toBeTruthy()
+    expect(hasSkills).toBeTruthy()
   })
 
   test('skills list shows workspace skills', async ({ mainWindow }) => {
@@ -41,7 +41,7 @@ test.describe('Live Skills', () => {
       const hasEmpty = await emptyState.first().isVisible({ timeout: 3000 }).catch(() => false)
 
       // Should see either skills or empty state
-      expect(hasItems || hasEmpty || true).toBeTruthy()
+      expect(hasItems || hasEmpty).toBeTruthy()
     }
   })
 
@@ -62,7 +62,7 @@ test.describe('Live Skills', () => {
 
       const hasAdd = await addButton.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-      expect(hasAdd || true).toBeTruthy()
+      expect(hasAdd).toBeTruthy()
     }
   })
 
@@ -89,7 +89,7 @@ test.describe('Live Skills', () => {
         const skillInfo = mainWindow.getByText(/description|instructions|permissions/i)
         const hasInfo = await skillInfo.first().isVisible({ timeout: 3000 }).catch(() => false)
 
-        expect(hasInfo || true).toBeTruthy()
+        expect(hasInfo).toBeTruthy()
       }
     }
   })

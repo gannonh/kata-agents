@@ -66,7 +66,7 @@ test.describe('Live Workspaces', () => {
       await mainWindow.keyboard.press('Escape')
 
       // This test passes if either we found the add option or the menu was visible
-      expect(menuVisible || true).toBeTruthy()
+      expect(menuVisible).toBeTruthy()
     }
   })
 })
