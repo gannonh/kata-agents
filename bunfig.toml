@@ -8,3 +8,9 @@ coveragePathIgnorePatterns = [
 ]
 # Note: Bun doesn't support test ignore patterns yet (see https://github.com/oven-sh/bun/issues/21395)
 # E2E tests use .e2e.ts extension to avoid being picked up by bun test
+
+# Coverage thresholds - CI fails if below these targets
+[test.coverageThreshold]
+line = 65
+function = 70
+statement = 65
