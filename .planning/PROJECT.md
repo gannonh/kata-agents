@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Native desktop client for the Kata ecosystem with integrated git context. Built on the Claude Agent SDK, it provides multi-session management, MCP server integration, and developer-focused features like real-time git branch/PR display and AI-aware git context injection.
+Native desktop client for the Kata ecosystem with integrated git context. Built on the Claude Agent SDK, it provides multi-session management, MCP server integration, and developer-focused features like real-time git branch/PR display and AI-aware git context injection. Includes live E2E testing infrastructure and CI-enforced coverage thresholds.
 
 ## Core Value
 
@@ -45,17 +45,16 @@ A developer-centric AI desktop client that understands your git workflow and pro
 - ✓ Agent receives git context (branch, PR) per message — v0.6.0
 - ✓ Worktree and submodule support — v0.6.0
 
+<!-- v0.6.1 Testing Infrastructure milestone -->
+
+- ✓ Live E2E test suite with real credentials in isolated demo environment — v0.6.1
+- ✓ Coverage reporting and CI-enforced thresholds — v0.6.1
+- ✓ Auth, chat, session, git, and permission mode E2E tests — v0.6.1
+- ✓ Coverage gap analysis with documented rationale — v0.6.1
+
 ### Active
 
-<!-- v0.7.0 Testing Infrastructure milestone -->
-
-- [ ] Unit test coverage for uncovered modules (pr-service, etc.)
-- [ ] Coverage reporting and gap identification
-- [ ] Live E2E test suite with real credentials
-- [ ] Auth + chat round-trip tests
-- [ ] Session lifecycle tests (create, rename, delete, switch)
-- [ ] Git status badge tests in real repos
-- [ ] Permission mode cycling tests
+(No active milestone — start next with `/kata:kata-add-milestone`)
 
 ### Future
 
@@ -70,18 +69,19 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 ## Current State
 
-**Current milestone:** v0.7.0 Testing Infrastructure
-**Last shipped:** v0.6.0 Git Integration (2026-02-04)
+**Current milestone:** None (planning next)
+**Last shipped:** v0.6.1 Testing Infrastructure (2026-02-05)
 
 **Codebase:**
-- 88 files changed in v0.6.0
-- 11,701 lines added, 66 removed
-- 7 phases, 20 plans completed (cumulative)
+- 124 files changed in v0.6.1 (36 code, 88 planning)
+- 2,115 lines added, 88 removed (code only)
+- 9 phases, 26 plans completed (cumulative across all milestones)
 
 **Tech stack:**
 - Electron + React + Vite + shadcn/ui
 - Claude Agent SDK for AI execution
 - Bun for scripts and testing
+- Playwright for E2E testing
 
 **Distribution:**
 - macOS: DMG (arm64, x64) with code signing and notarization
@@ -139,6 +139,12 @@ A developer-centric AI desktop client that understands your git workflow and pro
 | chokidar v4 for .git file watching | Native fs.watch unreliable cross-platform | ✓ Good |
 | Auto-start git watcher on first GIT_STATUS request | Lazy init avoids overhead for non-git workspaces | ✓ Good |
 | Parse .git file gitdir pointer for worktrees | Handles worktrees and submodules transparently | ✓ Good |
+| Validate credentials.enc in live fixture | Prevents confusing test failures when credentials missing | ✓ Good |
+| Dynamic branch detection in git tests | Demo repo may be on different branch | ✓ Good |
+| data-streaming attribute on TurnCard | Allows tests to wait for streaming completion | ✓ Good |
+| Skip single-instance lock with KATA_CONFIG_DIR | Enables parallel test runs with different config dirs | ✓ Good |
+| Regression thresholds below current coverage | Protect against regression, not enforce aspirational targets | ✓ Good |
+| Three-tier coverage gap categorization | Distinguish actionable gaps from integration-test-territory | ✓ Good |
 
 ---
-*Last updated: 2026-02-04 after v0.7.0 milestone started*
+*Last updated: 2026-02-05 after v0.6.1 milestone complete*

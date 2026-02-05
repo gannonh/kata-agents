@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-02-05
+
+### Added
+- Live E2E test suite with real credentials using `~/.kata-agents-demo/` isolation
+- Credential validation in live E2E fixture to prevent cryptic test failures
+- Auth, chat, session lifecycle, git status, and permission mode live E2E tests
+- `data-testid` and `data-streaming` attributes for E2E test targeting
+- Coverage summary script (`bun run test:coverage:summary`) for threshold enforcement
+- Coverage threshold configuration in bunfig.toml with CI integration
+- Demo environment setup scripts (`demo:setup`, `demo:reset`, `demo:repo`, `demo:launch`)
+
+### Fixed
+- Live tests excluded from CI test runner to prevent false failures
+- Demo setup output suppressed in live test fixtures
+- E2E test infrastructure repaired and package versions synced
+
+### Changed
+- Coverage threshold check added to CI pipeline
+- Comprehensive test coverage analysis and gap documentation (COVERAGE.md)
+
 ## [0.6.0] - 2026-02-04
 
 ### Added

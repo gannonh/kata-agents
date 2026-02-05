@@ -1,5 +1,32 @@
 # Project Milestones: Kata Agents
 
+## v0.6.1 Testing Infrastructure (Shipped: 2026-02-05)
+
+**Delivered:** Baseline test coverage and live E2E testing capabilities with real credentials.
+
+**Phases completed:** 1-2 (6 plans total)
+
+**Key accomplishments:**
+
+- Live E2E test suite with real credentials in isolated demo environment
+- Auth, chat, session, git status, and permission mode E2E coverage
+- Coverage reporting configured with threshold enforcement in CI
+- Comprehensive test coverage gap analysis with documented rationale
+- Demo environment tooling (setup, reset, repo, launch scripts)
+
+**Stats:**
+
+- 36 files created/modified (code), 124 total including planning
+- 2,115 lines added, 88 removed (code only)
+- 2 phases, 6 plans, 10 requirements
+- 2 days from milestone start to ship (2026-02-04 to 2026-02-05)
+
+**Git range:** `v0.6.0` to `v0.6.1`
+
+**What's next:** v0.8.0 Kata Infrastructure
+
+---
+
 ## v0.6.0 Git Integration (Shipped: 2026-02-04)
 
 **Delivered:** Git context (branch, PR) displayed in workspace UI with real-time updates and AI context injection.
