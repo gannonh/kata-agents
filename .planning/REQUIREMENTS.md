@@ -4,7 +4,7 @@
 
 - [x] **COV-01**: Coverage report runs via `bun test --coverage` and identifies untested modules
 - [x] **COV-02**: pr-service.ts has unit tests following git-service.test.ts patterns
-- [ ] **COV-03**: Other coverage gaps identified by report are filled or documented with rationale
+- [x] **COV-03**: Other coverage gaps identified by report are filled or documented with rationale
 
 ## Live E2E Tests
 
@@ -40,4 +40,4 @@
 | E2E-07      | Phase 1 | 01-03 | Complete |
 | COV-01      | Phase 2 | 02-01 | Complete |
 | COV-02      | Phase 2 | Pre-existing | Complete |
-| COV-03      | Phase 2 | —     | Pending  |
+| COV-03      | Phase 2 | 02-02 | Complete |
