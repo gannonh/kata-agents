@@ -149,7 +149,10 @@ app.on('open-url', (event, url) => {
 })
 
 // Handle deeplink on Windows/Linux (single instance check)
-const gotTheLock = app.requestSingleInstanceLock()
+// Skip single-instance lock when KATA_CONFIG_DIR is set (multi-instance/test mode)
+// This allows multiple instances to run with different config directories
+const isMultiInstanceMode = !!process.env.KATA_CONFIG_DIR
+const gotTheLock = isMultiInstanceMode ? true : app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {

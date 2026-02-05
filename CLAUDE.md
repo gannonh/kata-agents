@@ -93,11 +93,11 @@ The Electron main process spawns agent sessions as separate Bun subprocesses. Th
 
 Three-level permission system per session (cycle with SHIFT+TAB):
 
-| Mode | Display | Behavior |
-|------|---------|----------|
-| `safe` | Explore | Read-only, blocks write operations |
-| `ask` | Ask to Edit | Prompts for bash commands (default) |
-| `allow-all` | Auto | Auto-approves all commands |
+| Mode        | Display     | Behavior                            |
+| ----------- | ----------- | ----------------------------------- |
+| `safe`      | Explore     | Read-only, blocks write operations  |
+| `ask`       | Ask to Edit | Prompts for bash commands (default) |
+| `allow-all` | Auto        | Auto-approves all commands          |
 
 ### Configuration Storage
 
@@ -139,3 +139,8 @@ import type { Session, Message, AgentEvent } from '@craft-agent/core';
 - Sessions are persisted as JSONL files in workspace directories
 - MCP servers can be stdio-based (local subprocess) or SSE-based (remote)
 - To reset window state (useful when debugging session display issues): `rm ~/.kata-agents/window-state.json`
+
+
+## e2e Testing
+
+@apps/electron/e2e/README.md

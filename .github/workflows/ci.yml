@@ -39,6 +39,9 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
+      - name: Check coverage thresholds
+        run: bun run test:coverage:summary
+
   e2e-tests:
     needs: validate
     runs-on: ubuntu-latest

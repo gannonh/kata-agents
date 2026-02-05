@@ -1,89 +1,110 @@
-# Kata Agents — State
+# Project State: Kata Agents
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-04)
+**Core Value:** Developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
 
-**Core value:** A developer-centric AI desktop client that understands your git workflow
-**Current focus:** v0.7.0 Testing Infrastructure
+**Current Focus:** v0.7.0 Testing Infrastructure -- Establish baseline test coverage and live E2E testing capabilities with real credentials.
+
+---
 
 ## Current Position
 
+**Milestone:** v0.7.0 Testing Infrastructure
+**Phase:** 2 - Unit Test Coverage ✓
+**Plan:** All complete, verified
+**Status:** Phase 2 verified, milestone complete
+
 ```
-Milestone: v0.7.0 Testing Infrastructure
-Phase: Not started (defining requirements)
-Status: Defining requirements
-Progress: [          ] 0/0 plans
+Progress: [██████████] 100% (10/10 requirements)
 ```
 
-**Last activity:** 2026-02-04 -- Milestone v0.7.0 started
-
-## Quick Tasks
-
-| ID | Name | Status | Summary |
-|----|------|--------|---------|
-| 001 | Fill test coverage gaps | Complete | [001-SUMMARY.md](./quick/001-fill-test-coverage-gaps/001-SUMMARY.md) |
-
-## Shipped Milestones
-
-| Version | Name | Shipped | Phases | Requirements |
-|---------|------|---------|--------|--------------|
-| v0.6.0 | Git Integration | 2026-02-04 | 5 | 12/12 |
-| v0.5.0 | — | 2026-02 | — | — |
-| v0.4.0 | Foundation | 2026-01-30 | 2 | 10/10 |
+---
 
 ## Performance Metrics
 
-| Metric | Value |
-|--------|-------|
-| Milestones shipped | 3 |
-| Total phases | 7 |
-| Total plans | 20 |
-| Total requirements | 22 |
+**Milestone velocity:**
+- v0.4.0: 10 requirements in 2 phases (6 plans)
+- v0.6.0: 12 requirements in 5 phases (14 plans)
+- v0.7.0: 10 requirements in 2 phases (6 plans) -- Complete
+
+**Current milestone:**
+- Started: 2026-02-04
+- Target completion: 2026-02-06
+- Days elapsed: 1
+- Phases completed: 2/2
+- Plans completed: 6/6
+
+---
 
 ## Accumulated Context
 
-### Decisions Made
+### Key Decisions
 
-See PROJECT.md Key Decisions table for full list with outcomes.
+| ID | Decision | Rationale | Date |
+|----|----------|-----------|------|
+| live-fixture-validation | Validate credentials.enc exists before launching app in live fixture | Prevents confusing test failures when credentials are missing | 2026-02-04 |
+| git-test-dynamic-branch | Dynamic branch detection instead of hardcoded 'main' | Demo repo may be on different branch; test verifies badge shows actual branch | 2026-02-04 |
+| data-testid-streaming | Add data-streaming attribute alongside data-testid on TurnCard | Allows tests to wait for streaming completion with attribute selector | 2026-02-04 |
+| multi-instance-lock | Skip single-instance lock when KATA_CONFIG_DIR is set | Enables parallel test runs with different config directories | 2026-02-04 |
+| regression-thresholds | Set coverage thresholds below current levels | Prevents regression while allowing incremental improvement toward UAT aspirational targets | 2026-02-05 |
+| explicit-coverage-flag | coverage not enabled by default | Coverage should only run on explicit --coverage flag | 2026-02-05 |
+| coverage-gap-categories | Three-tier categorization (high-priority, low-priority deferred, out-of-scope) | Distinguishes actionable gaps from integration-test-territory modules | 2026-02-05 |
 
-### Open Questions
+**Testing strategy (2026-02-04):**
+- Unit tests focus on critical business logic (pr-service, git-service patterns)
+- Live E2E tests use real credentials in `~/.kata-agents-demo/` isolation
+- Coverage gaps documented with rationale (not 100% coverage goal)
+- Separate test scripts for CI smoke tests vs live E2E tests
 
-_None_
+### Active Todos
 
-### Milestone Scope Issues
+- [x] Plan Phase 1: Live E2E Test Suite
+- [x] Execute 01-01-PLAN.md (Test Infrastructure)
+- [x] Execute 01-02-PLAN.md (Auth & Chat Tests)
+- [x] Execute 01-03-PLAN.md (Session, Git, Permission Tests)
+- [x] Plan Phase 2: Unit Test Coverage
+- [x] Execute 02-01-PLAN.md (Coverage Configuration)
+- [x] Execute 02-02-PLAN.md (Coverage Gaps Documentation)
+- [x] Execute 02-03-PLAN.md (Coverage Thresholds)
 
-Issues pulled into current milestone scope:
-- "E2E Testing Infrastructure - Mock API & Feature Integration Tests" (from: .planning/issues/open/2026-02-02-e2e-testing-infrastructure.md, GitHub: #49)
-- "Fill test coverage gaps" (from: .planning/issues/open/2026-02-02-fill-test-coverage-gaps.md, GitHub: #52)
-- "Live E2E Test Suite - Comprehensive Tests with Real Credentials" (from: .planning/issues/open/2026-02-04-live-e2e-test-suite.md, GitHub: #60)
+### Known Blockers
 
-### Pending Issues
+None.
 
-3 open issues in `.planning/issues/open/` (all pulled into v0.7.0 scope)
+### Technical Debt
 
-### Blockers
+**From v0.6.0:**
+- GitStatusBadge.tsx exists but unused (inline GitBranchBadge used instead)
+- Deprecated GET_GIT_BRANCH channel retained for backward compatibility
+- isGitRepository() exported but not called externally
 
-_None_
+**Testing debt (resolved in v0.7.0):**
+- ~~pr-service.ts has no unit tests~~ (RESOLVED: pr-service.test.ts exists)
+- ~~No live E2E tests with real credentials~~ (RESOLVED: 5 live E2E tests)
+- ~~Coverage reporting not configured~~ (RESOLVED: bunfig.toml coverage settings + CI enforcement)
 
-## Disabled Features
-
-| Feature | Status | Dependency |
-|---------|--------|------------|
-| Slack OAuth | Disabled with error message | Needs HTTPS relay server |
-| External docs links | Empty/GitHub fallback | Needs docs.kata.sh |
-| Version manifest | Disabled | Needs version API at kata.sh |
-| MCP docs server | Commented out | Needs docs MCP at kata.sh |
+---
 
 ## Session Continuity
 
-Last session: 2026-02-04
-Stopped at: Defining v0.7.0 requirements
-Resume file: None
+**Last session:** 2026-02-05 18:10 UTC
+**Stopped at:** Completed 02-03-PLAN.md (Coverage Thresholds)
+**Resume file:** None
 
-## Next Steps
+**Next action:** Audit milestone and ship v0.7.0
 
-Define requirements and create roadmap for v0.7.0
+**Context for next agent:**
+- All 10 requirements complete (E2E-01 through E2E-07, COV-01 through COV-03)
+- Phase 2 verified: 7/7 must-haves passed
+- Coverage enforcement via `bun run test:coverage:summary` and CI integration
+- PR #65 ready for review
+
+**Files to review:**
+- `scripts/coverage-summary.ts` -- Coverage aggregation and enforcement
+- `.planning/REQUIREMENTS.md` -- All requirements marked complete
+- `.planning/phases/active/02-unit-test-coverage/02-03-SUMMARY.md`
 
 ---
-*Last updated: 2026-02-04 after v0.7.0 milestone started*
+
+_Last updated: 2026-02-05 after 02-03-PLAN.md complete_

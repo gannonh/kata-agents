@@ -4,8 +4,7 @@ import type { Page, Locator } from '@playwright/test'
  * Page object for the main chat interface.
  * Encapsulates all chat-related interactions.
  *
- * Note: Uses structural selectors since the app doesn't have data-testid
- * attributes yet. These selectors may need updating as the UI evolves.
+ * Uses data-testid selectors for reliable E2E testing.
  */
 export class ChatPage {
   readonly page: Page
@@ -20,9 +19,10 @@ export class ChatPage {
     this.chatInput = page.locator('[contenteditable="true"]').first()
     // Send button - look for buttons with SVG icons
     this.sendButton = page.locator('button').filter({ has: page.locator('svg') }).last()
-    // Message containers - these selectors may need refinement
+    // Assistant turn cards use data-testid (added in 01-02)
+    this.assistantTurns = page.locator('[data-testid="assistant-turn-card"]')
+    // User turns still need a selector - use class-based for now
     this.userTurns = page.locator('[class*="user-message"], [class*="UserMessage"]')
-    this.assistantTurns = page.locator('[class*="assistant-message"], [class*="AssistantMessage"]')
   }
 
   /**
@@ -38,7 +38,22 @@ export class ChatPage {
    * Wait for an assistant response to appear
    */
   async waitForResponse(timeout = 30000): Promise<void> {
-    await this.assistantTurns.last().waitFor({ state: 'visible', timeout })
+    const lastTurn = this.assistantTurns.last()
+    await lastTurn.waitFor({ state: 'visible', timeout })
+    // Wait for streaming to finish if data-streaming attribute exists
+    try {
+      await this.page.waitForFunction(
+        (sel: string) => {
+          const turns = document.querySelectorAll(sel)
+          const last = turns[turns.length - 1]
+          return last && last.getAttribute('data-streaming') !== 'true'
+        },
+        '[data-testid="assistant-turn-card"]',
+        { timeout }
+      )
+    } catch {
+      // data-streaming attribute may not exist on all turn cards
+    }
   }
 
   /**

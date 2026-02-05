@@ -5,47 +5,124 @@ End-to-end tests using Playwright with Electron support.
 ## Quick Start
 
 ```bash
-# From apps/electron directory
+# From monorepo root (recommended)
+bun run test:e2e           # Mock tests
+bun run test:e2e:live      # Live tests with real credentials
 
-# Run all e2e tests
+# Or from apps/electron directory
+cd apps/electron
 bun run test:e2e
-
-# Run with UI (interactive mode)
-bun run test:e2e:ui
-
-# Run in debug mode
-bun run test:e2e:debug
+bun run test:e2e:live
 ```
 
 ## Prerequisites
 
 1. **Build the app first** - Tests run against the built Electron app:
    ```bash
-   bun run build
+   bun run electron:build
    ```
 
-2. **Test mode** - Tests automatically set `KATA_TEST_MODE=1` to:
-   - Use mock API responses
-   - Use isolated test workspace
-   - Skip real Claude API calls
+2. **For live tests** - Authenticate via the app to create credentials:
+   ```bash
+   # Credentials must exist at ~/.kata-agents/credentials.enc
+   ```
 
 ## Directory Structure
 
 ```
 e2e/
-├── fixtures/           # Test fixtures (app launch, workspace, mocks)
-│   ├── electron.fixture.ts
-│   ├── test-workspace.ts
-│   └── mock-api.ts
-├── page-objects/       # Page Object Model classes
-│   ├── ChatPage.ts
-│   └── WorkspacePage.ts
-├── tests/              # Test specs
-│   ├── app-launch.spec.ts
-│   └── session-lifecycle.spec.ts
-├── helpers/            # Utility functions
-│   └── test-utils.ts
-└── screenshots/        # Debug screenshots (gitignored)
+├── fixtures/
+│   ├── electron.fixture.ts  # Mock mode (KATA_TEST_MODE=1)
+│   └── live.fixture.ts      # Live mode (real credentials)
+├── page-objects/
+│   ├── ChatPage.ts          # Chat interactions
+│   └── WorkspacePage.ts     # Workspace interactions
+├── tests/
+│   ├── *.e2e.ts             # Mock tests
+│   └── live/                # Live tests (real API)
+│       ├── auth.live.e2e.ts
+│       ├── chat.live.e2e.ts
+│       ├── session.live.e2e.ts
+│       ├── git.live.e2e.ts
+│       ├── permission.live.e2e.ts
+│       ├── settings.live.e2e.ts
+│       ├── workspaces.live.e2e.ts
+│       ├── skills.live.e2e.ts
+│       ├── mcps.live.e2e.ts
+│       ├── folders.live.e2e.ts
+│       ├── flags.live.e2e.ts
+│       ├── status.live.e2e.ts
+│       ├── labels.live.e2e.ts
+│       └── updates.live.e2e.ts
+└── helpers/
+    └── test-utils.ts
+```
+
+## Live Tests
+
+Live tests use real OAuth credentials and the demo environment (`~/.kata-agents-demo/`).
+
+### Test Categories
+
+| File | Feature Area | Description |
+|------|--------------|-------------|
+| `auth.live.e2e.ts` | Authentication | App loads with credentials, no onboarding |
+| `chat.live.e2e.ts` | Chat | Send message, streaming response |
+| `session.live.e2e.ts` | Sessions | Create session, persistence |
+| `git.live.e2e.ts` | Git | Branch badge display |
+| `permission.live.e2e.ts` | Permissions | Mode cycling (safe/ask/allow-all) |
+| `settings.live.e2e.ts` | Settings | App/workspace settings, appearance |
+| `workspaces.live.e2e.ts` | Workspaces | Switcher, create, manage |
+| `skills.live.e2e.ts` | Skills | List, add, view info |
+| `mcps.live.e2e.ts` | MCPs | Sources, connection status |
+| `folders.live.e2e.ts` | Folders | Working directory, file preview |
+| `flags.live.e2e.ts` | Flags | Flag/unflag sessions |
+| `status.live.e2e.ts` | Status | Session status management |
+| `labels.live.e2e.ts` | Labels | Label menu (#), configuration |
+| `updates.live.e2e.ts` | Updates | Check for updates, version |
+
+### Running Live Tests
+
+```bash
+# All live tests
+bun run test:e2e:live
+
+# Specific category
+bun run test:e2e:live -- --grep "settings"
+
+# Single file
+bun run test:e2e:live -- e2e/tests/live/settings.live.e2e.ts
+
+# Debug mode (step-through)
+bun run test:e2e:live:debug
+
+# Headed mode (watch execution)
+bun run test:e2e:live:headed
+```
+
+### Demo Environment
+
+The live fixture automatically sets up the demo environment on first run:
+
+```
+~/.kata-agents-demo/
+├── config.json
+└── workspaces/demo-workspace/
+    ├── sessions/       # Seeded test sessions
+    ├── sources/        # Filesystem MCP
+    ├── skills/         # Copied from project
+    ├── statuses/       # Default config
+    └── labels/         # Default config
+
+~/kata-agents-demo-repo/   # Demo git repo (working dir)
+```
+
+Manual setup commands:
+```bash
+bun run demo:setup    # Seed demo environment
+bun run demo:reset    # Wipe and recreate
+bun run demo:repo     # Create demo git repo
+bun run demo:launch   # Setup + launch app
 ```
 
 ## Writing Tests
@@ -53,7 +130,11 @@ e2e/
 ### Using Fixtures
 
 ```typescript
+// Mock tests - isolated, fast
 import { test, expect } from '../fixtures/electron.fixture'
+
+// Live tests - real API, requires credentials
+import { test, expect } from '../fixtures/live.fixture'
 
 test('my test', async ({ electronApp, mainWindow }) => {
   // electronApp - Playwright Electron handle
@@ -64,107 +145,25 @@ test('my test', async ({ electronApp, mainWindow }) => {
 ### Using Page Objects
 
 ```typescript
-import { test, expect } from '../fixtures/electron.fixture'
+import { test, expect } from '../fixtures/live.fixture'
 import { ChatPage } from '../page-objects/ChatPage'
 
 test('send message', async ({ mainWindow }) => {
   const chatPage = new ChatPage(mainWindow)
   await chatPage.sendMessage('Hello')
-  await chatPage.waitForResponse()
-})
-```
-
-## Live Tests (Real Credentials)
-
-Live tests use the demo environment (`~/.kata-agents-demo/`) with real OAuth credentials from `~/.kata-agents/credentials.enc`. They exercise the full auth path with no mocking.
-
-### Setup
-
-```bash
-# From monorepo root
-
-# Seed demo environment (config, workspace, sessions, skills, sources)
-bun run demo:setup
-
-# Create demo git repo at ~/kata-agents-demo-repo/
-bun run demo:repo
-
-# Or do both and launch the app in dev mode
-bun run demo:launch
-```
-
-### Writing Live Tests
-
-Use `live.fixture.ts` instead of `electron.fixture.ts`:
-
-```typescript
-import { test, expect } from '../fixtures/live.fixture'
-
-test('send real message', async ({ mainWindow }) => {
-  // This hits the real Claude API -- use longer timeouts
-  const chatPage = new ChatPage(mainWindow)
-  await chatPage.sendMessage('Say hello')
+  // Live tests need longer timeouts
   await chatPage.waitForResponse({ timeout: 30_000 })
 })
 ```
 
-Key differences from mock tests:
-- No `KATA_TEST_MODE` env var (real auth path)
-- `KATA_CONFIG_DIR` points to `~/.kata-agents-demo/`
-- Demo directory persists across test runs (not cleaned up)
-- Longer default timeouts for real API calls
-- Requires valid OAuth credentials in `~/.kata-agents/credentials.enc`
+## Debugging
 
-### Demo Commands
-
-| Command | Description |
-|---------|-------------|
-| `bun run demo:setup` | Seed demo environment (no-op if exists) |
-| `bun run demo:reset` | Wipe and recreate demo environment |
-| `bun run demo:launch` | Setup + launch app in dev mode |
-| `bun run demo:repo` | Create demo git repo (no-op if exists) |
-
-### Demo Environment
-
-The demo setup creates:
-
-```
-~/.kata-agents-demo/
-├── config.json                    # Global config (oauth_token auth)
-└── workspaces/demo-workspace/
-    ├── config.json                # Workspace config
-    ├── sessions/                  # 4 seeded sessions
-    │   ├── 260201-bright-meadow/  # Code Review (in-progress, flagged)
-    │   ├── 260201-swift-river/    # API Integration (todo)
-    │   ├── 260202-quiet-forest/   # Debug Session (needs-review)
-    │   └── 260202-golden-dawn/    # Quick Question (done)
-    ├── sources/filesystem/        # Filesystem MCP source
-    ├── skills/                    # Copied from project skills/
-    ├── statuses/                  # Default status config
-    ├── labels/                    # Default label config
-    └── .claude-plugin/            # Plugin manifest
-
-~/kata-agents-demo-repo/           # Separate demo git repo (working dir)
-```
-
-Auth works because `credentials.enc` is read from the hardcoded path `~/.kata-agents/credentials.enc` regardless of `KATA_CONFIG_DIR`.
+1. **Debug mode** - `bun run test:e2e:live:debug`
+2. **Headed mode** - `bun run test:e2e:live:headed`
+3. **Screenshots** - Auto-captured on failure
+4. **Videos** - Retained on failure in `playwright-report/`
+5. **Traces** - Captured on first retry
 
 ## Configuration
 
-See `playwright.config.ts` for:
-- Timeout settings
-- Retry configuration
-- Reporter options
-- Trace/video capture settings
-
-## CI Integration
-
-E2E tests are available in CI but disabled by default (macOS runners are expensive).
-To enable, uncomment the `e2e-tests` job in `.github/workflows/ci.yml`.
-
-## Debugging Failed Tests
-
-1. **Screenshots** - Automatically captured on failure
-2. **Videos** - Retained on failure (see `playwright-report/`)
-3. **Traces** - Captured on first retry
-4. **Debug mode** - Run `bun run test:e2e:debug` for step-through debugging
+See `playwright.config.ts` for timeout, retry, and reporter settings.

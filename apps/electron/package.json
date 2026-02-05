@@ -35,7 +35,10 @@
     "test:e2e:watch": "playwright test --watch",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:live": "playwright test tests/live/",
+    "test:e2e:live:debug": "playwright test tests/live/ --debug",
+    "test:e2e:live:headed": "playwright test tests/live/ --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",

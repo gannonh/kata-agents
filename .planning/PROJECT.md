@@ -49,14 +49,13 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 <!-- v0.7.0 Testing Infrastructure milestone -->
 
-- [ ] Mock API server for E2E chat flow testing without real credentials
-- [ ] Mock MCP servers for tool discovery and execution testing
-- [ ] Git integration E2E tests with real repo fixtures
-- [ ] Session and workspace lifecycle E2E tests
 - [ ] Unit test coverage for uncovered modules (pr-service, etc.)
-- [ ] Live E2E test suite with real credentials for local validation
-- [ ] Two-tier test strategy: CI smoke tests + local live tests
 - [ ] Coverage reporting and gap identification
+- [ ] Live E2E test suite with real credentials
+- [ ] Auth + chat round-trip tests
+- [ ] Session lifecycle tests (create, rename, delete, switch)
+- [ ] Git status badge tests in real repos
+- [ ] Permission mode cycling tests
 
 ### Future
 
