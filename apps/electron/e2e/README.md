@@ -175,6 +175,31 @@ bun run test:e2e:live:headed
 - They exercise the real Claude API and take longer than mock tests
 - Use longer timeouts (30s+) for API calls
 
+### Live Test Categories
+
+| File | Feature Area | Tests |
+|------|--------------|-------|
+| `auth.live.e2e.ts` | Authentication | App loads with credentials, no onboarding |
+| `chat.live.e2e.ts` | Chat | Send message, streaming response |
+| `session.live.e2e.ts` | Sessions | Create session, persistence |
+| `git.live.e2e.ts` | Git Integration | Branch badge display |
+| `permission.live.e2e.ts` | Permissions | Mode cycling (safe/ask/allow-all) |
+| `settings.live.e2e.ts` | Settings | App/workspace settings, appearance |
+| `workspaces.live.e2e.ts` | Workspaces | Switcher, create, manage |
+| `skills.live.e2e.ts` | Skills | List, add, view skill info |
+| `mcps.live.e2e.ts` | MCPs | Sources list, connection status |
+| `folders.live.e2e.ts` | Folders | Working directory, file preview |
+| `flags.live.e2e.ts` | Flags | Flag/unflag sessions |
+| `status.live.e2e.ts` | Status | Session status management |
+| `labels.live.e2e.ts` | Labels | Label menu, configuration |
+| `updates.live.e2e.ts` | Updates | Check for updates, version display |
+
+Run specific test file:
+```bash
+bun run test:e2e:live -- --grep "settings"
+bun run test:e2e:live -- e2e/tests/live/settings.live.e2e.ts
+```
+
 ## Configuration
 
 See `playwright.config.ts` for:
