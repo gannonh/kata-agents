@@ -48,18 +48,17 @@ test.describe('Live Skills', () => {
   test('add skill button exists', async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle')
 
-    // Navigate to skills
-    const skillsNav = mainWindow.getByRole('button', { name: /skills/i })
-      .or(mainWindow.getByText(/skills/i).first())
+    // Navigate to skills - use the sidebar nav button which has format "Skills N"
+    const skillsNav = mainWindow.getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('button', { name: /^Skills \d+$/i })
 
     if (await skillsNav.isVisible({ timeout: 5000 })) {
       await skillsNav.click()
       await mainWindow.waitForTimeout(1000)
 
-      // Look for add skill button
-      const addButton = mainWindow.getByRole('button', { name: /add skill/i })
-        .or(mainWindow.getByText(/add skill/i))
-        .or(mainWindow.locator('[class*="Plus"]'))
+      // Look for add skill button via data-tutorial attribute
+      const addButton = mainWindow.locator('[data-tutorial="add-skill-button"]')
+        .or(mainWindow.getByRole('button', { name: /add skill/i }))
 
       const hasAdd = await addButton.first().isVisible({ timeout: 3000 }).catch(() => false)
 
@@ -70,17 +69,17 @@ test.describe('Live Skills', () => {
   test('skill info page loads when skill selected', async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle')
 
-    // Navigate to skills
-    const skillsNav = mainWindow.getByRole('button', { name: /skills/i })
-      .or(mainWindow.getByText(/skills/i).first())
+    // Navigate to skills - use the sidebar nav button which has format "Skills N"
+    const skillsNav = mainWindow.getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('button', { name: /^Skills \d+$/i })
 
     if (await skillsNav.isVisible({ timeout: 5000 })) {
       await skillsNav.click()
       await mainWindow.waitForTimeout(1000)
 
-      // Look for any skill item to click
-      const skillItem = mainWindow.locator('[class*="skill-item"]').first()
-        .or(mainWindow.locator('[class*="skill"] button').first())
+      // Look for any skill item to click - skill items are in the skills list panel
+      // They have a description text that identifies them
+      const skillItem = mainWindow.locator('button').filter({ hasText: /Use this skill when/i }).first()
 
       if (await skillItem.isVisible({ timeout: 3000 })) {
         await skillItem.click()

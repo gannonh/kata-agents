@@ -14,9 +14,9 @@ test.describe('Live Settings', () => {
     // Wait for settings to load
     await mainWindow.waitForTimeout(1000)
 
-    // Verify settings page is visible (look for version info)
-    const versionText = mainWindow.getByText(/v\d+\.\d+\.\d+/)
-    await expect(versionText).toBeVisible({ timeout: 5000 })
+    // Verify settings page is visible (look for version info - no "v" prefix)
+    const versionText = mainWindow.getByText(/\d+\.\d+\.\d+/)
+    await expect(versionText.first()).toBeVisible({ timeout: 5000 })
   })
 
   test('workspace settings shows model selector', async ({ mainWindow }) => {
@@ -51,16 +51,26 @@ test.describe('Live Settings', () => {
     }
   })
 
-  test('settings closes with escape key', async ({ mainWindow }) => {
+  test('settings navigation with escape key', async ({ mainWindow }) => {
     // Open settings
     await mainWindow.keyboard.press('Meta+,')
     await mainWindow.waitForTimeout(1000)
 
-    // Close with escape
+    // Click into App settings to go to nested view
+    const appSettingsButton = mainWindow.getByRole('button', { name: /App.*Notifications/i })
+    await appSettingsButton.click()
+    await mainWindow.waitForTimeout(500)
+
+    // Verify we're in App Settings nested page
+    await expect(mainWindow.getByRole('heading', { name: 'App Settings', level: 1 })).toBeVisible({ timeout: 3000 })
+
+    // Press escape - should go back to settings navigator (not fully close settings)
     await mainWindow.keyboard.press('Escape')
     await mainWindow.waitForTimeout(500)
 
-    // Verify chat input is visible (back to main view)
-    await expect(mainWindow.locator('[contenteditable="true"]')).toBeVisible({ timeout: 5000 })
+    // Verify we went back - App Settings heading should be gone (or we're back at navigator)
+    // The settings navigator shows clickable buttons for each settings category
+    const appButton = mainWindow.getByRole('button', { name: /App.*Notifications/i })
+    await expect(appButton).toBeVisible({ timeout: 5000 })
   })
 })

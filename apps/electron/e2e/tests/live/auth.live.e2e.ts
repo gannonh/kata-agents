@@ -23,7 +23,8 @@ test.describe('Live Auth', () => {
     // Verify main app container is visible (indicates successful auth)
     await expect(mainWindow.locator('[data-testid="app-main-content"]')).toBeVisible()
 
-    // Verify chat input is available (final confirmation of authenticated state)
-    await expect(mainWindow.locator('[contenteditable="true"]')).toBeVisible({ timeout: 10000 })
+    // Verify we're in authenticated state (sidebar navigation is available)
+    // Note: App may restore to settings view from previous session, so we check navigation exists
+    await expect(mainWindow.getByRole('navigation', { name: 'Main navigation' })).toBeVisible({ timeout: 10000 })
   })
 })

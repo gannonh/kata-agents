@@ -10,14 +10,14 @@ test.describe('Live Workspaces', () => {
   test('workspace switcher is visible and shows current workspace', async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle')
 
-    // Look for workspace switcher in the sidebar/titlebar
-    // The demo workspace should be selected
-    const workspaceSwitcher = mainWindow.locator('[data-tutorial="workspace-switcher"]')
-      .or(mainWindow.getByRole('button', { name: /workspace/i }))
-      .or(mainWindow.locator('[class*="workspace"]').first())
+    // Look for workspace switcher - it's a button with "Select workspace" aria-label
+    const workspaceSwitcher = mainWindow.getByRole('button', { name: 'Select workspace' })
 
-    // At minimum, we should see some workspace indication
-    await expect(workspaceSwitcher.or(mainWindow.locator('text=/demo|kata/i').first())).toBeVisible({ timeout: 10000 })
+    // The workspace switcher should be visible
+    await expect(workspaceSwitcher).toBeVisible({ timeout: 10000 })
+
+    // Verify it shows the demo workspace name
+    await expect(mainWindow.getByText('Demo Workspace')).toBeVisible({ timeout: 5000 })
   })
 
   test('workspace dropdown opens on click', async ({ mainWindow }) => {
