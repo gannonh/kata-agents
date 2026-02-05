@@ -41,8 +41,9 @@ export const test = base.extend<LiveFixtures>({
     }
 
     // Ensure demo environment exists (no-op if already seeded)
-    execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'inherit' })
-    execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'inherit' })
+    // Suppress output - these scripts are idempotent and only log "already exists" messages
+    execSync('bun run scripts/setup-demo.ts', { cwd: PROJECT_ROOT, stdio: 'pipe' })
+    execSync('bash scripts/create-demo-repo.sh', { cwd: PROJECT_ROOT, stdio: 'pipe' })
 
     const args = [
       path.join(__dirname, '../../dist/main.cjs'),
