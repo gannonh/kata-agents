@@ -11,12 +11,12 @@
 ## Current Position
 
 **Milestone:** v0.7.0 Testing Infrastructure
-**Phase:** 1 - Live E2E Test Suite ✓
-**Plan:** All complete, verified
-**Status:** Phase 1 verified, ready for Phase 2
+**Phase:** 2 - Unit Test Coverage (executing)
+**Plan:** 01 of 02 complete
+**Status:** Phase 2 in progress
 
 ```
-Progress: [███████░░░] 70% (7/10 requirements)
+Progress: [█████████░] 90% (9/10 requirements)
 ```
 
 ---
@@ -31,9 +31,9 @@ Progress: [███████░░░] 70% (7/10 requirements)
 **Current milestone:**
 - Started: 2026-02-04
 - Target completion: 2026-02-06
-- Days elapsed: 0
+- Days elapsed: 1
 - Phases completed: 1/2
-- Plans completed: 3/6
+- Plans completed: 4/6
 
 ---
 
@@ -47,6 +47,8 @@ Progress: [███████░░░] 70% (7/10 requirements)
 | git-test-dynamic-branch | Dynamic branch detection instead of hardcoded 'main' | Demo repo may be on different branch; test verifies badge shows actual branch | 2026-02-04 |
 | data-testid-streaming | Add data-streaming attribute alongside data-testid on TurnCard | Allows tests to wait for streaming completion with attribute selector | 2026-02-04 |
 | multi-instance-lock | Skip single-instance lock when KATA_CONFIG_DIR is set | Enables parallel test runs with different config directories | 2026-02-04 |
+| no-coverage-threshold | No coverageThreshold in bunfig.toml | Will be determined after gaps documentation in 02-02 | 2026-02-05 |
+| explicit-coverage-flag | coverage not enabled by default | Coverage should only run on explicit --coverage flag | 2026-02-05 |
 
 **Testing strategy (2026-02-04):**
 - Unit tests focus on critical business logic (pr-service, git-service patterns)
@@ -60,8 +62,9 @@ Progress: [███████░░░] 70% (7/10 requirements)
 - [x] Execute 01-01-PLAN.md (Test Infrastructure)
 - [x] Execute 01-02-PLAN.md (Auth & Chat Tests)
 - [x] Execute 01-03-PLAN.md (Session, Git, Permission Tests)
-- [ ] Plan Phase 2: Unit Test Coverage
-- [ ] Execute Phase 2 plans
+- [x] Plan Phase 2: Unit Test Coverage
+- [x] Execute 02-01-PLAN.md (Coverage Configuration)
+- [ ] Execute 02-02-PLAN.md (Coverage Gaps Documentation)
 
 ### Known Blockers
 
@@ -75,30 +78,30 @@ None.
 - isGitRepository() exported but not called externally
 
 **Testing debt (addressed in v0.7.0):**
-- pr-service.ts has no unit tests
+- ~~pr-service.ts has no unit tests~~ (RESOLVED: pr-service.test.ts exists)
 - ~~No live E2E tests with real credentials~~ (RESOLVED: 5 live E2E tests now)
-- Coverage reporting not configured
+- ~~Coverage reporting not configured~~ (RESOLVED: bunfig.toml coverage settings)
 
 ---
 
 ## Session Continuity
 
-**Last session:** 2026-02-04 22:20 UTC
-**Stopped at:** Completed 01-03-PLAN.md (Phase 1 complete)
+**Last session:** 2026-02-05 15:46 UTC
+**Stopped at:** Completed 02-01-PLAN.md (Coverage Configuration)
 **Resume file:** None
 
-**Next action:** Plan Phase 2 (Unit Test Coverage)
+**Next action:** Execute 02-02-PLAN.md (Coverage Gaps Documentation)
 
 **Context for next agent:**
-- Phase 1 complete: 5 live E2E tests passing (E2E-03 through E2E-07)
-- All tests run via `bun run test:e2e:live` in ~47 seconds
-- Ready for Phase 2: Unit test coverage
-- See `.planning/phases/completed/01-live-e2e-test-suite/` for phase artifacts
+- Coverage configured in bunfig.toml with proper ignore patterns
+- Current coverage: 45.39% functions, 50.76% lines
+- COV-01 and COV-02 complete, COV-03 pending
+- See `.planning/phases/active/02-unit-test-coverage/02-01-SUMMARY.md`
 
 **Files to review:**
-- `apps/electron/e2e/tests/live/*.live.e2e.ts` -- All live E2E tests
-- `.planning/phases/completed/01-live-e2e-test-suite/01-*-SUMMARY.md` -- Phase 1 summaries
+- `bunfig.toml` -- Coverage configuration
+- `.planning/REQUIREMENTS.md` -- Traceability table
 
 ---
 
-_Last updated: 2026-02-04 after Phase 1 verification_
+_Last updated: 2026-02-05 after 02-01-PLAN.md completion_
