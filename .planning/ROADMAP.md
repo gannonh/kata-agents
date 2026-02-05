@@ -92,6 +92,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Coverage configuration (bunfig.toml settings, exclude release artifacts)
 - [x] 02-02-PLAN.md — Coverage gaps documentation (COVERAGE.md with analysis and rationale)
+- [x] 02-03-PLAN.md — Coverage thresholds (gap closure: CI enforcement, summary script)
 
 **Note:** COV-02 (pr-service.ts unit tests) was discovered to already exist during planning. Comprehensive tests at `packages/shared/src/git/__tests__/pr-service.test.ts`.
 
@@ -103,7 +104,7 @@ Plans:
 |-----------|--------|--------|-------|--------------|----------|
 | v0.4.0 Foundation | Shipped | 2 | 6 | 10 | 100% |
 | v0.6.0 Git Integration | Shipped | 5 | 14 | 12 | 100% |
-| v0.7.0 Testing Infrastructure | In Progress | 2 | 5 | 10 | 100% |
+| v0.7.0 Testing Infrastructure | In Progress | 2 | 6 | 10 | 100% |
 | v0.8.0 Kata Infrastructure | Planned | — | — | — | — |
 
 ---
