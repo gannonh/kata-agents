@@ -13,6 +13,7 @@
     "test": "bun test ./packages/ ./apps/electron/src/renderer/lib/",
     "test:watch": "bun test --watch ./packages/ ./apps/electron/src/renderer/lib/",
     "test:coverage": "bun test --coverage ./packages/ ./apps/electron/src/renderer/lib/",
+    "test:coverage:summary": "bun run scripts/coverage-summary.ts",
     "test:e2e": "cd apps/electron && bun run test:e2e",
     "test:e2e:ui": "cd apps/electron && bun run test:e2e:ui",
     "test:e2e:debug": "cd apps/electron && bun run test:e2e:debug",
