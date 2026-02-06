@@ -1,390 +1,427 @@
-# Research Summary: Git Status UI Integration
+# Sub-Agent Orchestration Research Summary
 
-**Project:** Kata Agents v0.6.0 - Git Status UI Integration
-**Synthesized:** 2026-02-02
-**Overall Confidence:** HIGH
+**Project:** Kata Agents v0.7.0 Milestone
+**Synthesized:** 2026-02-06
+**Research Coverage:** Technology stack, feature landscape, architecture integration, pitfalls
 
 ---
 
 ## Executive Summary
 
-This feature adds git context awareness to Kata Agents, displaying branch information and PR status to both users and the AI agent. Expert consensus shows this is table-stakes functionality for modern developer tools (VS Code, JetBrains, GitHub Desktop all prominently display branch status), with high user expectations for visibility without requiring interaction.
+Sub-agent orchestration extends Kata's agent capabilities with user-defined task delegation and parallel execution. The SDK provides complete technical primitives (AgentDefinition, Task tool, lifecycle hooks), and the existing codebase already handles core sub-agent event processing (parentToolUseId tracking, ActivityGroup nesting, background task UI). The implementation path involves three layers: storage/configuration (new agent definition CRUD), runtime integration (plumbing agent definitions through CraftAgent.chat()), and UI enhancement (agent identity in existing message tree).
 
-The recommended approach leverages existing infrastructure: use simple-git (8.5M weekly downloads, TypeScript-native) for git operations and gh CLI (already authenticated on developer machines) for PR data. Both run in the main process following established patterns for subprocess management. The architecture extends existing IPC/Jotai patterns without introducing new paradigms, minimizing integration risk.
+Three critical risks require upfront design: shared token budget exhaustion (parallel sub-agents consume parent context multiplicatively), event stream interleaving (concurrent sub-agent events require proper ordering and attribution), and permission inheritance complexity (sub-agents need their own permission evaluation scope). These are solvable with token attribution logic, per-sub-agent state tracking, and permission intersection models.
 
-Key risks center on performance: naive polling can spawn 85-120+ git processes causing CPU spikes and UI lag (verified in GitHub issues). Mitigation requires debouncing (300-500ms), selective file watching (.git/index and .git/HEAD only), and async-only execution to prevent main process blocking. GitHub API rate limiting (5,000 requests/hour) demands aggressive caching with ETags. The app's multi-workspace architecture requires workspace-scoped state to prevent cross-contamination during workspace switching.
+The GUI opportunity is in persistent visibility. CLI tools (Claude Code, command-line agents) provide background task lists and status checks via keyboard shortcuts and commands. A desktop GUI can offer a persistent agent activity dashboard, live sub-agent stream preview, per-agent token cost display, and context window gauges. These features are impossible in a CLI and differentiate Kata in the agent orchestration space.
 
 ---
 
-## Key Findings
+## Key Findings by Research Area
 
-### Technology Stack (from STACK.md)
+### Technology Stack (STACK.md)
 
-**Core Dependencies:**
-- **simple-git ^3.30.0** - Wraps git CLI with TypeScript support; returns structured StatusResult with branch, tracking, ahead/behind counts. Chosen over isomorphic-git (pure JS, slower) and nodegit (native bindings, compile issues with Electron).
-- **gh CLI** (zero new dependencies) - Already authenticated on user machines, JSON output available. App's existing shell-env.ts loads PATH including /opt/homebrew/bin. Preferred over @octokit/rest which requires OAuth device flow setup.
+**What the SDK provides:**
+- `AgentDefinition` type with description, tools, disallowedTools, prompt, model, mcpServers, skills, maxTurns
+- `Options.agents` parameter accepts `Record<string, AgentDefinition>`
+- Task tool with `subagent_type` input that references an agent definition
+- SubagentStart/SubagentStop hook events for lifecycle management
+- `SDKTaskNotificationMessage` for background task completion (status, output_file, summary)
+- All messages carry `parent_tool_use_id` to identify sub-agent context
 
-**Integration Pattern:**
-```typescript
-interface GitContext {
-  branch: string | null;          // From simple-git status()
-  tracking: string | null;
-  ahead: number;
-  behind: number;
-  isDetached: boolean;
-  pullRequest?: {                 // From gh CLI (optional)
-    number: number;
-    title: string;
-    state: 'open' | 'closed' | 'merged';
-    url: string;
-    isDraft: boolean;
-  };
-  hasGit: boolean;
-  hasGhCli: boolean;
-}
+**What the codebase already has:**
+- `parentToolUseId` tracking on all messages (runtime and stored)
+- `ActivityGroup` type and `groupActivitiesByParent()` for nested tool display
+- `task_backgrounded` / `task_progress` event handling
+- Background task UI in ActiveTasksBar with TaskActionMenu
+- Safety net that auto-completes orphaned child tools when parent Task finishes
+- Plugin loading via `plugins: [{ type: 'local', path }]` (line 1483 in craft-agent.ts) that auto-discovers `.claude/agents/*.md` files
+
+**Gap identified:**
+- `SDKTaskNotificationMessage` not yet mapped to AgentEvent union type or forwarded to renderer
+- No token attribution logic to track per-sub-agent consumption
+- No agent slug extraction from Task tool input for UI display
+
+**No new dependencies required.** The existing React + Jotai + shadcn/ui stack provides sufficient primitives for sub-agent tree visualization. Evaluated tree libraries (react-d3-tree, react-arborist, React Flow, react-complex-tree) were rejected due to heavy dependencies, styling conflicts, or wrong abstractions for shallow agent hierarchies.
+
+### Feature Landscape (FEATURES.md)
+
+**Table stakes** (users expect these, missing any feels broken):
+1. Sub-agent as collapsible group in message tree (already partially built)
+2. Progress indication for running sub-agents (SDK provides elapsed_time_seconds)
+3. Background vs foreground distinction (run_in_background flag)
+4. Completion summary when sub-agents finish (SDKTaskNotificationMessage.summary)
+5. Error display with clear failure reason (status: 'failed')
+6. Nested tool call display with depth indentation (already built)
+7. Agent type label showing which agent is running (from subagent_type)
+
+**GUI differentiators** (CLI cannot replicate):
+1. **Agent activity dashboard**: Persistent panel showing all active/recent sub-agents with status, elapsed time, token cost. CLI equivalent (Ctrl+T in Claude Code) requires a keyboard shortcut and only shows on demand.
+2. **Live sub-agent stream preview**: Expandable real-time view of what a background agent is doing. CLI has no visibility into background agent internals until completion.
+3. **Context window gauge per sub-agent**: Visual meter showing context consumption. No CLI equivalent.
+4. **Parallel comparison view**: Side-by-side results from multiple agents solving the same problem. CLI shows results sequentially.
+
+**MVP recommendation:**
+- Phase 1: Core sub-agent display (agent type badge, elapsed time, collapsible children, completion summary, error state)
+- Phase 2: Background agent support (background indicator, toggle button, task notification handling, TaskOutput integration)
+- Phase 3: Agent dashboard (active agents panel, per-agent cost display, resume button)
+
+**Defer to v0.8.0+:**
+- Agent teams (multi-session coordination with shared task lists and inter-agent messaging)
+- Parallel agent comparison/evaluation (requires git worktree isolation, result evaluation)
+- Custom agent definition visual editor (markdown files suffice for v0.7.0)
+- Agent memory/persistence (cross-session learning)
+
+### Architecture Integration (ARCHITECTURE.md)
+
+**Recommended storage pattern:** Workspace-level agent definitions at `~/.kata-agents/workspaces/{id}/agents/{agent-slug}/` with:
+- `config.json` (AgentDefinition fields + UI metadata: slug, name, description, model, tools, disallowedTools, mcpServers, skills, maxTurns, enabled, icon)
+- `prompt.md` (system prompt as separate file for editing)
+
+**New package module:**
+```
+packages/shared/src/agents/
+  types.ts           # StoredAgentDefinition, LoadedAgent interfaces
+  storage.ts         # CRUD for agent definition files
+  index.ts           # Re-exports
 ```
 
-**Recommended module location:** `packages/shared/src/git/` with exports for git-status.ts (simple-git wrapper), github-pr.ts (gh CLI wrapper), and types.ts (GitContext interface).
+**New IPC channels:**
+- `agents:get` - List agent definitions for workspace
+- `agents:create` - Create new agent definition
+- `agents:update` - Update agent definition
+- `agents:delete` - Delete agent definition
+- `agents:templates` - Get built-in agent templates
+- `agents:changed` - Broadcast when definitions change (main -> renderer)
 
-### Feature Priorities (from FEATURES.md)
+**Runtime changes needed:**
+1. Extract `agentSlug` from Task tool input (subagent_type field) in `sessions.ts` event processing
+2. Add `agentSlug?: string` to Message type and ToolStartEvent type
+3. Store `activeSubAgents: Map<taskId, agentSlug>` on ManagedSession for tracking
+4. Pass loaded agent definitions to `options.agents` in CraftAgent.chat()
+5. Add agent-aware permission checks in PreToolUse hook (enforce disallowedTools per agent)
 
-**Table Stakes (user expectation = 100%):**
-| Feature | Complexity | Evidence |
-|---------|------------|----------|
-| Current branch name display | Low | VS Code bottom-left status bar, JetBrains toolbar widget, GitHub Desktop "Current Branch" button |
-| Linked PR display | Medium | GitHub Desktop 3.0+, GitLens, VS Code GitHub extension all show PR association |
-| PR status indicator | Medium | Green check/yellow pending/red X is universal convention |
-| Click-to-copy branch name | Low | Common workflow for PR titles, Jira tickets |
+**Files to create:**
+- `packages/shared/src/agents/` module (3 files)
+- `apps/electron/src/renderer/atoms/agents.ts` (agentDefinitionsAtom, agentDefinitionMapAtom)
+- `apps/electron/src/renderer/components/agents/` directory (AgentList, AgentEditor, AgentCard components)
 
-**Differentiators (competitive advantage):**
-- **AI context awareness** (STRONGEST) - Inject git context into agent system prompt: "I see you're on feature/user-auth with PR #42 open." No existing tool provides this. Turns passive display into active assistance.
-- **PR title inline** - Most tools show PR number only, requiring click. Showing title gives instant context.
-- **One-click PR open** - Click badge opens PR in browser (GitHub Desktop has this, opportunity for parity).
+**Files to modify:**
+- `packages/core/src/types/message.ts` (add agentSlug)
+- `packages/shared/src/agent/craft-agent.ts` (load agents, pass to options, agent-aware permissions)
+- `apps/electron/src/shared/types.ts` (IPC channels)
+- `apps/electron/src/main/ipc.ts` (agent CRUD handlers)
+- `apps/electron/src/main/sessions.ts` (agentSlug extraction, activeSubAgents tracking)
+- `apps/electron/src/preload/index.ts` (expose agent methods)
+- `apps/electron/src/renderer/event-processor/types.ts` (agentSlug on ToolStartEvent)
+- Settings UI component (add Agents tab)
+- ActiveTasksBar.tsx (show agent name when BackgroundTask has agentSlug)
+- TurnCard rendering (agent identity badge on Task activities)
 
-**Anti-Features (deliberately exclude for v0.6.0):**
-- Branch switching UI - Kata Agents is an AI chat tool, not a Git client
-- Commit history view - GitHub Desktop owns this domain
-- Diff viewer - VS Code already excellent
-- Merge/rebase controls - Complex operations that can destroy work
-- Stash management - Niche use case, easy data loss
+**Build order:**
+1. Storage layer (packages/shared/src/agents/)
+2. IPC and main process (channels, handlers, activeSubAgents tracking)
+3. Renderer state (atoms, extend Message type)
+4. UI components (settings panel, agent badges, dashboard)
 
-**MVP Recommendation:**
-1. Branch name display (table stakes, immediate value)
-2. Linked PR title + status (differentiator when combined with AI context)
-3. Click to open PR (low complexity, high convenience)
+### Domain Pitfalls (PITFALLS.md)
 
-Defer to post-MVP: dirty indicator, ahead/behind count, PR review status (all add complexity without core value).
+**Critical pitfalls (cause rewrites):**
 
-### Architecture Approach (from ARCHITECTURE.md)
+1. **Shared token budget exhaustion (HIGH risk):** Parent and N sub-agents share the same 200K token context window. Three to five concurrent sub-agents can exhaust the parent's budget, causing truncated results. Real-world report: 3 of 5 agents failed with output truncation. Prevention: track per-sub-agent token consumption via parentToolUseId, implement token budget allocator, set output token limits per sub-agent, monitor context utilization in real-time.
 
-**Foundation exists:** Git branch detection already implemented at line 743-756 of ipc.ts using GET_GIT_BRANCH channel. Extension follows established patterns without architectural changes.
+2. **Event stream interleaving (HIGH risk):** Multiple sub-agents produce interleaved events on the same stream. `tool_result` can arrive before `tool_start`, and events from different sub-agents are mixed. Current `processEvent()` uses O(n) linear scans on `managed.messages` array which becomes O(N*M) with N sub-agents and M tools each. Prevention: replace linear scans with Map-based O(1) lookups, implement per-sub-agent event queuing, extend ToolIndex pattern to main process.
 
-**Component Boundaries:**
-| Component | Location | Responsibility |
-|-----------|----------|----------------|
-| GitService | `apps/electron/src/main/git.ts` (NEW) | Execute git commands via simple-git, parse output |
-| IPC Handlers | `apps/electron/src/main/ipc.ts` (MODIFY) | Add GIT_STATUS channel, wire to GitService |
-| Preload API | `apps/electron/src/preload/index.ts` (MODIFY) | Expose getGitStatus() and onGitStatusChanged() |
-| gitAtom | `apps/electron/src/renderer/atoms/git.ts` (NEW) | Workspace-keyed state (Map<workspaceId, GitState>) |
-| useGitStatus | `apps/electron/src/renderer/hooks/useGitStatus.ts` (NEW) | Hook for accessing git state |
-| GitStatusBadge | `apps/electron/src/renderer/components/git/` (NEW) | UI component for branch/status display |
+3. **Permission escalation (HIGH risk):** Sub-agents inherit parent's permission mode but need more nuanced control. Background sub-agents auto-deny permissions they can't prompt for, foreground sub-agents may inherit too-broad permissions, custom permissions don't propagate. Prevention: each sub-agent needs its own permission evaluation scope intersecting parent permissions with sub-agent tool restrictions, foreground sub-agents proxy prompts to parent UI, background sub-agents need policy defined at spawn time.
 
-**Key Patterns to Follow:**
-1. **Event-Based Updates** - Matches existing patterns for sources, skills, themes. Watch .git directory with debouncing, broadcast status changes via IPC.
-2. **Workspace-Scoped State** - Git state keyed by workspaceId in Map, not global. Matches existing workspace-scoped patterns (sources, sessions, labels).
-3. **Graceful Degradation** - Return null for non-git directories, cache isRepo check. Existing getGitBranch returns null for non-repos.
+4. **Resource exhaustion (HIGH risk):** N parallel sub-agents create N concurrent API calls. Memory usage scales linearly (~50-200MB per sub-agent). Token cost multiplies (5 sub-agents at 50K tokens each = 250K tokens per turn). Prevention: set hard limit on concurrent sub-agents (3-5), implement sub-agent queue, monitor memory pressure, summarize completed sub-agent histories to reduce in-memory message count.
 
-**Anti-Patterns to Avoid:**
-- Renderer-side git execution (violates security sandbox)
-- Excessive polling (use .git directory file watching with debouncing)
-- Global git state (breaks multi-workspace)
-- Synchronous git calls in render path (UI freezes)
+**Moderate pitfalls:**
 
-**UI Placement:** Add to workspace header area near WorkspaceSwitcher (consistent with "workspace context" information pattern). Small, unobtrusive badge/text showing "[PR #42] Fix user auth - Passing".
+5. **Error propagation (MODERATE risk):** Sub-agent failures arrive as tool errors, not thrown exceptions. No real-time health monitoring. Parent can't preemptively cancel related sub-agents. Research shows 17.2x error amplification in poorly coordinated multi-agent systems. Prevention: implement sub-agent supervisor, classify errors (transient/fatal/partial), add circuit-breaker logic, surface root cause not every downstream failure.
 
-### Critical Pitfalls (from PITFALLS.md)
+6. **UI state complexity (MODERATE risk):** Nested sub-agent trees with real-time streaming cause React re-render storms. Current `sessionAtomFamily` has single StreamingState but multiple concurrent streaming sub-agents need multiple streaming contexts. Prevention: per-sub-agent streaming state (Map<parentToolUseId, StreamingState>), React.memo with stable keys, separate atom family for sub-agent messages, batch IPC events before dispatching.
 
-**Must address in Phase 1 (Core Git Status):**
+7. **Background lifecycle management (MODERATE risk):** Background sub-agents run asynchronously with no heartbeat, no progress reporting beyond elapsed time, no cancellation granularity. Can't access MCP tools. After app restart, background task shell access is lost. Prevention: background task registry in main process, heartbeat monitoring, per-sub-agent cancel/resume controls, persist background task state to disk.
 
-1. **Naive Polling Without Throttling** - Calling git status without rate limiting spawns excessive subprocesses. Real-world example: 85-120+ git processes causing CPU spikes. **Prevention:** Debounce 300-500ms, watch .git/index and .git/HEAD only, use simple-git's maxConcurrentProcesses: 5, add --no-optional-locks flag.
+8. **Session persistence (MODERATE risk):** Sub-agent messages create complex nested structure in JSONL. Large session files (5 sub-agents with 10 tool calls each = 50+ messages per turn). SDK maintains separate sub-agent transcripts at `~/.claude/projects/{project}/{sessionId}/subagents/agent-{agentId}.jsonl`, creating two sources of truth. StoredMessage doesn't include agentId or background task metadata. Prevention: add agentId to StoredMessage, store background task metadata, consider incremental persistence, reconcile app's JSONL with SDK's sub-agent transcripts, lazy loading for sub-agent messages.
 
-2. **Blocking the Main Process** - Running git synchronously freezes entire app. Git Extensions users reported "up to a minute" waits in large repos. **Prevention:** Always async subprocess execution, never execSync, set 5s timeouts with retry, show loading states.
+**Minor pitfalls:**
 
-3. **Not Detecting Non-Git Directories** - Running git commands in non-repos causes error spam. **Prevention:** Pre-check with `git rev-parse --is-inside-work-tree`, cache result, design UI for non-git state, handle exit code 128 gracefully.
+9. **Sub-agent compaction timing:** Parent compacts context while sub-agents run, losing orchestration context. Prevention: delay compaction until sub-agents complete, include summary of active sub-agents in compaction prompt.
 
-4. **Workspace State Confusion** (Kata Agents specific) - Git status from one workspace leaks to another in multi-workspace scenarios. **Prevention:** Scope all git state to workspace ID, cancel pending operations on workspace switch, test rapid switching.
+10. **Cost visibility:** No per-sub-agent token breakdown. Users can't identify expensive sub-agents. Prevention: attribute token usage via parentToolUseId, per-sub-agent counter in UI.
 
-**Must address in Phase 2 (PR Integration):**
-
-5. **GitHub API Rate Limit Exhaustion** - 5,000 requests/hour authenticated (60 unauthenticated). Search API even stricter: 30 requests/minute. **Prevention:** Always authenticate, use conditional requests with ETags (cached responses don't count against limit), cache for 5-10 minutes, monitor X-RateLimit-Remaining header, implement exponential backoff.
-
-**Cross-cutting concerns (all phases):**
-
-6. **Cross-Platform Path/Line Ending Issues** - CRLF vs LF causes false positives. Windows paths use backslashes. **Prevention:** Use --porcelain -z for NUL-separated output, normalize paths internally, respect .gitattributes, enable long paths on Windows.
-
-7. **Race Conditions in Status Updates** - Async operations complete out of order, UI shows stale state. **Prevention:** Cancel pending requests on new user action, use request IDs to discard stale responses, debounce aggressively, atomic state updates.
-
-8. **Detached HEAD State** - UI assumes HEAD always points to branch. **Prevention:** Parse `git status --porcelain=v2 --branch` which includes detached HEAD info, show "HEAD detached at abc1234", test rebase/checkout scenarios.
+11. **Testing complexity:** Testing requires simulating concurrent, asynchronous, interleaved event streams. Existing test infrastructure not set up for this. Prevention: event stream simulator, property-based tests, mock SDK query() generator, add sub-agent e2e scenarios.
 
 ---
 
 ## Implications for Roadmap
 
-### Suggested Phase Structure
+### Phase 1: Core Infrastructure (v0.7.0 foundation)
 
-Based on dependencies and incremental value delivery:
+**Goal:** Enable user-defined sub-agent storage, runtime loading, and basic UI display without touching parallel execution or background tasks.
 
-#### Phase 1: Core Git Service (Main Process)
-**Duration:** 2-3 days
+**Rationale:** Build the storage layer and agent definition loading pipeline first. This establishes the data model and IPC patterns that later phases depend on. No UI complexity yet, no concurrency risks yet.
+
 **Deliverables:**
-- GitService module with getGitStatus() using simple-git
-- GIT_STATUS IPC handler in ipc.ts
-- Preload API extensions (getGitStatus, onGitStatusChanged)
-- Type definitions in shared/types.ts
+- Agent definition storage at `~/.kata-agents/workspaces/{id}/agents/{slug}/`
+- CRUD operations in `packages/shared/src/agents/`
+- IPC channels for agent management
+- Load agent definitions and pass to `options.agents` in CraftAgent.chat()
+- Extract agentSlug from Task tool input and add to Message type
+- Agent settings panel in workspace settings (list, create, edit, delete)
 
-**Rationale:** Foundation layer - all UI work depends on this. Must include throttling/debouncing from day one to prevent performance pitfalls. Workspace-scoped architecture is core requirement for multi-workspace app.
+**Dependencies:** None (greenfield)
 
-**Features from FEATURES.md:**
-- Branch name detection
-- Dirty/clean status
-- Non-git directory handling
+**Risk flags:** None at this phase (no runtime execution changes)
 
-**Pitfalls to address:**
-- Blocking main process (#2) - async-only from start
-- Non-git directories (#3) - pre-check before operations
-- Workspace state confusion (#14) - scope to workspace ID
-- Cross-platform issues (#6) - use porcelain -z
+### Phase 2: Sub-Agent Identity and Single-Agent UX (v0.7.0 MVP)
 
-**Research needs:** Standard patterns, no additional research required.
+**Goal:** Make sub-agents visible in the existing message tree with agent type badges, elapsed time, and completion summaries. One sub-agent at a time, foreground only.
+
+**Rationale:** Extend the existing ActivityGroup rendering with agent identity. Users see which agent ran, how long it took, and the result. No background tasks, no parallel execution (avoids token exhaustion and event interleaving risks).
+
+**Deliverables:**
+- Agent type badge on Task activities (show agent name + icon from definition)
+- Elapsed time indicator using existing `task_progress` events
+- Completion summary display from `SDKTaskNotificationMessage`
+- Error state display with clear failure reason
+- Agent-aware permission prompts (include agent name in permission request)
+- activeSubAgents tracking in ManagedSession (one entry max for now)
+
+**Dependencies:** Phase 1 (needs agent definitions loaded)
+
+**Risk flags:**
+- Research needed: How to handle permission intersection for sub-agents with restricted tools
+- Implementation detail: Renderer's `updateStreamingContentAtom` assumes single streaming context; may need adjustment even for single sub-agent
+
+### Phase 3: Background Sub-Agents and Lifecycle Management (v0.7.1)
+
+**Goal:** Enable background sub-agent execution with proper lifecycle tracking, status monitoring, and output retrieval.
+
+**Rationale:** Background execution is a table stakes feature (users expect it from Claude Code). But it introduces moderate risks (no heartbeat, MCP tool unavailability, subprocess restart issues). Separate from Phase 2 to avoid compounding complexity.
+
+**Deliverables:**
+- Background indicator on Task activities (toolStatus: 'backgrounded')
+- Handle `SDKTaskNotificationMessage` when background tasks complete
+- TaskOutput result integration into completion display
+- Background task registry in main process (Map<taskId, metadata>)
+- Per-sub-agent cancel control in ActiveTasksBar
+- Persist background task state to JSONL (taskId, agentSlug, isBackground)
+- Heartbeat monitoring (mark hung tasks after N seconds of no progress)
+
+**Dependencies:** Phase 2 (needs single foreground sub-agent working)
+
+**Risk flags:**
+- **Research needed:** Background sub-agents can't access MCP tools (SDK limitation). Need to document this restriction and provide UI feedback.
+- **Research needed:** How to handle app restart with active background tasks. SDK loses shell access on restart (issue #16085).
+- Implementation risk: Reconciling app's JSONL storage with SDK's separate sub-agent transcript files.
+
+### Phase 4: Token Attribution and Budget Management (v0.7.2)
+
+**Goal:** Track per-sub-agent token consumption and implement budget controls to prevent shared token exhaustion.
+
+**Rationale:** This is the highest-risk pitfall for parallel sub-agents. Addressing it before Phase 5 (parallel execution) prevents costly production failures.
+
+**Deliverables:**
+- Per-sub-agent token counter using parentToolUseId attribution
+- Token budget allocator (reserve parent budget, divide remainder among sub-agents)
+- Real-time context utilization monitoring with UI gauge
+- Per-sub-agent cost display in agent dashboard
+- Cancel sub-agents approaching budget limits
+- Output token limit per sub-agent (configurable in agent definition)
+
+**Dependencies:** Phase 3 (needs background lifecycle tracking)
+
+**Risk flags:**
+- **Research needed:** The SDK's `usage_update` event provides aggregate inputTokens and contextWindow. Need to verify if per-sub-agent attribution via parentToolUseId is sufficient or if we need SDK changes.
+- **Research needed:** What happens when a sub-agent hits the output token limit mid-execution? Does it gracefully truncate or error out?
+
+### Phase 5: Parallel Sub-Agent Execution and Event Ordering (v0.8.0)
+
+**Goal:** Allow multiple sub-agents to run concurrently with proper event interleaving, state consistency, and resource limits.
+
+**Rationale:** Parallel execution is the major UX differentiator (vs sequential sub-agents) but introduces the highest complexity. Requires all previous phases to be stable. This is a v0.8.0 milestone, not v0.7.0.
+
+**Deliverables:**
+- Per-sub-agent event queuing in main process
+- Replace linear message array scans with Map-based O(1) lookups
+- Per-sub-agent StreamingState map in renderer atoms
+- Concurrent sub-agent limit (3-5) with queueing for additional requests
+- Memory pressure monitoring (cancel/throttle sub-agents if memory exceeds threshold)
+- Batch IPC event dispatch (collect events for 16ms, then apply all at once)
+- React.memo with stable keys for sub-agent message groups (prevent cascade re-renders)
+- Sub-agent supervisor for error handling (cancel siblings on fatal error, circuit-breaker logic)
+
+**Dependencies:** Phase 4 (needs token attribution and budget controls)
+
+**Risk flags:**
+- **Deep research needed:** Event interleaving with out-of-order delivery. Need comprehensive test suite with simulated concurrent event streams.
+- **Deep research needed:** Renderer atom consistency under concurrent updates. Existing `syncSessionsToAtomsAtom` guard ("don't overwrite if processing") may need extension.
+- **Deep research needed:** Subprocess memory leak prevention. How to trigger garbage collection for completed sub-agents?
+
+### Phase 6: Agent Activity Dashboard (v0.8.1)
+
+**Goal:** Build the persistent agent activity dashboard that shows all running, recent, and completed sub-agents with detailed metrics.
+
+**Rationale:** This is the GUI's killer feature vs CLI tools. It requires stable parallel execution (Phase 5) and accurate token attribution (Phase 4).
+
+**Deliverables:**
+- Agent activity panel in sidebar or header
+- Real-time status for all active sub-agents (running/completed/failed/stopped)
+- Elapsed time, token consumption, and cost per sub-agent
+- Click to expand sub-agent for full transcript
+- Resume button to continue completed sub-agent's session
+- Filter/search within dashboard (by agent type, status, cost)
+- Export sub-agent results as markdown or JSON
+
+**Dependencies:** Phase 5 (needs parallel execution working)
+
+**Risk flags:**
+- Implementation challenge: Where to place the dashboard in the existing UI layout? Sidebar competes with session list. Header competes with workspace switcher. Consider a floating panel or bottom drawer.
+
+### Defer to Future Milestones (v0.9.0+)
+
+**Agent teams (multi-session coordination):** Experimental even in Claude Code. Requires inter-agent messaging, shared task lists, session management across multiple windows/processes. Massive architectural lift. Wait for upstream SDK stabilization.
+
+**Parallel agent comparison/evaluation:** Cursor's "run 8 agents and pick the best" feature requires git worktree isolation, result evaluation, conflict resolution. Significant infrastructure investment. Consider after agent teams.
+
+**Custom agent definition visual editor:** Building a full visual editor for agent markdown files is scope creep. Let users edit markdown directly for v0.7.0-v0.8.0. Revisit for v0.9.0 if user demand is high.
+
+**Agent memory/persistence:** Cross-session learning per agent. Adds storage/retrieval complexity. Defer until sub-agent orchestration patterns stabilize.
 
 ---
 
-#### Phase 2: State Management (Renderer)
-**Duration:** 1-2 days
-**Deliverables:**
-- gitAtom with workspace-keyed state (Map<workspaceId, GitState>)
-- useGitStatus hook
-- IPC listener for status updates
-- State update coordination
-
-**Rationale:** State layer - UI components depend on this. Follows established Jotai patterns from existing atoms (sources, sessions). Clear separation from Phase 1 allows parallel work if needed.
-
-**Features from FEATURES.md:**
-- State container for branch/status data
-- Multi-workspace state isolation
-
-**Pitfalls to address:**
-- Race conditions (#7) - request cancellation, debouncing
-- IPC overhead (#13) - batch updates, send diffs not full state
-
-**Research needs:** None, established patterns.
-
----
-
-#### Phase 3: Basic UI (Branch Display)
-**Duration:** 2-3 days
-**Deliverables:**
-- GitStatusBadge component showing branch name
-- Integration into WorkspaceSwitcher/workspace header
-- Simple dirty/clean indicator
-- Click-to-copy branch name
-
-**Rationale:** First visible value. Low scope, table-stakes feature. Proves integration works before adding PR complexity.
-
-**Features from FEATURES.md:**
-- Current branch name display (table stakes)
-- Branch display location (workspace header)
-- Click-to-copy branch name (table stakes)
-
-**Pitfalls to address:**
-- Detached HEAD state (#5) - show "HEAD detached at abc1234"
-- Poor error messaging (#8) - user-friendly messages for common errors
-
-**Research needs:** None, straightforward UI implementation.
-
----
-
-#### Phase 4: PR Integration
-**Duration:** 3-4 days
-**Deliverables:**
-- GitHub PR info via gh CLI
-- PR badge with status indicator (green check/yellow/red X)
-- PR title display inline
-- Click to open PR in browser
-- Fallback for missing/unauthenticated gh CLI
-
-**Rationale:** Differentiator feature - combines with AI context awareness. More complex due to external dependency (gh CLI) and rate limiting concerns. Clear separation from core git status allows deferral if needed.
-
-**Features from FEATURES.md:**
-- Linked PR display (table stakes)
-- PR status indicator (table stakes)
-- PR title inline (differentiator)
-- One-click PR open (differentiator)
-
-**Pitfalls to address:**
-- Rate limit exhaustion (#4) - cache, ETags, exponential backoff
-- Hardcoded default branch (#10) - query from remote/API
-- Poor error messaging (#8) - graceful degradation if gh CLI unavailable
-
-**Research needs:** May need `/kata:research-phase` if gh CLI integration patterns are unclear or if rate limiting strategy needs validation.
-
----
-
-#### Phase 5: Real-Time Updates
-**Duration:** 2-3 days
-**Deliverables:**
-- .git directory file watching (selective: .git/index, .git/HEAD, .git/refs/)
-- Debounced status broadcasts (300-500ms)
-- Watch cleanup on workspace switch
-- Performance testing with active agent sessions
-
-**Rationale:** Polish - improves UX but not blocking for core value. Separated from Phase 1 to allow incremental rollout. High risk of performance issues if not implemented carefully.
-
-**Features from FEATURES.md:**
-- Real-time status updates without manual refresh
-
-**Pitfalls to address:**
-- Naive polling (#1) - selective file watching, debouncing
-- File watcher resource exhaustion (#11) - watch .git paths only, exclude node_modules
-- Conflicting subprocess management (#12) - coordinate with SessionManager
-
-**Research needs:** Likely yes - file watching patterns in Electron with performance constraints. Consider `/kata:research-phase` for file watching strategy.
-
----
-
-#### Phase 6: AI Context Injection (DIFFERENTIATOR)
-**Duration:** 1-2 days
-**Deliverables:**
-- Inject git context into agent system prompt
-- Context format: "Current branch: feature/user-auth, PR #42 (Fix user auth) - Passing"
-- Agent can reference git state in responses
-- Update when git state changes
-
-**Rationale:** Unique value proposition - no existing tool provides AI-aware git context. Relatively simple implementation once Phase 1-4 complete. Turns passive display into active assistance.
-
-**Features from FEATURES.md:**
-- AI context awareness (strongest differentiator)
-
-**Pitfalls to address:**
-- Stale context (#7) - update prompt when status changes
-- Over-verbose prompts - keep git context concise
-
-**Research needs:** None, straightforward prompt injection.
-
----
-
-### Phase Dependency Graph
+## Phase Dependency Graph
 
 ```
-Phase 1: Core Git Service (Main Process)
-    ↓
-Phase 2: State Management (Renderer)
-    ↓
-Phase 3: Basic UI (Branch Display) ←— First user-visible value
-    ↓
-Phase 4: PR Integration ←— Can be deferred if needed
-    ↓
-Phase 5: Real-Time Updates ←— Polish, can be deferred
-    ↓
-Phase 6: AI Context Injection ←— DIFFERENTIATOR, requires Phases 1-4
+Phase 1: Core Infrastructure
+    |
+    +-- Phase 2: Single-Agent UX
+            |
+            +-- Phase 3: Background Lifecycle
+                    |
+                    +-- Phase 4: Token Attribution
+                            |
+                            +-- Phase 5: Parallel Execution (v0.8.0)
+                                    |
+                                    +-- Phase 6: Agent Dashboard
+                                            |
+                                            +-- Future: Agent Teams (v0.9.0+)
+                                            +-- Future: Comparison View (v0.9.0+)
 ```
 
-**Critical path:** Phases 1-2-3 deliver table-stakes branch display. Phase 4 adds PR features. Phase 6 adds unique AI value. Phase 5 is polish and can float.
+Critical path: 1 → 2 → 3 → 4 → 5
 
-**Parallelization opportunities:**
-- Phases 1 and 2 can overlap slightly (start Phase 2 once Phase 1 types are defined)
-- Phase 6 can start once Phase 4 delivers PR data (doesn't depend on Phase 5)
+Phase 6 can start as soon as Phase 5 ships alpha (no need to wait for stable).
 
 ---
 
-### Research Flags
+## Research Flags
 
-| Phase | Research Needed? | Rationale |
-|-------|------------------|-----------|
-| Phase 1 | NO | Standard git operations, established patterns |
-| Phase 2 | NO | Follows existing Jotai patterns |
-| Phase 3 | NO | Straightforward UI implementation |
-| Phase 4 | MAYBE | gh CLI integration and rate limiting strategy. Consider `/kata:research-phase` if patterns unclear. |
-| Phase 5 | YES | File watching performance in Electron with active agent sessions needs validation. Recommend `/kata:research-phase` for file watching strategy. |
-| Phase 6 | NO | Simple prompt injection |
+### Must research before Phase 3:
+- **Background sub-agent MCP tool access:** SDK issue #13254 reports background sub-agents can't access MCP tools. Verify if this is still true in SDK 0.2.19. If true, document prominently and provide UI feedback when user tries to background an agent that needs MCP tools.
+- **App restart with active background tasks:** Issue #16085 reports shell access is lost on session restore. Test if sub-agent background tasks survive app restart or need special handling.
 
-**Recommendation:** Phase 4 and Phase 5 are candidates for deeper research if implementation uncertainty arises. Phase 5 especially benefits from research given file watching performance risks.
+### Must research before Phase 4:
+- **Per-sub-agent token attribution:** Verify that attributing SDK events via parentToolUseId provides accurate per-sub-agent token counts. If not, may need SDK changes or fallback to estimation.
+- **Output token limit behavior:** What happens when a sub-agent hits 8192 output token limit? Truncation? Error? Need to handle gracefully in UI.
+
+### Must research before Phase 5:
+- **Event ordering guarantees:** Confirm that tool_result can arrive before tool_start for background sub-agent child tools (already observed in codebase). Design event buffer to handle this.
+- **Renderer atom consistency:** Stress test `syncSessionsToAtomsAtom` with rapid concurrent updates from multiple sub-agents. Verify no race conditions.
+- **Subprocess memory management:** Investigate if there's a way to trigger garbage collection in the Bun subprocess after sub-agents complete or if we need to restart the subprocess periodically.
 
 ---
 
 ## Confidence Assessment
 
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Stack | HIGH | simple-git is ecosystem standard (8.5M weekly downloads), gh CLI documented. Both actively maintained. |
-| Features | HIGH | Based on official documentation from VS Code, GitHub Desktop, JetBrains, GitLens. Table stakes well-established. |
-| Architecture | HIGH | Extends existing patterns in codebase. GET_GIT_BRANCH already implemented, proving viability. |
-| Pitfalls | HIGH | Verified with real-world GitHub issues (Git Extensions #5439, GitHub Desktop #11614, WSL #184). Official docs for rate limits and porcelain format. |
+| Research Area | Confidence | Rationale |
+|---------------|-----------|-----------|
+| SDK API surface (types, events, lifecycle) | **VERY HIGH** | Verified against SDK 0.2.19 type definitions and official docs |
+| Existing codebase sub-agent support | **VERY HIGH** | Read source files, traced event flow, confirmed parentToolUseId handling |
+| Feature landscape (table stakes, differentiators) | **HIGH** | Based on official Claude Code, VS Code, Cursor, Windsurf docs and changelogs |
+| Architecture integration plan | **HIGH** | Follows established patterns (source/skill CRUD, JSONL persistence, IPC channels) |
+| Critical pitfalls (token exhaustion, event interleaving) | **HIGH** | Verified against real-world GitHub issues and SDK limitations |
+| Moderate pitfalls (permissions, lifecycle) | **MEDIUM-HIGH** | Based on issue reports but some are closed/disputed; need to verify in SDK 0.2.19 |
+| Minor pitfalls (compaction, testing) | **MEDIUM** | Logical extrapolations from system behavior, not confirmed in production |
+| Parallel execution complexity | **MEDIUM** | Theoretical analysis; real complexity emerges during implementation |
+| Background task persistence | **MEDIUM** | SDK's separate transcript files not yet tested in Kata context |
 
-**Overall confidence: HIGH**
+---
 
-### Gaps to Address During Planning
+## Gaps to Address
 
-1. **Exact UI placement** - Research shows header/status bar patterns, but specific positioning in Kata Agents workspace header needs UX decision. Mock up placement near WorkspaceSwitcher.
+### Before Phase 1 implementation:
+1. **Agent definition schema validation:** Define JSON schema for config.json and validate on load. Prevent invalid agent definitions from breaking runtime.
+2. **Agent slug constraints:** Define valid characters (kebab-case only? length limits?). Must match filesystem restrictions.
+3. **Built-in agent templates:** Decide if v0.7.0 ships with any pre-defined agents (e.g., "code-reviewer", "test-writer"). If yes, where do they live (app bundle vs workspace)?
 
-2. **gh CLI availability detection** - Need concrete strategy for detecting gh CLI presence and authentication status. Fallback message when unavailable: "Install and authenticate gh CLI for PR info."
+### Before Phase 3 implementation:
+4. **Background task completion notification:** Design UI for notifying user when background sub-agent finishes. Toast? Badge on session? Status bar update?
+5. **Background task output handling:** TaskOutput returns text result. If result is large (10KB+), how to display? Inline expansion? Separate modal? Save to file?
 
-3. **PR status refresh frequency** - Research recommends 5-10 minute cache, but actual user expectation unclear. Consider user preference or manual refresh button.
+### Before Phase 5 implementation:
+6. **Sub-agent concurrency limit configuration:** Should the 3-5 concurrent limit be user-configurable? Per-workspace? Per-agent definition?
+7. **Error classification taxonomy:** Define which errors are transient (retry), fatal (cancel siblings), partial (continue). Map SDK error codes to classifications.
 
-4. **Integration with existing agent context** - Phase 6 requires understanding current system prompt structure. Review prompts/ directory during Phase 6 planning.
-
-5. **Performance baseline** - Test simple-git performance with typical repos (10k-100k files) to validate assumptions about debounce timing and concurrency limits.
-
-6. **File watching scope** - Phase 5 needs specific decision on which .git paths to watch. Research suggests .git/index, .git/HEAD, .git/refs/ but validate against common workflows (rebase, merge, etc.).
+### Testing gaps:
+8. **Concurrent event stream simulator:** Build test harness that generates realistic interleaved sub-agent events. Use for integration testing.
+9. **E2e sub-agent scenarios:** Add live test cases for foreground sub-agent, background sub-agent, parallel sub-agents (Phase 5+).
+10. **Memory pressure testing:** Simulate 5-10 concurrent sub-agents to measure memory usage and identify leaks.
 
 ---
 
 ## Sources
 
-All research based on official documentation and verified real-world issues:
+### Technology Stack
+- SDK type definitions: `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (v0.2.19)
+- SDK tool schemas: `node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts`
+- Claude Agent SDK documentation: https://platform.claude.com/docs/en/agent-sdk/subagents
+- Existing codebase: `packages/shared/src/agent/tool-matching.ts`, `apps/electron/src/main/sessions.ts`, `apps/electron/src/renderer/event-processor/`
 
-**Stack Research:**
-- [simple-git npm](https://www.npmjs.com/package/simple-git) - Version 3.30.0
-- [steveukx/git-js GitHub](https://github.com/steveukx/git-js) - TypeScript types
-- [gh pr view documentation](https://cli.github.com/manual/gh_pr_view) - JSON fields
-- Existing codebase: `apps/electron/src/main/shell-env.ts`, `ipc.ts:743-756`
+### Feature Landscape
+- [Claude Code Sub-Agents](https://code.claude.com/docs/en/sub-agents)
+- [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams)
+- [VS Code Multi-Agent Development](https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development)
+- [VS Code Agent Overview](https://code.visualstudio.com/docs/copilot/agents/overview)
+- [Cursor 2.0 Changelog](https://cursor.com/changelog/2-0)
+- [Windsurf Cascade Changelog](https://windsurf.com/changelog)
 
-**Features Research:**
-- [VS Code Source Control Overview](https://code.visualstudio.com/docs/sourcecontrol/overview)
-- [GitHub Desktop PR Viewing](https://docs.github.com/en/desktop/working-with-your-remote-repository-on-github-or-github-enterprise/viewing-a-pull-request-in-github-desktop)
-- [JetBrains IntelliJ New UI](https://www.jetbrains.com/help/idea/new-ui.html)
-- [GitLens Side Bar Views](https://help.gitkraken.com/gitlens/side-bar/)
-- [GitHub Desktop 3.0 PR Integration](https://github.blog/2022-04-26-github-desktop-3-0-brings-better-integration-for-your-pull-requests/)
+### Architecture Integration
+- Existing codebase: `craft-agent.ts`, `sessions.ts`, `ipc.ts`, `tool-matching.ts`, `event-processor/`
+- Agent Skills specification: https://agentskills.io/llms.txt (for agent definition file format reference)
 
-**Architecture Research:**
-- Existing codebase patterns in `apps/electron/src/`
-- Current implementation at `ipc.ts:743-756` (GET_GIT_BRANCH)
-- Jotai atom patterns from `atoms/sessions.ts` and `atoms/sources.ts`
-
-**Pitfalls Research:**
-- [Git Status Documentation](https://git-scm.com/docs/git-status) - Porcelain format
-- [GitHub Rate Limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
-- [GitHub API Best Practices](https://docs.github.com/rest/guides/best-practices-for-using-the-rest-api)
-- [Git Extensions #5439](https://github.com/gitextensions/gitextensions/issues/5439) - Status refresh performance
-- [GitHub Desktop #11614](https://github.com/desktop/desktop/issues/11614) - Index refresh indicator
-- [WSL #184](https://github.com/microsoft/WSL/issues/184) - Cross-platform line ending issues
+### Domain Pitfalls
+- [Claude Code #10212: Independent Context Windows for Sub-Agents](https://github.com/anthropics/claude-code/issues/10212)
+- [Claude Code #13254: Background subagents cannot access MCP tools](https://github.com/anthropics/claude-code/issues/13254)
+- [Claude Code #11934: Sub-agents permission denial in dontAsk mode](https://github.com/anthropics/claude-code/issues/11934)
+- [Claude Code #18950: Skills/subagents do not inherit user-level permissions](https://github.com/anthropics/claude-code/issues/18950)
+- [Claude Code #16085: Background task shell access lost on session restore](https://github.com/anthropics/claude-code/issues/16085)
+- [Why Your Multi-Agent System is Failing: 17x Error Trap](https://towardsdatascience.com/why-your-multi-agent-system-is-failing-escaping-the-17x-error-trap-of-the-bag-of-agents/)
+- [claude-agent-sdk-typescript #66: Context window usage formula](https://github.com/anthropics/claude-agent-sdk-typescript/issues/66)
 
 ---
 
-## Ready for Roadmap Creation
+## Recommended v0.7.0 Scope
 
-This research summary provides sufficient detail for the kata-roadmapper agent to:
+**In scope:**
+- Phase 1: Core infrastructure (agent definition storage, CRUD, IPC, settings panel)
+- Phase 2: Single-agent UX (agent type badges, elapsed time, completion summaries, errors)
+- Phase 3: Background lifecycle (background indicator, task notifications, cancel controls)
 
-1. Structure phases with clear deliverables and dependencies
-2. Identify which phases need deeper research
-3. Understand critical pitfalls to embed in milestone acceptance criteria
-4. Prioritize features (table stakes vs differentiators vs anti-features)
-5. Make informed technology choices (simple-git + gh CLI)
+**Out of scope (defer to v0.7.1+):**
+- Phase 4: Token attribution and budget management
+- Phase 5: Parallel sub-agent execution
+- Phase 6: Agent activity dashboard
+- Agent teams, comparison view, visual editor, memory/persistence
 
-**Key recommendations for roadmapper:**
-- Start with Phases 1-2-3 for MVP (branch display)
-- Add Phase 4 for PR integration
-- Defer Phase 5 (real-time updates) to post-MVP if time-constrained
-- Include Phase 6 (AI context) as key differentiator
+**Why this scope:** Delivers table stakes sub-agent features (user-defined agents, basic visibility, background execution) without tackling the highest-risk areas (token exhaustion, event interleaving, parallel execution). Establishes the foundation for more advanced features in v0.7.1-v0.8.0.
 
-**Next step:** Kata-roadmapper creates milestone breakdown with acceptance criteria incorporating pitfall prevention strategies.
+**Estimated effort:**
+- Phase 1: 2-3 weeks (storage layer, IPC, settings UI)
+- Phase 2: 2 weeks (agent identity rendering, event handling)
+- Phase 3: 1-2 weeks (background lifecycle)
+- **Total: 5-7 weeks for v0.7.0**
+
+**Risk mitigation:** Phase 2 and 3 build on existing infrastructure (ActivityGroup, BackgroundTask, event processor). No rewrites needed. Token attribution and parallel execution (high-risk areas) deferred to v0.7.1+.

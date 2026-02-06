@@ -1,136 +1,257 @@
-# Feature Landscape: Git Status UI
+# Feature Landscape: Sub-Agent Orchestration UX
 
-**Domain:** Developer tool git integration (branch/PR display)
-**Researched:** 2026-02-02
-**Confidence:** HIGH (based on official documentation from VS Code, GitHub Desktop, JetBrains)
+**Domain:** Multi-agent visualization and orchestration in a desktop AI assistant
+**Researched:** 2026-02-06
+**Confidence:** HIGH (based on official documentation from Claude Code, VS Code, Cursor, Windsurf)
+
+---
+
+## Context: Existing Codebase Support
+
+Kata Agents already has partial sub-agent infrastructure:
+
+- **`parentToolUseId` tracking** on Messages (both runtime and stored)
+- **`ActivityGroup` type** that groups Task tools with child activities
+- **`groupActivitiesByParent()`** function that nests child tool calls under parent Task tools
+- **Depth calculation** for tree-view rendering during streaming
+- **`task_backgrounded` / `shell_backgrounded` event handling** with status tracking
+- **`TaskOutput` data extraction** (duration, token usage) linked back to parent Task
+- **Orphan child auto-completion** when parent Task finishes
+
+The SDK exposes `AgentDefinition` with: description, tools, disallowedTools, prompt, model (sonnet/opus/haiku/inherit), mcpServers, skills, maxTurns. The `AgentInput` tool schema adds: run_in_background, name, team_name, mode (acceptEdits/bypassPermissions/default/delegate/dontAsk/plan), resume, allowed_tools.
+
+SDK event types relevant to sub-agents: `SDKTaskNotificationMessage` (task_id, status, output_file, summary), `SDKToolProgressMessage` (elapsed_time_seconds), `SubagentStart`/`SubagentStop` hooks.
+
+---
+
+## Claude Code CLI: Sub-Agent UX Reference
+
+### How sub-agents display
+
+**Foreground sub-agents** block the main conversation. The CLI shows tool execution inline with the parent conversation. Permission prompts and AskUserQuestion calls pass through to the user. Child tool calls appear nested under the parent Task tool.
+
+**Background sub-agents** run concurrently. The CLI returns immediately with an agentId. The main agent continues working. Permissions are pre-approved at launch time; anything not pre-approved auto-denies. Background sub-agents cannot use MCP tools or ask clarifying questions.
+
+### Progress and monitoring
+
+- **Ctrl+B**: Background a running task (bash command or agent). Unified key for both.
+- **Ctrl+T**: Toggle the task list view in the terminal status area. Shows up to 10 tasks with pending/in-progress/complete indicators.
+- **/tasks**: List and manage background tasks.
+- **TaskOutput tool**: The main agent polls background task results. Returns JSON with result text, usage stats, total_cost_usd, duration_ms.
+
+### Completion display
+
+When a background sub-agent finishes, the SDK emits `SDKTaskNotificationMessage` with status (completed/failed/stopped), output_file path, and a summary. The main agent receives this and incorporates the result into its conversation.
+
+Foreground sub-agents return their result directly as the Task tool's output. The result appears in the conversation as a completed tool call.
+
+### Agent teams (experimental)
+
+- **Shift+Up/Down**: Navigate between teammates in in-process mode.
+- **Enter on teammate**: View their full session.
+- **Escape**: Interrupt a teammate's current turn.
+- Split-pane mode (tmux/iTerm2): Each teammate gets its own terminal pane.
+- Shared task list: All agents can see task status and self-claim available work.
+- Delegate mode: Restricts the lead to coordination-only tools (no code editing).
+- Inter-agent messaging: Teammates message each other directly, not just back to the lead.
+
+### Limitations in CLI
+
+- No real-time visibility into nested tool calls during background execution until the sub-agent completes.
+- Sub-agents cannot spawn other sub-agents (single-level nesting only).
+- No interactive thinking mode or transparent intermediate output from sub-agents.
+- No progress tracking or ability to interrupt background sub-agents mid-execution.
+- Agent teams don't survive session resumption (in-process teammates lost on /resume).
+
+---
+
+## Competitive Landscape
+
+### VS Code Copilot (v1.109, Jan 2026)
+
+**Agent Sessions sidebar**: A dedicated view that lists all agent sessions (local, background, cloud) with status indicators. One place to manage everything. Click to jump between sessions.
+
+**Agent HQ**: Multi-agent orchestration interface where background agents appear as manageable sessions. Side-by-side layout shows the "All Sessions" list alongside the active chat.
+
+**Subagent visibility**: Users can see which tasks are running, which agent is being used, and expand any subagent to see the full prompt and result.
+
+**Parallel execution**: Multiple subagents run in parallel. Fire off multiple tasks at once. Results arrive independently.
+
+**MCP Apps**: Tool calls can return interactive UI components (dashboards, forms, visualizations) that render directly in chat.
+
+**Key insight**: VS Code treats agent sessions as first-class objects with their own lifecycle, visible in a persistent sidebar. The GUI adds value over a CLI by making all concurrent work visible simultaneously.
+
+### Cursor 2.0 (Oct 2025)
+
+**Agent-centric layout**: Dedicated sidebar where agents, plans, and runs are first-class objects. Conversations and diffs appear front and center.
+
+**Parallel agents**: Up to 8 agents in parallel via git worktrees or remote sandboxes. Each agent operates on an isolated copy of the codebase.
+
+**Progress visualization**: Each agent appears as a distinct item in the sidebar with status, progress indicators, and output logs. Sidebar shows running/completed/waiting states.
+
+**Best-solution evaluation**: After all parallel agents finish, Cursor evaluates all runs and recommends the best solution. The selected agent gets a comment explaining why it was picked.
+
+**Improved code review**: View all changes from Agent across multiple files without jumping between individual files.
+
+**Key insight**: Cursor's competitive advantage is the evaluation/comparison step. Multiple agents solve the same problem, and the tool recommends the best one. This is a pattern that makes parallel work more useful than sequential.
+
+### Windsurf (Wave 13, 2026)
+
+**Side-by-side Cascade panes**: Multiple Cascade sessions in separate panes and tabs within the same window. Monitor progress and compare outputs side-by-side. Can turn the window into an agent dashboard.
+
+**Context window indicator**: Visual indicator showing how much context window is in use. Helps users decide when to start a new session.
+
+**Git worktrees**: First-class support for parallel multi-agent sessions with isolated worktrees.
+
+**Terminal profile**: Dedicated terminal profile for more reliable agent execution.
+
+**Key insight**: Windsurf's context window visualization is a unique addition. Showing context consumption helps users understand agent capacity and make informed decisions about when to start fresh.
+
+---
 
 ## Table Stakes
 
-Features users expect from git status display in developer tools. Missing = feels broken.
+Features users expect from sub-agent support in a desktop AI assistant. Missing any of these feels broken.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| **Current branch name** | Every major IDE shows this. VS Code, JetBrains, GitHub Desktop all display prominently. Users need to know "where am I?" | Low | VS Code: bottom-left status bar. JetBrains: moved to toolbar in new UI. GitHub Desktop: "Current Branch" button. |
-| **Branch display location** | Must be visible without interaction. Status bar or header is standard. | Low | JetBrains users complained when branch was removed from status bar (IDEA-308917). Visibility matters. |
-| **Click-to-copy branch name** | Common developer workflow: copy branch name for PR titles, Jira tickets, Slack. | Low | Not always explicit, but expected. Single click or hover-copy. |
-| **Linked PR display (when exists)** | GitLens, GitHub Desktop 3.0+, and VS Code GitHub extension all show this. Developer expectation is growing. | Medium | GitHub Desktop: badge with PR number, click opens checks. GitLens: PR icon on branches, "linked PRs or issues when available." |
-| **PR status indicator** | Pass/fail/pending badge. GitHub Desktop 3.0 added real-time check status display. | Medium | Green check, yellow pending, red X. Universal convention. |
+| Feature | Why Expected | Evidence | Complexity |
+|---------|-------------|----------|------------|
+| **Sub-agent as collapsible group** | Users need to see that a Task tool has child operations. Claude Code, VS Code, Cursor all group sub-agent work. Kata already has `ActivityGroup` / `groupActivitiesByParent()`. | All tools show nested/grouped sub-agent work | Low (already partially built) |
+| **Progress indication for running sub-agents** | Users need to know something is happening. A spinner or elapsed timer on the Task tool while it runs. | Claude Code shows elapsed_time_seconds via SDKToolProgressMessage. All IDEs show running state. | Low (already have `task_progress` events) |
+| **Background vs foreground distinction** | Users must know if a sub-agent is blocking their conversation or running concurrently. | Claude Code: Ctrl+B toggle. VS Code: Agent Sessions shows local/background/cloud. Cursor: parallel agent sidebar. | Medium |
+| **Sub-agent completion summary** | When a sub-agent finishes, users need to see the result without digging through logs. | Claude Code: TaskNotification with summary. VS Code: expand to see result. Cursor: code review panel. | Low (SDK provides summary in SDKTaskNotificationMessage) |
+| **Sub-agent error display** | Failed sub-agents must surface clearly with the error reason. | Universal pattern. SDK provides status: 'failed'. | Low |
+| **Nested tool call display** | Child tools (Read, Edit, Bash) inside a sub-agent should be visible but secondary to the parent. | All tools show this. Kata already calculates depth and renders tree indentation. | Low (already built) |
+| **Sub-agent agent type label** | Users should see what kind of agent is running ("Explore", "code-reviewer", custom name). | Claude Code shows agent type with custom colors. VS Code shows which agent is being used. | Low |
 
-### Evidence for Table Stakes
-
-**Branch Name Display:**
-- VS Code: "You can find indicators of the status of your repository in the bottom left corner of VS Code: the current branch, dirty indicators and the number of incoming and outgoing commits" ([VS Code Docs](https://code.visualstudio.com/docs/sourcecontrol/overview))
-- JetBrains: "The widget shows the current branch, allows switching branches, and provides the most popular VCS actions" ([IntelliJ New UI](https://www.jetbrains.com/help/idea/new-ui.html))
-- GitHub Desktop: Branch shown in prominent "Current Branch" button at top of window
-
-**Linked PR Display:**
-- GitHub Desktop 3.0: "You can now see the checks of your pull requests to ensure your code is ready for production" ([GitHub Blog](https://github.blog/2022-04-26-github-desktop-3-0-brings-better-integration-for-your-pull-requests/))
-- GitLens: "Shows linked PRs or issues when available, or offers to start a new PR" ([GitLens Docs](https://help.gitkraken.com/gitlens/side-bar/))
+---
 
 ## Differentiators
 
-Features that would make Kata Agents' git display better than typical. Not expected, but valued.
+Features that would make Kata's sub-agent UX stand out. The opportunity is GUI vs CLI.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **PR title inline** | Most tools show PR number only, requiring click to see title. Showing title inline gives instant context. | Low | GitHub Desktop shows PR list with titles, but not inline in main view. Opportunity. |
-| **AI context awareness** | Agent knows git context automatically. "I see you're on feature/user-auth with PR #42 open" - no need to explain. | Medium | Unique to AI-native tools. Context injection into agent prompts. |
-| **PR review status** | Show "Approved", "Changes requested", or "Waiting for review" at a glance. | Medium | GitHub Desktop 3.0 added review notifications but not persistent status display. |
-| **Dirty indicator** | Show uncommitted changes exist (red dot or asterisk next to branch). | Low | VS Code shows "dirty indicators" in status bar. Common but not universal in simpler tools. |
-| **Ahead/behind count** | Show "2 ahead, 1 behind" sync status with remote. | Medium | VS Code and JetBrains show this. Useful but adds visual complexity. |
-| **One-click PR open** | Click PR badge opens PR in browser. Zero friction. | Low | GitHub Desktop has this. GitLens has "Open Associated Pull Request" command. |
+| Feature | Value Proposition | Evidence / Inspiration | Complexity |
+|---------|-------------------|----------------------|------------|
+| **Agent activity dashboard** | A dedicated panel showing all active and recent sub-agents with status, elapsed time, and token cost. The GUI equivalent of Claude Code's Ctrl+T task list, but persistent and visual. | VS Code Agent Sessions sidebar. Cursor agent sidebar. CLI users lose track of background tasks. | Medium |
+| **Live sub-agent stream preview** | While a foreground sub-agent runs, show a live preview of its intermediate text and tool calls in a collapsible region. CLI cannot do this for background agents. | VS Code allows expanding subagent to see full prompt/result. No tool shows live streaming preview of a background agent's work. | High |
+| **Context window gauge per sub-agent** | Show how much context each sub-agent has consumed. Helps users understand why a sub-agent might compact or fail. | Windsurf context window indicator. No tool shows per-agent context usage. | Medium |
+| **Token cost per sub-agent** | Display running cost alongside each sub-agent. SDK provides costUSD in ModelUsage. Makes the cost of parallel work transparent. | TaskOutput returns total_cost_usd. No tool surfaces this as a live indicator. | Low-Medium |
+| **Agent configuration panel** | GUI for defining custom sub-agents: name, description, prompt, tools, model. Currently CLI-only in Claude Code (/agents). | Claude Code /agents command. Kata could make this a visual form instead of markdown files. | Medium |
+| **Parallel agent comparison view** | When running multiple agents on the same problem, show results side-by-side for comparison. | Cursor 2.0 "best solution" evaluation. Windsurf side-by-side panes. | High |
+| **One-click background toggle** | Button to send a running foreground agent to background (equivalent of Ctrl+B). No keyboard shortcut memorization needed. | Claude Code Ctrl+B. GUI button is more discoverable. | Low |
+| **Sub-agent permission inheritance display** | Show which permissions a sub-agent has vs the parent. Visual diff of tool access. | Claude Code shows tool restrictions per sub-agent. No tool visualizes the delta. | Medium |
+| **Resume/re-run sub-agent** | Button to resume a completed sub-agent's session (the SDK supports `resume` on AgentInput). Useful for iterating on partial results. | Claude Code agent resume via agent ID. GUI makes this a one-click action. | Medium |
+| **Agent team coordination view** | If implementing agent teams: visual representation of the shared task list, agent assignments, message flow between agents. | Claude Code agent teams use shared task list and inter-agent messaging. All coordination happens via text in CLI. GUI could make this a Kanban-like board. | High |
 
-### Value Analysis
+### Strongest GUI differentiators (CLI cannot replicate)
 
-**AI Context Awareness** is the strongest differentiator. No existing tool automatically injects git context into AI conversations. This turns passive display into active assistance:
-- Agent sees branch name suggests relevant code areas
-- Agent sees PR title understands current task
-- Agent sees PR status can suggest next actions ("PR approved, ready to merge")
+1. **Agent activity dashboard**: Persistent visual of all agents, their states, and costs. CLI requires Ctrl+T toggle and /tasks command.
+2. **Live sub-agent stream preview**: Expandable real-time view of what a background agent is doing. CLI has no visibility into background agent internals until completion.
+3. **Context window gauge**: Visual meter showing context consumption per agent. CLI has no equivalent.
+4. **Parallel comparison view**: Side-by-side results from multiple agents. CLI shows results sequentially.
+
+---
 
 ## Anti-Features
 
-Things to deliberately NOT build for v0.6.0. Common mistakes in this domain.
+Things to deliberately NOT build for v0.7.0.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| **Branch switching UI** | Scope creep. Kata Agents is an AI chat tool, not a Git client. VS Code, Tower, GitKraken already do this well. | Display only. Users switch branches in their IDE or terminal. |
-| **Commit history view** | Major feature, not needed for context display. GitHub Desktop has full commit graph. | Show current state only. History is visible in existing tools. |
-| **Diff viewer** | VS Code has excellent built-in diff. Duplicating this is wasteful. | Link to PR on GitHub where diffs are viewable. |
-| **Merge/rebase controls** | Complex operations that can destroy work. "Git Tools can make mistakes even easier" ([DZone](https://dzone.com/refcardz/git-patterns-and-anti-patterns)). | Not even a link. Users handle merges in dedicated tools. |
-| **Full PR details panel** | Comments, reviewers, files changed - this is GitHub's job. | Show title + status badge. Link to GitHub for details. |
-| **Branch creation** | Workflow complexity. Users have established branch creation flows. | Display current branch. Creation happens elsewhere. |
-| **Stash management** | Complex feature, niche use case, easy to cause data loss. | Out of scope entirely. |
-| **Multiple remote support** | Edge case complexity. Most users have one remote (origin). | Assume single remote for v0.6.0. |
-| **Sync status polling** | Frequent git operations can slow large repos. "git status" can be expensive. | Fetch on workspace open, manual refresh. No auto-polling. |
+| **Agent teams (multi-session coordination)** | Experimental even in Claude Code. Adds massive complexity: inter-agent messaging, shared task lists, session management, tmux-like pane splitting. The SDK marks this as experimental with many known limitations. | Build single-session sub-agent support first. Evaluate agent teams for v0.8.0+ after the feature stabilizes upstream. |
+| **Custom agent definition editor** | Building a full visual editor for agent markdown files is scope creep for v0.7.0. The /agents interactive UI in Claude Code took multiple releases to stabilize. | Support loading existing agent definitions from .claude/agents/ and ~/.claude/agents/. Let users edit markdown files directly. Consider a visual editor for v0.8.0. |
+| **Parallel agent comparison/evaluation** | Cursor's "run 8 agents and pick the best" requires git worktree isolation, result evaluation, and conflict resolution. Significant infrastructure. | Support one sub-agent at a time in foreground, or multiple sequential. Consider parallel for v0.8.0. |
+| **Sub-agent spawning sub-agents** | The SDK explicitly prevents this. Single-level nesting only. Don't try to work around it. | Display the flat parent-child hierarchy that the SDK provides. |
+| **Split-pane agent views** | Requires window management complexity (tmux-like splitting). Electron can do this but it's a major UI effort for v0.7.0. | Show sub-agents within the existing chat panel with collapsible groups. Consider dedicated agent panels for v0.8.0. |
+| **Agent memory/persistence** | Claude Code's persistent memory feature (cross-session learning per agent) is new and adds storage/retrieval complexity. | Defer. Sub-agents run within a session. Memory is a v0.8.0+ concern. |
+| **MCP tool visualization inside sub-agents** | Background sub-agents in Claude Code cannot use MCP tools. Visualizing MCP-specific tool calls inside sub-agents adds edge cases. | Show MCP tools the same as any other tool in the nested display. No special treatment needed. |
+| **Real-time inter-agent messaging UI** | Only relevant for agent teams, which are out of scope for v0.7.0. | Not applicable until agent teams are implemented. |
+| **Agent marketplace/sharing** | Distributing custom agents beyond the local machine. | Use the existing Agent Skills specification format. Plugin distribution is a separate feature. |
 
-### Anti-Pattern Evidence
-
-**"Button Addict" Anti-Pattern:** One presentation identifies adding too many Git GUI controls as an anti-pattern. "DON'T underestimate the complexity and danger of Git" ([Speaker Deck](https://speakerdeck.com/lemiorhan/10-git-anti-patterns-you-should-be-aware-of)).
-
-**Complexity Trap:** "Building unnecessarily complex solutions or adding features without clear value... Increases complexity and potential for bugs" ([BairesDev](https://www.bairesdev.com/blog/software-anti-patterns/)).
+---
 
 ## Feature Dependencies
 
 ```
-Branch Name Display (prerequisite for all)
+Sub-agent as collapsible group (already partially built)
     |
-    +-- Linked PR Display (requires knowing current branch to query GitHub)
-    |       |
-    |       +-- PR Status Badge (requires PR data)
-    |       |
-    |       +-- PR Title Display (requires PR data)
+    +-- Progress indication (SDKToolProgressMessage / elapsed timer)
     |
-    +-- Dirty Indicator (independent git status check)
+    +-- Agent type label (from AgentInput.subagent_type)
+    |
+    +-- Nested tool call display (already built: depth calculation, ActivityGroup)
+    |
+    +-- Sub-agent completion summary (SDKTaskNotificationMessage)
+    |
+    +-- Sub-agent error display (status: 'failed')
+    |
+    +-- Background vs foreground distinction (AgentInput.run_in_background)
+            |
+            +-- One-click background toggle (Ctrl+B equivalent)
+            |
+            +-- Agent activity dashboard (requires tracking all active agents)
+                    |
+                    +-- Token cost per sub-agent (TaskOutput.total_cost_usd)
+                    |
+                    +-- Context window gauge (SDK ModelUsage.contextWindow)
 ```
 
-**Key Dependency:** PR features require GitHub API integration (`gh` CLI or GitHub REST API). Branch display is git-only.
+---
 
-## MVP Recommendation
+## MVP Recommendation for v0.7.0
 
-For v0.6.0, prioritize:
+### Phase 1: Core Sub-Agent Display
 
-1. **Branch name display** - Table stakes, low complexity, immediate value
-2. **Linked PR title + status** - Differentiator when combined with AI context, medium complexity
-3. **Click to open PR** - Low complexity, high convenience
+Enhance the existing `ActivityGroup` rendering to show sub-agents as first-class UI elements:
 
-**Implementation approach:**
-- Display branch name in workspace header (near WorkspaceSwitcher)
-- When PR exists: Show "[PR #42] Fix user auth - Passing"
-- Click opens PR in browser
-- Inject git context into agent system prompt
+1. **Agent type badge** on the Task tool activity (show "Explore", "code-reviewer", etc.)
+2. **Elapsed time indicator** using existing `task_progress` events
+3. **Collapsible child tools** using existing depth/group infrastructure
+4. **Completion summary** from SDKTaskNotificationMessage
+5. **Error state** with clear failure reason
 
-Defer to post-MVP (v0.7.0+):
-- Dirty indicator: Requires ongoing git status monitoring, adds complexity
-- Ahead/behind count: Requires remote tracking, additional API calls
-- PR review status: Requires additional GitHub API calls
+This phase uses infrastructure that already exists in the codebase.
 
-## UI Placement Patterns (Industry Standard)
+### Phase 2: Background Agent Support
 
-| Tool | Branch Location | PR Location |
-|------|-----------------|-------------|
-| VS Code | Bottom-left status bar | Source Control sidebar (GitLens adds status bar) |
-| JetBrains (New UI) | Top toolbar widget | Git tool window |
-| GitHub Desktop | Top "Current Branch" button | Pull Requests tab in branch dropdown |
-| GitLens | Status bar + sidebar | Sidebar "Linked PRs" section |
+6. **Background indicator** on Task tools that were backgrounded (toolStatus: 'backgrounded')
+7. **Background-to-foreground toggle** button on backgrounded tasks
+8. **Task notification handling** when background agents complete
+9. **TaskOutput result integration** into the completion display
 
-**Recommendation for Kata Agents:**
-- Branch + PR in workspace header area (consistent with WorkspaceSwitcher pattern)
-- Small, unobtrusive badge/text near workspace name
-- Follows pattern of "workspace context" information in one location
+### Phase 3: Agent Dashboard (Differentiator)
+
+10. **Active agents panel** in sidebar or header showing all running/recent sub-agents
+11. **Per-agent cost display** from TaskOutput data
+12. **Resume button** to continue a completed sub-agent's session
+
+### Defer to v0.8.0+
+
+- Agent teams and inter-agent coordination
+- Parallel agent comparison view
+- Custom agent definition visual editor
+- Agent memory/persistence
+- Split-pane agent views
+
+---
 
 ## Sources
 
 **Official Documentation (HIGH confidence):**
-- [VS Code Source Control Overview](https://code.visualstudio.com/docs/sourcecontrol/overview)
-- [GitHub Desktop PR Viewing](https://docs.github.com/en/desktop/working-with-your-remote-repository-on-github-or-github-enterprise/viewing-a-pull-request-in-github-desktop)
-- [JetBrains IntelliJ New UI](https://www.jetbrains.com/help/idea/new-ui.html)
-- [GitLens Side Bar Views](https://help.gitkraken.com/gitlens/side-bar/)
+- [Claude Code Sub-Agents](https://code.claude.com/docs/en/sub-agents)
+- [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams)
+- [Claude Code Interactive Mode](https://code.claude.com/docs/en/interactive-mode)
+- [VS Code Multi-Agent Development](https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development)
+- [VS Code Agent Overview](https://code.visualstudio.com/docs/copilot/agents/overview)
+- [VS Code Unified Agent Experience](https://code.visualstudio.com/blogs/2025/11/03/unified-agent-experience)
+- [Cursor 2.0 Changelog](https://cursor.com/changelog/2-0)
+- [Cursor Parallel Agents Docs](https://cursor.com/docs/configuration/worktrees)
+- [Windsurf Cascade Changelog](https://windsurf.com/changelog)
 
-**Release Announcements (MEDIUM confidence):**
-- [GitHub Desktop 3.0 PR Integration](https://github.blog/2022-04-26-github-desktop-3-0-brings-better-integration-for-your-pull-requests/)
-- [GitHub Desktop 3.2 PR Preview](https://github.blog/2023-03-03-github-desktop-3-2-preview-your-pull-request/)
+**SDK Source (HIGH confidence):**
+- `@anthropic-ai/claude-agent-sdk` types: AgentDefinition, AgentInput, SDKTaskNotificationMessage, SDKToolProgressMessage
+- Existing codebase: turn-utils.ts (groupActivitiesByParent), tool.ts event handlers, message.ts types
 
-**Community/Best Practices (MEDIUM confidence):**
-- [Git Patterns and Anti-Patterns - DZone](https://dzone.com/refcardz/git-patterns-and-anti-patterns)
-- [LazyGit UX Analysis](https://www.bwplotka.dev/2025/lazygit/)
-- [JetBrains User Feedback on Branch Widget](https://youtrack.jetbrains.com/issue/IDEA-308917)
+**Industry Analysis (MEDIUM confidence):**
+- [VS Code 1.107 Agent HQ](https://visualstudiomagazine.com/articles/2025/12/12/vs-code-1-107-november-2025-update-expands-multi-agent-orchestration-model-management.aspx)
+- [Cursor 2.0 InfoWorld](https://www.infoworld.com/article/4081431/cursor-2-0-adds-coding-model-ui-for-parallel-agents.html)
+- [Building Agents with Claude Agent SDK](https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk)
