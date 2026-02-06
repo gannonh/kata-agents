@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
-**Current focus:** Planning next milestone
+**Current focus:** v0.7.0 Multi-Agent Orchestration
 
 ---
 
 ## Current Position
 
-**Milestone:** None (v0.6.1 shipped)
-**Phase:** N/A
-**Plan:** N/A
-**Status:** Ready for next milestone
+**Milestone:** v0.7.0 Multi-Agent Orchestration
+**Phase:** Not started (defining requirements)
+**Plan:** —
+**Status:** Defining requirements
 
 ```
-Progress: [██████████] 100% (v0.6.1 shipped)
+Progress: [░░░░░░░░░░] 0%
 ```
 
 ---
@@ -39,7 +39,7 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Active Todos
 
-None — milestone complete.
+None — milestone just started.
 
 ### Known Blockers
 
@@ -62,11 +62,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-05
-**Stopped at:** Milestone v0.6.1 complete
+**Stopped at:** Defining v0.7.0 milestone
 **Resume file:** None
 
-**Next action:** `/kata:kata-add-milestone` to start next milestone
+**Next action:** Complete milestone initialization (research → requirements → roadmap)
 
 ---
 
-_Last updated: 2026-02-05 after v0.6.1 milestone complete_
+_Last updated: 2026-02-05 after v0.7.0 milestone started_

@@ -54,11 +54,17 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 ### Active
 
-(No active milestone — start next with `/kata:kata-add-milestone`)
+<!-- v0.7.0 Multi-Agent Orchestration milestone -->
+
+- [ ] Agent can spawn sub-agents that execute in parallel with their own context
+- [ ] Sub-agent progress and results visible in chat UI
+- [ ] Users can define custom sub-agent configurations per workspace
+- [ ] Sub-agent events (spawn, progress, completion) rendered in conversation
+- [ ] Background sub-agent support with monitoring
 
 ### Future
 
-- [ ] Set up kata.sh infrastructure (website, update server)
+- [ ] Agent Teams (multi-session coordination, experimental SDK feature)
 - [ ] Kata Orchestrator integration
 - [ ] Re-enable Slack OAuth with Kata relay server
 
@@ -67,9 +73,20 @@ A developer-centric AI desktop client that understands your git workflow and pro
 - Kata Context integration — future, not yet defined
 - Custom MCP server hosting — use third-party or self-hosted
 
+## Current Milestone: v0.7.0 Multi-Agent Orchestration
+
+**Goal:** Enable the agent to spawn and manage sub-agents that execute in parallel, each with their own context window, with full visibility in the chat UI.
+
+**Target features:**
+- Sub-agent spawning via SDK `agents` parameter in `query()`
+- Real-time sub-agent progress visualization in chat
+- Custom sub-agent definitions (per-workspace agent configs)
+- Background sub-agent execution and monitoring
+- Sub-agent result rendering in conversation flow
+
 ## Current State
 
-**Current milestone:** None (planning next)
+**Current milestone:** v0.7.0 Multi-Agent Orchestration
 **Last shipped:** v0.6.1 Testing Infrastructure (2026-02-05)
 
 **Codebase:**
@@ -147,4 +164,4 @@ A developer-centric AI desktop client that understands your git workflow and pro
 | Three-tier coverage gap categorization | Distinguish actionable gaps from integration-test-territory | ✓ Good |
 
 ---
-*Last updated: 2026-02-05 after v0.6.1 milestone complete*
+*Last updated: 2026-02-05 after v0.7.0 milestone started*
