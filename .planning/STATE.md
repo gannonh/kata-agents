@@ -12,12 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 **Milestone:** v0.7.0 Multi-Agent Orchestration
-**Phase:** 9 (Sub-Agent Execution Foundation) — pending
-**Plan:** N/A
-**Status:** Planning Phase 9
+**Phase:** 9 (Sub-Agent Execution Foundation) — in progress
+**Plan:** 1 of 1 (Thread agentSlug through event pipeline)
+**Status:** Phase complete
+**Last activity:** 2026-02-06 - Completed 09-01-PLAN.md
 
 ```
-Progress: [░░░░░░░░░░] 0% (v0.7.0 Phase 9 pending)
+Progress: [██████████] 100% (v0.7.0 Phase 9 complete, 1/1 plans)
 ```
 
 ---
@@ -27,7 +28,7 @@ Progress: [░░░░░░░░░░] 0% (v0.7.0 Phase 9 pending)
 **Milestone velocity:**
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
-- v0.6.1: 10 requirements in 2 phases (6 plans) — 2 days
+- v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
 
 ---
 
@@ -37,9 +38,14 @@ Progress: [░░░░░░░░░░] 0% (v0.7.0 Phase 9 pending)
 
 See PROJECT.md Key Decisions table for full history.
 
+| Decision | Rationale | Outcome |
+|----------|-----------|---------|
+| Extract agentSlug from toolInput.subagent_type, not SDK hooks | Tool input available synchronously at tool_start time; hooks fire later | Pending verification |
+| Prefer agentSlug field over toolInput lookup in ActivityGroupRow badge | Explicit field is stable against SDK dual-event pattern where first tool_start arrives with empty input | Pending verification |
+
 ### Active Todos
 
-None — milestone complete.
+None.
 
 ### Known Blockers
 
@@ -61,12 +67,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05
-**Stopped at:** Milestone v0.6.1 complete
+**Last session:** 2026-02-06
+**Stopped at:** Completed 09-01-PLAN.md (Phase 9 complete)
 **Resume file:** None
 
-**Next action:** `/kata:kata-add-milestone` to start next milestone
+**Next action:** Begin Phase 10 (Sub-Agent Lifecycle Display) planning
 
 ---
 
-_Last updated: 2026-02-05 after v0.6.1 milestone complete_
+_Last updated: 2026-02-06 after Phase 9 Plan 01 complete_
