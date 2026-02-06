@@ -146,6 +146,8 @@ export interface Message {
   toolDisplayMeta?: ToolDisplayMeta;
   // Parent tool ID for nested tool calls (e.g., child tools inside Task subagent)
   parentToolUseId?: string;
+  // Agent type slug for Task sub-agents (e.g., "Explore", "Plan")
+  agentSlug?: string;
   // Background task fields
   taskId?: string;          // For Task with run_in_background
   shellId?: string;         // For Bash with run_in_background
@@ -224,6 +226,8 @@ export interface StoredMessage {
   toolDisplayMeta?: ToolDisplayMeta;
   // Parent tool ID for nested tool calls (persisted for session restore)
   parentToolUseId?: string;
+  // Agent type slug for Task sub-agents (persisted for session restore)
+  agentSlug?: string;
   // Background task fields (persisted)
   taskId?: string;
   shellId?: string;

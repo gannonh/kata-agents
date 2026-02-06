@@ -62,6 +62,8 @@ export interface ToolStartEvent {
   toolDisplayName?: string
   /** Tool display metadata with base64-encoded icon for viewer compatibility */
   toolDisplayMeta?: ToolDisplayMeta
+  /** Agent type slug for Task sub-agents */
+  agentSlug?: string
 }
 
 /**
