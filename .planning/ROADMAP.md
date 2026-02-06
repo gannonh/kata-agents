@@ -41,7 +41,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
   4. Tool calls within the sub-agent render with visible depth indentation relative to the parent
 
 **Plans:**
-- [ ] Plan 01 (Wave 1): Thread agentSlug through event pipeline (types, extraction, propagation, badge display)
+- [x] Plan 01 (Wave 1): Thread agentSlug through event pipeline (types, extraction, propagation, badge display) — Completed 2026-02-06
 
 #### Phase 10: Sub-Agent Lifecycle Display
 
@@ -130,8 +130,8 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
 | v0.4.0 Foundation | Shipped | 2 | 6 | 10 | 100% |
 | v0.6.0 Git Integration | Shipped | 5 | 14 | 12 | 100% |
 | v0.6.1 Testing Infrastructure | Shipped | 2 | 6 | 10 | 100% |
-| v0.7.0 Multi-Agent Orchestration | In Progress | 4 | — | 13 | 0% |
+| v0.7.0 Multi-Agent Orchestration | In Progress | 4 | 1 | 13 | 31% |
 
 ---
 
-_Last updated: 2026-02-06 after v0.7.0 roadmap created_
+_Last updated: 2026-02-06 after Phase 9 complete_

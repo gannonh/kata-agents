@@ -40,8 +40,8 @@ See PROJECT.md Key Decisions table for full history.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Extract agentSlug from toolInput.subagent_type, not SDK hooks | Tool input available synchronously at tool_start time; hooks fire later | Pending verification |
-| Prefer agentSlug field over toolInput lookup in ActivityGroupRow badge | Explicit field is stable against SDK dual-event pattern where first tool_start arrives with empty input | Pending verification |
+| Extract agentSlug from toolInput.subagent_type, not SDK hooks | Tool input available synchronously at tool_start time; hooks fire later | Verified |
+| Prefer agentSlug field over toolInput lookup in ActivityGroupRow badge | Explicit field is stable against SDK dual-event pattern where first tool_start arrives with empty input | Verified |
 
 ### Active Todos
 
