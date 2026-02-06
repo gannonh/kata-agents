@@ -40,6 +40,9 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
   3. The agent type badge (general-purpose, Explore, or Plan) displays on the sub-agent group header
   4. Tool calls within the sub-agent render with visible depth indentation relative to the parent
 
+**Plans:**
+- [ ] Plan 01 (Wave 1): Thread agentSlug through event pipeline (types, extraction, propagation, badge display)
+
 #### Phase 10: Sub-Agent Lifecycle Display
 
 **Goal**: Running, completed, and failed sub-agents each show distinct, informative states so the user always knows what happened.
