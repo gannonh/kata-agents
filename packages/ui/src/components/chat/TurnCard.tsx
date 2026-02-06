@@ -169,6 +169,8 @@ export interface ActivityItem {
   toolDisplayMeta?: ToolDisplayMeta  // Embedded metadata with base64 icon (for viewer compatibility)
   timestamp: number
   error?: string
+  // Agent type slug for Task sub-agents
+  agentSlug?: string
   // Parent-child nesting for Task subagents
   parentId?: string  // Parent activity's toolUseId
   depth?: number     // Nesting level (0 = root, 1 = child, etc.)
@@ -926,7 +928,8 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
   }, [groupId, expandedGroups, setExpandedGroups])
 
   const description = group.parent.toolInput?.description as string | undefined
-  const subagentType = group.parent.toolInput?.subagent_type as string | undefined
+  const subagentType = group.parent.agentSlug
+    || (group.parent.toolInput?.subagent_type as string | undefined)
   const isComplete = group.parent.status === 'completed' || group.parent.status === 'error'
   const hasError = group.parent.status === 'error'
 

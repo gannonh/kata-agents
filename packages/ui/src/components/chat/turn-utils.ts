@@ -28,6 +28,7 @@ export function storedToMessage(stored: StoredMessage): Message {
     toolDisplayName: stored.toolDisplayName,
     toolDisplayMeta: stored.toolDisplayMeta,  // Includes base64 icon for viewer
     parentToolUseId: stored.parentToolUseId,
+    agentSlug: stored.agentSlug,
     taskId: stored.taskId,
     shellId: stored.shellId,
     elapsedSeconds: stored.elapsedSeconds,
@@ -239,6 +240,7 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     // This is tracked by session manager's parentToolStack, NOT the SDK's
     // parent_tool_use_id which is for result-matching, not hierarchy.
     parentId: message.parentToolUseId,
+    agentSlug: message.agentSlug,
   }
 
   // Calculate depth incrementally using existing activities
