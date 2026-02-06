@@ -23,12 +23,12 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
 
 | Phase | Name | Requirements | Depends On |
 |-------|------|-------------|------------|
-| 1 | Sub-Agent Execution Foundation | EXEC-01, EXEC-04, DISPLAY-01, DISPLAY-05 | — |
-| 2 | Sub-Agent Lifecycle Display | DISPLAY-02, DISPLAY-03, DISPLAY-04 | Phase 1 |
-| 3 | Parallel Execution | EXEC-02, EXEC-03, EXEC-05 | Phase 2 |
-| 4 | Background Sub-Agent Support | BG-01, BG-02, BG-03 | Phase 3 |
+| 9 | Sub-Agent Execution Foundation | EXEC-01, EXEC-04, DISPLAY-01, DISPLAY-05 | — |
+| 10 | Sub-Agent Lifecycle Display | DISPLAY-02, DISPLAY-03, DISPLAY-04 | Phase 9 |
+| 11 | Parallel Execution | EXEC-02, EXEC-03, EXEC-05 | Phase 10 |
+| 12 | Background Sub-Agent Support | BG-01, BG-02, BG-03 | Phase 11 |
 
-#### Phase 1: Sub-Agent Execution Foundation
+#### Phase 9: Sub-Agent Execution Foundation
 
 **Goal**: A sub-agent spawned via the SDK Task tool appears in the message tree as a collapsible group with its agent type visible and nested tool calls indented.
 
@@ -40,7 +40,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
   3. The agent type badge (general-purpose, Explore, or Plan) displays on the sub-agent group header
   4. Tool calls within the sub-agent render with visible depth indentation relative to the parent
 
-#### Phase 2: Sub-Agent Lifecycle Display
+#### Phase 10: Sub-Agent Lifecycle Display
 
 **Goal**: Running, completed, and failed sub-agents each show distinct, informative states so the user always knows what happened.
 
@@ -51,7 +51,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
   2. A completed sub-agent displays a completion summary (token count, duration, or SDK-provided summary text)
   3. A failed sub-agent displays an error state with the failure reason visible without expanding the group
 
-#### Phase 3: Parallel Execution
+#### Phase 11: Parallel Execution
 
 **Goal**: Multiple sub-agents execute concurrently within a single session with events correctly ordered and a hard limit preventing resource exhaustion.
 
@@ -63,7 +63,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Curren
   3. A configurable concurrent sub-agent limit (default 3-5) prevents unbounded spawning; additional requests queue until a slot opens
   4. The UI remains responsive during parallel sub-agent execution (no render blocking or event loss)
 
-#### Phase 4: Background Sub-Agent Support
+#### Phase 12: Background Sub-Agent Support
 
 **Goal**: Background sub-agents are visually distinct from foreground sub-agents, notify the user on completion, and render their results inline.
 
