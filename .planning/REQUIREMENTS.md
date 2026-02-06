@@ -45,20 +45,20 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DISPLAY-01  | —     | Pending |
-| DISPLAY-02  | —     | Pending |
-| DISPLAY-03  | —     | Pending |
-| DISPLAY-04  | —     | Pending |
-| DISPLAY-05  | —     | Pending |
-| EXEC-01     | —     | Pending |
-| EXEC-02     | —     | Pending |
-| EXEC-03     | —     | Pending |
-| EXEC-04     | —     | Pending |
-| EXEC-05     | —     | Pending |
-| BG-01       | —     | Pending |
-| BG-02       | —     | Pending |
-| BG-03       | —     | Pending |
+| DISPLAY-01  | Phase 1: Sub-Agent Execution Foundation | Pending |
+| DISPLAY-02  | Phase 2: Sub-Agent Lifecycle Display | Pending |
+| DISPLAY-03  | Phase 2: Sub-Agent Lifecycle Display | Pending |
+| DISPLAY-04  | Phase 2: Sub-Agent Lifecycle Display | Pending |
+| DISPLAY-05  | Phase 1: Sub-Agent Execution Foundation | Pending |
+| EXEC-01     | Phase 1: Sub-Agent Execution Foundation | Pending |
+| EXEC-02     | Phase 3: Parallel Execution | Pending |
+| EXEC-03     | Phase 3: Parallel Execution | Pending |
+| EXEC-04     | Phase 1: Sub-Agent Execution Foundation | Pending |
+| EXEC-05     | Phase 3: Parallel Execution | Pending |
+| BG-01       | Phase 4: Background Sub-Agent Support | Pending |
+| BG-02       | Phase 4: Background Sub-Agent Support | Pending |
+| BG-03       | Phase 4: Background Sub-Agent Support | Pending |
 
 ---
 
-_13 requirements across 3 categories_
+_13 requirements across 3 categories, mapped to 4 phases with 100% coverage_
