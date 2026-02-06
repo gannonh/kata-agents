@@ -38,6 +38,7 @@ export function handleToolStart(
       toolDisplayMeta: event.toolDisplayMeta,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
+      agentSlug: event.agentSlug,
     })
     return { session: updatedSession, streaming }
   }
@@ -57,6 +58,7 @@ export function handleToolStart(
     toolIntent: event.toolIntent,
     toolDisplayName: event.toolDisplayName,
     toolDisplayMeta: event.toolDisplayMeta,
+    agentSlug: event.agentSlug,
   }
 
   return {

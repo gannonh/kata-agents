@@ -3229,6 +3229,11 @@ To view this task's output:
         // No stack or map needed; the event carries the correct parent from the start.
         const parentToolUseId = event.parentToolUseId
 
+        // Extract agent type slug from Task tool input for display badge
+        const agentSlug = event.toolName === 'Task'
+          ? (formattedToolInput?.subagent_type as string) || undefined
+          : undefined
+
         // Track if we need to send an event to the renderer
         // Send on: first occurrence OR when we have new input data to update
         let shouldSendEvent = !isDuplicateEvent
@@ -3251,6 +3256,10 @@ To view this task's output:
           if (toolDisplayMeta && !existingStartMsg.toolDisplayMeta) {
             existingStartMsg.toolDisplayMeta = toolDisplayMeta
           }
+          // Set agentSlug if not already set (from Task tool input)
+          if (agentSlug && !existingStartMsg.agentSlug) {
+            existingStartMsg.agentSlug = agentSlug
+          }
         } else {
           // Add tool message immediately (will be updated on tool_result)
           // This ensures tool calls are persisted even if they don't complete
@@ -3268,6 +3277,7 @@ To view this task's output:
             toolDisplayMeta,  // Includes base64 icon for viewer compatibility
             turnId: event.turnId,
             parentToolUseId,
+            agentSlug,
           }
           managed.messages.push(toolStartMessage)
         }
@@ -3285,6 +3295,7 @@ To view this task's output:
             toolDisplayMeta,  // Includes base64 icon for viewer compatibility
             turnId: event.turnId,
             parentToolUseId,
+            agentSlug,
           }, workspaceId)
         }
         break
