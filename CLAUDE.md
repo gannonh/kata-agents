@@ -50,6 +50,7 @@ apps/
         │   ├── index.ts          # App entry, window lifecycle, Sentry
         │   ├── ipc.ts            # IPC handlers for renderer communication
         │   ├── sessions.ts       # SessionManager - spawns Bun subprocesses for agent execution
+        │   ├── daemon-manager.ts # DaemonManager - spawns/supervises daemon subprocess
         │   └── window-manager.ts # Multi-window management
         ├── preload/              # Context bridge (exposes IPC to renderer)
         └── renderer/             # React UI (Vite + shadcn)
@@ -69,6 +70,7 @@ packages/
 │       ├── credentials/          # AES-256-GCM encrypted credential storage
 │       ├── mcp/                  # MCP client and validation
 │       ├── prompts/              # System prompt generation
+│       ├── daemon/               # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management)
 │       ├── sessions/             # Session persistence (JSONL format)
 │       └── sources/              # External data connections
 ├── ui/                           # Shared React components

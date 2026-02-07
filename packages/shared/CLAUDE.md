@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Headless execution mode
 - Dynamic status system
 - Session persistence
+- Daemon subprocess (SQLite message queue, JSON-lines IPC, PID management)
 
 ## Package Exports
 
@@ -28,6 +29,7 @@ import { loadWorkspaceSources, type LoadedSource } from '@craft-agent/shared/sou
 import { loadStatusConfig, createStatus } from '@craft-agent/shared/statuses';
 import { resolveTheme } from '@craft-agent/shared/config/theme';
 import { debug } from '@craft-agent/shared/utils';
+import { MessageQueue, createLineParser } from '@craft-agent/shared/daemon';
 ```
 
 ## Directory Structure
@@ -38,6 +40,7 @@ src/
 ├── auth/               # OAuth, craft-token, claude-token, state
 ├── config/             # Storage, preferences, models, theme, watcher
 ├── credentials/        # Secure credential storage (AES-256-GCM)
+├── daemon/             # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management)
 ├── headless/           # Non-interactive execution mode
 ├── mcp/                # MCP client and connection validation
 ├── prompts/            # System prompt generation

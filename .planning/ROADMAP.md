@@ -38,7 +38,7 @@ Plans:
 4. ✅ Daemon mode blocks bash, computer, and write operations by default
 5. ✅ Unit tests validate shouldAllowToolInMode with daemon mode
 
-#### Phase 11: Daemon Core and SQLite Queue
+#### Phase 11: Daemon Core and SQLite Queue — Completed 2026-02-07
 
 **Goal:** Spawn the daemon as a Bun subprocess from Electron main process with stdin/stdout JSON communication, crash recovery via exponential backoff supervisor, and SQLite message queue for inbound channel messages.
 
@@ -46,12 +46,18 @@ Plans:
 
 **Requirements:** DAEMON-01, DAEMON-02, DAEMON-05
 
+**Plans:** 2 plans
+
+Plans:
+- [x] 11-01-PLAN.md — SQLite message queue and JSON-lines IPC module
+- [x] 11-02-PLAN.md — Daemon entry point, DaemonManager, Electron integration
+
 **Success Criteria:**
-1. DaemonManager spawns a Bun subprocess and exchanges JSON messages over stdin/stdout
-2. Daemon restarts automatically on crash with exponential backoff (1s, 2s, 4s... max 30s, pauses after 5 consecutive failures)
-3. SQLite database at ~/.kata-agents/daemon.db stores inbound and outbound messages with WAL mode
-4. Message queue supports enqueue, dequeue, and mark-processed operations
-5. Stale daemon PID cleanup prevents zombie processes on app startup
+1. ✅ DaemonManager spawns a Bun subprocess and exchanges JSON messages over stdin/stdout
+2. ✅ Daemon restarts automatically on crash with exponential backoff (1s, 2s, 4s... max 30s, pauses after 5 consecutive failures)
+3. ✅ SQLite database at ~/.kata-agents/daemon.db stores inbound and outbound messages with WAL mode
+4. ✅ Message queue supports enqueue, dequeue, and mark-processed operations
+5. ✅ Stale daemon PID cleanup prevents zombie processes on app startup
 
 #### Phase 12: Channel Adapters
 
@@ -151,8 +157,8 @@ Plans:
 | v0.4.0 Foundation             | ✅ Shipped  | 2      | 6     | 10           | 100%     |
 | v0.6.0 Git Integration        | ✅ Shipped  | 5      | 14    | 12           | 100%     |
 | v0.6.1 Testing Infrastructure | ✅ Shipped  | 2      | 6     | 10           | 100%     |
-| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | 2     | 17           | 12%      |
+| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | 4     | 17           | 29%     |
 
 ---
 
-_Last updated: 2026-02-07 after Phase 10 completed_
+_Last updated: 2026-02-07 after Phase 11 completed_
