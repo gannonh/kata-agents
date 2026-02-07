@@ -1,390 +1,499 @@
-# Research Summary: Git Status UI Integration
+# v0.7.0 Research Summary: Always-On Assistant
 
-**Project:** Kata Agents v0.6.0 - Git Status UI Integration
-**Synthesized:** 2026-02-02
-**Overall Confidence:** HIGH
+**Synthesis Date:** 2026-02-07
+**Research Scope:** Daemon process, communication channels, plugin system, service integrations
+**Source Documents:** STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md
 
 ---
 
 ## Executive Summary
 
-This feature adds git context awareness to Kata Agents, displaying branch information and PR status to both users and the AI agent. Expert consensus shows this is table-stakes functionality for modern developer tools (VS Code, JetBrains, GitHub Desktop all prominently display branch status), with high user expectations for visibility without requiring interaction.
+v0.7.0 introduces always-on assistant capabilities through three core pillars:
 
-The recommended approach leverages existing infrastructure: use simple-git (8.5M weekly downloads, TypeScript-native) for git operations and gh CLI (already authenticated on developer machines) for PR data. Both run in the main process following established patterns for subprocess management. The architecture extends existing IPC/Jotai patterns without introducing new paradigms, minimizing integration risk.
+1. **Daemon Foundation:** Background process running in Electron main, spawning agent sessions for inbound events
+2. **Communication Channels:** Slack and Gmail integrations with message ingress and agent response routing
+3. **Service Plugin System:** First-party plugin architecture for channel adapters
 
-Key risks center on performance: naive polling can spawn 85-120+ git processes causing CPU spikes and UI lag (verified in GitHub issues). Mitigation requires debouncing (300-500ms), selective file watching (.git/index and .git/HEAD only), and async-only execution to prevent main process blocking. GitHub API rate limiting (5,000 requests/hour) demands aggressive caching with ETags. The app's multi-workspace architecture requires workspace-scoped state to prevent cross-contamination during workspace switching.
+The implementation is strictly additive to existing architecture. No breaking changes to SessionManager, CraftAgent, source system, or session persistence.
+
+**Critical Path:** Daemon Core → SQLite Queue → Channel Adapters → Permission Model → UI Integration
+
+**Deferred to v0.8.0+:** Discord, WhatsApp (instability risk), scheduled tasks, event-driven triggers, session handoff
 
 ---
 
-## Key Findings
+## Technology Decisions
 
-### Technology Stack (from STACK.md)
+### Communication Channel SDKs
 
-**Core Dependencies:**
-- **simple-git ^3.30.0** - Wraps git CLI with TypeScript support; returns structured StatusResult with branch, tracking, ahead/behind counts. Chosen over isomorphic-git (pure JS, slower) and nodegit (native bindings, compile issues with Electron).
-- **gh CLI** (zero new dependencies) - Already authenticated on user machines, JSON output available. App's existing shell-env.ts loads PATH including /opt/homebrew/bin. Preferred over @octokit/rest which requires OAuth device flow setup.
+| Service | SDK | Version | Ingress | Confidence | Status |
+|---------|-----|---------|---------|------------|--------|
+| **Slack** | @slack/web-api | 7.13.0 | Poll (conversations.history) | HIGH | v0.7.0 |
+| Gmail | @googleapis/gmail | 15.0.0 | Poll (history.list) | HIGH | v0.7.0 |
+| Discord | discord.js | 14.25.1 | Subscribe (WebSocket) | HIGH | Deferred |
+| WhatsApp | @whiskeysockets/baileys | 7.0.0-rc.9 | Subscribe (WebSocket) | MEDIUM | Deferred (risk) |
 
-**Integration Pattern:**
+**Slack Decision Rationale:** HTTP polling via `@slack/web-api` only. Socket Mode deferred to minimize OAuth complexity (requires app-level token xapp-* in addition to bot token xoxb-*). Polling at 2s intervals fits within rate limits (50 calls/min per channel).
+
+**WhatsApp Risk:** Baileys reverse-engineers WhatsApp protocol. Meta actively bans automation. 7.0.0-rc.9 is a release candidate. Protocol instability documented in GitHub issues. Recommend deferring entirely or offering as experimental with clear warnings.
+
+**Gmail vs full googleapis:** Start with `@googleapis/gmail` (2MB) over full `googleapis` (80MB). Switch to full package only if Calendar/Drive channels are added later.
+
+### SQLite: bun:sqlite vs better-sqlite3
+
+**Decision:** Use `bun:sqlite` in Bun daemon subprocess, but route Electron main process queries through IPC instead of direct database access.
+
+**Why avoid dual access:**
+- Cross-runtime WAL compatibility uncertain (bun:sqlite and better-sqlite3 use different SQLite builds)
+- better-sqlite3 requires native module rebuilding for Electron (electron-rebuild complexity)
+- File locking edge cases between Node.js and Bun processes
+- Windows bug: bun:sqlite WAL holds locks beyond close() (bun#25964)
+
+**Alternative approach:** Daemon exposes query interface over stdin/stdout JSON protocol. Electron sends query requests; daemon reads via bun:sqlite and returns results. +1ms IPC latency acceptable for UI display.
+
+### Daemon Process Model
+
+**Subprocess:** Spawned from Electron main process via Node.js `child_process.spawn`, not Bun.spawn (main process is Node.js, not Bun).
+
+**Communication:** Line-delimited JSON over stdin/stdout (same pattern as existing agent subprocesses).
+
+**Lifecycle:**
+- Start on app launch after auth confirmed
+- Stop on `app.before-quit` with SIGTERM + 5s grace period
+- Supervisor with exponential backoff (1s, 2s, 4s... max 30s) for crash recovery
+- After 5 consecutive crashes, enter paused state requiring manual intervention
+
+**PID tracking:** Write daemon PID to `~/.kata-agents/daemon.pid`. On startup, kill stale PIDs to prevent zombie processes.
+
+### Plugin System Architecture
+
+**v0.7.0:** Static registry, bundled first-party plugins only. No discovery, no dynamic loading.
+
+```
+packages/shared/src/plugins/builtin/
+  slack/
+    index.ts              # KataPlugin implementation
+    slack-adapter.ts      # ChannelAdapter
+  gmail/
+    index.ts
+    gmail-adapter.ts
+```
+
+**Plugin contract:**
 ```typescript
-interface GitContext {
-  branch: string | null;          // From simple-git status()
-  tracking: string | null;
-  ahead: number;
-  behind: number;
-  isDetached: boolean;
-  pullRequest?: {                 // From gh CLI (optional)
-    number: number;
-    title: string;
-    state: 'open' | 'closed' | 'merged';
-    url: string;
-    isDraft: boolean;
-  };
-  hasGit: boolean;
-  hasGhCli: boolean;
+interface KataPlugin {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  registerChannels?(registry: ChannelRegistry): void;
+  registerTools?(registry: ToolRegistry): void;
+  registerServices?(registry: ServiceRegistry): void;
+  initialize?(context: PluginContext): Promise<void>;
+  shutdown?(): Promise<void>;
 }
 ```
 
-**Recommended module location:** `packages/shared/src/git/` with exports for git-status.ts (simple-git wrapper), github-pr.ts (gh CLI wrapper), and types.ts (GitContext interface).
-
-### Feature Priorities (from FEATURES.md)
-
-**Table Stakes (user expectation = 100%):**
-| Feature | Complexity | Evidence |
-|---------|------------|----------|
-| Current branch name display | Low | VS Code bottom-left status bar, JetBrains toolbar widget, GitHub Desktop "Current Branch" button |
-| Linked PR display | Medium | GitHub Desktop 3.0+, GitLens, VS Code GitHub extension all show PR association |
-| PR status indicator | Medium | Green check/yellow pending/red X is universal convention |
-| Click-to-copy branch name | Low | Common workflow for PR titles, Jira tickets |
-
-**Differentiators (competitive advantage):**
-- **AI context awareness** (STRONGEST) - Inject git context into agent system prompt: "I see you're on feature/user-auth with PR #42 open." No existing tool provides this. Turns passive display into active assistance.
-- **PR title inline** - Most tools show PR number only, requiring click. Showing title gives instant context.
-- **One-click PR open** - Click badge opens PR in browser (GitHub Desktop has this, opportunity for parity).
-
-**Anti-Features (deliberately exclude for v0.6.0):**
-- Branch switching UI - Kata Agents is an AI chat tool, not a Git client
-- Commit history view - GitHub Desktop owns this domain
-- Diff viewer - VS Code already excellent
-- Merge/rebase controls - Complex operations that can destroy work
-- Stash management - Niche use case, easy data loss
-
-**MVP Recommendation:**
-1. Branch name display (table stakes, immediate value)
-2. Linked PR title + status (differentiator when combined with AI context)
-3. Click to open PR (low complexity, high convenience)
-
-Defer to post-MVP: dirty indicator, ahead/behind count, PR review status (all add complexity without core value).
-
-### Architecture Approach (from ARCHITECTURE.md)
-
-**Foundation exists:** Git branch detection already implemented at line 743-756 of ipc.ts using GET_GIT_BRANCH channel. Extension follows established patterns without architectural changes.
-
-**Component Boundaries:**
-| Component | Location | Responsibility |
-|-----------|----------|----------------|
-| GitService | `apps/electron/src/main/git.ts` (NEW) | Execute git commands via simple-git, parse output |
-| IPC Handlers | `apps/electron/src/main/ipc.ts` (MODIFY) | Add GIT_STATUS channel, wire to GitService |
-| Preload API | `apps/electron/src/preload/index.ts` (MODIFY) | Expose getGitStatus() and onGitStatusChanged() |
-| gitAtom | `apps/electron/src/renderer/atoms/git.ts` (NEW) | Workspace-keyed state (Map<workspaceId, GitState>) |
-| useGitStatus | `apps/electron/src/renderer/hooks/useGitStatus.ts` (NEW) | Hook for accessing git state |
-| GitStatusBadge | `apps/electron/src/renderer/components/git/` (NEW) | UI component for branch/status display |
-
-**Key Patterns to Follow:**
-1. **Event-Based Updates** - Matches existing patterns for sources, skills, themes. Watch .git directory with debouncing, broadcast status changes via IPC.
-2. **Workspace-Scoped State** - Git state keyed by workspaceId in Map, not global. Matches existing workspace-scoped patterns (sources, sessions, labels).
-3. **Graceful Degradation** - Return null for non-git directories, cache isRepo check. Existing getGitBranch returns null for non-repos.
-
-**Anti-Patterns to Avoid:**
-- Renderer-side git execution (violates security sandbox)
-- Excessive polling (use .git directory file watching with debouncing)
-- Global git state (breaks multi-workspace)
-- Synchronous git calls in render path (UI freezes)
-
-**UI Placement:** Add to workspace header area near WorkspaceSwitcher (consistent with "workspace context" information pattern). Small, unobtrusive badge/text showing "[PR #42] Fix user auth - Passing".
-
-### Critical Pitfalls (from PITFALLS.md)
-
-**Must address in Phase 1 (Core Git Status):**
-
-1. **Naive Polling Without Throttling** - Calling git status without rate limiting spawns excessive subprocesses. Real-world example: 85-120+ git processes causing CPU spikes. **Prevention:** Debounce 300-500ms, watch .git/index and .git/HEAD only, use simple-git's maxConcurrentProcesses: 5, add --no-optional-locks flag.
-
-2. **Blocking the Main Process** - Running git synchronously freezes entire app. Git Extensions users reported "up to a minute" waits in large repos. **Prevention:** Always async subprocess execution, never execSync, set 5s timeouts with retry, show loading states.
-
-3. **Not Detecting Non-Git Directories** - Running git commands in non-repos causes error spam. **Prevention:** Pre-check with `git rev-parse --is-inside-work-tree`, cache result, design UI for non-git state, handle exit code 128 gracefully.
-
-4. **Workspace State Confusion** (Kata Agents specific) - Git status from one workspace leaks to another in multi-workspace scenarios. **Prevention:** Scope all git state to workspace ID, cancel pending operations on workspace switch, test rapid switching.
-
-**Must address in Phase 2 (PR Integration):**
-
-5. **GitHub API Rate Limit Exhaustion** - 5,000 requests/hour authenticated (60 unauthenticated). Search API even stricter: 30 requests/minute. **Prevention:** Always authenticate, use conditional requests with ETags (cached responses don't count against limit), cache for 5-10 minutes, monitor X-RateLimit-Remaining header, implement exponential backoff.
-
-**Cross-cutting concerns (all phases):**
-
-6. **Cross-Platform Path/Line Ending Issues** - CRLF vs LF causes false positives. Windows paths use backslashes. **Prevention:** Use --porcelain -z for NUL-separated output, normalize paths internally, respect .gitattributes, enable long paths on Windows.
-
-7. **Race Conditions in Status Updates** - Async operations complete out of order, UI shows stale state. **Prevention:** Cancel pending requests on new user action, use request IDs to discard stale responses, debounce aggressively, atomic state updates.
-
-8. **Detached HEAD State** - UI assumes HEAD always points to branch. **Prevention:** Parse `git status --porcelain=v2 --branch` which includes detached HEAD info, show "HEAD detached at abc1234", test rebase/checkout scenarios.
+**v0.8.0+:** Dynamic loading via `import()`, manifest-based discovery, Bun Workers for sandboxing.
 
 ---
 
-## Implications for Roadmap
+## Architecture Integration
 
-### Suggested Phase Structure
+### DaemonManager as Peer to SessionManager
 
-Based on dependencies and incremental value delivery:
+**Location:** `apps/electron/src/main/daemon.ts` (NEW)
 
-#### Phase 1: Core Git Service (Main Process)
-**Duration:** 2-3 days
-**Deliverables:**
-- GitService module with getGitStatus() using simple-git
-- GIT_STATUS IPC handler in ipc.ts
-- Preload API extensions (getGitStatus, onGitStatusChanged)
-- Type definitions in shared/types.ts
-
-**Rationale:** Foundation layer - all UI work depends on this. Must include throttling/debouncing from day one to prevent performance pitfalls. Workspace-scoped architecture is core requirement for multi-workspace app.
-
-**Features from FEATURES.md:**
-- Branch name detection
-- Dirty/clean status
-- Non-git directory handling
-
-**Pitfalls to address:**
-- Blocking main process (#2) - async-only from start
-- Non-git directories (#3) - pre-check before operations
-- Workspace state confusion (#14) - scope to workspace ID
-- Cross-platform issues (#6) - use porcelain -z
-
-**Research needs:** Standard patterns, no additional research required.
-
----
-
-#### Phase 2: State Management (Renderer)
-**Duration:** 1-2 days
-**Deliverables:**
-- gitAtom with workspace-keyed state (Map<workspaceId, GitState>)
-- useGitStatus hook
-- IPC listener for status updates
-- State update coordination
-
-**Rationale:** State layer - UI components depend on this. Follows established Jotai patterns from existing atoms (sources, sessions). Clear separation from Phase 1 allows parallel work if needed.
-
-**Features from FEATURES.md:**
-- State container for branch/status data
-- Multi-workspace state isolation
-
-**Pitfalls to address:**
-- Race conditions (#7) - request cancellation, debouncing
-- IPC overhead (#13) - batch updates, send diffs not full state
-
-**Research needs:** None, established patterns.
-
----
-
-#### Phase 3: Basic UI (Branch Display)
-**Duration:** 2-3 days
-**Deliverables:**
-- GitStatusBadge component showing branch name
-- Integration into WorkspaceSwitcher/workspace header
-- Simple dirty/clean indicator
-- Click-to-copy branch name
-
-**Rationale:** First visible value. Low scope, table-stakes feature. Proves integration works before adding PR complexity.
-
-**Features from FEATURES.md:**
-- Current branch name display (table stakes)
-- Branch display location (workspace header)
-- Click-to-copy branch name (table stakes)
-
-**Pitfalls to address:**
-- Detached HEAD state (#5) - show "HEAD detached at abc1234"
-- Poor error messaging (#8) - user-friendly messages for common errors
-
-**Research needs:** None, straightforward UI implementation.
-
----
-
-#### Phase 4: PR Integration
-**Duration:** 3-4 days
-**Deliverables:**
-- GitHub PR info via gh CLI
-- PR badge with status indicator (green check/yellow/red X)
-- PR title display inline
-- Click to open PR in browser
-- Fallback for missing/unauthenticated gh CLI
-
-**Rationale:** Differentiator feature - combines with AI context awareness. More complex due to external dependency (gh CLI) and rate limiting concerns. Clear separation from core git status allows deferral if needed.
-
-**Features from FEATURES.md:**
-- Linked PR display (table stakes)
-- PR status indicator (table stakes)
-- PR title inline (differentiator)
-- One-click PR open (differentiator)
-
-**Pitfalls to address:**
-- Rate limit exhaustion (#4) - cache, ETags, exponential backoff
-- Hardcoded default branch (#10) - query from remote/API
-- Poor error messaging (#8) - graceful degradation if gh CLI unavailable
-
-**Research needs:** May need `/kata:research-phase` if gh CLI integration patterns are unclear or if rate limiting strategy needs validation.
-
----
-
-#### Phase 5: Real-Time Updates
-**Duration:** 2-3 days
-**Deliverables:**
-- .git directory file watching (selective: .git/index, .git/HEAD, .git/refs/)
-- Debounced status broadcasts (300-500ms)
-- Watch cleanup on workspace switch
-- Performance testing with active agent sessions
-
-**Rationale:** Polish - improves UX but not blocking for core value. Separated from Phase 1 to allow incremental rollout. High risk of performance issues if not implemented carefully.
-
-**Features from FEATURES.md:**
-- Real-time status updates without manual refresh
-
-**Pitfalls to address:**
-- Naive polling (#1) - selective file watching, debouncing
-- File watcher resource exhaustion (#11) - watch .git paths only, exclude node_modules
-- Conflicting subprocess management (#12) - coordinate with SessionManager
-
-**Research needs:** Likely yes - file watching patterns in Electron with performance constraints. Consider `/kata:research-phase` for file watching strategy.
-
----
-
-#### Phase 6: AI Context Injection (DIFFERENTIATOR)
-**Duration:** 1-2 days
-**Deliverables:**
-- Inject git context into agent system prompt
-- Context format: "Current branch: feature/user-auth, PR #42 (Fix user auth) - Passing"
-- Agent can reference git state in responses
-- Update when git state changes
-
-**Rationale:** Unique value proposition - no existing tool provides AI-aware git context. Relatively simple implementation once Phase 1-4 complete. Turns passive display into active assistance.
-
-**Features from FEATURES.md:**
-- AI context awareness (strongest differentiator)
-
-**Pitfalls to address:**
-- Stale context (#7) - update prompt when status changes
-- Over-verbose prompts - keep git context concise
-
-**Research needs:** None, straightforward prompt injection.
-
----
-
-### Phase Dependency Graph
+DaemonManager lives in Electron main process, parallel to SessionManager. It does not replace SessionManager; it creates daemon-specific sessions through SessionManager's existing API.
 
 ```
-Phase 1: Core Git Service (Main Process)
-    ↓
-Phase 2: State Management (Renderer)
-    ↓
-Phase 3: Basic UI (Branch Display) ←— First user-visible value
-    ↓
-Phase 4: PR Integration ←— Can be deferred if needed
-    ↓
-Phase 5: Real-Time Updates ←— Polish, can be deferred
-    ↓
-Phase 6: AI Context Injection ←— DIFFERENTIATOR, requires Phases 1-4
+Main Process:
+  WindowManager (unchanged)
+  SessionManager (minor extension: daemon session fields)
+  DaemonManager (NEW)
+    ├── PluginRegistry
+    ├── DaemonMessageQueue (SQLite)
+    ├── TaskScheduler (SQLite)
+    └── activeChannelSessions: Map<channelId, sessionId>
 ```
 
-**Critical path:** Phases 1-2-3 deliver table-stakes branch display. Phase 4 adds PR features. Phase 6 adds unique AI value. Phase 5 is polish and can float.
+**Strictly additive:** No changes to CraftAgent API, session JSONL format, source storage, credential encryption, or IPC event format.
 
-**Parallelization opportunities:**
-- Phases 1 and 2 can overlap slightly (start Phase 2 once Phase 1 types are defined)
-- Phase 6 can start once Phase 4 delivers PR data (doesn't depend on Phase 5)
+### Per-Channel Sessions with Compaction
 
----
+Each channel gets a dedicated `ManagedSession` with session ID convention: `daemon-{channelSlug}-{workspaceId}`.
 
-### Research Flags
+Long-running daemon sessions hit context limits. SDK's built-in compaction handles this. Existing `pendingPlanExecution` / `markCompactionComplete` pattern supports post-compaction recovery.
 
-| Phase | Research Needed? | Rationale |
-|-------|------------------|-----------|
-| Phase 1 | NO | Standard git operations, established patterns |
-| Phase 2 | NO | Follows existing Jotai patterns |
-| Phase 3 | NO | Straightforward UI implementation |
-| Phase 4 | MAYBE | gh CLI integration and rate limiting strategy. Consider `/kata:research-phase` if patterns unclear. |
-| Phase 5 | YES | File watching performance in Electron with active agent sessions needs validation. Recommend `/kata:research-phase` for file watching strategy. |
-| Phase 6 | NO | Simple prompt injection |
+### Channel Storage Pattern
 
-**Recommendation:** Phase 4 and Phase 5 are candidates for deeper research if implementation uncertainty arises. Phase 5 especially benefits from research given file watching performance risks.
+**Location:** `~/.kata-agents/workspaces/{id}/channels/{slug}/config.json`
 
----
+Follows source storage pattern. New workspace subdirectory `channels/` alongside `sources/`, `sessions/`, `skills/`.
 
-## Confidence Assessment
+Channels reference existing sources for credentials:
+```typescript
+interface ChannelConfig {
+  slug: string;
+  enabled: boolean;
+  adapter: string;
+  credentials: {
+    sourceSlug: string;  // e.g., "slack" references existing Slack source
+  };
+}
+```
 
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Stack | HIGH | simple-git is ecosystem standard (8.5M weekly downloads), gh CLI documented. Both actively maintained. |
-| Features | HIGH | Based on official documentation from VS Code, GitHub Desktop, JetBrains, GitLens. Table stakes well-established. |
-| Architecture | HIGH | Extends existing patterns in codebase. GET_GIT_BRANCH already implemented, proving viability. |
-| Pitfalls | HIGH | Verified with real-world GitHub issues (Git Extensions #5439, GitHub Desktop #11614, WSL #184). Official docs for rate limits and porcelain format. |
+**Credential reuse:** Slack channel uses same bot token as Slack source. Gmail channel uses same OAuth token as Gmail source. No duplicate credential storage.
 
-**Overall confidence: HIGH**
+### Daemon Permission Mode
 
-### Gaps to Address During Planning
+Add `'daemon'` to `PermissionMode` union. Daemon mode is more restrictive than `safe` mode.
 
-1. **Exact UI placement** - Research shows header/status bar patterns, but specific positioning in Kata Agents workspace header needs UX decision. Mock up placement near WorkspaceSwitcher.
+**Behavior:** Like `ask` with auto-approval for configurable allowlist (defined per plugin). Default blocks `bash`, `computer`, and write operations.
 
-2. **gh CLI availability detection** - Need concrete strategy for detecting gh CLI presence and authentication status. Fallback message when unavailable: "Install and authenticate gh CLI for PR info."
+**Rationale:** Autonomous AI actions without user oversight require explicit per-channel tool configuration. Interactive permission modes (`safe`/`ask`/`allow-all`) are too permissive for unattended operation.
 
-3. **PR status refresh frequency** - Research recommends 5-10 minute cache, but actual user expectation unclear. Consider user preference or manual refresh button.
+### Data Flow: Inbound Message Processing
 
-4. **Integration with existing agent context** - Phase 6 requires understanding current system prompt structure. Review prompts/ directory during Phase 6 planning.
+```
+Channel Adapter (poll/subscribe)
+  → DaemonManager.onChannelMessage()
+    → SQLite message queue (enqueue)
+    → processQueue()
+      → find or create daemon session for channelId
+      → SessionManager.sendMessage(sessionId, formattedMessage)
+        → CraftAgent.chat() [existing flow]
+        → streaming events → IPC → renderer
+      → on complete: check for reply action
+        → Channel Adapter.sendReply()
+      → SQLite message queue (dequeue / mark processed)
+```
 
-5. **Performance baseline** - Test simple-git performance with typical repos (10k-100k files) to validate assumptions about debounce timing and concurrency limits.
+### SQLite Integration
 
-6. **File watching scope** - Phase 5 needs specific decision on which .git paths to watch. Research suggests .git/index, .git/HEAD, .git/refs/ but validate against common workflows (rebase, merge, etc.).
+**Location:** `~/.kata-agents/daemon.db` (global, not workspace-scoped)
 
----
+**Tables:**
+- `message_queue` - pending messages from channel adapters
+- `task_schedule` - cron-style scheduled triggers (deferred to v0.8.0)
+- `channel_state` - last poll cursor, subscription state per channel
 
-## Sources
+**Why global:** Daemon manages channels across workspaces. Single database avoids coordination.
 
-All research based on official documentation and verified real-world issues:
-
-**Stack Research:**
-- [simple-git npm](https://www.npmjs.com/package/simple-git) - Version 3.30.0
-- [steveukx/git-js GitHub](https://github.com/steveukx/git-js) - TypeScript types
-- [gh pr view documentation](https://cli.github.com/manual/gh_pr_view) - JSON fields
-- Existing codebase: `apps/electron/src/main/shell-env.ts`, `ipc.ts:743-756`
-
-**Features Research:**
-- [VS Code Source Control Overview](https://code.visualstudio.com/docs/sourcecontrol/overview)
-- [GitHub Desktop PR Viewing](https://docs.github.com/en/desktop/working-with-your-remote-repository-on-github-or-github-enterprise/viewing-a-pull-request-in-github-desktop)
-- [JetBrains IntelliJ New UI](https://www.jetbrains.com/help/idea/new-ui.html)
-- [GitLens Side Bar Views](https://help.gitkraken.com/gitlens/side-bar/)
-- [GitHub Desktop 3.0 PR Integration](https://github.blog/2022-04-26-github-desktop-3-0-brings-better-integration-for-your-pull-requests/)
-
-**Architecture Research:**
-- Existing codebase patterns in `apps/electron/src/`
-- Current implementation at `ipc.ts:743-756` (GET_GIT_BRANCH)
-- Jotai atom patterns from `atoms/sessions.ts` and `atoms/sources.ts`
-
-**Pitfalls Research:**
-- [Git Status Documentation](https://git-scm.com/docs/git-status) - Porcelain format
-- [GitHub Rate Limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
-- [GitHub API Best Practices](https://docs.github.com/rest/guides/best-practices-for-using-the-rest-api)
-- [Git Extensions #5439](https://github.com/gitextensions/gitextensions/issues/5439) - Status refresh performance
-- [GitHub Desktop #11614](https://github.com/desktop/desktop/issues/11614) - Index refresh indicator
-- [WSL #184](https://github.com/microsoft/WSL/issues/184) - Cross-platform line ending issues
+**WAL mode:** `PRAGMA journal_mode = WAL` for concurrent readers + single writer. `PRAGMA synchronous = NORMAL` for performance. Schedule `PRAGMA wal_checkpoint(TRUNCATE)` during idle to prevent unbounded WAL growth.
 
 ---
 
-## Ready for Roadmap Creation
+## Feature Prioritization
 
-This research summary provides sufficient detail for the kata-roadmapper agent to:
+### Table Stakes (Must-Have for v0.7.0)
 
-1. Structure phases with clear deliverables and dependencies
-2. Identify which phases need deeper research
-3. Understand critical pitfalls to embed in milestone acceptance criteria
-4. Prioritize features (table stakes vs differentiators vs anti-features)
-5. Make informed technology choices (simple-git + gh CLI)
+**Communication Channels:**
+- Receive messages from channels (Slack, Gmail)
+- Send messages to channels
+- Channel selector/routing (explicit configuration)
+- Message threading (Slack `thread_ts`)
+- Mention/trigger mode (Slack `app_mention`, Gmail label filter)
 
-**Key recommendations for roadmapper:**
-- Start with Phases 1-2-3 for MVP (branch display)
-- Add Phase 4 for PR integration
-- Defer Phase 5 (real-time updates) to post-MVP if time-constrained
-- Include Phase 6 (AI context) as key differentiator
+**Service Plugins:**
+- Read emails (Gmail API search)
+- Draft emails (Gmail API `drafts.create`)
+- Send emails with confirmation (two-step: draft then send after UI approval)
 
-**Next step:** Kata-roadmapper creates milestone breakdown with acceptance criteria incorporating pitfall prevention strategies.
+**Daemon:**
+- System tray / menu bar presence
+- Background process survival (window closes, daemon continues)
+- Quick launch from tray (keyboard shortcut)
+- Status indicator (idle/processing/error)
+- Graceful shutdown
+
+**Security:**
+- Action confirmation for consequential operations (send email, post message)
+- Per-channel permissions
+- Credential isolation (extend existing blocked env vars)
+- Audit log (append-only per workspace)
+
+**Session Management:**
+- One session per channel thread
+- Session persistence across restarts
+- Context carryover within thread
+
+### Differentiators (Unique to Kata)
+
+**Channel-to-Session Mapping:** Each Slack thread or Gmail email becomes a Kata session with full context, tools, and MCP access. No competitor maps channel conversations into a rich desktop session.
+
+**Unified Session View:** Channel sessions appear in same session list as direct chat sessions. User switches between Kata UI and Slack/Gmail, same session.
+
+**Cross-Source Context:** Agent uses Gmail source + Linear MCP source in one session. "Summarize emails from Alice and create Linear ticket."
+
+**Send with Confirmation:** Agent drafts email/message, shows in Kata UI, user confirms, then sends. Trust-building pattern from ChatGPT Agent.
+
+### Anti-Features (Explicitly Out of Scope)
+
+**WhatsApp Integration:** Policy barriers. Meta blocks AI chatbots. High ban risk. Baileys protocol instability.
+
+**Auto-Reply to All Messages:** Noisy bots erode trust. Default to @mention or keyword trigger. Explicit opt-in per channel.
+
+**Auto-Send Emails:** Trust-destroying action. Always require explicit confirmation.
+
+**Always-Listening Voice:** Privacy-sensitive. Requires speech-to-text. Text-only triggers.
+
+**Auto-Start on Login:** Aggressive. Offer as opt-in, off by default.
+
+**Full Inbox Management:** Gemini 3's "autonomous inbox" is Google's game. Kata provides read, search, draft, label, not "manage my inbox."
+
+---
+
+## Critical Pitfalls and Mitigations
+
+### 22 Verified Pitfalls Across 6 Categories
+
+**Daemon Lifecycle:**
+1. Zombie processes on app exit → PID registry, cleanup hooks
+2. macOS sleep/wake breaks connections → powerMonitor resume handler
+3. Memory leaks in long-running process → RSS monitoring, scheduled restarts
+4. Crash recovery without data loss → supervisor with SQLite queue replay
+
+**Channel SDKs:**
+5. Slack Socket Mode silent disconnection → app-level liveness check
+6. Discord privileged intents verification wall → slash commands primary, intents opt-in
+7. Baileys WhatsApp account bans → defer entirely, too high risk
+8. Gmail watch expiry after 7 days → daily renewal, stored historyId
+
+**SQLite:**
+9. WAL file growth → checkpoint scheduling, close readers periodically
+10. Multi-process locking → single-writer pattern (daemon only)
+11. Corruption on crash during checkpoint → integrity checks, JSONL fallback
+12. bun:sqlite vs better-sqlite3 API mismatch → adapter interface
+
+**Plugin System:**
+13. In-process plugin crashes → worker thread isolation or try/catch boundaries
+14. Configuration schema evolution → versioned configs, migrations
+15. Type safety erosion → canonical IncomingMessage type, Zod validation
+
+**Security:**
+16. Autonomous actions without oversight → restricted daemon permission mode
+17. Prompt injection via channel messages → input framing, tool restrictions
+18. Credential sprawl → per-service health checks, proactive refresh
+19. Tool allowlist bypass → separate daemonPermissions.json
+
+**Desktop Platform:**
+20. macOS App Nap throttles daemon → powerSaveBlocker
+21. Electron on macOS 26 GPU lag → track Electron fixes, test on 26
+22. Code signing network entitlements → com.apple.security.network.client
+
+**Severity breakdown:** 8 Critical, 10 High, 4 Medium.
+
+### Highest-Risk Items
+
+**Critical (blocks launch if not addressed):**
+- Zombie processes (1)
+- Autonomous actions (16)
+- Prompt injection (17)
+- WhatsApp bans (7)
+
+**High (degrades UX or reliability):**
+- Slack disconnection (5)
+- Multi-process locking (10)
+- In-process crashes (13)
+- Credential sprawl (18)
+- App Nap (20)
+
+---
+
+## Build Order (7 Phases)
+
+### Phase 1: Foundation Types and SQLite
+**Files:** `packages/shared/src/plugins/types.ts`, `packages/shared/src/channels/types.ts`, `packages/core/src/types/daemon.ts`, SQLite schema
+
+**Why first:** Pure types, no runtime behavior. All subsequent phases import these.
+
+**Dependencies:** None.
+
+**Tests:** Unit tests for type validation.
+
+### Phase 2: Daemon Permission Mode
+**Files:** `packages/shared/src/agent/mode-types.ts`, `mode-manager.ts`, `permissions-config.ts`
+
+**Why second:** Daemon needs permission mode before running agents. Small surface area.
+
+**Dependencies:** Phase 1 types.
+
+**Tests:** shouldAllowToolInMode with daemon mode.
+
+### Phase 3: SQLite Message Queue and Task Scheduler
+**Files:** `apps/electron/src/main/daemon-db.ts`
+
+**Why third:** Queue is daemon's central state. Must work before adapters push into it.
+
+**Dependencies:** Phase 1 types, better-sqlite3.
+
+**Tests:** Enqueue/dequeue, WAL checkpointing.
+
+### Phase 4: DaemonManager Core
+**Files:** `apps/electron/src/main/daemon.ts`, `index.ts` (lifecycle), `ipc.ts` (handlers), `shared/types.ts` (IPC channels)
+
+**Why fourth:** Orchestrator connecting queue to SessionManager.
+
+**Dependencies:** Phases 1-3.
+
+**Tests:** Mock channel adapter enqueuing synthetic messages.
+
+### Phase 5: First Channel Adapter (Gmail Polling)
+**Files:** `packages/shared/src/plugins/builtin/gmail/`, channel config storage, credential sharing
+
+**Why Gmail first:** OAuth flow proven, API source exists, polling simpler than WebSocket.
+
+**Dependencies:** Phases 1-4, existing Gmail source.
+
+**Tests:** Poll cycle, historyId cursor, draft/send flow.
+
+### Phase 6: Renderer Integration
+**Files:** `apps/electron/src/renderer/atoms/daemon.ts`, `hooks/useDaemon.ts`, `preload/index.ts`, UI components
+
+**Why sixth:** Daemon runs headlessly before UI exists. UI important for usability, not validation.
+
+**Dependencies:** Phase 4 (daemon IPC).
+
+**Tests:** IPC round-trip, status updates, channel CRUD.
+
+### Phase 7: Additional Channel Adapters
+**Files:** `packages/shared/src/plugins/builtin/slack/`
+
+**Why last:** Each adapter independent. Gmail proves pattern.
+
+**Dependencies:** Phases 1-5 pattern established.
+
+**Tests:** Slack conversations.history polling, thread mapping.
+
+---
+
+## Roadmap Implications
+
+### Milestone Scoping
+
+**v0.7.0 Scope:**
+- Daemon foundation (Phases 1-4)
+- Gmail service plugin (Phase 5)
+- Slack channel adapter (Phase 7)
+- Renderer integration (Phase 6)
+- Audit log, per-channel permissions
+
+**Estimated effort:** 6-8 weeks (2-3 weeks per phase, phases 5-7 parallelizable).
+
+**v0.8.0 Deferred:**
+- Discord adapter (privileged intents complexity)
+- WhatsApp adapter (ban risk, protocol instability)
+- Scheduled tasks (task scheduler infrastructure)
+- Event-driven triggers (trigger listener framework)
+- Session handoff (bidirectional sync between desktop and channel)
+- Least-privilege scoping (time-bounded permissions)
+
+### User-Facing Value Proposition
+
+**v0.7.0 delivers:**
+1. Monitor Slack channels for @mentions, respond with full agent capabilities
+2. Search Gmail, draft emails, send with confirmation
+3. Channel conversations appear as desktop sessions (unique to Kata)
+4. Always-on assistant without keeping window open
+
+**Competitive position:** Only desktop AI assistant unifying direct chat, channel conversations, and service plugins in a single interface with local MCP servers and workspace-scoped permissions.
+
+**Gaps vs competitors:**
+- ChatGPT Agent: Web-only, no desktop sessions
+- Claude Desktop: No integrations
+- Microsoft Copilot: Locked to M365
+- Lindy AI: No desktop app
+
+### Risk Assessment for Roadmap Planning
+
+**High-confidence items:**
+- Slack HTTP polling (proven SDK, existing OAuth)
+- Gmail polling (existing OAuth, Gmail API stable)
+- Daemon subprocess management (existing SessionManager pattern)
+- Permission system extension (existing mode infrastructure)
+
+**Medium-confidence items:**
+- SQLite cross-process coordination (WAL mode well-documented but bun:sqlite + better-sqlite3 combo untested)
+- Crash recovery with queue replay (depends on SQLite reliability)
+- Memory leak mitigation (requires production telemetry)
+
+**Low-confidence items:**
+- WhatsApp via Baileys (ban risk, protocol instability, RC version)
+- Discord at scale (privileged intents verification process)
+- Energy impact optimization (platform-specific, requires profiling)
+
+### Dependencies on Existing Infrastructure
+
+**Existing features that accelerate v0.7.0:**
+- Slack OAuth (packages/shared/src/auth/slack-oauth.ts)
+- Google OAuth (packages/shared/src/auth/google-oauth.ts)
+- Source system (packages/shared/src/sources/)
+- Permission modes (safe/ask/allow-all)
+- Session persistence (JSONL)
+- MCP client (packages/shared/src/mcp/client.ts)
+- Credential manager (AES-256-GCM)
+- Bun subprocess model (apps/electron/src/main/sessions.ts)
+
+**No breaking changes required to existing systems.**
+
+### Testing Strategy
+
+**Unit tests:**
+- Channel adapters (mock SDK responses)
+- SQLite queue (enqueue/dequeue, checkpointing)
+- Permission mode filtering (daemon allowlist)
+
+**Integration tests:**
+- DaemonManager + mock adapter
+- Credential refresh flow
+- Session creation from channel message
+
+**E2E tests (live API):**
+- Slack polling cycle
+- Gmail draft/send flow
+- Daemon crash recovery
+- macOS sleep/wake resilience
+
+**Platform-specific tests:**
+- macOS App Nap behavior
+- Code signing with network entitlements
+- Energy impact profiling
+
+### Open Questions for Roadmap
+
+1. **Slack Socket Mode vs HTTP polling:** Start with polling (simpler), add Socket Mode in v0.8.0 for lower latency?
+2. **Tray-only mode:** Should daemon run with all windows closed? Requires menu bar/tray icon as sole interface.
+3. **Multi-workspace channel management:** One daemon per workspace or global daemon managing all workspaces?
+4. **Discord deployment:** Desktop bot (user runs Discord app) or hosted bot (Kata hosts Discord connection)?
+5. **WhatsApp inclusion timeline:** Skip v0.7.0 and v0.8.0 entirely, revisit when official API available?
+
+---
+
+## Key Findings Summary
+
+### Stack
+- Slack: @slack/web-api HTTP polling, not Socket Mode (simpler OAuth)
+- Discord: discord.js 14.25.1, slash commands primary to avoid privileged intents
+- WhatsApp: Baileys 7.0.0-rc.9 deferred (ban risk, protocol instability)
+- Gmail: @googleapis/gmail 15.0.0 polling with historyId cursor
+- SQLite: bun:sqlite in daemon, IPC queries from Electron, no better-sqlite3 native module
+
+### Features
+- Table stakes: receive/send messages, channel routing, threading, mention triggers
+- Differentiators: channel-to-session mapping, unified session view, cross-source context, send with confirmation
+- Anti-features: WhatsApp, auto-reply, auto-send, voice, full inbox management
+
+### Architecture
+- DaemonManager as peer to SessionManager, strictly additive
+- Per-channel sessions with SDK compaction
+- Channel storage follows source pattern, credentials reuse existing OAuth
+- Daemon permission mode with tool allowlist
+- SQLite global database, WAL mode, IPC queries from Electron
+
+### Pitfalls
+- 22 verified pitfalls across 6 categories
+- 8 Critical (zombie processes, autonomous actions, prompt injection, WhatsApp bans)
+- 10 High (Slack disconnection, SQLite locking, plugin crashes, App Nap)
+- Mitigation strategies for each with phase assignments
+
+**Recommendation:** Proceed with v0.7.0 scoped to Slack + Gmail. Defer Discord and WhatsApp. Build Phase 1-4 (daemon foundation) before any adapter to establish permission and security boundaries.
