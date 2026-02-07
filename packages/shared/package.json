@@ -48,7 +48,11 @@
     "./version": "./src/version/index.ts",
     "./branding": "./src/branding.ts",
     "./network-interceptor": "./src/network-interceptor.ts",
-    "./git": "./src/git/index.ts"
+    "./git": "./src/git/index.ts",
+    "./channels": "./src/channels/index.ts",
+    "./channels/types": "./src/channels/types.ts",
+    "./plugins": "./src/plugins/index.ts",
+    "./plugins/types": "./src/plugins/types.ts"
   },
   "dependencies": {
     "@craft-agent/core": "workspace:*",
