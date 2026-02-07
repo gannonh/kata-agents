@@ -16,3 +16,4 @@ export type {
 
 export { MessageQueue } from './message-queue.ts';
 export { createLineParser, formatMessage } from './ipc.ts';
+export { writePidFile, removePidFile, cleanupStaleDaemon } from './pid.ts';
