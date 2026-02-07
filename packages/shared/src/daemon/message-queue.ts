@@ -31,6 +31,8 @@ export class MessageQueue {
   private dequeueStmt: ReturnType<Database['query']>;
   private markProcessedStmt: ReturnType<Database['query']>;
   private markFailedStmt: ReturnType<Database['query']>;
+  private getPollingStateStmt: ReturnType<Database['query']>;
+  private setPollingStateStmt: ReturnType<Database['query']>;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -68,6 +70,17 @@ export class MessageQueue {
       ON messages (channel_id, direction, created_at)
     `);
 
+    // Create polling state table for adapter restart resilience
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS polling_state (
+        adapter_id TEXT NOT NULL,
+        channel_source_id TEXT NOT NULL,
+        last_timestamp TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        PRIMARY KEY (adapter_id, channel_source_id)
+      )
+    `);
+
     // Prepare statements
     this.enqueueStmt = this.db.query(
       `INSERT INTO messages (direction, channel_id, payload)
@@ -94,6 +107,16 @@ export class MessageQueue {
       `UPDATE messages
        SET status = 'failed', error = $error, retry_count = retry_count + 1
        WHERE id = $id`,
+    );
+
+    this.getPollingStateStmt = this.db.query(
+      `SELECT last_timestamp FROM polling_state
+       WHERE adapter_id = $adapterId AND channel_source_id = $channelSourceId`,
+    );
+
+    this.setPollingStateStmt = this.db.query(
+      `INSERT OR REPLACE INTO polling_state (adapter_id, channel_source_id, last_timestamp, updated_at)
+       VALUES ($adapterId, $channelSourceId, $lastTimestamp, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     );
   }
 
@@ -151,6 +174,30 @@ export class MessageQueue {
    */
   markFailed(id: number, error: string): void {
     this.markFailedStmt.run({ $id: id, $error: error });
+  }
+
+  /**
+   * Get the last known polling timestamp for an adapter/channel pair.
+   * Returns null if no state has been recorded.
+   */
+  getPollingState(adapterId: string, channelSourceId: string): string | null {
+    const row = this.getPollingStateStmt.get({
+      $adapterId: adapterId,
+      $channelSourceId: channelSourceId,
+    }) as { last_timestamp: string } | null;
+    return row?.last_timestamp ?? null;
+  }
+
+  /**
+   * Store or update the polling timestamp for an adapter/channel pair.
+   * Uses INSERT OR REPLACE for upsert behavior.
+   */
+  setPollingState(adapterId: string, channelSourceId: string, lastTimestamp: string): void {
+    this.setPollingStateStmt.run({
+      $adapterId: adapterId,
+      $channelSourceId: channelSourceId,
+      $lastTimestamp: lastTimestamp,
+    });
   }
 
   /**
