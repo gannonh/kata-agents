@@ -1,169 +1,448 @@
 # Technology Stack
 
-**Project:** Kata Agents v0.6.0 - Git Status UI Integration
-**Researched:** 2026-02-02
+**Project:** Kata Agents v0.7.0 - Always-On Assistant (Daemon, Channels, Plugin System)
+**Researched:** 2026-02-07
 
-## Recommended Stack
+## New Dependencies
 
-### Git Operations
+### Channel SDK Libraries
 
-| Technology  | Version  | Purpose                                         | Why                                                                                                                    |
-| ----------- | -------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| simple-git  | ^3.30.0  | Read git status, branch, tracking info          | 8.5M weekly downloads, actively maintained, wraps git CLI (already on user systems), full TypeScript support, returns structured StatusResult |
+| Package | Version | Purpose | Bun Compatible | Ingress Model |
+|---------|---------|---------|----------------|---------------|
+| @slack/web-api | ^7.13.0 | Slack REST API (post messages, read history) | Yes (since Bun 1.1.10) | Poll |
+| @slack/socket-mode | ^2.0.5 | Slack real-time events via WebSocket | Yes (since Bun 1.1.10) | Subscribe |
+| discord.js | ^14.25.1 | Discord gateway + REST (messages, events) | Yes (official Bun guide exists) | Subscribe |
+| @whiskeysockets/baileys | ^7.0.0-rc.9 | WhatsApp Web API via WebSocket | Likely (uses ws + crypto, no native deps) | Subscribe |
+| googleapis | ^171.4.0 | Gmail API (messages.list, history.list) | Yes (pure HTTP client) | Poll |
 
-### GitHub API Access (for PR info)
+### Supporting Libraries (Transitive, Already Present or Pulled In)
 
-| Technology | Version | Purpose                      | Why                                                                                                       |
-| ---------- | ------- | ---------------------------- | --------------------------------------------------------------------------------------------------------- |
-| gh CLI     | N/A     | Get PR info for current branch | Zero dependencies to add, user already authenticated, JSON output, app already handles shell environment loading |
+| Package | Pulled By | Notes |
+|---------|-----------|-------|
+| @hapi/boom | baileys | Error handling, peer dep |
+| pino | baileys | Logger, peer dep (can pass silent logger) |
+| ws | discord.js, baileys | WebSocket client, Bun has native ws support |
 
-**NOT recommending @octokit/rest because:**
-1. Requires additional auth flow (OAuth device flow or token management)
-2. gh CLI is already authenticated on developer machines
-3. App already has shell-env.ts that loads PATH including `/opt/homebrew/bin` where gh lives
-4. Simpler: `gh pr list --head branch --json` vs OAuth setup + API calls
+### What NOT to Add
 
-### Supporting Libraries
+| Library | Why Not |
+|---------|---------|
+| @slack/bolt | Framework-level abstraction; we only need web-api + socket-mode for channel adapter |
+| @google-cloud/pubsub | Requires GCP project + webhook endpoint; desktop app uses polling instead |
+| @googleapis/gmail | Subpackage of googleapis; full googleapis package gives access to all Google APIs |
+| node-cron | Bun has `setInterval`; daemon scheduler is ~50 lines with SQLite-backed next_run |
 
-| Library | Version | Purpose              | When to Use                              |
-| ------- | ------- | -------------------- | ---------------------------------------- |
-| None    | -       | -                    | No additional libraries needed           |
+## Detailed Library Analysis
 
-## Detailed Rationale
+### @slack/web-api + @slack/socket-mode
 
-### Why simple-git (not isomorphic-git or nodegit)
+**Version verified:** 7.13.0 (web-api), 2.0.5 (socket-mode) on npm.
 
-**simple-git selected because:**
-- **CLI wrapper approach fits Electron** - Users already have git installed; no need for pure JS reimplementation
-- **8.5M weekly downloads** - Ecosystem standard, well-tested
-- **StatusResult interface gives us everything we need:**
-  - `current`: Current branch name
-  - `tracking`: Upstream branch (e.g., `origin/main`)
-  - `ahead`: Commits ahead of tracked branch
-  - `behind`: Commits behind tracked branch
-  - `detached`: Boolean for detached HEAD state
-- **TypeScript-first** - Bundled types since v3.x, ESM/CommonJS/TS support
+**Bun compatibility:** Resolved. Issue [slackapi/node-slack-sdk#1748](https://github.com/slackapi/node-slack-sdk/issues/1748) was closed May 2024 after Bun 1.1.10 added brotli compression support. No workarounds needed.
 
-**Alternatives rejected:**
+**Architecture decision: Poll vs Socket Mode.**
+The brainstorm specifies Slack uses HTTP polling via `conversations.history`. Socket Mode is available as an alternative (WebSocket-based, no public URL needed). For v0.7.0:
 
-| Alternative     | Why Not                                                                              |
-| --------------- | ------------------------------------------------------------------------------------ |
-| isomorphic-git  | Pure JS reimplementation - slower for large repos, more complex API, overkill for reading status |
-| nodegit         | Native libgit2 bindings - compile issues with Electron, rebuild complexity           |
-| Raw git CLI     | Would work but simple-git already parses porcelain output into typed objects         |
+- **Use @slack/web-api only.** Poll `conversations.history` on a 2s interval. Simpler. One fewer dependency (@slack/socket-mode can be deferred).
+- Socket Mode requires an app-level token (xapp-*) in addition to the bot token (xoxb-*). The existing Kata OAuth flow produces bot tokens. Adding app-level tokens requires Slack app manifest changes.
+- Socket Mode is worth adding in a later release for reduced latency and lower API rate limit consumption.
 
-### Why gh CLI (not @octokit/rest)
-
-The project already has `apps/electron/src/main/shell-env.ts` which:
-- Loads user's full shell environment on macOS
-- Ensures `/opt/homebrew/bin` (where gh lives) is in PATH
-- Already handles the "GUI app has minimal environment" problem
-
-**Using gh CLI:**
+**Minimal integration surface:**
 ```typescript
-// Get PR for current branch
-const result = execSync('gh pr list --head branch-name --json number,title,state,url', {
-  encoding: 'utf-8',
-  cwd: workspacePath
-});
-const prs = JSON.parse(result);
+import { WebClient } from '@slack/web-api'
+
+const client = new WebClient(botToken)
+
+// Poll for new messages
+const result = await client.conversations.history({
+  channel: channelId,
+  oldest: lastTimestamp,  // Only messages after this
+  limit: 20,
+})
+
+// Send response
+await client.chat.postMessage({
+  channel: channelId,
+  text: responseText,
+  thread_ts: threadTs,  // Reply in thread
+})
 ```
 
-**Available JSON fields for PRs:**
-- `number`, `title`, `state`, `url`
-- `author`, `baseRefName`, `headRefName`
-- `isDraft`, `mergeable`, `reviewDecision`
-- `statusCheckRollup` (CI status)
+**Rate limits:** `conversations.history` allows ~50 calls/min (Tier 3). At 2s polling, that is 30 calls/min per channel. One channel is fine; multiple channels on the same workspace may need staggered polling.
 
-**Why not @octokit/rest:**
+### discord.js
 
-| Concern            | gh CLI                                  | @octokit/rest                                      |
-| ------------------ | --------------------------------------- | -------------------------------------------------- |
-| Authentication     | Already done (user ran `gh auth login`) | Need device flow or token storage                  |
-| Dependencies       | Zero (already on dev machines)          | +@octokit/rest, potentially auth plugins           |
-| Maintenance burden | Shell already handles PATH              | OAuth flow, token refresh, error handling          |
-| User experience    | Works if gh works                       | Need to prompt for GitHub auth in app              |
+**Version verified:** 14.25.1 on npm. Stable v14 line (Discord API v10).
 
-**Fallback strategy:** If `gh` is not installed or not authenticated, gracefully degrade - show git branch info but indicate "GitHub CLI not available for PR info."
+**Bun compatibility:** Confirmed working. Bun's official docs include a [discord.js guide](https://bun.com/docs/guides/ecosystem/discordjs). One known limitation: `@discordjs/voice` (native opus bindings) does not work in Bun. Not relevant for text-based channel adapter.
 
-## Installation
+**Ingress model:** Subscribe. discord.js maintains a persistent WebSocket connection to the Discord Gateway. Messages arrive as `messageCreate` events with no polling needed.
 
-```bash
-# Only one new dependency needed
-bun add simple-git
-```
-
-No changes to devDependencies required.
-
-## Integration Pattern
-
-### Main Process Only
-
-Both simple-git and gh CLI should run in the **main process** (not renderer):
-- simple-git wraps git CLI - needs filesystem access
-- gh CLI is a subprocess - needs shell environment
-- App already uses this pattern for agent subprocess spawning
-
-### Recommended Module Location
-
-```
-packages/shared/src/git/
-  index.ts          # Public exports
-  git-status.ts     # simple-git wrapper for status/branch
-  github-pr.ts      # gh CLI wrapper for PR info
-  types.ts          # GitContext interface
-```
-
-### GitContext Interface
-
+**Intents required:**
 ```typescript
-interface GitContext {
-  // From simple-git status()
-  branch: string | null;
-  tracking: string | null;
-  ahead: number;
-  behind: number;
-  isDetached: boolean;
+import { Client, GatewayIntentBits } from 'discord.js'
 
-  // From gh CLI (optional - may not be available)
-  pullRequest?: {
-    number: number;
-    title: string;
-    state: 'open' | 'closed' | 'merged';
-    url: string;
-    isDraft: boolean;
-  };
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,  // Privileged intent
+  ]
+})
 
-  // Meta
-  hasGit: boolean;
-  hasGhCli: boolean;
+client.on('messageCreate', (message) => {
+  // message.content, message.author, message.channelId
+  // message.reply(text) to respond
+})
+
+await client.login(botToken)
+```
+
+**Privileged intents note:** `MessageContent` is a privileged intent. Bots in fewer than 100 guilds can enable it in the Discord Developer Portal without verification. Bots in 100+ guilds require Discord approval. This is a user-facing setup step, not a code concern.
+
+**Resource footprint:** discord.js Client holds one WebSocket + in-memory cache of guilds, channels, members. Memory usage scales with guild size. For a single-guild bot typical of Kata's use case, expect ~20-40MB overhead.
+
+### @whiskeysockets/baileys
+
+**Version verified:** 7.0.0-rc.9 on npm (release candidate). The v7 line is the actively maintained branch.
+
+**Bun compatibility:** Not explicitly tested by the Baileys team, but the library is pure TypeScript over `ws` (WebSocket) and `libsignal-protocol-typescript`. No native Node.js addons. Community projects (baileys-api, whatsapp-mcp-ts) use Baileys with Bun-based toolchains.
+
+**Risk: RC status.** v7 is a release candidate. The API surface may shift before stable release. Pin to an exact version (7.0.0-rc.9) and track releases. The v6 line (6.7.9) is stable but receives fewer updates.
+
+**Risk: Reverse-engineered protocol.** Baileys is not an official WhatsApp API. WhatsApp can change its protocol at any time, breaking Baileys. The brainstorm report flags this as a known risk. Mitigation: treat WhatsApp as a best-effort channel, surface connection errors in the UI, and degrade gracefully.
+
+**Auth model:** QR code pairing. Baileys generates a QR code that the user scans with their phone. Auth state persists to disk via `useMultiFileAuthState()`. After initial pairing, reconnection is automatic.
+
+**Integration for Kata:** The QR code flow needs UI integration. Options:
+1. Render QR in the Electron renderer via IPC (daemon sends QR data to main process, main process forwards to renderer).
+2. Open a temporary window with the QR code.
+
+**Minimal integration surface:**
+```typescript
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+} from '@whiskeysockets/baileys'
+
+const { state, saveCreds } = await useMultiFileAuthState(authDir)
+
+const sock = makeWASocket({
+  auth: state,
+  printQRInTerminal: false,  // We handle QR via UI
+})
+
+sock.ev.on('connection.update', ({ connection, qr }) => {
+  if (qr) sendQrToElectron(qr)  // Forward QR to UI
+  if (connection === 'open') onConnected()
+  if (connection === 'close') handleReconnect()
+})
+
+sock.ev.on('messages.upsert', ({ messages, type }) => {
+  if (type !== 'notify') return
+  for (const msg of messages) {
+    onMessage(normalizeMessage(msg))
+  }
+})
+
+sock.ev.on('creds.update', saveCreds)
+```
+
+**Auth state storage:** `useMultiFileAuthState` writes to a directory. For Kata, store under the source folder: `~/.kata-agents/workspaces/{id}/sources/{slug}/whatsapp-auth/`. This aligns with existing per-source storage patterns.
+
+### googleapis (Gmail)
+
+**Version verified:** 171.4.0 on npm.
+
+**Bun compatibility:** Yes. Pure HTTP client wrapping Google's REST APIs. No native dependencies.
+
+**Existing infrastructure:** Kata already has Google OAuth with Gmail scopes (`gmail.modify`, `gmail.compose`) in `packages/shared/src/auth/google-oauth.ts`. The OAuth tokens are stored via the existing credential manager. No new auth flow needed.
+
+**Ingress model: Poll with historyId.** Gmail push notifications require Google Cloud Pub/Sub with a webhook endpoint, which is not available in a desktop app. The recommended approach for desktop apps is polling via `users.history.list()` with a stored `historyId`.
+
+**Polling pattern:**
+```typescript
+import { google } from 'googleapis'
+
+const gmail = google.gmail({ version: 'v1', auth: oauthClient })
+
+// Initial: get current historyId
+const profile = await gmail.users.getProfile({ userId: 'me' })
+let lastHistoryId = profile.data.historyId
+
+// Poll: get changes since last check
+const history = await gmail.users.history.list({
+  userId: 'me',
+  startHistoryId: lastHistoryId,
+  historyTypes: ['messageAdded'],
+  labelIds: [labelId],  // Optional: filter by label
+})
+
+if (history.data.history) {
+  for (const entry of history.data.history) {
+    for (const added of entry.messagesAdded || []) {
+      const msg = await gmail.users.messages.get({
+        userId: 'me',
+        id: added.message.id,
+        format: 'full',
+      })
+      onMessage(normalizeGmailMessage(msg.data))
+    }
+  }
+  lastHistoryId = history.data.historyId
 }
 ```
 
-## What NOT to Add
+**Poll interval:** 30-60s is appropriate for email. Gmail API quota is 250 units/user/second; `history.list` costs 2 units. No rate limit concern at 60s intervals.
 
-| Library/Tool           | Why Not                                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| @octokit/rest          | Auth complexity, gh CLI already handles this                      |
-| @octokit/oauth-device  | Not needed if using gh CLI                                        |
-| isomorphic-git         | Overkill, slower, more complex for read-only operations           |
-| nodegit                | Native module complexity with Electron packaging                  |
-| dugite                 | Bundles git binary - unnecessary, users have git                  |
-| git-status npm         | Abandoned, simple-git is the standard                             |
-| any git hosting UI     | Out of scope - just showing context, not managing                 |
+**Package size note:** `googleapis` is large (~80MB installed) because it bundles type definitions for all Google APIs. Alternative: use `@googleapis/gmail` (^15.0.0) for a smaller footprint (~2MB). Trade-off: if Kata later adds Calendar or Drive channels, separate subpackages would need to be installed. Recommendation: start with `@googleapis/gmail` for v0.7.0. Switch to full `googleapis` only if multiple Google services are needed.
+
+## SQLite: bun:sqlite vs better-sqlite3
+
+### Architecture Context
+
+The brainstorm establishes:
+- Daemon process runs in Bun, writes to `~/.kata-agents/daemon/daemon.db`
+- Electron main process (Node.js) needs read access for UI display
+- WAL mode enables concurrent readers + single writer
+
+### bun:sqlite (for daemon)
+
+**API:** Built into Bun runtime. No dependency to install. Synchronous API inspired by better-sqlite3.
+
+**Key API surface:**
+```typescript
+import { Database } from 'bun:sqlite'
+
+const db = new Database('daemon.db')
+db.run('PRAGMA journal_mode = WAL')
+
+// Cached prepared statement
+const insert = db.query('INSERT INTO messages VALUES ($id, $content)')
+insert.run({ $id: '1', $content: 'hello' })
+
+// Fetch rows
+const rows = db.query('SELECT * FROM messages WHERE processed = 0').all()
+
+// Transactions
+const tx = db.transaction((msgs) => {
+  for (const m of msgs) insert.run(m)
+})
+tx(messages)  // Atomic
+```
+
+**Performance:** Bun claims 3-6x faster than better-sqlite3 for read queries. The advantage comes from JavaScriptCore's native integration, bypassing N-API overhead. For the daemon's workload (small tables, low throughput), the difference is negligible. The real advantage is zero dependencies.
+
+**Strict mode:** `new Database(path, { strict: true })` allows binding parameters without `$`/`:` prefixes and throws on missing parameters. Recommended for daemon code.
+
+### better-sqlite3 (for Electron reads)
+
+**Status:** Not currently in `package.json` dependencies, but referenced in the brainstorm as the reader for the Electron side.
+
+**Consideration:** Adding better-sqlite3 to Electron requires native module rebuilding for the Electron Node.js version. This is a known pain point (electron-rebuild, node-gyp). The brainstorm acknowledges this risk and specifies a fallback.
+
+**Recommendation: Use the IPC fallback from day one.** Instead of Electron directly reading the SQLite file via better-sqlite3:
+1. Daemon exposes a query interface over stdin/stdout (part of the existing JSON protocol).
+2. Electron sends query requests to the daemon; daemon reads from bun:sqlite and returns results.
+3. No native module in Electron. No cross-runtime SQLite file locking concerns.
+
+This eliminates:
+- better-sqlite3 as a dependency entirely
+- electron-rebuild complexity
+- Cross-runtime WAL compatibility uncertainty (bun:sqlite uses a different SQLite build than better-sqlite3; WAL file format is standard but implementation details may vary)
+- File locking edge cases between two processes
+
+Trade-off: adds ~1ms latency per query (IPC round-trip). Acceptable for UI display of daemon state.
+
+### SQLite WAL Mode: Cross-Process Safety
+
+If the IPC approach is rejected and direct file access is needed:
+- WAL mode permits simultaneous readers and a single writer across processes on the same host.
+- Readers get snapshot isolation: they see the database as of the moment their read transaction started.
+- The WAL file format is part of the SQLite specification, not implementation-specific. A file written by bun:sqlite's SQLite build can be read by better-sqlite3's SQLite build.
+- Both processes must be on the same machine (WAL does not work over network filesystems).
+- Tested extensively in production by SQLite (iOS apps, Android apps, Electron apps). The cross-runtime combination (bun:sqlite writer + better-sqlite3 reader) is less common but should work given the format is standard.
+
+## Daemon Process Patterns
+
+### Subprocess Spawning from Electron
+
+Kata already spawns Bun subprocesses from Electron's Node.js main process. The pattern in `SessionManager` uses the Claude Agent SDK which internally uses `child_process.spawn` (or Bun.spawn when running under Bun). The daemon will use the same approach.
+
+**From Electron main process (Node.js):**
+```typescript
+import { spawn } from 'child_process'
+
+const daemon = spawn('bun', ['run', 'packages/daemon/src/index.ts'], {
+  stdio: ['pipe', 'pipe', 'pipe'],
+  env: { ...process.env, KATA_DAEMON: '1' },
+})
+
+// Line-delimited JSON protocol (same as agent subprocesses)
+daemon.stdout.on('data', (chunk) => {
+  for (const line of chunk.toString().split('\n')) {
+    if (!line.trim()) continue
+    const event = JSON.parse(line)
+    handleDaemonEvent(event)
+  }
+})
+
+daemon.stdin.write(JSON.stringify({ type: 'start_channel', sourceSlug: 'slack-acme' }) + '\n')
+```
+
+**Bun-native IPC alternative:** Bun supports `Bun.spawn` with an `ipc` callback for structured message passing (JSC serialization, supports structured clone types). This is more ergonomic than line-delimited JSON over stdio. However, it requires both parent and child to run under Bun. Since Electron's main process is Node.js, the IPC option is not available. stdin/stdout with line-delimited JSON is the correct choice.
+
+### Daemon Lifecycle
+
+**Start:** Electron spawns daemon on app launch (after auth is confirmed).
+**Stop:** Electron sends SIGTERM to daemon on app quit. Daemon has 5s to clean up (disconnect adapters, flush SQLite WAL, close sockets).
+**Crash recovery:** Electron monitors the daemon's exit event. On unexpected exit (non-zero code), restart with exponential backoff (1s, 2s, 4s, 8s, max 30s). After 5 consecutive crashes, stop restarting and surface error in UI.
+
+**Tray mode (deferred to v0.8.0):** To keep the daemon running when all windows are closed:
+- Listen to `window-all-closed` event, prevent `app.quit()`
+- Create a system tray icon with "Show Window" and "Quit" options
+- Daemon continues running; tray icon provides access
+- macOS: tray appears in menu bar. Windows: system tray area.
+
+This is deferred because the daemon in v0.7.0 lives and dies with the Electron process. Tray mode requires the headless permission model.
+
+### Communication Protocol
+
+Reuse the existing line-delimited JSON pattern from agent subprocesses:
+
+**Electron -> Daemon (stdin):**
+```typescript
+type DaemonCommand =
+  | { type: 'start_channel'; sourceSlug: string; config: ChannelSourceConfig }
+  | { type: 'stop_channel'; sourceSlug: string }
+  | { type: 'query'; id: string; sql: string; params?: unknown[] }
+  | { type: 'status' }
+  | { type: 'shutdown' }
+```
+
+**Daemon -> Electron (stdout):**
+```typescript
+type DaemonEvent =
+  | { type: 'channel_connected'; sourceSlug: string }
+  | { type: 'channel_disconnected'; sourceSlug: string; reason: string }
+  | { type: 'channel_error'; sourceSlug: string; error: string }
+  | { type: 'message_received'; sourceSlug: string; message: IncomingMessage }
+  | { type: 'agent_response'; sourceSlug: string; channelId: string; content: string }
+  | { type: 'query_result'; id: string; rows: unknown[] }
+  | { type: 'status'; channels: ChannelStatus[] }
+  | { type: 'qr_code'; sourceSlug: string; qr: string }  // WhatsApp QR
+```
+
+## Plugin Loading Patterns in Bun/TypeScript
+
+### Context
+
+The brainstorm specifies source-based config over a plugin SDK for v0.7.0. Channel adapters are compiled into the daemon, not dynamically loaded. The plugin loading question is about future extensibility.
+
+### Dynamic Import Pattern
+
+Bun supports dynamic `import()` with TypeScript files directly (no pre-compilation needed):
+
+```typescript
+// Load adapter by name
+const adapterModule = await import(`./adapters/${adapterName}.ts`)
+const adapter: ChannelAdapter = adapterModule.createAdapter(config)
+```
+
+**Cache busting for development:**
+```typescript
+const module = await import(`./adapters/${name}.ts?t=${Date.now()}`)
+```
+
+### v0.7.0: Static Registry (No Dynamic Loading)
+
+For v0.7.0, channel adapters are a static registry:
+
+```typescript
+const ADAPTERS: Record<string, (config: ChannelSourceConfig) => ChannelAdapter> = {
+  slack: (config) => new SlackAdapter(config),
+  discord: (config) => new DiscordAdapter(config),
+  whatsapp: (config) => new WhatsAppAdapter(config),
+  gmail: (config) => new GmailAdapter(config),
+}
+
+function createAdapter(config: ChannelSourceConfig): ChannelAdapter {
+  const factory = ADAPTERS[config.adapter]
+  if (!factory) throw new Error(`Unknown adapter: ${config.adapter}`)
+  return factory(config)
+}
+```
+
+This is the right choice for v0.7.0: no discovery mechanism, no version management, no sandboxing. Four adapters do not justify a plugin system.
+
+### Future: Plugin Contract (v0.8.0+)
+
+When dynamic adapter loading is needed (third-party adapters, marketplace), the minimal contract:
+
+```typescript
+// Plugin manifest (package.json or adapter.json)
+interface AdapterManifest {
+  name: string
+  version: string
+  adapter: string  // 'slack' | 'discord' | custom
+  entrypoint: string  // Relative path to main module
+}
+
+// Plugin entry module must export:
+export function createAdapter(config: ChannelSourceConfig): ChannelAdapter
+
+// Loading:
+const manifest = JSON.parse(await Bun.file(manifestPath).text())
+const mod = await import(resolve(pluginDir, manifest.entrypoint))
+const adapter = mod.createAdapter(config)
+```
+
+**Sandboxing concern:** Dynamic imports run in the same process with full filesystem access. For untrusted third-party plugins, Bun Workers (Web Worker API) provide isolation. Each worker runs in a separate thread with a restricted API surface. This is a v0.8.0+ concern.
+
+## Installation Plan
+
+```bash
+# Phase 1: Slack adapter
+bun add @slack/web-api
+
+# Phase 2: Discord adapter
+bun add discord.js
+
+# Phase 3: WhatsApp adapter
+bun add @whiskeysockets/baileys@7.0.0-rc.9 @hapi/boom pino
+
+# Phase 3 (Gmail, if included in v0.7.0):
+bun add @googleapis/gmail
+```
+
+All packages install into the daemon package (`packages/daemon/package.json`), not the root or Electron package. The daemon is a Bun subprocess; its dependencies do not need to be compatible with Electron's Node.js version.
 
 ## Version Verification
 
-| Package    | Verified Version | Source                                                                                     | Confidence |
-| ---------- | ---------------- | ------------------------------------------------------------------------------------------ | ---------- |
-| simple-git | 3.30.0           | [npm registry](https://www.npmjs.com/package/simple-git) (published 2 months ago)          | HIGH       |
-| gh CLI     | N/A (external)   | [GitHub CLI docs](https://cli.github.com/manual/gh_pr_view)                                | HIGH       |
+| Package | Verified Version | Source | Confidence |
+|---------|-----------------|--------|------------|
+| @slack/web-api | 7.13.0 | [npm](https://www.npmjs.com/package/@slack/web-api) | HIGH |
+| @slack/socket-mode | 2.0.5 | [npm](https://www.npmjs.com/package/@slack/socket-mode) | HIGH |
+| discord.js | 14.25.1 | [npm](https://www.npmjs.com/package/discord.js) | HIGH |
+| @whiskeysockets/baileys | 7.0.0-rc.9 | [npm](https://www.npmjs.com/package/@whiskeysockets/baileys) | MEDIUM (RC) |
+| googleapis | 171.4.0 | [npm](https://www.npmjs.com/package/googleapis) | HIGH |
+| @googleapis/gmail | 15.0.0 | [npm](https://www.npmjs.com/package/@googleapis/gmail) | HIGH |
+| bun:sqlite | Built-in (Bun 1.2+) | [Bun docs](https://bun.com/docs/runtime/sqlite) | HIGH |
 
 ## Sources
 
-- [simple-git npm](https://www.npmjs.com/package/simple-git) - Version and download stats
-- [steveukx/git-js GitHub](https://github.com/steveukx/git-js) - TypeScript types and API
-- [npm-compare: simple-git vs isomorphic-git vs nodegit](https://npm-compare.com/isomorphic-git,nodegit,simple-git) - Library comparison
-- [gh pr view documentation](https://cli.github.com/manual/gh_pr_view) - JSON fields and syntax
-- [gh pr list documentation](https://cli.github.com/manual/gh_pr_list) - Filtering by branch
-- Existing codebase: `apps/electron/src/main/shell-env.ts` - Shell environment handling
+- [Slack Node SDK - GitHub](https://github.com/slackapi/node-slack-sdk) - Socket Mode and Web API
+- [Slack Bun compatibility issue #1748](https://github.com/slackapi/node-slack-sdk/issues/1748) - Resolved, works since Bun 1.1.10
+- [discord.js docs](https://discord.js.org/docs) - v14.25.1 API reference
+- [Bun discord.js guide](https://bun.com/docs/guides/ecosystem/discordjs) - Official Bun integration guide
+- [Baileys GitHub](https://github.com/WhiskeySockets/Baileys) - WhatsApp Web API
+- [Gmail Push Notifications](https://developers.google.com/workspace/gmail/api/guides/push) - Push vs poll guidance
+- [bun:sqlite docs](https://bun.com/docs/runtime/sqlite) - API reference, WAL mode
+- [bun:sqlite Database class](https://bun.com/reference/bun/sqlite/Database) - Constructor options
+- [better-sqlite3 vs bun:sqlite discussion](https://github.com/WiseLibs/better-sqlite3/discussions/1057) - Performance comparison
+- [SQLite WAL documentation](https://sqlite.org/wal.html) - Cross-process concurrency model
+- [Bun IPC guide](https://bun.com/guides/process/ipc) - Subprocess communication
+- [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model) - Main/renderer architecture
+- [Electron utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process) - Background process alternative
+- [Electron background daemon patterns](https://github.com/electron/electron/issues/26288) - Community discussion
+- [Electron tray pattern](https://blog.stackademic.com/how-to-keep-your-electron-app-running-in-background-guide-373f9df8418d) - Keep-alive approach

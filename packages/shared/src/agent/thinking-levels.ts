@@ -10,7 +10,7 @@
  * Ultrathink override can boost to Max Think for a single message.
  */
 
-export type ThinkingLevel = 'off' | 'think' | 'max';
+export type ThinkingLevel = "off" | "think" | "max";
 
 export interface ThinkingLevelDefinition {
   id: ThinkingLevel;
@@ -26,13 +26,25 @@ export interface ThinkingLevelDefinition {
  * (model dropdown, workspace settings, etc.)
  */
 export const THINKING_LEVELS: readonly ThinkingLevelDefinition[] = [
-  { id: 'off', name: 'No Thinking', description: 'Fastest responses, no reasoning' },
-  { id: 'think', name: 'Thinking', description: 'Balanced speed and reasoning' },
-  { id: 'max', name: 'Max Thinking', description: 'Deepest reasoning for complex tasks' },
+  {
+    id: "off",
+    name: "No Thinking",
+    description: "Fastest responses, no reasoning",
+  },
+  {
+    id: "think",
+    name: "Thinking",
+    description: "Balanced speed and reasoning",
+  },
+  {
+    id: "max",
+    name: "Max Thinking",
+    description: "Deepest reasoning for complex tasks",
+  },
 ] as const;
 
 /** Default thinking level for new sessions when workspace has no default */
-export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'think';
+export const DEFAULT_THINKING_LEVEL: ThinkingLevel = "think";
 
 /**
  * Token budgets per model family.
@@ -62,11 +74,14 @@ const TOKEN_BUDGETS = {
  * Get the thinking token budget for a given level and model.
  *
  * @param level - The thinking level (off, think, max)
- * @param modelId - The model ID (e.g., 'claude-haiku-4-5-20251001')
+ * @param modelId - The model ID (e.g., 'claude-haiku-4-5')
  * @returns Number of thinking tokens to allocate
  */
-export function getThinkingTokens(level: ThinkingLevel, modelId: string): number {
-  const isHaiku = modelId.toLowerCase().includes('haiku');
+export function getThinkingTokens(
+  level: ThinkingLevel,
+  modelId: string,
+): number {
+  const isHaiku = modelId.toLowerCase().includes("haiku");
   const budgets = isHaiku ? TOKEN_BUDGETS.haiku : TOKEN_BUDGETS.default;
   return budgets[level];
 }
@@ -83,5 +98,5 @@ export function getThinkingLevelName(level: ThinkingLevel): string {
  * Validate that a value is a valid ThinkingLevel.
  */
 export function isValidThinkingLevel(value: unknown): value is ThinkingLevel {
-  return value === 'off' || value === 'think' || value === 'max';
+  return value === "off" || value === "think" || value === "max";
 }
