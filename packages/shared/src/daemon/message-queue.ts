@@ -8,35 +8,146 @@
 import { Database } from 'bun:sqlite';
 import type { MessageDirection, QueuedMessage } from './types.ts';
 
+/** Row shape returned by SQLite before payload deserialization */
+interface RawMessageRow {
+  id: number;
+  direction: string;
+  channel_id: string;
+  status: string;
+  payload: string;
+  created_at: string;
+  processed_at: string | null;
+  error: string | null;
+  retry_count: number;
+}
+
 /**
  * SQLite-backed message queue for the daemon subprocess.
  * Uses WAL mode for concurrent read safety and prepared statements for performance.
  */
 export class MessageQueue {
   private db: Database;
+  private enqueueStmt: ReturnType<Database['query']>;
+  private dequeueStmt: ReturnType<Database['query']>;
+  private markProcessedStmt: ReturnType<Database['query']>;
+  private markFailedStmt: ReturnType<Database['query']>;
 
-  constructor(_dbPath: string) {
-    this.db = null as unknown as Database;
-    throw new Error('Not implemented');
+  constructor(dbPath: string) {
+    this.db = new Database(dbPath);
+
+    // Configure WAL mode and pragmas
+    this.db.run('PRAGMA journal_mode = WAL');
+    this.db.run('PRAGMA busy_timeout = 5000');
+    this.db.run('PRAGMA synchronous = NORMAL');
+
+    // Create messages table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        direction TEXT NOT NULL CHECK(direction IN ('inbound', 'outbound')),
+        channel_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK(status IN ('pending', 'processing', 'processed', 'failed')),
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        processed_at TEXT,
+        error TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    // Create indices
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_messages_pending
+      ON messages (direction, status, created_at)
+      WHERE status = 'pending'
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_messages_channel
+      ON messages (channel_id, direction, created_at)
+    `);
+
+    // Prepare statements
+    this.enqueueStmt = this.db.query(
+      `INSERT INTO messages (direction, channel_id, payload)
+       VALUES ($direction, $channelId, $payload)`,
+    );
+
+    this.dequeueStmt = this.db.query(
+      `UPDATE messages
+       SET status = 'processing', processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = (
+         SELECT id FROM messages
+         WHERE direction = $direction AND status = 'pending'
+         ORDER BY created_at ASC
+         LIMIT 1
+       )
+       RETURNING *`,
+    );
+
+    this.markProcessedStmt = this.db.query(
+      `UPDATE messages SET status = 'processed' WHERE id = $id`,
+    );
+
+    this.markFailedStmt = this.db.query(
+      `UPDATE messages
+       SET status = 'failed', error = $error, retry_count = retry_count + 1
+       WHERE id = $id`,
+    );
   }
 
-  enqueue(_direction: MessageDirection, _channelId: string, _payload: unknown): number {
-    throw new Error('Not implemented');
+  /**
+   * Add a message to the queue. Returns the auto-generated row ID.
+   */
+  enqueue(direction: MessageDirection, channelId: string, payload: unknown): number {
+    const result = this.enqueueStmt.run({
+      $direction: direction,
+      $channelId: channelId,
+      $payload: JSON.stringify(payload),
+    });
+    return result.lastInsertRowid as number;
   }
 
-  dequeue(_direction: MessageDirection): QueuedMessage | null {
-    throw new Error('Not implemented');
+  /**
+   * Atomically claim the oldest pending message for the given direction.
+   * Returns the message with its payload deserialized, or null if none pending.
+   */
+  dequeue(direction: MessageDirection): QueuedMessage | null {
+    const row = this.dequeueStmt.get({ $direction: direction }) as RawMessageRow | null;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      direction: row.direction as MessageDirection,
+      channelId: row.channel_id,
+      status: row.status as QueuedMessage['status'],
+      payload: JSON.parse(row.payload),
+      createdAt: row.created_at,
+      processedAt: row.processed_at,
+      error: row.error,
+      retryCount: row.retry_count,
+    };
   }
 
-  markProcessed(_id: number): void {
-    throw new Error('Not implemented');
+  /**
+   * Mark a message as successfully processed.
+   */
+  markProcessed(id: number): void {
+    this.markProcessedStmt.run({ $id: id });
   }
 
-  markFailed(_id: number, _error: string): void {
-    throw new Error('Not implemented');
+  /**
+   * Mark a message as failed with an error description. Increments retry_count.
+   */
+  markFailed(id: number, error: string): void {
+    this.markFailedStmt.run({ $id: id, $error: error });
   }
 
+  /**
+   * Close the database connection.
+   */
   close(): void {
-    throw new Error('Not implemented');
+    this.db.close();
   }
 }
