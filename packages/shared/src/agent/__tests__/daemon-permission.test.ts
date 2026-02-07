@@ -138,6 +138,53 @@ describe('daemon mode - custom allowlist', () => {
 })
 
 // ============================================================================
+// Daemon mode - edge cases
+// ============================================================================
+
+describe('daemon mode - edge cases', () => {
+  it('blocks all tools when custom allowlist is empty', () => {
+    const emptyAllowlist: DaemonAllowlistConfig = {
+      allowedTools: new Set(),
+      allowedMcpPatterns: [],
+    }
+    const result = shouldAllowToolInMode('Read', {}, 'daemon', {
+      daemonAllowlist: emptyAllowlist,
+    })
+    expect(result.allowed).toBe(false)
+  })
+
+  it('is case-sensitive for tool names', () => {
+    const result = shouldAllowToolInMode('read', {}, 'daemon')
+    expect(result.allowed).toBe(false)
+  })
+
+  it('includes tool name in rejection reason', () => {
+    const result = shouldAllowToolInMode('Bash', { command: 'ls' }, 'daemon')
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) {
+      expect(result.reason).toContain('Bash')
+      expect(result.reason).toContain('daemon tool allowlist')
+    }
+  })
+
+  it('daemon mode ignores permissionsContext', () => {
+    const result = shouldAllowToolInMode('Bash', { command: 'ls' }, 'daemon', {
+      permissionsContext: { workspaceId: 'test' } as never,
+    })
+    expect(result.allowed).toBe(false)
+  })
+
+  it('default allowlist contains exactly the expected tools', () => {
+    const expectedTools = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'TaskOutput', 'TodoWrite']
+    expect(Array.from(DAEMON_DEFAULT_ALLOWLIST.allowedTools).sort()).toEqual(expectedTools.sort())
+  })
+
+  it('default allowlist has no MCP patterns', () => {
+    expect(DAEMON_DEFAULT_ALLOWLIST.allowedMcpPatterns).toEqual([])
+  })
+})
+
+// ============================================================================
 // Daemon mode - not in UI cycle
 // ============================================================================
 

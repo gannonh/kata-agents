@@ -18,11 +18,13 @@ import { z } from 'zod';
  * - 'safe': Read-only, blocks writes, never prompts (green)
  * - 'ask': Prompts for dangerous operations (amber)
  * - 'allow-all': Everything allowed, no prompts (violet)
+ * - 'daemon': Background daemon mode, allowlist-only tool access (warning)
  */
 export type PermissionMode = 'safe' | 'ask' | 'allow-all' | 'daemon';
 
 /**
- * Order of modes for cycling with SHIFT+TAB
+ * Order of modes for cycling with SHIFT+TAB.
+ * Daemon mode is excluded — it is set programmatically for background sessions only.
  */
 export const PERMISSION_MODE_ORDER: PermissionMode[] = ['safe', 'ask', 'allow-all'];
 

@@ -1254,24 +1254,26 @@ export function shouldAllowToolInMode(
     daemonAllowlist?: DaemonAllowlistConfig;
   }
 ): ToolCheckResult {
-  // Daemon mode: allowlist-only tool access (checked first, before config loading)
+  // ============================================================
+  // Daemon Mode: Allowlist-only tool access
+  // ============================================================
   if (mode === 'daemon') {
     const daemonConfig = options?.daemonAllowlist ?? DAEMON_DEFAULT_ALLOWLIST;
     if (daemonConfig.allowedTools.has(toolName)) {
       return { allowed: true };
     }
-    if (toolName.startsWith('mcp__')) {
-      for (const pattern of daemonConfig.allowedMcpPatterns) {
-        if (pattern.test(toolName)) {
-          return { allowed: true };
-        }
-      }
+    if (toolName.startsWith('mcp__') && daemonConfig.allowedMcpPatterns.some(pattern => pattern.test(toolName))) {
+      return { allowed: true };
     }
     return {
       allowed: false,
       reason: `${toolName} is not in the daemon tool allowlist. Daemon mode restricts tool access for safety.`,
     };
   }
+
+  // ============================================================
+  // Interactive Modes: Config-based permissions (safe/ask/allow-all)
+  // ============================================================
 
   // Get config: merged custom if context provided, otherwise defaults
   let config: ToolCheckConfig;

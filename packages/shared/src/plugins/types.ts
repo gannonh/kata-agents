@@ -4,7 +4,7 @@
  * Plugins extend the daemon with channels, tools, and background services.
  * Each plugin registers its capabilities via typed registries during initialization.
  *
- * First-party plugins only (v0.7.0). Third-party plugin loading deferred to v0.8.0+.
+ * Currently restricted to first-party plugins. Third-party plugin loading is planned.
  */
 
 import type { ChannelAdapter } from '../channels/types.ts';
