@@ -4,11 +4,11 @@
 
 ### Daemon Infrastructure
 
-- [ ] **DAEMON-01**: Daemon runs as Bun subprocess of Electron with stdin/stdout JSON communication
-- [ ] **DAEMON-02**: Daemon restarts automatically on crash with exponential backoff (max 5 attempts)
+- [x] **DAEMON-01**: Daemon runs as Bun subprocess of Electron with stdin/stdout JSON communication
+- [x] **DAEMON-02**: Daemon restarts automatically on crash with exponential backoff (max 5 attempts)
 - [ ] **DAEMON-03**: Daemon status indicator shows running/stopped/error state in UI
 - [x] **DAEMON-04**: Daemon permission mode restricts tool access to explicit allowlist
-- [ ] **DAEMON-05**: SQLite message queue stores inbound/outbound messages for daemon channels
+- [x] **DAEMON-05**: SQLite message queue stores inbound/outbound messages for daemon channels
 - [ ] **DAEMON-06**: Task scheduler supports cron, interval, and one-shot scheduled tasks
 - [ ] **DAEMON-07**: System tray icon provides quick access and background operation when main window is closed
 
