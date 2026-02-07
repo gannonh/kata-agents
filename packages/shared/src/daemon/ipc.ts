@@ -10,13 +10,24 @@
  * for each complete newline-terminated line. Handles partial chunks,
  * multi-line chunks, and empty lines.
  */
-export function createLineParser(_onLine: (line: string) => void): (chunk: string) => void {
-  throw new Error('Not implemented');
+export function createLineParser(onLine: (line: string) => void): (chunk: string) => void {
+  let buffer = '';
+  return (chunk: string) => {
+    buffer += chunk;
+    let idx: number;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (line) {
+        onLine(line);
+      }
+    }
+  };
 }
 
 /**
  * Format a message as a newline-terminated JSON string for IPC transmission.
  */
-export function formatMessage(_msg: unknown): string {
-  throw new Error('Not implemented');
+export function formatMessage(msg: unknown): string {
+  return JSON.stringify(msg) + '\n';
 }
