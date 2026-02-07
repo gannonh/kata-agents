@@ -54,10 +54,13 @@ export {
   modeManager,
   // Default Explore mode patterns (for UI display)
   SAFE_MODE_CONFIG,
+  // Daemon mode allowlist
+  DAEMON_DEFAULT_ALLOWLIST,
   // Types
   type ModeState,
   type ModeCallbacks,
   type ModeConfig,
+  type DaemonAllowlistConfig,
 } from './mode-manager.ts';
 
 // Export plan types and permission mode messages
