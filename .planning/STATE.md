@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** Not started (defining requirements)
+**Phase:** 10 — Foundation Types and Permission Mode
 **Plan:** N/A
-**Status:** Defining requirements
+**Status:** Roadmap created, ready to plan Phase 10
 
 ```
-Progress: [          ] 0% (milestone started)
+Progress: [          ] 0% (roadmap created, 5 phases defined)
 ```
 
 ---
@@ -72,11 +72,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-07
-**Stopped at:** Milestone v0.7.0 started, defining requirements
+**Stopped at:** Roadmap created for v0.7.0 (5 phases, 17 requirements mapped)
 **Resume file:** None
 
-**Next action:** Define requirements for v0.7.0
+**Next action:** Plan Phase 10 (Foundation Types and Permission Mode)
 
 ---
 
-_Last updated: 2026-02-07 after v0.7.0 milestone started_
+_Last updated: 2026-02-07 after v0.7.0 roadmap created_

@@ -51,23 +51,23 @@
 
 | Requirement | Phase | Plan |
 |-------------|-------|------|
-| DAEMON-01   |       |      |
-| DAEMON-02   |       |      |
-| DAEMON-03   |       |      |
-| DAEMON-04   |       |      |
-| DAEMON-05   |       |      |
-| DAEMON-06   |       |      |
-| DAEMON-07   |       |      |
-| CHAN-01      |       |      |
-| CHAN-02      |       |      |
-| CHAN-03      |       |      |
-| CHAN-04      |       |      |
-| CHAN-05      |       |      |
-| CHAN-06      |       |      |
-| CHAN-07      |       |      |
-| PLUG-01     |       |      |
-| PLUG-02     |       |      |
-| PLUG-03     |       |      |
+| DAEMON-01   | 11    |      |
+| DAEMON-02   | 11    |      |
+| DAEMON-03   | 14    |      |
+| DAEMON-04   | 10    |      |
+| DAEMON-05   | 11    |      |
+| DAEMON-06   | 13    |      |
+| DAEMON-07   | 14    |      |
+| CHAN-01      | 12    |      |
+| CHAN-02      | 12    |      |
+| CHAN-03      | 14    |      |
+| CHAN-04      | 12    |      |
+| CHAN-05      | 12    |      |
+| CHAN-06      | 14    |      |
+| CHAN-07      | 14    |      |
+| PLUG-01     | 10    |      |
+| PLUG-02     | 13    |      |
+| PLUG-03     | 13    |      |
 
 ---
 
