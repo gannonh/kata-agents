@@ -2,22 +2,22 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-05)
+See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** Developer-centric AI desktop client that understands your git workflow and provides contextual assistance.
-**Current focus:** Planning next milestone
+**Current focus:** v0.7.0 Always-On Assistant
 
 ---
 
 ## Current Position
 
-**Milestone:** None (v0.6.1 shipped)
-**Phase:** N/A
+**Milestone:** v0.7.0 Always-On Assistant
+**Phase:** Not started (defining requirements)
 **Plan:** N/A
-**Status:** Ready for next milestone
+**Status:** Defining requirements
 
 ```
-Progress: [██████████] 100% (v0.6.1 shipped)
+Progress: [          ] 0% (milestone started)
 ```
 
 ---
@@ -37,9 +37,19 @@ Progress: [██████████] 100% (v0.6.1 shipped)
 
 See PROJECT.md Key Decisions table for full history.
 
+**v0.7.0 architecture decision (brainstorm 2026-02-07):**
+- Hybrid architecture selected over minimal (NanoClaw-style) and gateway (OpenClaw-style)
+- Daemon as Bun subprocess of Electron (not WebSocket gateway)
+- Plugin contract with 3 registration methods (registerChannel/registerTool/registerService)
+- Dual ingress channel adapter (poll/subscribe)
+- New `daemon` permission mode with tool allowlist
+- SQLite for daemon state, first-party plugins only
+- launchd/systemd deferred to v0.8.0+
+- Full brainstorm: .planning/brainstorms/2026-02-07T06-16-brainstorm/SUMMARY.md
+
 ### Active Todos
 
-None — milestone complete.
+None — defining requirements.
 
 ### Known Blockers
 
@@ -61,12 +71,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-05
-**Stopped at:** Milestone v0.6.1 complete
+**Last session:** 2026-02-07
+**Stopped at:** Milestone v0.7.0 started, defining requirements
 **Resume file:** None
 
-**Next action:** `/kata:kata-add-milestone` to start next milestone
+**Next action:** Define requirements for v0.7.0
 
 ---
 
-_Last updated: 2026-02-05 after v0.6.1 milestone complete_
+_Last updated: 2026-02-07 after v0.7.0 milestone started_
