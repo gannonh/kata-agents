@@ -17,7 +17,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 
 **Goal:** Run a background daemon that monitors Slack and WhatsApp channels, routes inbound messages to agent sessions, and exposes channel conversations in the desktop UI alongside direct chat sessions.
 
-#### Phase 10: Foundation Types and Permission Mode
+#### Phase 10: Foundation Types and Permission Mode — Completed 2026-02-07
 
 **Goal:** Define the plugin contract, channel adapter interface, daemon types, and daemon permission mode. Pure type definitions and permission logic with no runtime behavior.
 
@@ -25,12 +25,18 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 
 **Requirements:** PLUG-01, DAEMON-04
 
+**Plans:** 2 plans
+
+Plans:
+- [x] 10-01-PLAN.md — Plugin contract, channel adapter, and daemon event types
+- [x] 10-02-PLAN.md — Daemon permission mode and unit tests
+
 **Success Criteria:**
-1. KataPlugin interface compiles with registerChannel, registerTool, registerService methods
-2. ChannelAdapter interface defines poll and subscribe ingress modes
-3. Daemon permission mode restricts tool access to an explicit allowlist
-4. Daemon mode blocks bash, computer, and write operations by default
-5. Unit tests validate shouldAllowToolInMode with daemon mode
+1. ✅ KataPlugin interface compiles with registerChannel, registerTool, registerService methods
+2. ✅ ChannelAdapter interface defines poll and subscribe ingress modes
+3. ✅ Daemon permission mode restricts tool access to an explicit allowlist
+4. ✅ Daemon mode blocks bash, computer, and write operations by default
+5. ✅ Unit tests validate shouldAllowToolInMode with daemon mode
 
 #### Phase 11: Daemon Core and SQLite Queue
 
@@ -145,8 +151,8 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 | v0.4.0 Foundation             | ✅ Shipped  | 2      | 6     | 10           | 100%     |
 | v0.6.0 Git Integration        | ✅ Shipped  | 5      | 14    | 12           | 100%     |
 | v0.6.1 Testing Infrastructure | ✅ Shipped  | 2      | 6     | 10           | 100%     |
-| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | —     | 17           | 0%       |
+| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | 2     | 17           | 12%      |
 
 ---
 
-_Last updated: 2026-02-07 after v0.7.0 roadmap created_
+_Last updated: 2026-02-07 after Phase 10 completed_

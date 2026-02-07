@@ -28,9 +28,11 @@ import {
   type CompiledApiEndpointRule,
   type CompiledBashPattern,
   type MismatchAnalysis,
+  type DaemonAllowlistConfig,
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
+  DAEMON_DEFAULT_ALLOWLIST,
 } from './mode-types.ts';
 
 // Import incr-regex-package for smart pattern mismatch diagnostics
@@ -44,9 +46,11 @@ export {
   type CompiledApiEndpointRule,
   type CompiledBashPattern,
   type MismatchAnalysis,
+  type DaemonAllowlistConfig,
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
+  DAEMON_DEFAULT_ALLOWLIST,
 };
 
 /**
@@ -1247,8 +1251,30 @@ export function shouldAllowToolInMode(
   options?: {
     plansFolderPath?: string;
     permissionsContext?: PermissionsContext;
+    daemonAllowlist?: DaemonAllowlistConfig;
   }
 ): ToolCheckResult {
+  // ============================================================
+  // Daemon Mode: Allowlist-only tool access
+  // ============================================================
+  if (mode === 'daemon') {
+    const daemonConfig = options?.daemonAllowlist ?? DAEMON_DEFAULT_ALLOWLIST;
+    if (daemonConfig.allowedTools.has(toolName)) {
+      return { allowed: true };
+    }
+    if (toolName.startsWith('mcp__') && daemonConfig.allowedMcpPatterns.some(pattern => pattern.test(toolName))) {
+      return { allowed: true };
+    }
+    return {
+      allowed: false,
+      reason: `${toolName} is not in the daemon tool allowlist. Daemon mode restricts tool access for safety.`,
+    };
+  }
+
+  // ============================================================
+  // Interactive Modes: Config-based permissions (safe/ask/allow-all)
+  // ============================================================
+
   // Get config: merged custom if context provided, otherwise defaults
   let config: ToolCheckConfig;
 

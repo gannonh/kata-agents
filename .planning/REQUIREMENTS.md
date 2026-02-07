@@ -7,7 +7,7 @@
 - [ ] **DAEMON-01**: Daemon runs as Bun subprocess of Electron with stdin/stdout JSON communication
 - [ ] **DAEMON-02**: Daemon restarts automatically on crash with exponential backoff (max 5 attempts)
 - [ ] **DAEMON-03**: Daemon status indicator shows running/stopped/error state in UI
-- [ ] **DAEMON-04**: Daemon permission mode restricts tool access to explicit allowlist
+- [x] **DAEMON-04**: Daemon permission mode restricts tool access to explicit allowlist
 - [ ] **DAEMON-05**: SQLite message queue stores inbound/outbound messages for daemon channels
 - [ ] **DAEMON-06**: Task scheduler supports cron, interval, and one-shot scheduled tasks
 - [ ] **DAEMON-07**: System tray icon provides quick access and background operation when main window is closed
@@ -24,7 +24,7 @@
 
 ### Plugin System
 
-- [ ] **PLUG-01**: Plugin contract supports registerChannel, registerTool, and registerService
+- [x] **PLUG-01**: Plugin contract supports registerChannel, registerTool, and registerService
 - [ ] **PLUG-02**: Plugins can be enabled/disabled per workspace
 - [ ] **PLUG-03**: First-party plugins are bundled and loaded at daemon startup
 

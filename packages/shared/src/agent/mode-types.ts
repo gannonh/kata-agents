@@ -18,11 +18,13 @@ import { z } from 'zod';
  * - 'safe': Read-only, blocks writes, never prompts (green)
  * - 'ask': Prompts for dangerous operations (amber)
  * - 'allow-all': Everything allowed, no prompts (violet)
+ * - 'daemon': Background daemon mode, allowlist-only tool access (warning)
  */
-export type PermissionMode = 'safe' | 'ask' | 'allow-all';
+export type PermissionMode = 'safe' | 'ask' | 'allow-all' | 'daemon';
 
 /**
- * Order of modes for cycling with SHIFT+TAB
+ * Order of modes for cycling with SHIFT+TAB.
+ * Daemon mode is excluded — it is set programmatically for background sessions only.
  */
 export const PERMISSION_MODE_ORDER: PermissionMode[] = ['safe', 'ask', 'allow-all'];
 
@@ -157,6 +159,20 @@ export interface ModeConfig {
 }
 
 // ============================================================
+// Daemon Allowlist Config (Browser-safe - pure data)
+// ============================================================
+
+/**
+ * Daemon mode allowlist configuration.
+ * Unlike safe mode (blocklist-based), daemon mode uses an allowlist
+ * where only explicitly permitted tools can run.
+ */
+export interface DaemonAllowlistConfig {
+  allowedTools: Set<string>;
+  allowedMcpPatterns: RegExp[];
+}
+
+// ============================================================
 // Safe Mode Configuration (Browser-safe - pure data)
 // ============================================================
 
@@ -186,6 +202,20 @@ export const SAFE_MODE_CONFIG: ModeConfig = {
   allowedApiEndpoints: [],
   displayName: 'Safe Mode',
   shortcutHint: 'SHIFT+TAB',
+};
+
+/**
+ * Default tool allowlist for daemon mode.
+ * Only these tools are permitted. Everything else is blocked.
+ */
+export const DAEMON_DEFAULT_ALLOWLIST: DaemonAllowlistConfig = {
+  allowedTools: new Set([
+    'Read', 'Glob', 'Grep',
+    'WebFetch', 'WebSearch',
+    'Task', 'TaskOutput',
+    'TodoWrite',
+  ]),
+  allowedMcpPatterns: [],
 };
 
 /**
@@ -241,6 +271,18 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
       text: 'text-accent',
       bg: 'bg-accent',
       border: 'border-accent',
+    },
+  },
+  'daemon': {
+    displayName: 'Daemon',
+    shortName: 'Daemon',
+    description: 'Background daemon mode. Allowlist-only tool access.',
+    // Shield icon from Lucide
+    svgPath: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+    colorClass: {
+      text: 'text-warning',
+      bg: 'bg-warning',
+      border: 'border-warning',
     },
   },
 };
