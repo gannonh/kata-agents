@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 10 — Foundation Types and Permission Mode (VERIFIED)
-**Plan:** 02 of 2
-**Status:** Phase 10 verified (21/21 must_haves)
-**Last activity:** 2026-02-07 — Phase 10 verified and completed
+**Phase:** 11 — Daemon Core and SQLite Queue
+**Plan:** 01 of 2
+**Status:** In progress (Plan 01 complete)
+**Last activity:** 2026-02-07 — Completed 11-01-PLAN.md
 
 ```
-Progress: [██        ] 20% (2 of ~10 plans complete across 5 phases)
+Progress: [███       ] 30% (3 of ~10 plans complete across 5 phases)
 ```
 
 ---
@@ -28,7 +28,7 @@ Progress: [██        ] 20% (2 of ~10 plans complete across 5 phases)
 **Milestone velocity:**
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
-- v0.6.1: 10 requirements in 2 phases (6 plans) — 2 days
+- v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
 
 ---
 
@@ -48,9 +48,13 @@ See PROJECT.md Key Decisions table for full history.
 - launchd/systemd deferred to v0.8.0+
 - Full brainstorm: .planning/brainstorms/2026-02-07T06-16-brainstorm/SUMMARY.md
 
+**Phase 11 Plan 01 decisions:**
+- SQLite snake_case columns mapped to camelCase QueuedMessage fields at the dequeue boundary
+- Payload stored as JSON TEXT, serialized on enqueue, deserialized on dequeue
+
 ### Active Todos
 
-None — defining requirements.
+None.
 
 ### Known Blockers
 
@@ -73,11 +77,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-07
-**Stopped at:** Phase 10 verified and completed — PR #76 ready
+**Stopped at:** Completed 11-01-PLAN.md
 **Resume file:** None
 
-**Next action:** Merge PR #76, then plan Phase 11 (Daemon Core and SQLite Queue)
+**Next action:** Execute 11-02-PLAN.md (daemon entry point and DaemonManager)
 
 ---
 
-_Last updated: 2026-02-07 after Phase 10 verified_
+_Last updated: 2026-02-07 after Plan 11-01 completed_
