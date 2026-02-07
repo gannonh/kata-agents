@@ -67,6 +67,13 @@ Plans:
 
 **Requirements:** CHAN-01, CHAN-02, CHAN-04, CHAN-05
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — TriggerMatcher, ChannelSessionResolver, and polling state persistence (TDD)
+- [ ] 12-02-PLAN.md — Slack adapter, channel-runner, and daemon entry wiring
+- [ ] 12-03-PLAN.md — WhatsApp adapter with Bun compatibility gate
+
 **Success Criteria:**
 1. Slack adapter polls conversations.history via @slack/web-api and enqueues new messages
 2. WhatsApp adapter connects via Baileys and enqueues inbound messages
