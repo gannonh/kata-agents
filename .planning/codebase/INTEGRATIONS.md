@@ -8,7 +8,7 @@
 - Claude API for message generation
   - SDK: `@anthropic-ai/sdk` ^0.71.1
   - Auth: `ANTHROPIC_API_KEY` (required)
-  - Models: Opus 4.5, Sonnet 4.5, Haiku 4.5 (200K context window)
+  - Models: Opus 4.6, Sonnet 4.5, Haiku 4.5 (200K context window)
   - Configuration: `packages/shared/src/config/models.ts` defines available models and defaults
   - Base URL: Configurable via `process.env.ANTHROPIC_BASE_URL` (defaults to `https://api.anthropic.com`)
   - Location: `packages/shared/src/auth/claude-token.ts` for token management
