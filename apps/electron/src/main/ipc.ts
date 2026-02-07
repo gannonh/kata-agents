@@ -7,6 +7,7 @@ import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
+import type { DaemonManager } from './daemon-manager'
 import { ipcLog, windowLog } from './logger'
 import { logGetSessionsCall, logDiagnostic } from './startup-diagnostics'
 import { WindowManager } from './window-manager'
@@ -200,7 +201,7 @@ function stopAllGitWatchers(): void {
   gitWatchers.clear()
 }
 
-export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager): void {
+export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager, daemonManager?: DaemonManager | null): void {
   // Clean up all git watchers on app quit
   app.on('before-quit', () => {
     stopAllGitWatchers()
@@ -2537,5 +2538,26 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Note: Permission mode cycling settings (cyclablePermissionModes) are now workspace-level
   // and managed via WORKSPACE_SETTINGS_GET/UPDATE channels
+
+  // ============================================================
+  // Daemon Management
+  // ============================================================
+
+  ipcMain.handle(IPC_CHANNELS.DAEMON_START, async () => {
+    if (!daemonManager) throw new Error('Daemon manager not initialized')
+    await daemonManager.start()
+    return daemonManager.getState()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.DAEMON_STOP, async () => {
+    if (!daemonManager) throw new Error('Daemon manager not initialized')
+    await daemonManager.stop()
+    return daemonManager.getState()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.DAEMON_STATUS, async () => {
+    if (!daemonManager) return 'stopped'
+    return daemonManager.getState()
+  })
 
 }

@@ -73,6 +73,7 @@ Sentry.setUser({ id: machineId })
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
+import { DaemonManager } from './daemon-manager'
 import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -109,6 +110,7 @@ const DEEPLINK_SCHEME = process.env.KATA_DEEPLINK_SCHEME || process.env.CRAFT_DE
 
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
+let daemonManager: DaemonManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -311,6 +313,19 @@ app.whenReady().then(async () => {
     sessionManager.setWindowManager(windowManager)
     logDiagnostic('WindowManager set on SessionManager')
 
+    // Initialize daemon manager (does not auto-start; Phase 12+ triggers start)
+    logDiagnostic('Creating DaemonManager...')
+    const configDir = process.env.KATA_CONFIG_DIR || process.env.CRAFT_CONFIG_DIR || join(homedir(), '.kata-agents')
+    const daemonScript = join(__dirname, '../../packages/shared/src/daemon/entry.ts')
+    daemonManager = new DaemonManager(
+      'bun',
+      daemonScript,
+      configDir,
+      (event) => mainLog.info('[daemon] event:', event.type),
+      (state) => mainLog.info('[daemon] state:', state),
+    )
+    logDiagnostic('DaemonManager created')
+
     // Initialize notification service
     logDiagnostic('Initializing notification service...')
     initNotificationService(windowManager)
@@ -318,7 +333,7 @@ app.whenReady().then(async () => {
 
     // Register IPC handlers (must happen before window creation)
     logDiagnostic('Registering IPC handlers...')
-    registerIpcHandlers(sessionManager, windowManager)
+    registerIpcHandlers(sessionManager, windowManager, daemonManager)
     logDiagnostic('IPC handlers registered')
 
     // Create initial windows (restores from saved state or opens first workspace)
@@ -436,6 +451,16 @@ app.on('before-quit', async (event) => {
     }
     // Clean up SessionManager resources (file watchers, timers, etc.)
     sessionManager.cleanup()
+
+    // Stop daemon subprocess
+    if (daemonManager) {
+      try {
+        await daemonManager.stop()
+        mainLog.info('Daemon stopped')
+      } catch (error) {
+        mainLog.error('Failed to stop daemon:', error)
+      }
+    }
 
     // If update is in progress, let electron-updater handle the quit flow
     // Force exit breaks the NSIS installer on Windows
