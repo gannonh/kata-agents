@@ -23,16 +23,15 @@ export function writePidFile(configDir: string, pid: number): void {
 }
 
 /**
- * Remove the PID file if it exists. Silently ignores errors.
+ * Remove the PID file if it exists. Ignores ENOENT (already gone).
  */
 export function removePidFile(configDir: string): void {
   try {
-    const path = getPidFilePath(configDir);
-    if (existsSync(path)) {
-      unlinkSync(path);
+    unlinkSync(getPidFilePath(configDir));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error(`[daemon] Failed to remove PID file:`, err);
     }
-  } catch {
-    // Ignore removal errors
   }
 }
 

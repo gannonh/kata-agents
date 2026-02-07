@@ -117,12 +117,21 @@ export class MessageQueue {
     const row = this.dequeueStmt.get({ $direction: direction }) as RawMessageRow | null;
     if (!row) return null;
 
+    let payload: unknown;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      console.error(`[message-queue] Corrupted payload for message ${row.id}, marking failed`);
+      this.markFailed(row.id, 'corrupted payload: invalid JSON');
+      return null;
+    }
+
     return {
       id: row.id,
       direction: row.direction as MessageDirection,
       channelId: row.channel_id,
       status: row.status as QueuedMessage['status'],
-      payload: JSON.parse(row.payload),
+      payload,
       createdAt: row.created_at,
       processedAt: row.processed_at,
       error: row.error,

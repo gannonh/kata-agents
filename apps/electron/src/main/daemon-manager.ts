@@ -7,7 +7,7 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import type { DaemonCommand, DaemonEvent, DaemonStatus } from '@craft-agent/core/types';
+import type { DaemonCommand, DaemonEvent } from '@craft-agent/core/types';
 import { createLineParser, cleanupStaleDaemon } from '@craft-agent/shared/daemon';
 
 /** Manager-level state (superset of daemon status) */
@@ -55,10 +55,16 @@ export class DaemonManager {
     this.setState('starting');
     this.lastStartTime = Date.now();
 
-    this.process = spawn(this.bunPath, ['run', this.daemonScript], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, KATA_CONFIG_DIR: this.configDir },
-    });
+    try {
+      this.process = spawn(this.bunPath, ['run', this.daemonScript], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, KATA_CONFIG_DIR: this.configDir },
+      });
+    } catch (err) {
+      console.error('[daemon-manager] Failed to spawn daemon process:', err);
+      this.setState('error');
+      return;
+    }
 
     this.process.stdout?.on('data', (chunk: Buffer) => {
       this.lineParser(chunk.toString());
@@ -66,6 +72,10 @@ export class DaemonManager {
 
     this.process.stderr?.on('data', (chunk: Buffer) => {
       console.error(`[daemon] ${chunk.toString().trimEnd()}`);
+    });
+
+    this.process.on('error', (err) => {
+      console.error('[daemon-manager] Daemon process error:', err);
     });
 
     this.process.on('exit', (code, signal) => {
@@ -79,7 +89,10 @@ export class DaemonManager {
    * Send a command to the daemon subprocess via stdin.
    */
   sendCommand(cmd: DaemonCommand): void {
-    if (!this.process?.stdin?.writable) return;
+    if (!this.process?.stdin?.writable) {
+      console.error(`[daemon-manager] Cannot send command '${cmd.type}': stdin not writable`);
+      return;
+    }
     this.process.stdin.write(JSON.stringify(cmd) + '\n');
   }
 
@@ -94,6 +107,12 @@ export class DaemonManager {
 
     this.cancelPendingRestart();
     this.setState('stopping');
+
+    // No process to stop (e.g. called from 'error' state after crash)
+    if (!this.process) {
+      this.setState('stopped');
+      return;
+    }
 
     this.stopPromise = new Promise<void>((resolve) => {
       this.stopResolve = resolve;

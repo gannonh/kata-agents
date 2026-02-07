@@ -316,7 +316,7 @@ app.whenReady().then(async () => {
     // Initialize daemon manager (does not auto-start; Phase 12+ triggers start)
     logDiagnostic('Creating DaemonManager...')
     const configDir = process.env.KATA_CONFIG_DIR || process.env.CRAFT_CONFIG_DIR || join(homedir(), '.kata-agents')
-    const daemonScript = join(__dirname, '../../packages/shared/src/daemon/entry.ts')
+    const daemonScript = join(__dirname, '../../../packages/shared/src/daemon/entry.ts')
     daemonManager = new DaemonManager(
       'bun',
       daemonScript,
