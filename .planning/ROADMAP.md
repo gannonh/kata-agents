@@ -25,6 +25,12 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 
 **Requirements:** PLUG-01, DAEMON-04
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 10-01-PLAN.md — Plugin contract, channel adapter, and daemon event types
+- [ ] 10-02-PLAN.md — Daemon permission mode and unit tests
+
 **Success Criteria:**
 1. KataPlugin interface compiles with registerChannel, registerTool, registerService methods
 2. ChannelAdapter interface defines poll and subscribe ingress modes
