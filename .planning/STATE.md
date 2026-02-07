@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 11 — Daemon Core and SQLite Queue
-**Plan:** 01 of 2
-**Status:** In progress (Plan 01 complete)
-**Last activity:** 2026-02-07 — Completed 11-01-PLAN.md
+**Plan:** 02 of 2
+**Status:** Phase 11 complete
+**Last activity:** 2026-02-07 — Completed 11-02-PLAN.md
 
 ```
-Progress: [███       ] 30% (3 of ~10 plans complete across 5 phases)
+Progress: [████      ] 40% (4 of ~10 plans complete across 5 phases)
 ```
 
 ---
@@ -52,6 +52,10 @@ See PROJECT.md Key Decisions table for full history.
 - SQLite snake_case columns mapped to camelCase QueuedMessage fields at the dequeue boundary
 - Payload stored as JSON TEXT, serialized on enqueue, deserialized on dequeue
 
+**Phase 11 Plan 02 decisions:**
+- CONFIG_DIR computed inline in electron main process (no subpath export for config/paths)
+- DaemonManager does not auto-start; Phase 12+ triggers start when channels are configured
+
 ### Active Todos
 
 None.
@@ -77,11 +81,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-07
-**Stopped at:** Completed 11-01-PLAN.md
+**Stopped at:** Completed 11-02-PLAN.md (Phase 11 complete)
 **Resume file:** None
 
-**Next action:** Execute 11-02-PLAN.md (daemon entry point and DaemonManager)
+**Next action:** Begin Phase 12 planning (channel adapters and plugin contract)
 
 ---
 
-_Last updated: 2026-02-07 after Plan 11-01 completed_
+_Last updated: 2026-02-07 after Plan 11-02 completed_
