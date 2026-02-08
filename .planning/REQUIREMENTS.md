@@ -14,11 +14,11 @@
 
 ### Communication Channels
 
-- [ ] **CHAN-01**: Slack channel adapter receives and sends messages via @slack/web-api polling
-- [ ] **CHAN-02**: WhatsApp channel adapter receives and sends messages via Baileys
+- [x] **CHAN-01**: Slack channel adapter receives and sends messages via @slack/web-api polling
+- [x] **CHAN-02**: WhatsApp channel adapter receives and sends messages via Baileys
 - [ ] **CHAN-03**: Channel configuration UI allows selecting which channels/conversations to monitor
-- [ ] **CHAN-04**: Thread-to-session mapping creates persistent sessions per channel conversation
-- [ ] **CHAN-05**: Mention/trigger pattern activates agent response (configurable per channel)
+- [x] **CHAN-04**: Thread-to-session mapping creates persistent sessions per channel conversation
+- [x] **CHAN-05**: Mention/trigger pattern activates agent response (configurable per channel)
 - [ ] **CHAN-06**: Channel sessions appear alongside direct sessions in unified session view
 - [ ] **CHAN-07**: Channel sessions have MCP tools attached for contextual assistance
 

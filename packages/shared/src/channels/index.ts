@@ -1,7 +1,7 @@
 /**
  * Channels Module
  *
- * Public type exports for channel adapters.
+ * Public exports for channel adapters and shared channel infrastructure.
  */
 
 export type {
@@ -10,3 +10,8 @@ export type {
   ChannelFilter,
   ChannelConfig,
 } from './types.ts';
+
+export { TriggerMatcher } from './trigger-matcher.ts';
+export { resolveSessionKey } from './session-resolver.ts';
+export { SlackChannelAdapter, WhatsAppChannelAdapter, createAdapter } from './adapters/index.ts';
+export type { PollingStateFns, QrCallback } from './adapters/index.ts';

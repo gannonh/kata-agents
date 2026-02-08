@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 11 — Daemon Core and SQLite Queue (VERIFIED)
-**Plan:** 02 of 2
-**Status:** Phase 11 verified (19/19 must_haves)
-**Last activity:** 2026-02-07 — Phase 11 verified and completed
+**Phase:** 12 — Channel Adapters (complete)
+**Plan:** 03 of 3
+**Status:** Phase 12 complete
+**Last activity:** 2026-02-08 — Completed 12-03-PLAN.md
 
 ```
-Progress: [████      ] 40% (4 of ~10 plans complete across 5 phases)
+Progress: [███████   ] 70% (7 of ~10 plans complete across 5 phases)
 ```
 
 ---
@@ -56,6 +56,15 @@ See PROJECT.md Key Decisions table for full history.
 - CONFIG_DIR computed inline in electron main process (no subpath export for config/paths)
 - DaemonManager does not auto-start; Phase 12+ triggers start when channels are configured
 
+**Phase 12 Plan 02 decisions:**
+- ChannelRunner accepts optional AdapterFactory constructor parameter (avoids bun:test module mock cross-contamination)
+- Daemon entry uses state object pattern for mutable ChannelRunner reference (TypeScript narrowing workaround)
+
+**Phase 12 Plan 03 decisions:**
+- Baileys compatible with Bun (QR received, connection events fire; ws warnings are edge cases)
+- QrCallback observer pattern instead of stored QR state
+- stopping flag guards against reconnect loops during shutdown
+
 ### Active Todos
 
 None.
@@ -80,12 +89,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-07
-**Stopped at:** Phase 11 verified and completed — PR #79 ready
+**Last session:** 2026-02-08
+**Stopped at:** Completed 12-03-PLAN.md (WhatsApp adapter with Baileys)
 **Resume file:** None
 
-**Next action:** Merge PR #79, then plan Phase 12 (Channel Adapters)
+**Next action:** Begin next phase in v0.7.0 roadmap
 
 ---
 
-_Last updated: 2026-02-07 after Phase 11 verified_
+_Last updated: 2026-02-08 after 12-03 plan complete (Phase 12 complete)_

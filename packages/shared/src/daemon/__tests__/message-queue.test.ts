@@ -129,6 +129,40 @@ describe('MessageQueue', () => {
     expect(second!.payload).toEqual({ text: 'second' });
   });
 
+  describe('polling state', () => {
+    test('getPollingState returns null for unknown adapter/channel', () => {
+      createQueue();
+      const result = queue.getPollingState('slack-adapter', 'C123');
+      expect(result).toBeNull();
+    });
+
+    test('setPollingState stores and getPollingState retrieves the timestamp', () => {
+      createQueue();
+      queue.setPollingState('slack-adapter', 'C123', '1678886400.123456');
+      const result = queue.getPollingState('slack-adapter', 'C123');
+      expect(result).toBe('1678886400.123456');
+    });
+
+    test('setPollingState overwrites previous value for same adapter/channel', () => {
+      createQueue();
+      queue.setPollingState('slack-adapter', 'C123', '1678886400.000000');
+      queue.setPollingState('slack-adapter', 'C123', '1678886500.000000');
+      const result = queue.getPollingState('slack-adapter', 'C123');
+      expect(result).toBe('1678886500.000000');
+    });
+
+    test('different adapter/channel combos are independent', () => {
+      createQueue();
+      queue.setPollingState('slack-adapter', 'C123', '1000.0');
+      queue.setPollingState('slack-adapter', 'C456', '2000.0');
+      queue.setPollingState('whatsapp-adapter', 'C123', '3000.0');
+
+      expect(queue.getPollingState('slack-adapter', 'C123')).toBe('1000.0');
+      expect(queue.getPollingState('slack-adapter', 'C456')).toBe('2000.0');
+      expect(queue.getPollingState('whatsapp-adapter', 'C123')).toBe('3000.0');
+    });
+  });
+
   test('close closes database', () => {
     createQueue();
     queue.enqueue('inbound', 'slack-general', { text: 'test' });
