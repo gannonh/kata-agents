@@ -11,9 +11,11 @@
 import { join } from 'path';
 import { homedir } from 'os';
 import type { DaemonCommand, DaemonEvent } from './types.ts';
+import type { ChannelConfig } from '../channels/types.ts';
 import { createLineParser, formatMessage } from './ipc.ts';
 import { writePidFile, removePidFile } from './pid.ts';
 import { MessageQueue } from './message-queue.ts';
+import { ChannelRunner } from './channel-runner.ts';
 
 function log(msg: string): void {
   process.stderr.write(`[daemon] ${msg}\n`);
@@ -35,6 +37,8 @@ async function main(): Promise<void> {
   const queue = new MessageQueue(dbPath);
   log(`MessageQueue initialized at ${dbPath}`);
 
+  const state = { channelRunner: null as ChannelRunner | null };
+
   emit({ type: 'status_changed', status: 'running' });
 
   // Read commands from stdin as JSON-lines
@@ -42,15 +46,17 @@ async function main(): Promise<void> {
   const decoder = new TextDecoder();
   let running = true;
 
-  const parser = createLineParser((line: string) => {
-    let cmd: DaemonCommand;
-    try {
-      cmd = JSON.parse(line) as DaemonCommand;
-    } catch (err) {
-      log(`Failed to parse command: ${line}`);
-      return;
-    }
+  const pendingCommands: DaemonCommand[] = [];
 
+  const parser = createLineParser((line: string) => {
+    try {
+      pendingCommands.push(JSON.parse(line) as DaemonCommand);
+    } catch {
+      log(`Failed to parse command: ${line}`);
+    }
+  });
+
+  async function handleCommand(cmd: DaemonCommand): Promise<void> {
     switch (cmd.type) {
       case 'stop':
         log('Received stop command');
@@ -65,8 +71,31 @@ async function main(): Promise<void> {
       case 'plugin_action':
         log(`Plugin action ignored (phase 13): ${cmd.pluginId}/${cmd.action}`);
         break;
+      case 'configure_channels': {
+        log(`Configuring channels for ${cmd.workspaces.length} workspace(s)`);
+        // Stop existing runner if any
+        if (state.channelRunner) {
+          await state.channelRunner.stopAll();
+          state.channelRunner = null;
+        }
+        // Build workspace configs map
+        const workspaceConfigs = new Map<
+          string,
+          { workspaceId: string; configs: ChannelConfig[]; tokens: Map<string, string> }
+        >();
+        for (const ws of cmd.workspaces) {
+          workspaceConfigs.set(ws.workspaceId, {
+            workspaceId: ws.workspaceId,
+            configs: ws.configs as ChannelConfig[],
+            tokens: new Map(Object.entries(ws.tokens)),
+          });
+        }
+        state.channelRunner = new ChannelRunner(queue, emit, workspaceConfigs, log);
+        await state.channelRunner.startAll();
+        break;
+      }
     }
-  });
+  }
 
   while (running) {
     const { value, done } = await reader.read();
@@ -75,10 +104,18 @@ async function main(): Promise<void> {
       break;
     }
     parser(decoder.decode(value, { stream: true }));
+
+    while (pendingCommands.length > 0) {
+      const cmd = pendingCommands.shift()!;
+      await handleCommand(cmd);
+    }
   }
 
   // Graceful shutdown
   emit({ type: 'status_changed', status: 'stopping' });
+  if (state.channelRunner) {
+    await state.channelRunner.stopAll();
+  }
   queue.close();
   log('MessageQueue closed');
   removePidFile(configDir);

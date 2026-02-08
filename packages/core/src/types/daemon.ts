@@ -26,6 +26,17 @@ export type DaemonCommand =
       action: string;
       /** Optional action payload */
       payload?: unknown;
+    }
+  | {
+      type: 'configure_channels';
+      /** Channel configurations grouped by workspace */
+      workspaces: Array<{
+        workspaceId: string;
+        /** ChannelConfig objects (typed as unknown[] to avoid circular dependency) */
+        configs: unknown[];
+        /** Map of sourceSlug -> token for credential resolution */
+        tokens: Record<string, string>;
+      }>;
     };
 
 /**

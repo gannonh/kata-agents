@@ -15,5 +15,6 @@ export type {
 } from './types.ts';
 
 export { MessageQueue } from './message-queue.ts';
+export { ChannelRunner } from './channel-runner.ts';
 export { createLineParser, formatMessage } from './ipc.ts';
 export { writePidFile, removePidFile, cleanupStaleDaemon } from './pid.ts';
