@@ -95,14 +95,14 @@ describe('WhatsAppChannelAdapter', () => {
     );
   });
 
-  test('start() creates socket with auth state', async () => {
+  test('start() creates socket with auth state but is not healthy until connection opens', async () => {
     adapter.configure('/tmp/test-auth');
     const onMessage = mock(() => {});
 
     await adapter.start(makeConfig(), onMessage);
 
     expect(adapter.id).toBe('test-whatsapp');
-    expect(adapter.isHealthy()).toBe(true);
+    expect(adapter.isHealthy()).toBe(false);
     expect(eventHandlers.has('connection.update')).toBe(true);
     expect(eventHandlers.has('messages.upsert')).toBe(true);
     expect(eventHandlers.has('creds.update')).toBe(true);
@@ -270,6 +270,28 @@ describe('WhatsAppChannelAdapter', () => {
     expect(adapter.getLastError()).toBe('logged out');
   });
 
+  test('connection.update close with non-logout triggers reconnect attempt', async () => {
+    adapter.configure('/tmp/test-auth');
+    await adapter.start(makeConfig(), () => {});
+
+    // Simulate connection open first
+    fireEvent('connection.update', { connection: 'open' });
+    expect(adapter.isHealthy()).toBe(true);
+
+    // Simulate close with non-logout status code (should reconnect)
+    const error = new Error('connection lost');
+    (error as any).output = { statusCode: 500 };
+    fireEvent('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error },
+    });
+
+    expect(adapter.isHealthy()).toBe(false);
+    expect(adapter.getLastError()).toBe('connection lost');
+    // Socket end should have been called to clean up old socket
+    expect(mockEnd).toHaveBeenCalled();
+  });
+
   test('connection.update handler invokes QR callback', async () => {
     const qrData: string[] = [];
     adapter.configure('/tmp/test-auth', (qr: string) => qrData.push(qr));
@@ -294,6 +316,8 @@ describe('WhatsAppChannelAdapter', () => {
     adapter.configure('/tmp/test-auth');
     await adapter.start(makeConfig(), () => {});
 
+    // Simulate connection open to set healthy
+    fireEvent('connection.update', { connection: 'open' });
     expect(adapter.isHealthy()).toBe(true);
 
     await adapter.stop();

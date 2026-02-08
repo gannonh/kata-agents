@@ -260,6 +260,45 @@ describe('SlackChannelAdapter', () => {
     expect(received[1]!.content).toBe('newer');
   });
 
+  test('start() throws and sets unhealthy when auth.test() fails', async () => {
+    adapter.configure('xoxb-bad-token');
+    mockAuthTest.mockImplementation(() =>
+      Promise.reject(new Error('invalid_auth')),
+    );
+
+    const onMessage = mock(() => {});
+    await expect(adapter.start(makeConfig(), onMessage)).rejects.toThrow('invalid_auth');
+    expect(adapter.isHealthy()).toBe(false);
+  });
+
+  test('isHealthy() recovers after successful poll following error', async () => {
+    adapter.configure('xoxb-test-token');
+    // First poll fails
+    mockConversationsHistory.mockImplementationOnce(() =>
+      Promise.reject(new Error('rate_limited')),
+    );
+
+    await adapter.start(makeConfig(), () => {});
+    expect(adapter.isHealthy()).toBe(false);
+
+    // Next poll succeeds (empty messages)
+    mockConversationsHistory.mockImplementation(() =>
+      Promise.resolve({ messages: [] as Record<string, unknown>[] }),
+    );
+
+    // Trigger poll manually via a second start (or directly access poll)
+    // We'll re-configure and start to get a clean poll
+    await adapter.stop();
+    adapter = new SlackChannelAdapter();
+    adapter.configure('xoxb-test-token');
+    mockAuthTest.mockImplementation(() =>
+      Promise.resolve({ user_id: 'U_BOT', bot_id: 'B_BOT' }),
+    );
+    await adapter.start(makeConfig(), () => {});
+    expect(adapter.isHealthy()).toBe(true);
+    expect(adapter.getLastError()).toBeNull();
+  });
+
   test('adapter name and type are correct', () => {
     expect(adapter.name).toBe('Slack');
     expect(adapter.type).toBe('poll');

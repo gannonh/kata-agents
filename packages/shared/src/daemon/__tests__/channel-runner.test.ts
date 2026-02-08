@@ -255,6 +255,41 @@ describe('ChannelRunner', () => {
     expect(msgEvent).toBeDefined();
   });
 
+  test('startAll emits error when token is missing for adapter', async () => {
+    const config = makeConfig({ slug: 'ch-no-token' });
+    const wsConfigs = new Map([
+      [
+        'ws-1',
+        {
+          workspaceId: 'ws-1',
+          configs: [config],
+          tokens: new Map(), // No tokens
+        },
+      ],
+    ]);
+
+    const adapters: ChannelAdapter[] = [];
+    const factory = () => {
+      const a = makeFakeAdapter();
+      adapters.push(a);
+      return a;
+    };
+
+    const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    await runner.startAll();
+
+    // Adapter was created but not started due to missing token
+    expect(adapters).toHaveLength(1);
+    expect((adapters[0]!.start as ReturnType<typeof mock>)).not.toHaveBeenCalled();
+
+    // Error event emitted
+    const errorEvents = events.filter((e) => e.type === 'plugin_error');
+    expect(errorEvents).toHaveLength(1);
+    const errorEvent = errorEvents[0] as { type: 'plugin_error'; pluginId: string; error: string };
+    expect(errorEvent.pluginId).toBe('ch-no-token');
+    expect(errorEvent.error).toContain('No token found');
+  });
+
   test('stopAll calls stop on all running adapters', async () => {
     const config1 = makeConfig({ slug: 'ch-a' });
     const config2 = makeConfig({ slug: 'ch-b' });

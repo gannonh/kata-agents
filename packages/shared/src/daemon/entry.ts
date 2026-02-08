@@ -57,43 +57,49 @@ async function main(): Promise<void> {
   });
 
   async function handleCommand(cmd: DaemonCommand): Promise<void> {
-    switch (cmd.type) {
-      case 'stop':
-        log('Received stop command');
-        running = false;
-        break;
-      case 'health_check':
-        emit({ type: 'status_changed', status: 'running' });
-        break;
-      case 'start':
-        // No-op: already running
-        break;
-      case 'plugin_action':
-        log(`Plugin action ignored (phase 13): ${cmd.pluginId}/${cmd.action}`);
-        break;
-      case 'configure_channels': {
-        log(`Configuring channels for ${cmd.workspaces.length} workspace(s)`);
-        // Stop existing runner if any
-        if (state.channelRunner) {
-          await state.channelRunner.stopAll();
-          state.channelRunner = null;
+    try {
+      switch (cmd.type) {
+        case 'stop':
+          log('Received stop command');
+          running = false;
+          break;
+        case 'health_check':
+          emit({ type: 'status_changed', status: 'running' });
+          break;
+        case 'start':
+          // No-op: already running
+          break;
+        case 'plugin_action':
+          log(`Plugin action ignored (phase 13): ${cmd.pluginId}/${cmd.action}`);
+          break;
+        case 'configure_channels': {
+          log(`Configuring channels for ${cmd.workspaces.length} workspace(s)`);
+          // Stop existing runner if any
+          if (state.channelRunner) {
+            await state.channelRunner.stopAll();
+            state.channelRunner = null;
+          }
+          // Build workspace configs map
+          const workspaceConfigs = new Map<
+            string,
+            { workspaceId: string; configs: ChannelConfig[]; tokens: Map<string, string> }
+          >();
+          for (const ws of cmd.workspaces) {
+            workspaceConfigs.set(ws.workspaceId, {
+              workspaceId: ws.workspaceId,
+              configs: ws.configs as ChannelConfig[],
+              tokens: new Map(Object.entries(ws.tokens)),
+            });
+          }
+          state.channelRunner = new ChannelRunner(queue, emit, workspaceConfigs, log);
+          await state.channelRunner.startAll();
+          break;
         }
-        // Build workspace configs map
-        const workspaceConfigs = new Map<
-          string,
-          { workspaceId: string; configs: ChannelConfig[]; tokens: Map<string, string> }
-        >();
-        for (const ws of cmd.workspaces) {
-          workspaceConfigs.set(ws.workspaceId, {
-            workspaceId: ws.workspaceId,
-            configs: ws.configs as ChannelConfig[],
-            tokens: new Map(Object.entries(ws.tokens)),
-          });
-        }
-        state.channelRunner = new ChannelRunner(queue, emit, workspaceConfigs, log);
-        await state.channelRunner.startAll();
-        break;
       }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log(`Error handling command ${cmd.type}: ${errorMsg}`);
+      emit({ type: 'plugin_error', pluginId: cmd.type, error: errorMsg });
     }
   }
 

@@ -8,9 +8,10 @@
 
 import type { ChannelAdapter, ChannelConfig, ChannelMessage } from '../channels/types.ts';
 import { TriggerMatcher } from '../channels/trigger-matcher.ts';
-import { ChannelSessionResolver } from '../channels/session-resolver.ts';
+import { resolveSessionKey } from '../channels/session-resolver.ts';
 import { createAdapter as defaultCreateAdapter } from '../channels/adapters/index.ts';
 import type { SlackChannelAdapter } from '../channels/adapters/slack-adapter.ts';
+import type { WhatsAppChannelAdapter } from '../channels/adapters/whatsapp-adapter.ts';
 import type { MessageQueue } from './message-queue.ts';
 import type { DaemonEvent } from './types.ts';
 
@@ -65,21 +66,37 @@ export class ChannelRunner {
           continue;
         }
 
-        // Configure adapter if it supports the configure method (duck-type check)
-        if ('configure' in adapter && typeof (adapter as SlackChannelAdapter).configure === 'function') {
-          const token = wsConfig.tokens.get(config.credentials.sourceSlug);
-          if (!token) {
-            this.emit({
-              type: 'plugin_error',
-              pluginId: config.slug,
-              error: `No token found for source: ${config.credentials.sourceSlug}`,
+        // Configure adapter based on type
+        switch (config.adapter) {
+          case 'slack': {
+            const token = wsConfig.tokens.get(config.credentials.sourceSlug);
+            if (!token) {
+              this.emit({
+                type: 'plugin_error',
+                pluginId: config.slug,
+                error: `No token found for source: ${config.credentials.sourceSlug}`,
+              });
+              continue;
+            }
+            (adapter as SlackChannelAdapter).configure(token, {
+              get: (aid, cid) => this.queue.getPollingState(aid, cid),
+              set: (aid, cid, ts) => this.queue.setPollingState(aid, cid, ts),
             });
-            continue;
+            break;
           }
-          (adapter as SlackChannelAdapter).configure(token, {
-            get: (aid, cid) => this.queue.getPollingState(aid, cid),
-            set: (aid, cid, ts) => this.queue.setPollingState(aid, cid, ts),
-          });
+          case 'whatsapp': {
+            const authStatePath = wsConfig.tokens.get(config.credentials.sourceSlug);
+            if (!authStatePath) {
+              this.emit({
+                type: 'plugin_error',
+                pluginId: config.slug,
+                error: `No auth state path found for source: ${config.credentials.sourceSlug}`,
+              });
+              continue;
+            }
+            (adapter as WhatsAppChannelAdapter).configure(authStatePath);
+            break;
+          }
         }
 
         // Create trigger matcher for this adapter
@@ -119,8 +136,8 @@ export class ChannelRunner {
     }
 
     // Resolve session key
-    const channelSourceId = (msg.metadata.slackChannel as string) ?? msg.channelId;
-    const sessionKey = ChannelSessionResolver.resolveSessionKey(
+    const channelSourceId = msg.channelId;
+    const sessionKey = resolveSessionKey(
       slug,
       workspaceId,
       msg.replyTo?.threadId,

@@ -80,6 +80,7 @@ export class SlackChannelAdapter implements ChannelAdapter {
 
   private async poll(config: ChannelConfig, onMessage: (msg: ChannelMessage) => void): Promise<void> {
     const channelIds = config.filter?.channelIds ?? [];
+    let pollHadError = false;
 
     for (const channelId of channelIds) {
       try {
@@ -115,9 +116,15 @@ export class SlackChannelAdapter implements ChannelAdapter {
           this.pollingStateFns.set(this._id, channelId, newestTs);
         }
       } catch (err) {
+        pollHadError = true;
         this.healthy = false;
         this.lastErrorMsg = err instanceof Error ? err.message : String(err);
       }
+    }
+
+    if (!pollHadError) {
+      this.healthy = true;
+      this.lastErrorMsg = null;
     }
   }
 

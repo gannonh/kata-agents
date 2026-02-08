@@ -33,6 +33,9 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
   private authStatePath: string | null = null;
   private qrCallback: QrCallback | null = null;
   private stopping = false;
+  private reconnectAttempts = 0;
+  private maxReconnects = 5;
+  private reconnectDelayMs = 1000;
 
   get id(): string {
     return this._id;
@@ -77,6 +80,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
       if (connection === 'open') {
         this.healthy = true;
         this.lastErrorMsg = null;
+        this.reconnectAttempts = 0;
       }
 
       if (connection === 'close') {
@@ -86,10 +90,20 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
 
         if (shouldReconnect && !this.stopping) {
           this.lastErrorMsg = lastDisconnect?.error?.message ?? 'connection closed';
-          // Reconnect by restarting
-          this.start(config, onMessage).catch((err) => {
-            this.lastErrorMsg = err instanceof Error ? err.message : String(err);
-          });
+          this.sock?.end(undefined);
+
+          if (this.reconnectAttempts >= this.maxReconnects) {
+            this.lastErrorMsg = `max reconnect attempts (${this.maxReconnects}) exceeded`;
+            return;
+          }
+
+          const delay = Math.min(this.reconnectDelayMs * 2 ** this.reconnectAttempts, 30_000);
+          this.reconnectAttempts++;
+          setTimeout(() => {
+            this.start(config, onMessage).catch((err) => {
+              this.lastErrorMsg = err instanceof Error ? err.message : String(err);
+            });
+          }, delay);
         } else {
           this.lastErrorMsg = 'logged out';
         }
@@ -130,8 +144,6 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
     });
 
     this.sock.ev.on('creds.update', saveCreds);
-
-    this.healthy = true;
   }
 
   async stop(): Promise<void> {
