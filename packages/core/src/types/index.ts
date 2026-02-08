@@ -43,3 +43,10 @@ export type {
 } from './message.ts';
 export { generateMessageId } from './message.ts';
 
+// Daemon types
+export type {
+  DaemonStatus,
+  DaemonCommand,
+  DaemonEvent,
+} from './daemon.ts';
+

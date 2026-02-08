@@ -54,11 +54,21 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 ### Active
 
-(No active milestone — start next with `/kata:kata-add-milestone`)
+<!-- v0.7.0 Always-On Assistant milestone -->
+
+- [ ] Daemon process as Bun subprocess with stdin/stdout JSON communication
+- [ ] Plugin contract with registerChannel/registerTool/registerService
+- [ ] ChannelAdapter interface with dual ingress (poll/subscribe)
+- [ ] Daemon permission mode with explicit tool allowlist
+- [ ] Per-channel CraftAgent sessions with compaction
+- [ ] SQLite for daemon message queue and task scheduling
+- [ ] Slack communication channel adapter
+- [ ] Gmail service plugin adapter
+- [ ] Daemon manager in Electron main process (spawn, health, IPC)
+- [ ] Channel session UI integration
 
 ### Future
 
-- [ ] Set up kata.sh infrastructure (website, update server)
 - [ ] Kata Orchestrator integration
 - [ ] Re-enable Slack OAuth with Kata relay server
 
@@ -69,7 +79,7 @@ A developer-centric AI desktop client that understands your git workflow and pro
 
 ## Current State
 
-**Current milestone:** None (planning next)
+**Current milestone:** v0.7.0 Always-On Assistant
 **Last shipped:** v0.6.1 Testing Infrastructure (2026-02-05)
 
 **Codebase:**
@@ -147,4 +157,4 @@ A developer-centric AI desktop client that understands your git workflow and pro
 | Three-tier coverage gap categorization | Distinguish actionable gaps from integration-test-territory | ✓ Good |
 
 ---
-*Last updated: 2026-02-05 after v0.6.1 milestone complete*
+*Last updated: 2026-02-07 after v0.7.0 milestone started*

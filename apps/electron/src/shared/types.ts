@@ -690,6 +690,11 @@ export const IPC_CHANNELS = {
   // Git real-time events (main -> renderer broadcast)
   GIT_STATUS_CHANGED: 'git:statusChanged',  // Payload: workspaceDir string
 
+  // Daemon management
+  DAEMON_START: 'daemon:start',
+  DAEMON_STOP: 'daemon:stop',
+  DAEMON_STATUS: 'daemon:status',
+
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
   GITBASH_BROWSE: 'gitbash:browse',

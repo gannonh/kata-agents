@@ -17,9 +17,27 @@ export interface ModelDefinition {
 // ============================================
 
 export const MODELS: ModelDefinition[] = [
-  { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5', shortName: 'Opus', description: 'Most capable', contextWindow: 200000 },
-  { id: 'claude-sonnet-4-5-20250929', name: 'Sonnet 4.5', shortName: 'Sonnet', description: 'Balanced', contextWindow: 200000 },
-  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', shortName: 'Haiku', description: 'Fast & efficient', contextWindow: 200000 },
+  {
+    id: "claude-opus-4-6",
+    name: "Opus 4.6",
+    shortName: "Opus",
+    description: "Most capable",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-sonnet-4-5",
+    name: "Sonnet 4.5",
+    shortName: "Sonnet",
+    description: "Balanced",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-haiku-4-5",
+    name: "Haiku 4.5",
+    shortName: "Haiku",
+    description: "Fast & efficient",
+    contextWindow: 200000,
+  },
 ];
 
 // ============================================
@@ -27,16 +45,16 @@ export const MODELS: ModelDefinition[] = [
 // ============================================
 
 /** Default model for main chat (user-facing) */
-export const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_MODEL = "claude-sonnet-4-5";
 
 /** Model for agent definition extraction (always high quality) */
-export const EXTRACTION_MODEL = 'claude-opus-4-5-20251101';
+export const EXTRACTION_MODEL = "claude-opus-4-6";
 
 /** Model for API response summarization (cost efficient) */
-export const SUMMARIZATION_MODEL = 'claude-haiku-4-5-20251001';
+export const SUMMARIZATION_MODEL = "claude-haiku-4-5";
 
 /** Model for instruction updates (high quality for accurate document editing) */
-export const INSTRUCTION_UPDATE_MODEL = 'claude-opus-4-5-20251101';
+export const INSTRUCTION_UPDATE_MODEL = "claude-opus-4-6";
 
 // ============================================
 // HELPER FUNCTIONS
@@ -44,40 +62,40 @@ export const INSTRUCTION_UPDATE_MODEL = 'claude-opus-4-5-20251101';
 
 /** Get display name for a model ID (full name with version) */
 export function getModelDisplayName(modelId: string): string {
-  const model = MODELS.find(m => m.id === modelId);
+  const model = MODELS.find((m) => m.id === modelId);
   if (model) return model.name;
   // Fallback: strip prefix and date suffix
-  return modelId.replace('claude-', '').replace(/-\d{8}$/, '');
+  return modelId.replace("claude-", "").replace(/-\d{8}$/, "");
 }
 
 /** Get short display name for a model ID (without version number) */
 export function getModelShortName(modelId: string): string {
-  const model = MODELS.find(m => m.id === modelId);
+  const model = MODELS.find((m) => m.id === modelId);
   if (model) return model.shortName;
   // For provider-prefixed IDs (e.g. "openai/gpt-5"), show just the model part
-  if (modelId.includes('/')) {
-    return modelId.split('/').pop() || modelId;
+  if (modelId.includes("/")) {
+    return modelId.split("/").pop() || modelId;
   }
   // Fallback: strip claude- prefix and date suffix
-  return modelId.replace('claude-', '').replace(/-[\d.-]+$/, '');
+  return modelId.replace("claude-", "").replace(/-[\d.-]+$/, "");
 }
 
 /** Get known context window size for a model ID (fallback when SDK hasn't reported usage yet) */
 export function getModelContextWindow(modelId: string): number | undefined {
-  return MODELS.find(m => m.id === modelId)?.contextWindow;
+  return MODELS.find((m) => m.id === modelId)?.contextWindow;
 }
 
 /** Check if model is an Opus model (for cache TTL decisions) */
 export function isOpusModel(modelId: string): boolean {
-  return modelId.includes('opus');
+  return modelId.includes("opus");
 }
 
 /**
  * Check if a model ID refers to a Claude model.
- * Handles both direct Anthropic IDs (e.g. "claude-sonnet-4-5-20250929")
+ * Handles both direct Anthropic IDs (e.g. "claude-sonnet-4-5")
  * and provider-prefixed IDs (e.g. "anthropic/claude-sonnet-4" via OpenRouter).
  */
 export function isClaudeModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
-  return lower.startsWith('claude-') || lower.includes('/claude');
+  return lower.startsWith("claude-") || lower.includes("/claude");
 }

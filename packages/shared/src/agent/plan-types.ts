@@ -220,6 +220,7 @@ export const PERMISSION_MODE_MESSAGES: Record<PermissionMode, string> = {
   'safe': `${PERMISSION_MODE_CONFIG['safe'].displayName} mode active. Read-only exploration enabled.`,
   'ask': `${PERMISSION_MODE_CONFIG['ask'].displayName} mode active. Prompts for dangerous operations.`,
   'allow-all': `${PERMISSION_MODE_CONFIG['allow-all'].displayName} mode active. All operations permitted.`,
+  'daemon': `${PERMISSION_MODE_CONFIG['daemon'].displayName} mode active. Allowlist-only tool access for background sessions.`,
 };
 
 /** System prompts sent to Claude when mode changes */
@@ -227,4 +228,5 @@ export const PERMISSION_MODE_PROMPTS: Record<PermissionMode, string> = {
   'safe': `The user has switched to ${PERMISSION_MODE_CONFIG['safe'].displayName} mode (read-only). You can read files, search, and explore the codebase, but write operations (Bash, Write, Edit, API calls) are blocked. Focus on understanding and explaining rather than making changes.`,
   'ask': `The user has switched to ${PERMISSION_MODE_CONFIG['ask'].displayName} mode. Most operations are allowed, but dangerous bash commands will prompt for user approval. You have access to write operations.`,
   'allow-all': `The user has switched to ${PERMISSION_MODE_CONFIG['allow-all'].displayName} mode. All operations are permitted without prompts. Use with care.`,
+  'daemon': `The session is in ${PERMISSION_MODE_CONFIG['daemon'].displayName} mode. Only allowlisted tools can be used. This mode is for background daemon sessions processing channel messages.`,
 };
