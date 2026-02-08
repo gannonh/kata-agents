@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 12 — Channel Adapters
-**Plan:** 01 of 3
-**Status:** In progress (plan 01 complete)
-**Last activity:** 2026-02-07 — Completed 12-01-PLAN.md
+**Plan:** 02 of 3
+**Status:** In progress (plan 02 complete)
+**Last activity:** 2026-02-08 — Completed 12-02-PLAN.md
 
 ```
-Progress: [█████     ] 50% (5 of ~10 plans complete across 5 phases)
+Progress: [██████    ] 60% (6 of ~10 plans complete across 5 phases)
 ```
 
 ---
@@ -56,6 +56,10 @@ See PROJECT.md Key Decisions table for full history.
 - CONFIG_DIR computed inline in electron main process (no subpath export for config/paths)
 - DaemonManager does not auto-start; Phase 12+ triggers start when channels are configured
 
+**Phase 12 Plan 02 decisions:**
+- ChannelRunner accepts optional AdapterFactory constructor parameter (avoids bun:test module mock cross-contamination)
+- Daemon entry uses state object pattern for mutable ChannelRunner reference (TypeScript narrowing workaround)
+
 ### Active Todos
 
 None.
@@ -80,12 +84,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-07
-**Stopped at:** Completed 12-01-PLAN.md (TriggerMatcher, ChannelSessionResolver, polling state)
+**Last session:** 2026-02-08
+**Stopped at:** Completed 12-02-PLAN.md (Slack adapter, channel-runner, daemon entry wiring)
 **Resume file:** None
 
-**Next action:** Execute 12-02-PLAN.md (Slack adapter, channel-runner, daemon entry wiring)
+**Next action:** Execute 12-03-PLAN.md (WhatsApp adapter with Bun compatibility gate)
 
 ---
 
-_Last updated: 2026-02-07 after 12-01 plan complete_
+_Last updated: 2026-02-08 after 12-02 plan complete_
