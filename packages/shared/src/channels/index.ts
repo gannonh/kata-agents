@@ -13,3 +13,5 @@ export type {
 
 export { TriggerMatcher } from './trigger-matcher.ts';
 export { ChannelSessionResolver } from './session-resolver.ts';
+export { SlackChannelAdapter, createAdapter } from './adapters/index.ts';
+export type { PollingStateFns } from './adapters/index.ts';
