@@ -59,7 +59,7 @@ Plans:
 4. ✅ Message queue supports enqueue, dequeue, and mark-processed operations
 5. ✅ Stale daemon PID cleanup prevents zombie processes on app startup
 
-#### Phase 12: Channel Adapters
+#### Phase 12: Channel Adapters — Completed 2026-02-08
 
 **Goal:** Implement Slack and WhatsApp channel adapters with thread-to-session mapping and configurable mention/trigger activation patterns.
 
@@ -70,16 +70,16 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — TriggerMatcher, ChannelSessionResolver, and polling state persistence (TDD)
-- [ ] 12-02-PLAN.md — Slack adapter, channel-runner, and daemon entry wiring
-- [ ] 12-03-PLAN.md — WhatsApp adapter with Bun compatibility gate
+- [x] 12-01-PLAN.md — TriggerMatcher, ChannelSessionResolver, and polling state persistence (TDD)
+- [x] 12-02-PLAN.md — Slack adapter, channel-runner, and daemon entry wiring
+- [x] 12-03-PLAN.md — WhatsApp adapter with Bun compatibility gate
 
 **Success Criteria:**
-1. Slack adapter polls conversations.history via @slack/web-api and enqueues new messages
-2. WhatsApp adapter connects via Baileys and enqueues inbound messages
-3. Each channel thread maps to a persistent daemon session (daemon-{channelSlug}-{workspaceId})
-4. Agent responds only to configured trigger patterns (@mention, keyword match) per channel
-5. Thread context carries over across daemon restarts via session persistence
+1. ✅ Slack adapter polls conversations.history via @slack/web-api and enqueues new messages
+2. ✅ WhatsApp adapter connects via Baileys and enqueues inbound messages
+3. ✅ Each channel thread maps to a persistent daemon session (daemon-{channelSlug}-{workspaceId})
+4. ✅ Agent responds only to configured trigger patterns (@mention, keyword match) per channel
+5. ✅ Thread context carries over across daemon restarts via session persistence
 
 #### Phase 13: Plugin Lifecycle and Task Scheduler
 
@@ -164,8 +164,8 @@ Plans:
 | v0.4.0 Foundation             | ✅ Shipped  | 2      | 6     | 10           | 100%     |
 | v0.6.0 Git Integration        | ✅ Shipped  | 5      | 14    | 12           | 100%     |
 | v0.6.1 Testing Infrastructure | ✅ Shipped  | 2      | 6     | 10           | 100%     |
-| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | 4     | 17           | 29%     |
+| v0.7.0 Always-On Assistant    | ➡️ Active   | 5      | 7     | 17           | 65%     |
 
 ---
 
-_Last updated: 2026-02-07 after Phase 11 completed_
+_Last updated: 2026-02-08 after Phase 12 completed_
