@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 12 — Channel Adapters
-**Plan:** 02 of 3
-**Status:** In progress (plan 02 complete)
-**Last activity:** 2026-02-08 — Completed 12-02-PLAN.md
+**Phase:** 12 — Channel Adapters (complete)
+**Plan:** 03 of 3
+**Status:** Phase 12 complete
+**Last activity:** 2026-02-08 — Completed 12-03-PLAN.md
 
 ```
-Progress: [██████    ] 60% (6 of ~10 plans complete across 5 phases)
+Progress: [███████   ] 70% (7 of ~10 plans complete across 5 phases)
 ```
 
 ---
@@ -60,6 +60,11 @@ See PROJECT.md Key Decisions table for full history.
 - ChannelRunner accepts optional AdapterFactory constructor parameter (avoids bun:test module mock cross-contamination)
 - Daemon entry uses state object pattern for mutable ChannelRunner reference (TypeScript narrowing workaround)
 
+**Phase 12 Plan 03 decisions:**
+- Baileys compatible with Bun (QR received, connection events fire; ws warnings are edge cases)
+- QrCallback observer pattern instead of stored QR state
+- stopping flag guards against reconnect loops during shutdown
+
 ### Active Todos
 
 None.
@@ -85,11 +90,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-08
-**Stopped at:** Completed 12-02-PLAN.md (Slack adapter, channel-runner, daemon entry wiring)
+**Stopped at:** Completed 12-03-PLAN.md (WhatsApp adapter with Baileys)
 **Resume file:** None
 
-**Next action:** Execute 12-03-PLAN.md (WhatsApp adapter with Bun compatibility gate)
+**Next action:** Begin next phase in v0.7.0 roadmap
 
 ---
 
-_Last updated: 2026-02-08 after 12-02 plan complete_
+_Last updated: 2026-02-08 after 12-03 plan complete (Phase 12 complete)_
