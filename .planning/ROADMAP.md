@@ -89,6 +89,13 @@ Plans:
 
 **Requirements:** PLUG-02, PLUG-03, DAEMON-06
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — PluginManager, registry implementations, and first-party plugins
+- [ ] 13-02-PLAN.md — TaskScheduler with SQLite persistence and croner scheduling
+- [ ] 13-03-PLAN.md — Daemon entry wiring (PluginManager + TaskScheduler integration)
+
 **Success Criteria:**
 1. Workspace settings UI shows installed plugins with enable/disable toggles
 2. Disabled plugins do not load channels or register tools for that workspace
