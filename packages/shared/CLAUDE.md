@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Dynamic status system
 - Session persistence
 - Daemon subprocess (SQLite message queue, JSON-lines IPC, PID management)
+- Channel adapters (Slack polling, WhatsApp WebSocket via Baileys)
 
 ## Package Exports
 
@@ -30,6 +31,7 @@ import { loadStatusConfig, createStatus } from '@craft-agent/shared/statuses';
 import { resolveTheme } from '@craft-agent/shared/config/theme';
 import { debug } from '@craft-agent/shared/utils';
 import { MessageQueue, createLineParser } from '@craft-agent/shared/daemon';
+import { SlackChannelAdapter, WhatsAppChannelAdapter, resolveSessionKey } from '@craft-agent/shared/channels';
 ```
 
 ## Directory Structure
@@ -40,7 +42,8 @@ src/
 ├── auth/               # OAuth, craft-token, claude-token, state
 ├── config/             # Storage, preferences, models, theme, watcher
 ├── credentials/        # Secure credential storage (AES-256-GCM)
-├── daemon/             # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management)
+├── channels/           # Channel adapters (Slack, WhatsApp), trigger matching, session resolution
+├── daemon/             # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management, channel orchestration)
 ├── headless/           # Non-interactive execution mode
 ├── mcp/                # MCP client and connection validation
 ├── prompts/            # System prompt generation

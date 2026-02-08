@@ -70,7 +70,8 @@ packages/
 │       ├── credentials/          # AES-256-GCM encrypted credential storage
 │       ├── mcp/                  # MCP client and validation
 │       ├── prompts/              # System prompt generation
-│       ├── daemon/               # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management)
+│       ├── channels/             # Channel adapters (Slack, WhatsApp), trigger matching, session resolution
+│       ├── daemon/               # Daemon subprocess (SQLite queue, JSON-lines IPC, PID management, channel orchestration)
 │       ├── sessions/             # Session persistence (JSONL format)
 │       └── sources/              # External data connections
 ├── ui/                           # Shared React components

@@ -20,7 +20,8 @@ packages/core/
 │   │   ├── index.ts       # Type re-exports
 │   │   ├── workspace.ts   # Workspace, auth, config types
 │   │   ├── session.ts     # Session, metadata types
-│   │   └── message.ts     # Message, token, event types
+│   │   ├── message.ts     # Message, token, event types
+│   │   └── daemon.ts      # Daemon status, command, event types
 │   └── utils/
 │       ├── index.ts       # Utility re-exports
 │       └── debug.ts       # Debug logging stub
@@ -61,6 +62,14 @@ packages/core/
 | `AgentEvent` | Events from CraftAgent during chat (incl. task_backgrounded, shell_backgrounded, task_progress) |
 | `TypedError` | Structured error with code, title, canRetry |
 | `Question` | AskUserQuestion tool format |
+
+### Daemon Types (`types/daemon.ts`)
+
+| Type | Description |
+|------|-------------|
+| `DaemonStatus` | Lifecycle status: `starting`, `running`, `stopping`, `stopped`, `error` |
+| `DaemonCommand` | Commands from Electron to daemon: `start`, `stop`, `health_check`, `plugin_action`, `configure_channels` |
+| `DaemonEvent` | Events from daemon to Electron: `status_changed`, `message_received`, `message_sent`, `plugin_loaded`, `plugin_error` |
 
 ## Usage
 
