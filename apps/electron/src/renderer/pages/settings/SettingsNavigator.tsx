@@ -9,7 +9,7 @@
 
 import * as React from 'react'
 import { useState } from 'react'
-import { MoreHorizontal, AppWindow } from 'lucide-react'
+import { MoreHorizontal, AppWindow, Radio } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -171,6 +171,12 @@ const settingsItems: SettingsItem[] = [
     label: 'Workspace',
     icon: WorkspaceIcon,
     description: 'Model, mode cycling, advanced',
+  },
+  {
+    id: 'channels',
+    label: 'Channels',
+    icon: Radio,
+    description: 'Daemon, Slack, WhatsApp channels',
   },
   {
     id: 'permissions',

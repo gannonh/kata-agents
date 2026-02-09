@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { formatDistanceToNow, formatDistanceToNowStrict, isToday, isYesterday, format, startOfDay } from "date-fns"
 import type { Locale } from "date-fns"
-import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox } from "lucide-react"
+import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox, Hash, MessageCircle, Radio } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -391,6 +391,24 @@ function SessionItem({
                   >
                     {PERMISSION_MODE_CONFIG[permissionMode].shortName}
                   </span>
+                )}
+                {item.channel && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 h-[18px] w-[18px] flex items-center justify-center rounded bg-foreground/5 text-foreground/60">
+                        {item.channel.adapter === 'slack' ? (
+                          <Hash className="h-[10px] w-[10px]" />
+                        ) : item.channel.adapter === 'whatsapp' ? (
+                          <MessageCircle className="h-[10px] w-[10px]" />
+                        ) : (
+                          <Radio className="h-[10px] w-[10px]" />
+                        )}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <span>{item.channel.displayName || `${item.channel.adapter}/${item.channel.slug}`}</span>
+                    </TooltipContent>
+                  </Tooltip>
                 )}
                 {/* Label badges — each badge opens its own LabelValuePopover for
                     editing the value or removing the label. Uses onMouseDown +
