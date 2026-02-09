@@ -74,6 +74,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
 import { DaemonManager } from './daemon-manager'
+import { TrayManager } from './tray-manager'
 import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -112,7 +113,7 @@ const DEEPLINK_SCHEME = process.env.KATA_DEEPLINK_SCHEME || process.env.CRAFT_DE
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let daemonManager: DaemonManager | null = null
-let trayManager: { updateState: (state: string) => void; destroy: () => void } | null = null
+let trayManager: TrayManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -342,6 +343,44 @@ app.whenReady().then(async () => {
     )
     logDiagnostic('DaemonManager created')
 
+    // Initialize system tray icon (provides background access when windows are closed)
+    logDiagnostic('Creating TrayManager...')
+    const resourcesDir = join(__dirname, '../resources')
+    trayManager = new TrayManager(
+      resourcesDir,
+      () => {
+        // Show window callback: focus existing or create new
+        if (windowManager?.hasWindows()) {
+          const windows = windowManager.getAllWindows()
+          if (windows.length > 0) {
+            const win = windows[0].window
+            if (win.isMinimized()) win.restore()
+            win.show()
+            win.focus()
+          }
+        } else if (windowManager) {
+          const workspaces = getWorkspaces()
+          if (workspaces.length > 0) {
+            windowManager.createWindow({ workspaceId: workspaces[0].id })
+          }
+        }
+      },
+      async () => {
+        // Start daemon callback
+        if (daemonManager) {
+          await daemonManager.start()
+        }
+      },
+      async () => {
+        // Stop daemon callback
+        if (daemonManager) {
+          await daemonManager.stop()
+        }
+      },
+    )
+    trayManager.create()
+    logDiagnostic('TrayManager created')
+
     // Initialize notification service
     logDiagnostic('Initializing notification service...')
     initNotificationService(windowManager)
@@ -478,6 +517,12 @@ app.on('before-quit', async (event) => {
       } catch (error) {
         mainLog.error('Failed to stop daemon:', error)
       }
+    }
+
+    // Destroy tray icon
+    if (trayManager) {
+      trayManager.destroy()
+      trayManager = null
     }
 
     // If update is in progress, let electron-updater handle the quit flow
