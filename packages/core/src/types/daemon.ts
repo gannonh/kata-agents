@@ -36,7 +36,16 @@ export type DaemonCommand =
         configs: unknown[];
         /** Map of sourceSlug -> token for credential resolution */
         tokens: Record<string, string>;
+        /** Plugin IDs enabled for this workspace */
+        enabledPlugins: string[];
       }>;
+    }
+  | {
+      type: 'schedule_task';
+      workspaceId: string;
+      taskType: 'cron' | 'interval' | 'one-shot';
+      schedule: string;
+      action: { type: string; [key: string]: unknown };
     };
 
 /**
@@ -76,4 +85,11 @@ export type DaemonEvent =
       pluginId: string;
       /** Error description */
       error: string;
+    }
+  | {
+      type: 'task_fired';
+      /** ID of the task that fired */
+      taskId: number;
+      /** Workspace the task belongs to */
+      workspaceId: string;
     };

@@ -45,6 +45,8 @@ export interface WorkspaceConfig {
     cyclablePermissionModes?: PermissionMode[]; // Which modes can be cycled with SHIFT+TAB (min 2, default: all 3)
     workingDirectory?: string;
     thinkingLevel?: ThinkingLevel; // Default thinking level ('off', 'think', 'max') - default: 'think'
+    /** Plugin IDs enabled for this workspace. Default: all first-party plugins. */
+    enabledPlugins?: string[];
   };
 
   /**
