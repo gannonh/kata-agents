@@ -106,6 +106,12 @@ export interface SessionConfig {
     /** Whether we're still waiting for compaction to complete */
     awaitingCompaction: boolean;
   };
+  /** Channel origin for daemon-created sessions (absent for direct/interactive sessions) */
+  channel?: {
+    adapter: string;
+    slug: string;
+    displayName?: string;
+  };
 }
 
 /**
@@ -186,6 +192,12 @@ export interface SessionHeader {
   tokenUsage: SessionTokenUsage;
   /** ID of the last final (non-intermediate) assistant message - for unread detection without loading messages */
   lastFinalMessageId?: string;
+  /** Channel origin for daemon-created sessions */
+  channel?: {
+    adapter: string;
+    slug: string;
+    displayName?: string;
+  };
 }
 
 /**
@@ -239,4 +251,10 @@ export interface SessionMetadata {
   hasUnread?: boolean;
   /** Token usage statistics (from JSONL header, available without loading messages) */
   tokenUsage?: SessionTokenUsage;
+  /** Channel origin for daemon-created sessions */
+  channel?: {
+    adapter: string;
+    slug: string;
+    displayName?: string;
+  };
 }
