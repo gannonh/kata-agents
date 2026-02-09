@@ -48,5 +48,7 @@ export type {
   DaemonStatus,
   DaemonCommand,
   DaemonEvent,
+  TaskType,
+  TaskAction,
 } from './daemon.ts';
 

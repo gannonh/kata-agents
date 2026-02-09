@@ -17,12 +17,14 @@ export class PluginManager {
   private toolRegistry: ToolRegistryImpl;
   private serviceRegistry: ServiceRegistryImpl;
   private initialized = false;
+  private log: (msg: string) => void;
 
-  constructor(enabledPluginIds: string[]) {
+  constructor(enabledPluginIds: string[], log?: (msg: string) => void) {
     this.enabledIds = new Set(enabledPluginIds);
     this.channelRegistry = new ChannelRegistryImpl();
     this.toolRegistry = new ToolRegistryImpl();
     this.serviceRegistry = new ServiceRegistryImpl();
+    this.log = log ?? (() => {});
   }
 
   /**
@@ -62,22 +64,38 @@ export class PluginManager {
     if (this.initialized) return;
     for (const [id, plugin] of this.plugins) {
       if (!this.enabledIds.has(id)) continue;
-      await plugin.initialize?.(context);
+      try {
+        await plugin.initialize?.(context);
+      } catch (err) {
+        this.log(`[plugin-manager] Failed to initialize plugin ${id}: ${err}`);
+      }
     }
-    for (const [, service] of this.serviceRegistry.getServices()) {
-      await service.start();
+    for (const [name, service] of this.serviceRegistry.getServices()) {
+      try {
+        await service.start();
+      } catch (err) {
+        this.log(`[plugin-manager] Failed to start service ${name}: ${err}`);
+      }
     }
     this.initialized = true;
   }
 
   /** Stop all services and shut down enabled plugins. */
   async shutdownAll(): Promise<void> {
-    for (const [, service] of this.serviceRegistry.getServices()) {
-      await service.stop();
+    for (const [name, service] of this.serviceRegistry.getServices()) {
+      try {
+        await service.stop();
+      } catch (err) {
+        this.log(`[plugin-manager] Failed to stop service ${name}: ${err}`);
+      }
     }
     for (const [id, plugin] of this.plugins) {
       if (!this.enabledIds.has(id)) continue;
-      await plugin.shutdown?.();
+      try {
+        await plugin.shutdown?.();
+      } catch (err) {
+        this.log(`[plugin-manager] Failed to shut down plugin ${id}: ${err}`);
+      }
     }
     this.initialized = false;
   }

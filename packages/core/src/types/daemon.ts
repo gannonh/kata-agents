@@ -11,6 +11,22 @@
 export type DaemonStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
 
 /**
+ * Type of scheduled task.
+ * - `cron`: Fires on a cron schedule (e.g., "0 9 * * 1-5")
+ * - `interval`: Fires every N milliseconds
+ * - `one-shot`: Fires once at a specific datetime, then marked complete
+ */
+export type TaskType = 'cron' | 'interval' | 'one-shot';
+
+/**
+ * Actions a scheduled task can trigger.
+ * Discriminated union on `type`.
+ */
+export type TaskAction =
+  | { type: 'send_message'; workspaceId: string; sessionKey: string; message: string }
+  | { type: 'plugin_action'; pluginId: string; action: string; payload?: unknown };
+
+/**
  * Commands sent from the Electron main process to the daemon.
  * Discriminated union on the `type` field.
  */
@@ -43,9 +59,9 @@ export type DaemonCommand =
   | {
       type: 'schedule_task';
       workspaceId: string;
-      taskType: 'cron' | 'interval' | 'one-shot';
+      taskType: TaskType;
       schedule: string;
-      action: { type: string; [key: string]: unknown };
+      action: TaskAction;
     };
 
 /**
