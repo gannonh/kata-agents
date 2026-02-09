@@ -201,6 +201,14 @@ export class MessageQueue {
   }
 
   /**
+   * Get the underlying Database instance for sharing with other modules
+   * (e.g., TaskScheduler).
+   */
+  getDb(): Database {
+    return this.db;
+  }
+
+  /**
    * Close the database connection.
    */
   close(): void {
