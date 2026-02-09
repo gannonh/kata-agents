@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 13 — Plugin Lifecycle and Task Scheduler
-**Plan:** 02 of 3
-**Status:** In progress
-**Last activity:** 2026-02-09 — Completed 13-02-PLAN.md
+**Phase:** 13 — Plugin Lifecycle and Task Scheduler (complete)
+**Plan:** 03 of 3 (all complete)
+**Status:** Phase complete
+**Last activity:** 2026-02-09 — Completed 13-03-PLAN.md
 
 ```
-Progress: [█████████ ] 90% (9 of ~10 plans complete across 5 phases)
+Progress: [██████████] 100% (10 of 10 plans complete across 5 phases)
 ```
 
 ---
@@ -65,6 +65,11 @@ See PROJECT.md Key Decisions table for full history.
 - QrCallback observer pattern instead of stored QR state
 - stopping flag guards against reconnect loops during shutdown
 
+**Phase 13 Plan 03 decisions:**
+- Daemon collects enabledPlugins as union across all workspace arrays; single PluginManager serves all workspaces
+- Shutdown order: TaskScheduler, PluginManager, ChannelRunner, MessageQueue
+- No ChannelRunner API changes needed; existing adapterFactory parameter reused
+
 ### Active Todos
 
 None.
@@ -90,11 +95,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-09
-**Stopped at:** Completed 13-02-PLAN.md (TaskScheduler with SQLite persistence and croner scheduling)
+**Stopped at:** Completed 13-03-PLAN.md (Daemon wiring for PluginManager and TaskScheduler)
 **Resume file:** None
 
-**Next action:** Execute 13-03-PLAN.md
+**Next action:** v0.7.0 milestone complete. Prepare release.
 
 ---
 
-_Last updated: 2026-02-09 after 13-02 plan complete_
+_Last updated: 2026-02-09 after 13-03 plan complete (phase 13 complete, milestone complete)_
