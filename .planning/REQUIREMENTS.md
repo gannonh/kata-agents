@@ -9,7 +9,7 @@
 - [ ] **DAEMON-03**: Daemon status indicator shows running/stopped/error state in UI
 - [x] **DAEMON-04**: Daemon permission mode restricts tool access to explicit allowlist
 - [x] **DAEMON-05**: SQLite message queue stores inbound/outbound messages for daemon channels
-- [ ] **DAEMON-06**: Task scheduler supports cron, interval, and one-shot scheduled tasks
+- [x] **DAEMON-06**: Task scheduler supports cron, interval, and one-shot scheduled tasks
 - [ ] **DAEMON-07**: System tray icon provides quick access and background operation when main window is closed
 
 ### Communication Channels
@@ -25,8 +25,8 @@
 ### Plugin System
 
 - [x] **PLUG-01**: Plugin contract supports registerChannel, registerTool, and registerService
-- [ ] **PLUG-02**: Plugins can be enabled/disabled per workspace
-- [ ] **PLUG-03**: First-party plugins are bundled and loaded at daemon startup
+- [x] **PLUG-02**: Plugins can be enabled/disabled per workspace
+- [x] **PLUG-03**: First-party plugins are bundled and loaded at daemon startup
 
 ## Future Requirements
 

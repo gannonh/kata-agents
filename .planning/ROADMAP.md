@@ -18,7 +18,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 - [x] Phase 10: Foundation Types and Permission Mode (2/2 plans) — completed 2026-02-07
 - [x] Phase 11: Daemon Core and SQLite Queue (2/2 plans) — completed 2026-02-07
 - [x] Phase 12: Channel Adapters (3/3 plans) — completed 2026-02-08
-- [ ] Phase 13: Plugin Lifecycle and Task Scheduler (0/3 plans)
+- [x] Phase 13: Plugin Lifecycle and Task Scheduler (3/3 plans) — completed 2026-02-08
 - [ ] Phase 14: UI Integration (0/0 plans)
 
 ## Completed Milestones
@@ -74,4 +74,4 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 | v0.7.0 Always-On Assistant    | 5      | 10    | In Progress | —          |
 
 ---
-*Last updated: 2026-02-08 — migrated to current format*
+*Last updated: 2026-02-08 — Phase 13 complete*
