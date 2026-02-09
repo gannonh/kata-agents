@@ -116,6 +116,7 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "croner": "^10.0.1",
     "date-fns": "^4.1.0",
     "gray-matter": "^4.0.3",
     "jotai": "^2.16.0",
