@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 13 — Plugin Lifecycle and Task Scheduler (complete)
-**Plan:** 03 of 3 (all complete)
-**Status:** Phase complete
-**Last activity:** 2026-02-09 — Completed 13-03-PLAN.md
+**Phase:** 14 — UI Integration (in progress)
+**Plan:** 01 of 2 (01 complete)
+**Status:** In progress
+**Last activity:** 2026-02-09 — Completed 14-01-PLAN.md
 
 ```
-Progress: [██████████] 100% (10 of 10 plans complete across 5 phases)
+Progress: [███████████░] 92% (11 of 12 plans complete across 5 phases)
 ```
 
 ---
@@ -70,6 +70,11 @@ See PROJECT.md Key Decisions table for full history.
 - Shutdown order: TaskScheduler, PluginManager, ChannelRunner, MessageQueue
 - No ChannelRunner API changes needed; existing adapterFactory parameter reused
 
+**Phase 14 Plan 01 decisions:**
+- DaemonManagerState type duplicated inline in shared/types.ts (portable, no cross-boundary import from daemon-manager.ts)
+- TrayManager uses nativeImage template on macOS only; regular icon on other platforms
+- window-all-closed keeps app alive when daemon is running on all platforms (not just macOS)
+
 ### Active Todos
 
 None.
@@ -95,11 +100,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-09
-**Stopped at:** Completed 13-03-PLAN.md (Daemon wiring for PluginManager and TaskScheduler)
+**Stopped at:** Completed 14-01-PLAN.md (Daemon IPC bridge, TrayManager, DaemonStatusIndicator)
 **Resume file:** None
 
-**Next action:** v0.7.0 milestone complete. Prepare release.
+**Next action:** Execute 14-02-PLAN.md (channel configuration UI and session list integration).
 
 ---
 
-_Last updated: 2026-02-09 after 13-03 plan complete (phase 13 complete, milestone complete)_
+_Last updated: 2026-02-09 after 14-01 plan complete_
