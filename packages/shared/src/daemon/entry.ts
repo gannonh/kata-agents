@@ -10,12 +10,14 @@
 
 import { join } from 'path';
 import { homedir } from 'os';
-import type { DaemonCommand, DaemonEvent } from './types.ts';
+import type { DaemonCommand, DaemonEvent, TaskType, TaskAction } from './types.ts';
 import type { ChannelConfig } from '../channels/types.ts';
 import { createLineParser, formatMessage } from './ipc.ts';
 import { writePidFile, removePidFile } from './pid.ts';
 import { MessageQueue } from './message-queue.ts';
 import { ChannelRunner } from './channel-runner.ts';
+import { PluginManager } from '../plugins/plugin-manager.ts';
+import { TaskScheduler } from './task-scheduler.ts';
 
 function log(msg: string): void {
   process.stderr.write(`[daemon] ${msg}\n`);
@@ -37,7 +39,17 @@ async function main(): Promise<void> {
   const queue = new MessageQueue(dbPath);
   log(`MessageQueue initialized at ${dbPath}`);
 
-  const state = { channelRunner: null as ChannelRunner | null };
+  const scheduler = new TaskScheduler(queue.getDb(), async (task) => {
+    log(`Task ${task.id} fired (${task.type}): ${JSON.stringify(task.action)}`);
+    emit({ type: 'task_fired', taskId: task.id, workspaceId: task.workspaceId });
+  }, log);
+  scheduler.start();
+  log('TaskScheduler started');
+
+  const state = {
+    channelRunner: null as ChannelRunner | null,
+    pluginManager: null as PluginManager | null,
+  };
 
   emit({ type: 'status_changed', status: 'running' });
 
@@ -70,15 +82,31 @@ async function main(): Promise<void> {
           // No-op: already running
           break;
         case 'plugin_action':
-          log(`Plugin action ignored (phase 13): ${cmd.pluginId}/${cmd.action}`);
+          log(`Plugin action: ${cmd.pluginId}/${cmd.action}`);
+          // Future: route to specific plugin via PluginManager
           break;
         case 'configure_channels': {
           log(`Configuring channels for ${cmd.workspaces.length} workspace(s)`);
-          // Stop existing runner if any
+          // Stop existing runner and plugins if any
           if (state.channelRunner) {
             await state.channelRunner.stopAll();
             state.channelRunner = null;
           }
+          if (state.pluginManager) {
+            await state.pluginManager.shutdownAll();
+            state.pluginManager = null;
+          }
+          // Collect enabled plugins (union across workspaces)
+          const enabledPluginIds = new Set<string>();
+          for (const ws of cmd.workspaces) {
+            for (const pid of ws.enabledPlugins) {
+              enabledPluginIds.add(pid);
+            }
+          }
+          // Create and initialize plugin manager
+          state.pluginManager = new PluginManager([...enabledPluginIds]);
+          state.pluginManager.loadBuiltinPlugins();
+          log(`PluginManager loaded with ${enabledPluginIds.size} enabled plugin(s)`);
           // Build workspace configs map
           const workspaceConfigs = new Map<
             string,
@@ -91,8 +119,21 @@ async function main(): Promise<void> {
               tokens: new Map(Object.entries(ws.tokens)),
             });
           }
-          state.channelRunner = new ChannelRunner(queue, emit, workspaceConfigs, log);
+          state.channelRunner = new ChannelRunner(
+            queue, emit, workspaceConfigs, log,
+            state.pluginManager.getAdapterFactory(),
+          );
           await state.channelRunner.startAll();
+          break;
+        }
+        case 'schedule_task': {
+          const task = scheduler.addTask({
+            workspaceId: cmd.workspaceId,
+            type: cmd.taskType as TaskType,
+            schedule: cmd.schedule,
+            action: cmd.action as TaskAction,
+          });
+          log(`Scheduled task ${task.id} (${task.type}): next at ${task.nextRunAt}`);
           break;
         }
       }
@@ -119,6 +160,12 @@ async function main(): Promise<void> {
 
   // Graceful shutdown
   emit({ type: 'status_changed', status: 'stopping' });
+  await scheduler.stop();
+  log('TaskScheduler stopped');
+  if (state.pluginManager) {
+    await state.pluginManager.shutdownAll();
+    log('PluginManager shut down');
+  }
   if (state.channelRunner) {
     await state.channelRunner.stopAll();
   }
