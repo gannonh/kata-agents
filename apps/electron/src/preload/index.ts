@@ -421,6 +421,14 @@ const api: ElectronAPI = {
   getDaemonStatus: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STATUS),
   startDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_START),
   stopDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STOP),
+
+  // Channel configuration
+  getChannels: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_GET, workspaceId),
+  updateChannel: (workspaceId: string, config: any) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_UPDATE, workspaceId, config),
+  deleteChannel: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_DELETE, workspaceId, channelSlug),
   onDaemonStateChanged: (callback: (state: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: string) => {
       callback(state)

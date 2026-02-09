@@ -80,6 +80,7 @@ import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
+import { daemonStateAtom } from "@/atoms/daemon"
 import { skillsAtom } from "@/atoms/skills"
 import { type TodoStateId, type TodoState, statusConfigsToTodoStates } from "@/config/todo-states"
 import { useStatuses } from "@/hooks/useStatuses"
@@ -774,6 +775,22 @@ function AppShellContent({
     })
     return cleanup
   }, [])
+
+  // Subscribe to daemon state changes
+  const setDaemonState = useSetAtom(daemonStateAtom)
+  React.useEffect(() => {
+    // Load initial daemon state
+    window.electronAPI.getDaemonStatus().then((state) => {
+      setDaemonState(state)
+    }).catch(() => {
+      // Daemon not available
+    })
+    // Subscribe to live updates
+    const cleanup = window.electronAPI.onDaemonStateChanged((state) => {
+      setDaemonState(state as import('../../../shared/types').DaemonManagerState)
+    })
+    return cleanup
+  }, [setDaemonState])
 
   // Handle session source selection changes
   const handleSessionSourcesChange = React.useCallback(async (sessionId: string, sourceSlugs: string[]) => {

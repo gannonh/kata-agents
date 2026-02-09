@@ -2560,4 +2560,48 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return daemonManager.getState()
   })
 
+  // ============================================================
+  // Channel Configuration (workspace-scoped)
+  // ============================================================
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_GET, async (_event, workspaceId: string) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const channelsDir = join(workspace.path, 'channels')
+    if (!existsSync(channelsDir)) return []
+
+    const configs: any[] = []
+    try {
+      const slugs = await readdir(channelsDir)
+      for (const slug of slugs) {
+        const configPath = join(channelsDir, slug, 'config.json')
+        if (existsSync(configPath)) {
+          try {
+            const raw = readFileSync(configPath, 'utf-8')
+            configs.push(JSON.parse(raw))
+          } catch {
+            // Skip malformed config files
+          }
+        }
+      }
+    } catch {
+      // channels directory not readable
+    }
+    return configs
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_UPDATE, async (_event, workspaceId: string, config: any) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const channelDir = join(workspace.path, 'channels', config.slug)
+    mkdirSync(channelDir, { recursive: true })
+    writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const channelDir = join(workspace.path, 'channels', channelSlug)
+    if (existsSync(channelDir)) {
+      rm(channelDir, { recursive: true, force: true })
+    }
+  })
+
 }

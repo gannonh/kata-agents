@@ -711,6 +711,11 @@ export const IPC_CHANNELS = {
   DAEMON_STATE_CHANGED: 'daemon:stateChanged',
   DAEMON_EVENT: 'daemon:event',
 
+  // Channel configuration (workspace-scoped)
+  CHANNELS_GET: 'channels:get',
+  CHANNELS_UPDATE: 'channels:update',
+  CHANNELS_DELETE: 'channels:delete',
+
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
   GITBASH_BROWSE: 'gitbash:browse',
@@ -985,6 +990,11 @@ export interface ElectronAPI {
   onDaemonStateChanged(callback: (state: DaemonManagerState) => void): () => void
   onDaemonEvent(callback: (event: import('@craft-agent/core/types').DaemonEvent) => void): () => void
 
+  // Channel configuration (workspace-scoped)
+  getChannels(workspaceId: string): Promise<import('@craft-agent/shared/channels').ChannelConfig[]>
+  updateChannel(workspaceId: string, config: import('@craft-agent/shared/channels').ChannelConfig): Promise<void>
+  deleteChannel(workspaceId: string, channelSlug: string): Promise<void>
+
   // Git status change listener (for real-time updates)
   onGitStatusChanged(callback: (workspaceDir: string) => void): () => void
 
@@ -1108,7 +1118,7 @@ export type ChatFilter =
 /**
  * Settings subpage options
  */
-export type SettingsSubpage = 'app' | 'appearance' | 'workspace' | 'permissions' | 'labels' | 'shortcuts' | 'preferences'
+export type SettingsSubpage = 'app' | 'appearance' | 'workspace' | 'channels' | 'permissions' | 'labels' | 'shortcuts' | 'preferences'
 
 /**
  * Chats navigation state - shows SessionList in navigator
@@ -1277,7 +1287,7 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
   if (key === 'settings') return { navigator: 'settings', subpage: 'app' }
   if (key.startsWith('settings:')) {
     const subpage = key.slice(9) as SettingsSubpage
-    if (['app', 'appearance', 'workspace', 'permissions', 'labels', 'shortcuts', 'preferences'].includes(subpage)) {
+    if (['app', 'appearance', 'workspace', 'channels', 'permissions', 'labels', 'shortcuts', 'preferences'].includes(subpage)) {
       return { navigator: 'settings', subpage }
     }
   }
