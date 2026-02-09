@@ -174,7 +174,7 @@
 - Auto-updates via electron-updater from `https://agents.craft.do/electron/latest`
 
 **Distribution Artifacts:**
-- Predictable naming: `Craft-Agent-${arch}.dmg`, `Craft-Agent-${arch}.exe`, `Craft-Agent-${arch}.AppImage`
+- Predictable naming: `Kata-Agents-${arch}.dmg`, `Kata-Agents-${arch}.exe`, `Kata-Agents-${arch}.AppImage`
 - Code signing & notarization disabled by default (requires CSC_LINK, APPLE_ID env vars)
 - No ASAR compression (disabled for performance)
 
