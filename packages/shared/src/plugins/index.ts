@@ -1,7 +1,7 @@
 /**
  * Plugins Module
  *
- * Public type exports for the plugin contract.
+ * Public exports for the plugin system: types, registries, manager, and builtins.
  */
 
 export type {
@@ -13,3 +13,7 @@ export type {
   PluginContext,
   PluginLogger,
 } from './types.ts';
+
+export { PluginManager } from './plugin-manager.ts';
+export { ChannelRegistryImpl, ToolRegistryImpl, ServiceRegistryImpl } from './registry-impl.ts';
+export { getBuiltinPlugins } from './builtin/index.ts';

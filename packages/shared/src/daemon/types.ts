@@ -55,3 +55,43 @@ export interface QueuedMessage {
   /** Number of times processing has been attempted and failed */
   retryCount: number;
 }
+
+/**
+ * Type of scheduled task.
+ * - `cron`: Fires on a cron schedule (e.g., "0 9 * * 1-5")
+ * - `interval`: Fires every N milliseconds
+ * - `one-shot`: Fires once at a specific datetime, then marked complete
+ */
+export type TaskType = 'cron' | 'interval' | 'one-shot';
+
+/**
+ * Actions a scheduled task can trigger.
+ * Discriminated union on `type`.
+ */
+export type TaskAction =
+  | { type: 'send_message'; workspaceId: string; sessionKey: string; message: string }
+  | { type: 'plugin_action'; pluginId: string; action: string; payload?: unknown };
+
+/**
+ * A scheduled task persisted in SQLite.
+ */
+export interface ScheduledTask {
+  /** Auto-incremented row ID */
+  id: number;
+  /** Workspace this task belongs to */
+  workspaceId: string;
+  /** Task type: cron, interval, or one-shot */
+  type: TaskType;
+  /** Schedule expression: cron string, interval ms as string, or ISO datetime for one-shot */
+  schedule: string;
+  /** Action to perform when the task fires */
+  action: TaskAction;
+  /** Whether the task is active */
+  enabled: boolean;
+  /** ISO timestamp of last execution, or null */
+  lastRunAt: string | null;
+  /** ISO timestamp of next scheduled execution */
+  nextRunAt: string;
+  /** ISO timestamp when the task was created */
+  createdAt: string;
+}
