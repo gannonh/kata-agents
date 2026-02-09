@@ -8,7 +8,8 @@
 
 import { spawn, type ChildProcess } from 'child_process';
 import type { DaemonCommand, DaemonEvent } from '@craft-agent/core/types';
-import { createLineParser, cleanupStaleDaemon } from '@craft-agent/shared/daemon';
+import { createLineParser } from '@craft-agent/shared/daemon/ipc';
+import { cleanupStaleDaemon } from '@craft-agent/shared/daemon/pid';
 
 /** Manager-level state (superset of daemon status) */
 export type DaemonManagerState = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'paused';
