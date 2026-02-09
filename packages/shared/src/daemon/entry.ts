@@ -10,7 +10,7 @@
 
 import { join } from 'path';
 import { homedir } from 'os';
-import type { DaemonCommand, DaemonEvent, TaskType, TaskAction } from './types.ts';
+import type { DaemonCommand, DaemonEvent } from './types.ts';
 import type { ChannelConfig } from '../channels/types.ts';
 import { createLineParser, formatMessage } from './ipc.ts';
 import { writePidFile, removePidFile } from './pid.ts';
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
           break;
         case 'plugin_action':
           log(`Plugin action: ${cmd.pluginId}/${cmd.action}`);
-          // Future: route to specific plugin via PluginManager
+          // TODO: route to specific plugin via PluginManager
           break;
         case 'configure_channels': {
           log(`Configuring channels for ${cmd.workspaces.length} workspace(s)`);
@@ -96,15 +96,10 @@ async function main(): Promise<void> {
             await state.pluginManager.shutdownAll();
             state.pluginManager = null;
           }
-          // Collect enabled plugins (union across workspaces)
-          const enabledPluginIds = new Set<string>();
-          for (const ws of cmd.workspaces) {
-            for (const pid of ws.enabledPlugins) {
-              enabledPluginIds.add(pid);
-            }
-          }
-          // Create and initialize plugin manager
-          state.pluginManager = new PluginManager([...enabledPluginIds]);
+          const enabledPluginIds = new Set(
+            cmd.workspaces.flatMap((ws) => ws.enabledPlugins),
+          );
+          state.pluginManager = new PluginManager([...enabledPluginIds], log);
           state.pluginManager.loadBuiltinPlugins();
           log(`PluginManager loaded with ${enabledPluginIds.size} enabled plugin(s)`);
           // Build workspace configs map
@@ -129,9 +124,9 @@ async function main(): Promise<void> {
         case 'schedule_task': {
           const task = scheduler.addTask({
             workspaceId: cmd.workspaceId,
-            type: cmd.taskType as TaskType,
+            type: cmd.taskType,
             schedule: cmd.schedule,
-            action: cmd.action as TaskAction,
+            action: cmd.action,
           });
           log(`Scheduled task ${task.id} (${task.type}): next at ${task.nextRunAt}`);
           break;

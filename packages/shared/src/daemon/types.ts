@@ -6,7 +6,10 @@
  */
 
 // Re-export public types from core
-export type { DaemonStatus, DaemonCommand, DaemonEvent } from '@craft-agent/core/types';
+export type { DaemonStatus, DaemonCommand, DaemonEvent, TaskType, TaskAction } from '@craft-agent/core/types';
+
+// Import locally for use in ScheduledTask
+import type { TaskType, TaskAction } from '@craft-agent/core/types';
 
 /**
  * Direction of a queued message relative to the daemon.
@@ -55,22 +58,6 @@ export interface QueuedMessage {
   /** Number of times processing has been attempted and failed */
   retryCount: number;
 }
-
-/**
- * Type of scheduled task.
- * - `cron`: Fires on a cron schedule (e.g., "0 9 * * 1-5")
- * - `interval`: Fires every N milliseconds
- * - `one-shot`: Fires once at a specific datetime, then marked complete
- */
-export type TaskType = 'cron' | 'interval' | 'one-shot';
-
-/**
- * Actions a scheduled task can trigger.
- * Discriminated union on `type`.
- */
-export type TaskAction =
-  | { type: 'send_message'; workspaceId: string; sessionKey: string; message: string }
-  | { type: 'plugin_action'; pluginId: string; action: string; payload?: unknown };
 
 /**
  * A scheduled task persisted in SQLite.

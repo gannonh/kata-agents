@@ -1,8 +1,8 @@
 /**
  * Task Scheduler
  *
- * Persists cron, interval, and one-shot tasks in SQLite and executes
- * them using croner-based timer scheduling. Survives daemon restarts
+ * Persists cron, interval, and one-shot tasks in SQLite (shared with MessageQueue)
+ * and executes them using croner-based timer scheduling. Survives daemon restarts
  * by reloading tasks from the database on start().
  */
 
@@ -158,7 +158,11 @@ export class TaskScheduler {
       $nextRunAt: nextRunAt,
     }) as RawTaskRow;
 
-    return rowToTask(row);
+    const task = rowToTask(row);
+    if (task.enabled) {
+      this.scheduleNext(task);
+    }
+    return task;
   }
 
   /**
@@ -212,10 +216,8 @@ export class TaskScheduler {
    * Cancel all pending timers and await any in-flight task callbacks.
    */
   async stop(): Promise<void> {
-    for (const [id, timer] of this.timers) {
-      clearTimeout(timer);
-      this.timers.delete(id);
-    }
+    this.timers.forEach((timer) => clearTimeout(timer));
+    this.timers.clear();
 
     if (this.inFlight.size > 0) {
       this.log(`[task-scheduler] Waiting for ${this.inFlight.size} in-flight tasks`);
@@ -245,31 +247,35 @@ export class TaskScheduler {
    * Execute a task callback and schedule the next occurrence.
    */
   private async executeTask(task: ScheduledTask): Promise<void> {
+    let callbackFailed = false;
     try {
       await this.onTask(task);
     } catch (err) {
-      this.log(`[task-scheduler] Task ${task.id} callback error: ${err}`);
+      callbackFailed = true;
+      this.log(`[task-scheduler] Task ${task.id} (${task.type}) callback failed: ${err}`);
     }
 
-    const now = new Date().toISOString();
+    try {
+      const now = new Date().toISOString();
 
-    if (task.type === 'one-shot') {
-      this.disableStmt.run({ $id: task.id, $lastRunAt: now });
-      return;
-    }
+      if (task.type === 'one-shot') {
+        this.disableStmt.run({ $id: task.id, $lastRunAt: now });
+        return;
+      }
 
-    // Compute next run
-    const nextRunAt = computeNextRunAt(task.type, task.schedule);
-    this.updateAfterRunStmt.run({
-      $id: task.id,
-      $lastRunAt: now,
-      $nextRunAt: nextRunAt,
-    });
+      const nextRunAt = computeNextRunAt(task.type, task.schedule);
+      this.updateAfterRunStmt.run({
+        $id: task.id,
+        $lastRunAt: now,
+        $nextRunAt: nextRunAt,
+      });
 
-    // Reload the task from DB and schedule next
-    const updated = this.getTask(task.id);
-    if (updated && updated.enabled) {
-      this.scheduleNext(updated);
+      const updated = this.getTask(task.id);
+      if (updated && updated.enabled) {
+        this.scheduleNext(updated);
+      }
+    } catch (err) {
+      this.log(`[task-scheduler] Task ${task.id} reschedule error: ${err}`);
     }
   }
 }

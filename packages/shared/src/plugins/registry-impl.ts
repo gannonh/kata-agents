@@ -62,8 +62,8 @@ export class ServiceRegistryImpl implements ServiceRegistry {
     this.services.set(id, service);
   }
 
-  /** Return the services map. */
-  getServices(): Map<string, PluginService> {
+  /** Return the services map (read-only view). */
+  getServices(): ReadonlyMap<string, PluginService> {
     return this.services;
   }
 }

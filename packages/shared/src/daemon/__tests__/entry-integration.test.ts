@@ -15,7 +15,7 @@ import type { ChannelConfig, ChannelAdapter, ChannelMessage } from '../../channe
 import type { DaemonEvent } from '../types.ts';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 
 describe('Daemon entry integration', () => {
   const tempDirs: string[] = [];
@@ -26,6 +26,10 @@ describe('Daemon entry integration', () => {
       try { db.close(); } catch { /* already closed */ }
     }
     databasesToClose.length = 0;
+    for (const dir of tempDirs) {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+    tempDirs.length = 0;
   });
 
   test('PluginManager adapter factory works with ChannelRunner', async () => {
