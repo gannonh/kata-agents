@@ -417,6 +417,25 @@ const api: ElectronAPI = {
   getPrStatus: (dirPath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PR_STATUS, dirPath),
 
+  // Daemon management
+  getDaemonStatus: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STATUS),
+  startDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_START),
+  stopDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STOP),
+  onDaemonStateChanged: (callback: (state: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: string) => {
+      callback(state)
+    }
+    ipcRenderer.on(IPC_CHANNELS.DAEMON_STATE_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DAEMON_STATE_CHANGED, handler)
+  },
+  onDaemonEvent: (callback: (event: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, daemonEvent: any) => {
+      callback(daemonEvent)
+    }
+    ipcRenderer.on(IPC_CHANNELS.DAEMON_EVENT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DAEMON_EVENT, handler)
+  },
+
   // Git status change listener (for real-time updates)
   onGitStatusChanged: (callback: (workspaceDir: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, workspaceDir: string) => {

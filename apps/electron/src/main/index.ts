@@ -83,6 +83,7 @@ import { initializeDocs } from '@craft-agent/shared/docs'
 import { ensureDefaultPermissions } from '@craft-agent/shared/agent/permissions-config'
 import { ensureToolIcons } from '@craft-agent/shared/config'
 import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
+import { IPC_CHANNELS } from '../shared/types'
 import { handleDeepLink } from './deep-link'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
@@ -111,6 +112,7 @@ const DEEPLINK_SCHEME = process.env.KATA_DEEPLINK_SCHEME || process.env.CRAFT_DE
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let daemonManager: DaemonManager | null = null
+let trayManager: { updateState: (state: string) => void; destroy: () => void } | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -321,8 +323,22 @@ app.whenReady().then(async () => {
       'bun',
       daemonScript,
       configDir,
-      (event) => mainLog.info('[daemon] event:', event.type),
-      (state) => mainLog.info('[daemon] state:', state),
+      (event) => {
+        mainLog.info('[daemon] event:', event.type)
+        // Forward daemon events to all renderer windows
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
+        }
+      },
+      (state) => {
+        mainLog.info('[daemon] state:', state)
+        // Forward state change to all renderer windows
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(IPC_CHANNELS.DAEMON_STATE_CHANGED, state)
+        }
+        // Update tray menu based on state
+        trayManager?.updateState(state)
+      },
     )
     logDiagnostic('DaemonManager created')
 
@@ -407,10 +423,12 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  // On macOS, apps typically stay active until explicitly quit
-  if (process.platform !== 'darwin') {
-    app.quit()
+  // Keep app alive when daemon is running (tray provides access)
+  const daemonRunning = daemonManager?.getState() === 'running'
+  if (process.platform === 'darwin' || daemonRunning) {
+    return // Stay alive: macOS convention or daemon needs to keep running
   }
+  app.quit()
 })
 
 // Track if we're in the process of quitting (to avoid re-entry)
