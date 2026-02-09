@@ -12,13 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 14 — UI Integration (in progress)
-**Plan:** 01 of 2 (01 complete)
-**Status:** In progress
-**Last activity:** 2026-02-09 — Completed 14-01-PLAN.md
+**Phase:** 14 — UI Integration (complete)
+**Plan:** 02 of 2 (all complete)
+**Status:** Phase complete
 
 ```
-Progress: [███████████░] 92% (11 of 12 plans complete across 5 phases)
+Progress: [████████████] 100% (12 of 12 plans complete across 5 phases)
 ```
 
 ---
@@ -29,6 +28,7 @@ Progress: [███████████░] 92% (11 of 12 plans complete ac
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
+- v0.7.0: 20 requirements in 5 phases (12 plans)
 
 ---
 
@@ -75,6 +75,12 @@ See PROJECT.md Key Decisions table for full history.
 - TrayManager uses nativeImage template on macOS only; regular icon on other platforms
 - window-all-closed keeps app alive when daemon is running on all platforms (not just macOS)
 
+**Phase 14 Plan 02 decisions:**
+- ChannelSettingsPage uses inline toggle rather than SettingsToggle for row layout with adapter icon
+- Channel badge uses adapter-specific Lucide icons (Hash/MessageCircle/Radio)
+- Daemon state subscription as standalone useEffect in AppShell for lifecycle isolation
+- Channel IPC handlers use synchronous readFileSync/writeFileSync consistent with existing patterns
+
 ### Active Todos
 
 None.
@@ -100,11 +106,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-09
-**Stopped at:** Completed 14-01-PLAN.md (Daemon IPC bridge, TrayManager, DaemonStatusIndicator)
+**Stopped at:** Completed 14-02-PLAN.md (channel settings UI, session badge, daemon subscription)
 **Resume file:** None
 
-**Next action:** Execute 14-02-PLAN.md (channel configuration UI and session list integration).
+**Next action:** v0.7.0 milestone complete. Proceed to release preparation (version bump, CHANGELOG, build verification).
 
 ---
 
-_Last updated: 2026-02-09 after 14-01 plan complete_
+_Last updated: 2026-02-09 after 14-02 plan complete_
