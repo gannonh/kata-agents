@@ -14,7 +14,7 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 14 — UI Integration (complete)
 **Plan:** 02 of 2 (all complete)
-**Status:** Phase complete
+**Status:** Milestone complete
 
 ```
 Progress: [████████████] 100% (12 of 12 plans complete across 5 phases)
