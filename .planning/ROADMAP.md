@@ -21,7 +21,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 - [x] Phase 13: Plugin Lifecycle and Task Scheduler (3/3 plans) — completed 2026-02-08
 - [x] Phase 14: UI Integration (2/2 plans) — completed 2026-02-09
 - [x] Phase 15: Channel Credentials and Session Attribution (2/2 plans) — completed 2026-02-10
-- [ ] Phase 16: Channel Creation UI and Config Delivery (0 plans)
+- [ ] Phase 16: Channel Creation UI and Config Delivery (2/2 plans)
 - [ ] Phase 17: End-to-End Message Processing (0 plans)
 
 ## Completed Milestones
@@ -74,7 +74,7 @@ Native desktop client for the Kata ecosystem with integrated git context. Buildi
 | v0.4.0 Foundation             | 2      | 6     | Shipped     | 2026-01-30 |
 | v0.6.0 Git Integration        | 5      | 14    | Shipped     | 2026-02-04 |
 | v0.6.1 Testing Infrastructure | 2      | 6     | Shipped     | 2026-02-05 |
-| v0.7.0 Always-On Assistant    | 8      | 14    | In Progress | —          |
+| v0.7.0 Always-On Assistant    | 8      | 16    | In Progress | —          |
 
 ---
-*Last updated: 2026-02-10 — Phase 15 completed*
+*Last updated: 2026-02-10 — Phase 16 planned*
