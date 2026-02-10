@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 15 — Channel Credentials and Session Attribution
-**Plan:** 02 (complete)
+**Phase:** 16 — Channel Creation UI and Config Delivery (not planned)
+**Plan:** None yet
 **Status:** In progress
 
 ```
-Progress: [█████████████░░░░░░░░░░░] 64% (14 of 14 plans complete across 5 of 8 phases; 3 phases unplanned)
+Progress: [██████████████░░░░░░░░░░] 67% (14 of 14 plans complete across 6 of 8 phases; 2 phases unplanned)
 ```
 
 ---
@@ -28,7 +28,7 @@ Progress: [█████████████░░░░░░░░░░
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (12 plans so far)
+- v0.7.0: 20 requirements in 8 phases (14 plans so far)
 
 ---
 
@@ -117,11 +117,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed Phase 15 Plan 01 (channel credential storage) and Plan 02 (session channel attribution)
+**Stopped at:** Completed Phase 15 (channel credentials and session attribution)
 **Resume file:** None
 
-**Next action:** Proceed to Phase 16 (channel creation UI and daemon config delivery).
+**Next action:** Plan Phase 16 (channel creation UI and config delivery).
 
 ---
 
-_Last updated: 2026-02-10 after Phase 15 Plans 01 and 02 complete_
+_Last updated: 2026-02-10 after Phase 15 complete_
