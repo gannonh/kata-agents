@@ -2565,7 +2565,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // ============================================================
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_GET, async (_event, workspaceId: string) => {
-    const channelsDir = join(homedir(), '.kata-agents', 'workspaces', workspaceId, 'channels')
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelsDir = join(rootPath, 'channels')
     if (!existsSync(channelsDir)) return []
 
     const configs: any[] = []
@@ -2589,13 +2591,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_UPDATE, async (_event, workspaceId: string, config: any) => {
-    const channelDir = join(homedir(), '.kata-agents', 'workspaces', workspaceId, 'channels', config.slug)
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelDir = join(rootPath, 'channels', config.slug)
     mkdirSync(channelDir, { recursive: true })
     writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
   })
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
-    const channelDir = join(homedir(), '.kata-agents', 'workspaces', workspaceId, 'channels', channelSlug)
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelDir = join(rootPath, 'channels', channelSlug)
     if (existsSync(channelDir)) {
       rm(channelDir, { recursive: true, force: true })
     }
