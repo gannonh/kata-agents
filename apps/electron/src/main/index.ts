@@ -328,6 +328,35 @@ app.whenReady().then(async () => {
       configDir,
       (event) => {
         mainLog.info('[daemon] event:', event.type)
+
+        // Handle process_message internally (daemon -> main -> daemon round-trip)
+        if (event.type === 'process_message' && sessionManager && daemonManager) {
+          sessionManager.processDaemonMessage(
+            event.workspaceId,
+            event.sessionKey,
+            event.content,
+            { adapter: event.channelId, slug: event.channelId },
+          ).then((response) => {
+            daemonManager!.sendCommand({
+              type: 'message_processed',
+              messageId: event.messageId,
+              response,
+              success: true,
+            })
+          }).catch((err) => {
+            mainLog.error('[daemon] Message processing error:', err)
+            daemonManager!.sendCommand({
+              type: 'message_processed',
+              messageId: event.messageId,
+              response: '',
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
+          return // Don't broadcast internal events to renderer
+        }
+
+        // Broadcast other events to renderer windows
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
         }
