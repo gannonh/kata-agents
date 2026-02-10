@@ -716,6 +716,11 @@ export const IPC_CHANNELS = {
   CHANNELS_UPDATE: 'channels:update',
   CHANNELS_DELETE: 'channels:delete',
 
+  // Channel credentials (workspace-scoped, renderer never sees raw values)
+  CHANNEL_CREDENTIAL_SET: 'channel-credential:set',
+  CHANNEL_CREDENTIAL_DELETE: 'channel-credential:delete',
+  CHANNEL_CREDENTIAL_EXISTS: 'channel-credential:exists',
+
   // Git Bash (Windows)
   GITBASH_CHECK: 'gitbash:check',
   GITBASH_BROWSE: 'gitbash:browse',
@@ -994,6 +999,11 @@ export interface ElectronAPI {
   getChannels(workspaceId: string): Promise<import('@craft-agent/shared/channels').ChannelConfig[]>
   updateChannel(workspaceId: string, config: import('@craft-agent/shared/channels').ChannelConfig): Promise<void>
   deleteChannel(workspaceId: string, channelSlug: string): Promise<void>
+
+  // Channel credentials
+  setChannelCredential(workspaceId: string, channelSlug: string, value: string): Promise<void>
+  deleteChannelCredential(workspaceId: string, channelSlug: string): Promise<boolean>
+  hasChannelCredential(workspaceId: string, channelSlug: string): Promise<boolean>
 
   // Git status change listener (for real-time updates)
   onGitStatusChanged(callback: (workspaceDir: string) => void): () => void

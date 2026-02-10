@@ -2607,4 +2607,23 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
+  // ============================================================
+  // Channel Credentials (workspace-scoped)
+  // ============================================================
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_SET, async (_event, workspaceId: string, channelSlug: string, value: string) => {
+    const credManager = getCredentialManager()
+    await credManager.setChannelCredential(workspaceId, channelSlug, value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
+    const credManager = getCredentialManager()
+    return credManager.deleteChannelCredential(workspaceId, channelSlug)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_EXISTS, async (_event, workspaceId: string, channelSlug: string) => {
+    const credManager = getCredentialManager()
+    return credManager.hasChannelCredential(workspaceId, channelSlug)
+  })
+
 }

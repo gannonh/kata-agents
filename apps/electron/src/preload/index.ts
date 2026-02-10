@@ -429,6 +429,14 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_UPDATE, workspaceId, config),
   deleteChannel: (workspaceId: string, channelSlug: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_DELETE, workspaceId, channelSlug),
+
+  // Channel credentials
+  setChannelCredential: (workspaceId: string, channelSlug: string, value: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_SET, workspaceId, channelSlug, value),
+  deleteChannelCredential: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, workspaceId, channelSlug),
+  hasChannelCredential: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_EXISTS, workspaceId, channelSlug),
   onDaemonStateChanged: (callback: (state: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: string) => {
       callback(state)
