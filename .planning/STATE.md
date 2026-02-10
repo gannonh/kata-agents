@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 16 — Channel Creation UI and Config Delivery (not planned)
-**Plan:** None yet
-**Status:** In progress
+**Phase:** 16 — Channel Creation UI and Config Delivery (complete)
+**Plan:** 02 of 2 complete
+**Status:** Phase 16 complete
 
 ```
-Progress: [██████████████░░░░░░░░░░] 67% (14 of 14 plans complete across 6 of 8 phases; 2 phases unplanned)
+Progress: [█████████████████████░░░] 88% (16 of 16 plans complete across 7 of 8 phases; 1 phase unplanned)
 ```
 
 ---
@@ -28,7 +28,7 @@ Progress: [██████████████░░░░░░░░░
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (14 plans so far)
+- v0.7.0: 20 requirements in 8 phases (16 plans so far)
 
 ---
 
@@ -85,6 +85,15 @@ See PROJECT.md Key Decisions table for full history.
 - Channel credentials use `channel_credential::{workspaceId}::{channelSlug}` key format, parallel to source credentials
 - ChannelRunner resolves tokens from channelSlug (preferred) falling back to sourceSlug (legacy)
 
+**Phase 16 Plan 01 decisions:**
+- deliverChannelConfigs accepts credentialManagerGetter parameter (avoids circular dependency)
+- Credential resolution: channelSlug preferred, sourceSlug (source_apikey) as legacy fallback
+- Empty workspaces array always sent to daemon to clear stale adapters
+- enabledPlugins derived from adapter types across enabled configs per workspace
+
+**Phase 16 Plan 02 decisions:**
+- No new architectural decisions; follows existing inline form patterns from Phase 14
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -117,11 +126,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed Phase 15 (channel credentials and session attribution)
+**Stopped at:** Completed Phase 16 Plan 02 (channel creation form)
 **Resume file:** None
 
-**Next action:** Plan Phase 16 (channel creation UI and config delivery).
+**Next action:** Plan Phase 17 (end-to-end message processing), then execute.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 15 complete_
+_Last updated: 2026-02-10 after Phase 16 complete_
