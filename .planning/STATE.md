@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 16 — Channel Creation UI and Config Delivery (not planned)
-**Plan:** None yet
+**Phase:** 16 — Channel Creation UI and Config Delivery
+**Plan:** 01 complete, 02 pending
 **Status:** In progress
 
 ```
-Progress: [██████████████░░░░░░░░░░] 67% (14 of 14 plans complete across 6 of 8 phases; 2 phases unplanned)
+Progress: [███████████████░░░░░░░░░] 68% (15 of 16 plans complete across 7 of 8 phases)
 ```
 
 ---
@@ -85,6 +85,12 @@ See PROJECT.md Key Decisions table for full history.
 - Channel credentials use `channel_credential::{workspaceId}::{channelSlug}` key format, parallel to source credentials
 - ChannelRunner resolves tokens from channelSlug (preferred) falling back to sourceSlug (legacy)
 
+**Phase 16 Plan 01 decisions:**
+- deliverChannelConfigs accepts credentialManagerGetter parameter (avoids circular dependency)
+- Credential resolution: channelSlug preferred, sourceSlug (source_apikey) as legacy fallback
+- Empty workspaces array always sent to daemon to clear stale adapters
+- enabledPlugins derived from adapter types across enabled configs per workspace
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -117,11 +123,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed Phase 15 (channel credentials and session attribution)
+**Stopped at:** Completed Phase 16 Plan 01 (config delivery bridge)
 **Resume file:** None
 
-**Next action:** Plan Phase 16 (channel creation UI and config delivery).
+**Next action:** Execute Phase 16 Plan 02 (channel creation UI).
 
 ---
 
-_Last updated: 2026-02-10 after Phase 15 complete_
+_Last updated: 2026-02-10 after Phase 16 Plan 01 complete_
