@@ -26,7 +26,9 @@ export type CredentialType =
   | 'source_oauth'       // OAuth tokens for MCP/API sources
   | 'source_bearer'      // Bearer tokens
   | 'source_apikey'      // API keys
-  | 'source_basic';      // Basic auth (base64 encoded user:pass)
+  | 'source_basic'       // Basic auth (base64 encoded user:pass)
+  // Channel credentials (stored per workspace+channel)
+  | 'channel_credential';
 
 /** Valid credential types for validation */
 const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
@@ -37,6 +39,7 @@ const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'source_bearer',
   'source_apikey',
   'source_basic',
+  'channel_credential',
 ] as const;
 
 /** Check if a string is a valid CredentialType */
@@ -53,6 +56,8 @@ export interface CredentialId {
   workspaceId?: string;
   /** Source ID for source credentials */
   sourceId?: string;
+  /** Channel slug for channel credentials */
+  channelSlug?: string;
   /** Server name or API name */
   name?: string;
 }
@@ -118,6 +123,14 @@ export function credentialIdToAccount(id: CredentialId): string {
     return parts.join(CREDENTIAL_DELIMITER);
   }
 
+  // Channel-scoped format:
+  // channel_credential::{workspaceId}::{channelSlug}
+  if (id.type === 'channel_credential' && id.workspaceId && id.channelSlug) {
+    parts.push(id.workspaceId);
+    parts.push(id.channelSlug);
+    return parts.join(CREDENTIAL_DELIMITER);
+  }
+
   parts.push('global');
   return parts.join(CREDENTIAL_DELIMITER);
 }
@@ -144,6 +157,12 @@ export function accountToCredentialId(account: string): CredentialId | null {
   // Source credentials: source_oauth::{workspaceId}::{sourceId}
   if (isSourceCredential(type) && parts.length === 3) {
     return { type, workspaceId: parts[1], sourceId: parts[2] };
+  }
+
+  // Channel-scoped format:
+  // channel_credential::{workspaceId}::{channelSlug}
+  if (type === 'channel_credential' && parts.length === 3) {
+    return { type, workspaceId: parts[1], channelSlug: parts[2] };
   }
 
   if (parts.length === 2 && parts[1] === 'global') {

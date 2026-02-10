@@ -67,14 +67,21 @@ export class ChannelRunner {
         }
 
         // Configure adapter based on type
+        // Resolve credential key: prefer channelSlug (dedicated), fall back to sourceSlug (legacy)
+        const credKey = config.credentials.channelSlug ?? config.credentials.sourceSlug;
+
         switch (config.adapter) {
           case 'slack': {
-            const token = wsConfig.tokens.get(config.credentials.sourceSlug);
+            if (!credKey) {
+              this.emit({ type: 'plugin_error', pluginId: config.slug, error: 'No credential key configured' });
+              continue;
+            }
+            const token = wsConfig.tokens.get(credKey);
             if (!token) {
               this.emit({
                 type: 'plugin_error',
                 pluginId: config.slug,
-                error: `No token found for source: ${config.credentials.sourceSlug}`,
+                error: `No token found for credential key: ${credKey}`,
               });
               continue;
             }
@@ -85,12 +92,16 @@ export class ChannelRunner {
             break;
           }
           case 'whatsapp': {
-            const authStatePath = wsConfig.tokens.get(config.credentials.sourceSlug);
+            if (!credKey) {
+              this.emit({ type: 'plugin_error', pluginId: config.slug, error: 'No credential key configured' });
+              continue;
+            }
+            const authStatePath = wsConfig.tokens.get(credKey);
             if (!authStatePath) {
               this.emit({
                 type: 'plugin_error',
                 pluginId: config.slug,
-                error: `No auth state path found for source: ${config.credentials.sourceSlug}`,
+                error: `No auth state path found for credential key: ${credKey}`,
               });
               continue;
             }

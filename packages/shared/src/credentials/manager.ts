@@ -266,6 +266,35 @@ export class CredentialManager {
     }
   }
 
+  // ============================================================
+  // Channel Credential Convenience Methods
+  // ============================================================
+
+  /** Get a channel credential value */
+  async getChannelCredential(workspaceId: string, channelSlug: string): Promise<string | null> {
+    const cred = await this.get({ type: 'channel_credential', workspaceId, channelSlug });
+    return cred?.value || null;
+  }
+
+  /** Set a channel credential value */
+  async setChannelCredential(workspaceId: string, channelSlug: string, value: string): Promise<void> {
+    await this.set(
+      { type: 'channel_credential', workspaceId, channelSlug },
+      { value }
+    );
+  }
+
+  /** Delete a channel credential */
+  async deleteChannelCredential(workspaceId: string, channelSlug: string): Promise<boolean> {
+    return this.delete({ type: 'channel_credential', workspaceId, channelSlug });
+  }
+
+  /** Check if a channel credential exists */
+  async hasChannelCredential(workspaceId: string, channelSlug: string): Promise<boolean> {
+    const cred = await this.get({ type: 'channel_credential', workspaceId, channelSlug });
+    return cred !== null;
+  }
+
   /** Check if a credential is expired (with 5-minute buffer) */
   isExpired(credential: StoredCredential): boolean {
     if (!credential.expiresAt) return false;
