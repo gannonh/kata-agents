@@ -2456,6 +2456,87 @@ export class SessionManager {
     return responseText
   }
 
+  /**
+   * Process an inbound daemon channel message.
+   * Creates or reuses a session identified by sessionKey, then runs the agent headlessly.
+   * Returns the agent's text response.
+   */
+  async processDaemonMessage(
+    workspaceId: string,
+    sessionKey: string,
+    content: string,
+    channelInfo: { adapter: string; slug: string; displayName?: string },
+  ): Promise<string> {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
+
+    // Find existing session by matching name === sessionKey
+    let sessionId: string | undefined
+    for (const [id, managed] of this.sessions) {
+      if (managed.name === sessionKey && managed.workspace.id === workspaceId) {
+        sessionId = id
+        break
+      }
+    }
+
+    // If not found in memory, check persisted sessions
+    if (!sessionId) {
+      const storedSessions = listStoredSessions(workspace.rootPath)
+      const existing = storedSessions.find(s => s.name === sessionKey)
+      if (existing) {
+        // Load the session into memory
+        const loaded = loadStoredSession(workspace.rootPath, existing.id)
+        if (loaded) {
+          const managed: ManagedSession = {
+            id: loaded.id,
+            workspace,
+            agent: null,
+            messages: (loaded.messages ?? []).map(storedToMessage),
+            isProcessing: false,
+            lastMessageAt: loaded.lastMessageAt ?? loaded.lastUsedAt,
+            streamingText: '',
+            processingGeneration: 0,
+            isFlagged: loaded.isFlagged ?? false,
+            permissionMode: loaded.permissionMode ?? 'safe',
+            sdkSessionId: loaded.sdkSessionId,
+            workingDirectory: loaded.workingDirectory,
+            sdkCwd: loaded.sdkCwd,
+            name: loaded.name,
+            channel: loaded.channel ?? { adapter: channelInfo.adapter, slug: channelInfo.slug, displayName: channelInfo.displayName },
+            messageQueue: [],
+            backgroundShellCommands: new Map(),
+            messagesLoaded: true,
+          }
+          this.sessions.set(loaded.id, managed)
+          sessionId = loaded.id
+        }
+      }
+    }
+
+    // Create new session if no match found
+    if (!sessionId) {
+      const session = await this.createSession(workspaceId, {
+        permissionMode: 'safe',
+        workingDirectory: 'user_default',
+      })
+      sessionId = session.id
+
+      // Set channel attribution and session name (sessionKey) on the managed session
+      const managed = this.sessions.get(sessionId)!
+      managed.name = sessionKey
+      managed.channel = {
+        adapter: channelInfo.adapter,
+        slug: channelInfo.slug,
+        displayName: channelInfo.displayName,
+      }
+
+      // Persist the name and channel info immediately
+      this.persistSession(managed)
+    }
+
+    return await this.sendMessageHeadless(sessionId, content)
+  }
+
   async sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions, existingMessageId?: string, _isAuthRetry?: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
