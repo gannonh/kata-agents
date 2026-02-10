@@ -7,6 +7,7 @@
 
 import { Tray, Menu, nativeImage, app } from 'electron'
 import { join } from 'path'
+import log from './logger'
 import type { DaemonManagerState } from '../shared/types'
 
 export class TrayManager {
@@ -74,9 +75,9 @@ export class TrayManager {
         enabled: !isBusy,
         click: () => {
           if (isRunning) {
-            this.onStopDaemon().catch(() => {})
+            this.onStopDaemon().catch((err) => log.error('[tray] Failed to stop daemon:', err))
           } else {
-            this.onStartDaemon().catch(() => {})
+            this.onStartDaemon().catch((err) => log.error('[tray] Failed to start daemon:', err))
           }
         },
       },

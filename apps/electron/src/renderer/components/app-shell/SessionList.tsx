@@ -202,6 +202,17 @@ interface SessionItemProps {
 }
 
 /**
+const CHANNEL_ICONS: Record<string, typeof Radio> = {
+  slack: Hash,
+  whatsapp: MessageCircle,
+}
+
+function ChannelIcon({ adapter, className }: { adapter: string; className?: string }) {
+  const Icon = CHANNEL_ICONS[adapter] ?? Radio
+  return <Icon className={className} />
+}
+
+/**
  * SessionItem - Individual session card with todo checkbox and dropdown menu
  * Tracks menu open state to keep "..." button visible
  */
@@ -396,13 +407,7 @@ function SessionItem({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="shrink-0 h-[18px] w-[18px] flex items-center justify-center rounded bg-foreground/5 text-foreground/60">
-                        {item.channel.adapter === 'slack' ? (
-                          <Hash className="h-[10px] w-[10px]" />
-                        ) : item.channel.adapter === 'whatsapp' ? (
-                          <MessageCircle className="h-[10px] w-[10px]" />
-                        ) : (
-                          <Radio className="h-[10px] w-[10px]" />
-                        )}
+                        <ChannelIcon adapter={item.channel.adapter} className="h-[10px] w-[10px]" />
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top">

@@ -11,7 +11,7 @@ import type { ChannelConfig } from '@craft-agent/shared/channels'
 
 /**
  * Current daemon process state.
- * Updated via window.electronAPI.onDaemonStateChanged() subscription in AppShell.
+ * Updated via IPC subscription to daemon state changes.
  */
 export const daemonStateAtom = atom<DaemonManagerState>('stopped')
 

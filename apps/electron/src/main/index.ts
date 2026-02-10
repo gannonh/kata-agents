@@ -326,18 +326,15 @@ app.whenReady().then(async () => {
       configDir,
       (event) => {
         mainLog.info('[daemon] event:', event.type)
-        // Forward daemon events to all renderer windows
         for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
+          if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
         }
       },
       (state) => {
         mainLog.info('[daemon] state:', state)
-        // Forward state change to all renderer windows
         for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send(IPC_CHANNELS.DAEMON_STATE_CHANGED, state)
+          if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_STATE_CHANGED, state)
         }
-        // Update tray menu based on state
         trayManager?.updateState(state)
       },
     )

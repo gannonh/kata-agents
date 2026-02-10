@@ -425,7 +425,7 @@ const api: ElectronAPI = {
   // Channel configuration
   getChannels: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_GET, workspaceId),
-  updateChannel: (workspaceId: string, config: any) =>
+  updateChannel: (workspaceId: string, config: import('@craft-agent/shared/channels').ChannelConfig) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_UPDATE, workspaceId, config),
   deleteChannel: (workspaceId: string, channelSlug: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_DELETE, workspaceId, channelSlug),
@@ -437,8 +437,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, workspaceId, channelSlug),
   hasChannelCredential: (workspaceId: string, channelSlug: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_EXISTS, workspaceId, channelSlug),
-  onDaemonStateChanged: (callback: (state: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, state: string) => {
+  onDaemonStateChanged: (callback: (state: import('../shared/types').DaemonManagerState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/types').DaemonManagerState) => {
       callback(state)
     }
     ipcRenderer.on(IPC_CHANNELS.DAEMON_STATE_CHANGED, handler)

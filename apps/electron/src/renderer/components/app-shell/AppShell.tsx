@@ -779,17 +779,10 @@ function AppShellContent({
   // Subscribe to daemon state changes
   const setDaemonState = useSetAtom(daemonStateAtom)
   React.useEffect(() => {
-    // Load initial daemon state
-    window.electronAPI.getDaemonStatus().then((state) => {
-      setDaemonState(state)
-    }).catch(() => {
-      // Daemon not available
+    window.electronAPI.getDaemonStatus().then(setDaemonState).catch((err) => {
+      console.warn('[AppShell] Failed to get initial daemon status:', err)
     })
-    // Subscribe to live updates
-    const cleanup = window.electronAPI.onDaemonStateChanged((state) => {
-      setDaemonState(state as import('../../../shared/types').DaemonManagerState)
-    })
-    return cleanup
+    return window.electronAPI.onDaemonStateChanged(setDaemonState)
   }, [setDaemonState])
 
   // Handle session source selection changes

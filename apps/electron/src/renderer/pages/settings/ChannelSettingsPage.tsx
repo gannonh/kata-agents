@@ -15,6 +15,7 @@ import { Hash, MessageCircle, Radio, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PanelHeader } from "@/components/app-shell/PanelHeader";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { HeaderMenu } from "@/components/ui/HeaderMenu";
 import { Spinner } from "@craft-agent/ui";
 import { useAppShellContext } from "@/context/AppShellContext";
@@ -23,14 +24,12 @@ import { routes } from "@/lib/navigate";
 import { daemonStateAtom } from "@/atoms/daemon";
 import { DaemonStatusIndicator } from "@/components/ui/daemon-status-indicator";
 import type { ChannelConfig } from "@craft-agent/shared/channels";
-import type { DaemonManagerState } from "../../../shared/types";
 import type { DetailsPageMeta } from "@/lib/navigation-registry";
 
 import {
   SettingsSection,
   SettingsCard,
   SettingsRow,
-  SettingsToggle,
 } from "@/components/settings";
 
 export const meta: DetailsPageMeta = {
@@ -53,9 +52,10 @@ export default function ChannelSettingsPage() {
 
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isDaemonTransitioning, setIsDaemonTransitioning] = useState(false);
 
-  // Load channels on mount and workspace change
+  const isDaemonTransitioning =
+    daemonState === "starting" || daemonState === "stopping";
+
   useEffect(() => {
     if (!activeWorkspaceId) {
       setIsLoading(false);
@@ -76,14 +76,6 @@ export default function ChannelSettingsPage() {
       });
   }, [activeWorkspaceId]);
 
-  // Track daemon transitioning states
-  useEffect(() => {
-    setIsDaemonTransitioning(
-      daemonState === "starting" || daemonState === "stopping",
-    );
-  }, [daemonState]);
-
-  // Toggle channel enabled state
   const handleToggleChannel = useCallback(
     async (channel: ChannelConfig, enabled: boolean) => {
       if (!activeWorkspaceId) return;
@@ -101,7 +93,6 @@ export default function ChannelSettingsPage() {
     [activeWorkspaceId],
   );
 
-  // Delete channel
   const handleDeleteChannel = useCallback(
     async (slug: string) => {
       if (!activeWorkspaceId) return;
@@ -117,7 +108,6 @@ export default function ChannelSettingsPage() {
     [activeWorkspaceId],
   );
 
-  // Start/stop daemon
   const handleDaemonToggle = useCallback(async () => {
     try {
       if (daemonState === "running") {
@@ -131,18 +121,22 @@ export default function ChannelSettingsPage() {
     }
   }, [daemonState]);
 
+  const header = (
+    <PanelHeader
+      title="Channels"
+      actions={
+        <HeaderMenu
+          route={routes.view.settings("channels")}
+          helpFeature="channels"
+        />
+      }
+    />
+  );
+
   if (!activeWorkspaceId) {
     return (
       <div className="h-full flex flex-col">
-        <PanelHeader
-          title="Channels"
-          actions={
-            <HeaderMenu
-              route={routes.view.settings("channels")}
-              helpFeature="channels"
-            />
-          }
-        />
+        {header}
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-muted-foreground">
             No workspace selected
@@ -155,15 +149,7 @@ export default function ChannelSettingsPage() {
   if (isLoading) {
     return (
       <div className="h-full flex flex-col">
-        <PanelHeader
-          title="Channels"
-          actions={
-            <HeaderMenu
-              route={routes.view.settings("channels")}
-              helpFeature="channels"
-            />
-          }
-        />
+        {header}
         <div className="flex-1 flex items-center justify-center">
           <Spinner className="text-muted-foreground" />
         </div>
@@ -173,15 +159,7 @@ export default function ChannelSettingsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <PanelHeader
-        title="Channels"
-        actions={
-          <HeaderMenu
-            route={routes.view.settings("channels")}
-            helpFeature="channels"
-          />
-        }
-      />
+      {header}
       <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
@@ -250,24 +228,12 @@ export default function ChannelSettingsPage() {
                           </div>
                         }
                       >
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={channel.enabled}
-                            onChange={(e) =>
-                              handleToggleChannel(channel, e.target.checked)
-                            }
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-foreground/10 peer-focus:outline-none rounded-full peer peer-checked:bg-accent transition-colors">
-                            <div
-                              className={cn(
-                                "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform",
-                                channel.enabled && "translate-x-4",
-                              )}
-                            />
-                          </div>
-                        </label>
+                        <Switch
+                          checked={channel.enabled}
+                          onCheckedChange={(checked) =>
+                            handleToggleChannel(channel, checked)
+                          }
+                        />
                       </SettingsRow>
                     ))}
                   </SettingsCard>
