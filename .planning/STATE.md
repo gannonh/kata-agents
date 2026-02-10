@@ -81,6 +81,10 @@ See PROJECT.md Key Decisions table for full history.
 - Daemon state subscription as standalone useEffect in AppShell for lifecycle isolation
 - Channel IPC handlers use synchronous readFileSync/writeFileSync consistent with existing patterns
 
+**Phase 15 Plan 01 decisions:**
+- Channel credentials use `channel_credential::{workspaceId}::{channelSlug}` key format, parallel to source credentials
+- ChannelRunner resolves tokens from channelSlug (preferred) falling back to sourceSlug (legacy)
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -113,11 +117,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed Phase 15 Plan 02 (session channel attribution)
+**Stopped at:** Completed Phase 15 Plan 01 (channel credential storage) and Plan 02 (session channel attribution)
 **Resume file:** None
 
-**Next action:** Execute remaining Phase 15 plans or proceed to Phase 16.
+**Next action:** Proceed to Phase 16 (channel creation UI and daemon config delivery).
 
 ---
 
-_Last updated: 2026-02-10 after Phase 15 Plan 02 complete_
+_Last updated: 2026-02-10 after Phase 15 Plans 01 and 02 complete_
