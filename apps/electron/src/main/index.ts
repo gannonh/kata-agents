@@ -74,12 +74,14 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
 import { DaemonManager } from './daemon-manager'
+import { deliverChannelConfigs } from './channel-config-delivery'
 import { TrayManager } from './tray-manager'
 import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
 import { getWorkspaces, loadStoredConfig } from '@craft-agent/shared/config'
+import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { initializeDocs } from '@craft-agent/shared/docs'
 import { ensureDefaultPermissions } from '@craft-agent/shared/agent/permissions-config'
 import { ensureToolIcons } from '@craft-agent/shared/config'
@@ -328,6 +330,11 @@ app.whenReady().then(async () => {
         mainLog.info('[daemon] event:', event.type)
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
+        }
+        if (event.type === 'status_changed' && event.status === 'running') {
+          deliverChannelConfigs(daemonManager!, getCredentialManager).catch((err) => {
+            mainLog.error('[daemon] Failed to deliver channel configs:', err)
+          })
         }
       },
       (state) => {

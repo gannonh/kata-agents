@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
 import type { DaemonManager } from './daemon-manager'
+import { deliverChannelConfigs } from './channel-config-delivery'
 import { ipcLog, windowLog } from './logger'
 import { logGetSessionsCall, logDiagnostic } from './startup-diagnostics'
 import { WindowManager } from './window-manager'
@@ -2604,6 +2605,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const channelDir = join(rootPath, 'channels', config.slug)
     mkdirSync(channelDir, { recursive: true })
     writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
+    if (daemonManager) {
+      deliverChannelConfigs(daemonManager, getCredentialManager).catch((err) => {
+        ipcLog.error('[channels:update] Failed to deliver channel configs:', err)
+      })
+    }
   })
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
@@ -2614,6 +2620,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     if (existsSync(channelDir)) {
       await rm(channelDir, { recursive: true, force: true })
     }
+    if (daemonManager) {
+      deliverChannelConfigs(daemonManager, getCredentialManager).catch((err) => {
+        ipcLog.error('[channels:delete] Failed to deliver channel configs:', err)
+      })
+    }
   })
 
   // ============================================================
@@ -2623,6 +2634,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_SET, async (_event, workspaceId: string, channelSlug: string, value: string) => {
     const credManager = getCredentialManager()
     await credManager.setChannelCredential(workspaceId, channelSlug, value)
+    if (daemonManager) {
+      deliverChannelConfigs(daemonManager, getCredentialManager).catch((err) => {
+        ipcLog.error('[channels:credential-set] Failed to deliver channel configs:', err)
+      })
+    }
   })
 
   ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
