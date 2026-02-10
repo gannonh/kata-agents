@@ -2414,6 +2414,48 @@ export class SessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
+  /**
+   * Run agent chat headlessly (no IPC events to renderer).
+   * Used by daemon message processing where there is no active UI session.
+   * Returns the final assistant text response.
+   */
+  async sendMessageHeadless(sessionId: string, content: string): Promise<string> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+
+    const agent = await this.getOrCreateAgent(managed)
+
+    // Load sources for context (same as sendMessage but skip renderer events)
+    const workspaceRootPath = managed.workspace.rootPath
+    const allSources = loadAllSources(workspaceRootPath)
+    agent.setAllSources(allSources)
+
+    if (managed.enabledSourceSlugs?.length) {
+      const sources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs)
+      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+      const { mcpServers, apiServers } = await buildServersFromSources(sources, sessionPath)
+      const intendedSlugs = sources.filter(s => s.config.enabled && s.config.isAuthenticated).map(s => s.config.slug)
+      agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+    }
+
+    // Collect final assistant text from the chat generator
+    let responseText = ''
+    const chatGenerator = agent.chat(content)
+
+    for await (const event of chatGenerator) {
+      // Capture the final assistant text blocks
+      if (event.type === 'text_complete' && event.text) {
+        responseText = event.text
+      }
+    }
+
+    // Persist session state after headless execution
+    this.persistSession(managed)
+
+    sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
+    return responseText
+  }
+
   async sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions, existingMessageId?: string, _isAuthRetry?: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
