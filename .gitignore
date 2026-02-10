@@ -7,6 +7,8 @@ dist
 *.tgz
 .build
 apps/electron/release
+apps/electron/packages
+apps/electron/vendor
 
 # code coverage
 coverage
