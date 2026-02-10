@@ -17,7 +17,7 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 **Status:** Phase 16 complete
 
 ```
-Progress: [████████████████████████] 100% (16 of 16 plans complete across 8 of 8 phases)
+Progress: [█████████████████████░░░] 88% (16 of 16 plans complete across 7 of 8 phases; 1 phase unplanned)
 ```
 
 ---
@@ -28,7 +28,7 @@ Progress: [███████████████████████
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (14 plans so far)
+- v0.7.0: 20 requirements in 8 phases (16 plans so far)
 
 ---
 
@@ -129,8 +129,8 @@ None.
 **Stopped at:** Completed Phase 16 Plan 02 (channel creation form)
 **Resume file:** None
 
-**Next action:** All v0.7.0 milestone plans complete. Proceed to Phase 17 (end-to-end message processing) if planned, or prepare release.
+**Next action:** Plan Phase 17 (end-to-end message processing), then execute.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 16 Plan 02 complete_
+_Last updated: 2026-02-10 after Phase 16 complete_
