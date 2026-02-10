@@ -3,7 +3,7 @@ status: complete
 phase: 14-ui-integration
 source: [14-01-SUMMARY.md, 14-02-SUMMARY.md]
 started: 2026-02-09T12:00:00Z
-updated: 2026-02-09T12:45:00Z
+updated: 2026-02-09T12:50:00Z
 ---
 
 ## Current Test
@@ -67,9 +67,9 @@ result: pass
 ## Summary
 
 total: 12
-passed: 8
+passed: 7
 issues: 0
 pending: 0
-skipped: 4
+skipped: 5
 
 ## Gaps
