@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
 import type { DaemonManager } from './daemon-manager'
-import { deliverChannelConfigs } from './channel-config-delivery'
+import { scheduleChannelConfigDelivery } from './channel-config-delivery'
 import { ipcLog, windowLog } from './logger'
 import { logGetSessionsCall, logDiagnostic } from './startup-diagnostics'
 import { WindowManager } from './window-manager'
@@ -2606,9 +2606,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     mkdirSync(channelDir, { recursive: true })
     writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
     if (daemonManager) {
-      deliverChannelConfigs(daemonManager, getCredentialManager).catch((err) => {
-        ipcLog.error('[channels:update] Failed to deliver channel configs:', err)
-      })
+      scheduleChannelConfigDelivery(daemonManager, getCredentialManager)
     }
   })
 

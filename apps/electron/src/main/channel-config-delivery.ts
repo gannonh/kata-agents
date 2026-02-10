@@ -1,13 +1,13 @@
 /**
  * Channel Config Delivery
  *
- * Bridges channel configuration on disk with the running daemon process.
+ * Reads channel configuration from disk and delivers it to the daemon via IPC.
  * Loads all workspace channel configs, resolves credentials, and sends
  * a configure_channels command to the daemon.
  *
  * Called on two trigger points:
- * 1. Daemon reaches 'running' state (initial delivery)
- * 2. Channel IPC mutations (CHANNELS_UPDATE, CHANNELS_DELETE, CHANNEL_CREDENTIAL_SET)
+ * 1. Daemon reaches 'running' state (initial delivery via deliverChannelConfigs)
+ * 2. Channel IPC mutations via scheduleChannelConfigDelivery (debounced to coalesce rapid changes)
  */
 
 import { existsSync, readdirSync, readFileSync } from 'fs'
@@ -18,8 +18,15 @@ import type { ChannelConfig } from '@craft-agent/shared/channels'
 import { getWorkspaces } from '@craft-agent/shared/config'
 import type { CredentialManager } from '@craft-agent/shared/credentials'
 
-/** Slug validation (matches ipc.ts isValidSlug) */
+/** Slug validation — duplicates ipc.ts isValidSlug (intentional to avoid circular dependency) */
 const VALID_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/
+
+export interface WorkspaceChannelPayload {
+  workspaceId: string
+  configs: ChannelConfig[]
+  tokens: Record<string, string>
+  enabledPlugins: string[]
+}
 
 /**
  * Load all enabled channel configs across all workspaces, resolve their
@@ -29,7 +36,7 @@ const VALID_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/
  * daemon can clear previously running adapters.
  *
  * @param daemonManager - The daemon manager instance
- * @param credentialManagerGetter - Getter to avoid circular dependency
+ * @param credentialManagerGetter - Getter to avoid circular dependency between daemon-manager and credentials
  */
 export async function deliverChannelConfigs(
   daemonManager: DaemonManager,
@@ -42,12 +49,7 @@ export async function deliverChannelConfigs(
   const workspaces = getWorkspaces()
   const credManager = credentialManagerGetter()
 
-  const workspacePayloads: Array<{
-    workspaceId: string
-    configs: ChannelConfig[]
-    tokens: Record<string, string>
-    enabledPlugins: string[]
-  }> = []
+  const workspacePayloads: WorkspaceChannelPayload[] = []
 
   for (const workspace of workspaces) {
     const rootPath = workspace.rootPath.replace(/^~/, homedir())
@@ -60,7 +62,8 @@ export async function deliverChannelConfigs(
     let slugs: string[]
     try {
       slugs = readdirSync(channelsDir)
-    } catch {
+    } catch (err) {
+      console.warn(`[channel-config-delivery] Cannot read channels directory for workspace ${workspace.id}:`, err)
       continue
     }
 
@@ -82,7 +85,7 @@ export async function deliverChannelConfigs(
         const raw = readFileSync(configPath, 'utf-8')
         config = JSON.parse(raw) as ChannelConfig
       } catch (err) {
-        console.error(`[channel-config-delivery] Skipping malformed config for "${slug}":`, err)
+        console.error(`[channel-config-delivery] Skipping malformed config at "${configPath}" (workspace: ${workspace.id}, slug: "${slug}"):`, err)
         continue
       }
 
@@ -95,6 +98,8 @@ export async function deliverChannelConfigs(
         const token = await credManager.getChannelCredential(workspace.id, config.credentials.channelSlug)
         if (token) {
           tokens[config.credentials.channelSlug] = token
+        } else {
+          console.warn(`[channel-config-delivery] Missing credential for channel "${slug}" (channelSlug: ${config.credentials.channelSlug})`)
         }
       } else if (config.credentials.sourceSlug) {
         const cred = await credManager.get({
@@ -104,6 +109,8 @@ export async function deliverChannelConfigs(
         })
         if (cred?.value) {
           tokens[config.credentials.sourceSlug] = cred.value
+        } else {
+          console.warn(`[channel-config-delivery] Missing source credential for channel "${slug}" (sourceSlug: ${config.credentials.sourceSlug})`)
         }
       }
 
@@ -111,7 +118,6 @@ export async function deliverChannelConfigs(
     }
 
     if (configs.length > 0) {
-      // Derive enabledPlugins from adapter types
       const adapterTypes = new Set(configs.map((c) => c.adapter))
       workspacePayloads.push({
         workspaceId: workspace.id,
@@ -127,4 +133,24 @@ export async function deliverChannelConfigs(
     type: 'configure_channels',
     workspaces: workspacePayloads,
   })
+}
+
+/**
+ * Debounced wrapper for IPC mutation triggers.
+ * Coalesces rapid consecutive calls (e.g., config write + credential set)
+ * so only the final filesystem state is delivered to the daemon.
+ */
+let deliveryTimer: ReturnType<typeof setTimeout> | null = null
+
+export function scheduleChannelConfigDelivery(
+  daemonManager: DaemonManager,
+  credentialManagerGetter: () => CredentialManager,
+): void {
+  if (deliveryTimer) clearTimeout(deliveryTimer)
+  deliveryTimer = setTimeout(() => {
+    deliveryTimer = null
+    deliverChannelConfigs(daemonManager, credentialManagerGetter).catch((err) => {
+      console.error('[channel-config-delivery] Scheduled delivery failed:', err)
+    })
+  }, 100)
 }

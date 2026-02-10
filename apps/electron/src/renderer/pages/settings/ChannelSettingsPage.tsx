@@ -84,7 +84,6 @@ export default function ChannelSettingsPage() {
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Creation form state
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<ChannelFormState>(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
@@ -174,68 +173,60 @@ export default function ChannelSettingsPage() {
     setFormError(null);
   }
 
+  function getFormValidationError(): string | null {
+    const slug = generatedSlug;
+    if (!form.adapter) return "Select an adapter type";
+    if (!form.name.trim()) return "Name is required";
+    if (!form.credential.trim()) return "Credential is required";
+    if (slug && !isValidSlug(slug))
+      return "Generated slug is invalid. Use only letters, numbers, and hyphens.";
+    if (slug && channels.some((c) => c.slug === slug))
+      return `A channel with slug "${slug}" already exists`;
+    if (form.adapter === "slack" && !form.channelIds.trim())
+      return "At least one Slack channel ID is required";
+    return null;
+  }
+
   async function handleSaveChannel() {
     if (!activeWorkspaceId) return;
     setFormError(null);
-    const slug = slugify(`${form.adapter}-${form.name}`);
 
-    // Validation
-    if (!form.adapter) {
-      setFormError("Select an adapter type");
-      return;
-    }
-    if (!form.name.trim()) {
-      setFormError("Name is required");
-      return;
-    }
-    if (!form.credential.trim()) {
-      setFormError("Credential is required");
-      return;
-    }
-    if (!isValidSlug(slug)) {
-      setFormError(
-        "Generated slug is invalid. Use only letters, numbers, and hyphens.",
-      );
-      return;
-    }
-    if (channels.some((c) => c.slug === slug)) {
-      setFormError(`A channel with slug "${slug}" already exists`);
-      return;
-    }
-    if (form.adapter === "slack" && !form.channelIds.trim()) {
-      setFormError("At least one Slack channel ID is required");
+    const error = getFormValidationError();
+    if (error) {
+      setFormError(error);
       return;
     }
 
+    const slug = generatedSlug;
     setIsSaving(true);
     try {
+      const pollInterval =
+        form.adapter === "slack"
+          ? form.pollIntervalMs || 10000
+          : undefined;
+
+      const channelIdList =
+        form.adapter === "slack" && form.channelIds.trim()
+          ? form.channelIds.split(",").map((s) => s.trim()).filter(Boolean)
+          : undefined;
+
+      const triggerPatternList = form.triggerPatterns.trim()
+        ? form.triggerPatterns.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+
       const config: ChannelConfig = {
         slug,
         enabled: true,
         adapter: form.adapter,
-        pollIntervalMs:
-          form.adapter === "slack"
-            ? parseInt(String(form.pollIntervalMs)) || 10000
-            : undefined,
+        pollIntervalMs: pollInterval,
         credentials: { channelSlug: slug },
         filter: {
-          channelIds:
-            form.adapter === "slack" && form.channelIds.trim()
-              ? form.channelIds
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-              : undefined,
-          triggerPatterns: form.triggerPatterns.trim()
-            ? form.triggerPatterns
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : undefined,
+          channelIds: channelIdList,
+          triggerPatterns: triggerPatternList,
         },
       };
 
-      // Sequence: config first, then credential (Plan 01's delivery trigger fires after each)
+      // Config first, then credential (each IPC mutation triggers debounced daemon delivery)
       await window.electronAPI.updateChannel(activeWorkspaceId, config);
       await window.electronAPI.setChannelCredential(
         activeWorkspaceId,
@@ -243,7 +234,6 @@ export default function ChannelSettingsPage() {
         form.credential,
       );
 
-      // Optimistic update
       setChannels((prev) => [...prev, config]);
       setShowForm(false);
       setForm(initialFormState);
@@ -265,11 +255,7 @@ export default function ChannelSettingsPage() {
       ? slugify(`${form.adapter}-${form.name}`)
       : "";
 
-  const isFormIncomplete =
-    !form.adapter ||
-    !form.name.trim() ||
-    !form.credential.trim() ||
-    (form.adapter === "slack" && !form.channelIds.trim());
+  const isFormIncomplete = getFormValidationError() !== null;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */

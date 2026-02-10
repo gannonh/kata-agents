@@ -331,8 +331,8 @@ app.whenReady().then(async () => {
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
         }
-        if (event.type === 'status_changed' && event.status === 'running') {
-          deliverChannelConfigs(daemonManager!, getCredentialManager).catch((err) => {
+        if (event.type === 'status_changed' && event.status === 'running' && daemonManager) {
+          deliverChannelConfigs(daemonManager, getCredentialManager).catch((err) => {
             mainLog.error('[daemon] Failed to deliver channel configs:', err)
           })
         }
