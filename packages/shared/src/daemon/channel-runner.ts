@@ -6,7 +6,7 @@
  * and enqueues inbound messages into the MessageQueue.
  */
 
-import type { ChannelAdapter, ChannelConfig, ChannelMessage } from '../channels/types.ts';
+import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../channels/types.ts';
 import { TriggerMatcher } from '../channels/trigger-matcher.ts';
 import { resolveSessionKey } from '../channels/session-resolver.ts';
 import { createAdapter as defaultCreateAdapter } from '../channels/adapters/index.ts';
@@ -155,12 +155,29 @@ export class ChannelRunner {
       channelSourceId,
     );
     msg.metadata.sessionKey = sessionKey;
+    msg.metadata.workspaceId = workspaceId;
 
     // Enqueue the message
     this.queue.enqueue('inbound', slug, msg);
 
     // Emit event
     this.emit({ type: 'message_received', channelId: slug, messageId: msg.id });
+  }
+
+  /**
+   * Deliver an outbound message through the adapter identified by slug.
+   * Throws if the adapter is not running or does not implement send().
+   */
+  async deliverOutbound(channelSlug: string, message: OutboundMessage): Promise<void> {
+    const running = this.adapters.get(channelSlug);
+    if (!running) {
+      throw new Error(`No running adapter for channel: ${channelSlug}`);
+    }
+    if (!running.adapter.send) {
+      throw new Error(`Adapter ${channelSlug} does not support send()`);
+    }
+    await running.adapter.send(message);
+    this.log(`Delivered outbound message to ${channelSlug}`);
   }
 
   async stopAll(): Promise<void> {
