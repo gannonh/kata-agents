@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 17 — End-to-End Message Processing
-**Plan:** 01 of 2 complete
-**Status:** In progress
-**Last activity:** 2026-02-10 - Completed 17-01-PLAN.md
+**Plan:** 02 of 2 complete
+**Status:** Phase complete
+**Last activity:** 2026-02-10 - Completed 17-02-PLAN.md
 
 ```
-Progress: [██████████████████████░░] 94% (17 of 18 plans complete across 8 phases)
+Progress: [████████████████████████] 100% (18 of 18 plans complete across 8 phases)
 ```
 
 ---
@@ -29,7 +29,7 @@ Progress: [██████████████████████░
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (18 plans so far)
+- v0.7.0: 20 requirements in 8 phases (18 plans)
 
 ---
 
@@ -99,6 +99,12 @@ See PROJECT.md Key Decisions table for full history.
 - Tasks 2 (consumer loop) and 3 (deliverOutbound) committed together due to compile-time dependency
 - workspaceId added to message metadata in ChannelRunner.handleMessage for consumer extraction
 
+**Phase 17 Plan 02 decisions:**
+- Used text_complete event for response capture (matches AgentEvent discriminated union)
+- Used storedToMessage() for session loading (existing pattern)
+- persistSession() for channel/name persistence (updateSessionMetadata doesn't support channel field)
+- process_message events excluded from renderer broadcast
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -131,11 +137,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed 17-01-PLAN.md (daemon message processing pipeline)
+**Stopped at:** Completed 17-02-PLAN.md (main process message handler and session routing)
 **Resume file:** None
 
-**Next action:** Execute 17-02-PLAN.md (main process message handler and session routing).
+**Next action:** All v0.7.0 plans complete. Ready for integration testing and release preparation.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 17 Plan 01 complete_
+_Last updated: 2026-02-10 after Phase 17 Plan 02 complete_
