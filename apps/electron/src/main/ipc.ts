@@ -2566,7 +2566,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_GET, async (_event, workspaceId: string) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
-    const channelsDir = join(workspace.path, 'channels')
+    const channelsDir = join(workspace.rootPath, 'channels')
     if (!existsSync(channelsDir)) return []
 
     const configs: any[] = []
@@ -2591,14 +2591,14 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_UPDATE, async (_event, workspaceId: string, config: any) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
-    const channelDir = join(workspace.path, 'channels', config.slug)
+    const channelDir = join(workspace.rootPath, 'channels', config.slug)
     mkdirSync(channelDir, { recursive: true })
     writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
   })
 
   ipcMain.handle(IPC_CHANNELS.CHANNELS_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
-    const channelDir = join(workspace.path, 'channels', channelSlug)
+    const channelDir = join(workspace.rootPath, 'channels', channelSlug)
     if (existsSync(channelDir)) {
       rm(channelDir, { recursive: true, force: true })
     }
