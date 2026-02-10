@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 16 — Channel Creation UI and Config Delivery
-**Plan:** 01 complete, 02 pending
-**Status:** In progress
+**Phase:** 16 — Channel Creation UI and Config Delivery (complete)
+**Plan:** 02 of 2 complete
+**Status:** Phase 16 complete
 
 ```
-Progress: [███████████████░░░░░░░░░] 68% (15 of 16 plans complete across 7 of 8 phases)
+Progress: [████████████████████████] 100% (16 of 16 plans complete across 8 of 8 phases)
 ```
 
 ---
@@ -91,6 +91,9 @@ See PROJECT.md Key Decisions table for full history.
 - Empty workspaces array always sent to daemon to clear stale adapters
 - enabledPlugins derived from adapter types across enabled configs per workspace
 
+**Phase 16 Plan 02 decisions:**
+- No new architectural decisions; follows existing inline form patterns from Phase 14
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -123,11 +126,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-10
-**Stopped at:** Completed Phase 16 Plan 01 (config delivery bridge)
+**Stopped at:** Completed Phase 16 Plan 02 (channel creation form)
 **Resume file:** None
 
-**Next action:** Execute Phase 16 Plan 02 (channel creation UI).
+**Next action:** All v0.7.0 milestone plans complete. Proceed to Phase 17 (end-to-end message processing) if planned, or prepare release.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 16 Plan 01 complete_
+_Last updated: 2026-02-10 after Phase 16 Plan 02 complete_
