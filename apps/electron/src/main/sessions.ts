@@ -339,6 +339,12 @@ interface ManagedSession {
   createdAt?: number
   // Total message count (pre-computed in JSONL header for fast list loading)
   messageCount?: number
+  // Channel origin for daemon-created sessions (absent for direct/interactive sessions)
+  channel?: {
+    adapter: string
+    slug: string
+    displayName?: string
+  }
   // Message queue for handling new messages while processing
   // When a message arrives during processing, we interrupt and queue
   messageQueue: Array<{
@@ -910,6 +916,7 @@ export class SessionManager {
             // Shared viewer state - loaded from metadata for persistence across restarts
             sharedUrl: meta.sharedUrl,
             sharedId: meta.sharedId,
+            channel: meta.channel,
           }
 
           this.sessions.set(meta.id, managed)
@@ -967,6 +974,7 @@ export class SessionManager {
           contextTokens: 0,
           costUsd: 0,
         },
+        channel: managed.channel,
       }
 
       // Queue for async persistence with debouncing
@@ -1288,6 +1296,7 @@ export class SessionManager {
         tokenUsage: m.tokenUsage,
         createdAt: m.createdAt,
         messageCount: m.messageCount,
+        channel: m.channel,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -1329,6 +1338,7 @@ export class SessionManager {
       sharedId: m.sharedId,
       lastMessageRole: m.lastMessageRole,
       tokenUsage: m.tokenUsage,
+      channel: m.channel,
     }
   }
 

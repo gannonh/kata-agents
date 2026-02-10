@@ -100,10 +100,12 @@ export interface ChannelConfig {
   /** Polling interval in milliseconds (only used by poll-type adapters) */
   pollIntervalMs?: number;
 
-  /** Credential reference pointing to a source's stored credentials */
+  /** Credential reference for this channel */
   credentials: {
-    /** Source slug whose credentials this channel uses */
-    sourceSlug: string;
+    /** Source slug whose credentials this channel uses (legacy path) */
+    sourceSlug?: string;
+    /** Channel slug for dedicated channel credentials (preferred path) */
+    channelSlug?: string;
   };
 
   /** Optional filter to restrict which messages are processed */

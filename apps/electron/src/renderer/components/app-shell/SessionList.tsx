@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { formatDistanceToNow, formatDistanceToNowStrict, isToday, isYesterday, format, startOfDay } from "date-fns"
 import type { Locale } from "date-fns"
-import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox } from "lucide-react"
+import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox, Hash, MessageCircle, Radio } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -202,6 +202,17 @@ interface SessionItemProps {
 }
 
 /**
+const CHANNEL_ICONS: Record<string, typeof Radio> = {
+  slack: Hash,
+  whatsapp: MessageCircle,
+}
+
+function ChannelIcon({ adapter, className }: { adapter: string; className?: string }) {
+  const Icon = CHANNEL_ICONS[adapter] ?? Radio
+  return <Icon className={className} />
+}
+
+/**
  * SessionItem - Individual session card with todo checkbox and dropdown menu
  * Tracks menu open state to keep "..." button visible
  */
@@ -391,6 +402,18 @@ function SessionItem({
                   >
                     {PERMISSION_MODE_CONFIG[permissionMode].shortName}
                   </span>
+                )}
+                {item.channel && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="shrink-0 h-[18px] w-[18px] flex items-center justify-center rounded bg-foreground/5 text-foreground/60">
+                        <ChannelIcon adapter={item.channel.adapter} className="h-[10px] w-[10px]" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <span>{item.channel.displayName || `${item.channel.adapter}/${item.channel.slug}`}</span>
+                    </TooltipContent>
+                  </Tooltip>
                 )}
                 {/* Label badges — each badge opens its own LabelValuePopover for
                     editing the value or removing the label. Uses onMouseDown +

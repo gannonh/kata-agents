@@ -6,21 +6,21 @@
 
 - [x] **DAEMON-01**: Daemon runs as Bun subprocess of Electron with stdin/stdout JSON communication
 - [x] **DAEMON-02**: Daemon restarts automatically on crash with exponential backoff (max 5 attempts)
-- [ ] **DAEMON-03**: Daemon status indicator shows running/stopped/error state in UI
+- [x] **DAEMON-03**: Daemon status indicator shows running/stopped/error state in UI
 - [x] **DAEMON-04**: Daemon permission mode restricts tool access to explicit allowlist
 - [x] **DAEMON-05**: SQLite message queue stores inbound/outbound messages for daemon channels
 - [x] **DAEMON-06**: Task scheduler supports cron, interval, and one-shot scheduled tasks
-- [ ] **DAEMON-07**: System tray icon provides quick access and background operation when main window is closed
+- [x] **DAEMON-07**: System tray icon provides quick access and background operation when main window is closed
 
 ### Communication Channels
 
 - [x] **CHAN-01**: Slack channel adapter receives and sends messages via @slack/web-api polling
 - [x] **CHAN-02**: WhatsApp channel adapter receives and sends messages via Baileys
-- [ ] **CHAN-03**: Channel configuration UI allows selecting which channels/conversations to monitor
+- [x] **CHAN-03**: Channel configuration UI allows selecting which channels/conversations to monitor
 - [x] **CHAN-04**: Thread-to-session mapping creates persistent sessions per channel conversation
 - [x] **CHAN-05**: Mention/trigger pattern activates agent response (configurable per channel)
-- [ ] **CHAN-06**: Channel sessions appear alongside direct sessions in unified session view
-- [ ] **CHAN-07**: Channel sessions have MCP tools attached for contextual assistance
+- [x] **CHAN-06**: Channel sessions appear alongside direct sessions in unified session view
+- [x] **CHAN-07**: Channel sessions have MCP tools attached for contextual assistance
 
 ### Plugin System
 

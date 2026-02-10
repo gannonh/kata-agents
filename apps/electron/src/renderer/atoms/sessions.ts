@@ -66,6 +66,12 @@ export interface SessionMeta {
   createdAt?: number
   /** Total number of messages in this session */
   messageCount?: number
+  /** Channel origin for daemon-created sessions */
+  channel?: {
+    adapter: string
+    slug: string
+    displayName?: string
+  }
 }
 
 /**
@@ -118,6 +124,7 @@ export function extractSessionMeta(session: Session): SessionMeta {
     model: session.model,
     createdAt: session.createdAt,
     tokenUsage: session.tokenUsage,
+    channel: session.channel,
   }
 }
 

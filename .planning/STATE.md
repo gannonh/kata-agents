@@ -12,13 +12,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 13 — Plugin Lifecycle and Task Scheduler (complete)
-**Plan:** 03 of 3 (all complete)
-**Status:** Phase complete
-**Last activity:** 2026-02-09 — Completed 13-03-PLAN.md
+**Phase:** 16 — Channel Creation UI and Config Delivery (not planned)
+**Plan:** None yet
+**Status:** In progress
 
 ```
-Progress: [██████████] 100% (10 of 10 plans complete across 5 phases)
+Progress: [██████████████░░░░░░░░░░] 67% (14 of 14 plans complete across 6 of 8 phases; 2 phases unplanned)
 ```
 
 ---
@@ -29,6 +28,7 @@ Progress: [██████████] 100% (10 of 10 plans complete across 
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
+- v0.7.0: 20 requirements in 8 phases (14 plans so far)
 
 ---
 
@@ -70,6 +70,28 @@ See PROJECT.md Key Decisions table for full history.
 - Shutdown order: TaskScheduler, PluginManager, ChannelRunner, MessageQueue
 - No ChannelRunner API changes needed; existing adapterFactory parameter reused
 
+**Phase 14 Plan 01 decisions:**
+- DaemonManagerState type duplicated inline in shared/types.ts (portable, no cross-boundary import from daemon-manager.ts)
+- TrayManager uses nativeImage template on macOS only; regular icon on other platforms
+- window-all-closed keeps app alive when daemon is running on all platforms (not just macOS)
+
+**Phase 14 Plan 02 decisions:**
+- ChannelSettingsPage uses inline toggle rather than SettingsToggle for row layout with adapter icon
+- Channel badge uses adapter-specific Lucide icons (Hash/MessageCircle/Radio)
+- Daemon state subscription as standalone useEffect in AppShell for lifecycle isolation
+- Channel IPC handlers use synchronous readFileSync/writeFileSync consistent with existing patterns
+
+**Phase 15 Plan 01 decisions:**
+- Channel credentials use `channel_credential::{workspaceId}::{channelSlug}` key format, parallel to source credentials
+- ChannelRunner resolves tokens from channelSlug (preferred) falling back to sourceSlug (legacy)
+
+### Roadmap Evolution
+
+- Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
+  - Phase 15: Channel credential storage + session channel attribution (Gaps 1, 4)
+  - Phase 16: Channel creation UI + daemon config delivery (Gaps 2, 3)
+  - Phase 17: End-to-end message processing (Gap 5)
+
 ### Active Todos
 
 None.
@@ -94,12 +116,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-09
-**Stopped at:** Completed 13-03-PLAN.md (Daemon wiring for PluginManager and TaskScheduler)
+**Last session:** 2026-02-10
+**Stopped at:** Completed Phase 15 (channel credentials and session attribution)
 **Resume file:** None
 
-**Next action:** v0.7.0 milestone complete. Prepare release.
+**Next action:** Plan Phase 16 (channel creation UI and config delivery).
 
 ---
 
-_Last updated: 2026-02-09 after 13-03 plan complete (phase 13 complete, milestone complete)_
+_Last updated: 2026-02-10 after Phase 15 complete_

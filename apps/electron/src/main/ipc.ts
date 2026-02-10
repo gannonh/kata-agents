@@ -19,6 +19,7 @@ import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
+import type { ChannelConfig } from '@craft-agent/shared/channels'
 import { getGitStatus, getPrStatus } from '@craft-agent/shared/git'
 import { GitWatcher } from './lib/git-watcher'
 import { MarkItDown } from 'markitdown-js'
@@ -43,6 +44,11 @@ function sanitizeFilename(name: string): string {
     .slice(0, 200)
     // Fallback if name is empty after sanitization
     || 'unnamed'
+}
+
+/** Validate a slug contains only safe filesystem characters */
+function isValidSlug(slug: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(slug)
 }
 
 /**
@@ -2558,6 +2564,75 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   ipcMain.handle(IPC_CHANNELS.DAEMON_STATUS, async () => {
     if (!daemonManager) return 'stopped'
     return daemonManager.getState()
+  })
+
+  // ============================================================
+  // Channel Configuration (workspace-scoped)
+  // ============================================================
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_GET, async (_event, workspaceId: string) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelsDir = join(rootPath, 'channels')
+    if (!existsSync(channelsDir)) return []
+
+    const configs: ChannelConfig[] = []
+    try {
+      const slugs = await readdir(channelsDir)
+      for (const slug of slugs) {
+        if (!isValidSlug(slug)) continue
+        const configPath = join(channelsDir, slug, 'config.json')
+        if (existsSync(configPath)) {
+          try {
+            const raw = readFileSync(configPath, 'utf-8')
+            configs.push(JSON.parse(raw))
+          } catch (err) {
+            ipcLog.warn(`[channels:get] Skipping malformed config for "${slug}":`, err)
+          }
+        }
+      }
+    } catch (err) {
+      ipcLog.error('[channels:get] Failed to read channels directory:', err)
+    }
+    return configs
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_UPDATE, async (_event, workspaceId: string, config: ChannelConfig) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    if (!isValidSlug(config.slug)) throw new Error(`Invalid channel slug: ${config.slug}`)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelDir = join(rootPath, 'channels', config.slug)
+    mkdirSync(channelDir, { recursive: true })
+    writeFileSync(join(channelDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8')
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNELS_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
+    const workspace = getWorkspaceOrThrow(workspaceId)
+    if (!isValidSlug(channelSlug)) throw new Error(`Invalid channel slug: ${channelSlug}`)
+    const rootPath = workspace.rootPath.replace(/^~/, homedir())
+    const channelDir = join(rootPath, 'channels', channelSlug)
+    if (existsSync(channelDir)) {
+      await rm(channelDir, { recursive: true, force: true })
+    }
+  })
+
+  // ============================================================
+  // Channel Credentials (workspace-scoped)
+  // ============================================================
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_SET, async (_event, workspaceId: string, channelSlug: string, value: string) => {
+    const credManager = getCredentialManager()
+    await credManager.setChannelCredential(workspaceId, channelSlug, value)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, async (_event, workspaceId: string, channelSlug: string) => {
+    const credManager = getCredentialManager()
+    return credManager.deleteChannelCredential(workspaceId, channelSlug)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_CREDENTIAL_EXISTS, async (_event, workspaceId: string, channelSlug: string) => {
+    const credManager = getCredentialManager()
+    return credManager.hasChannelCredential(workspaceId, channelSlug)
   })
 
 }

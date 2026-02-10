@@ -74,6 +74,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
 import { DaemonManager } from './daemon-manager'
+import { TrayManager } from './tray-manager'
 import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -83,6 +84,7 @@ import { initializeDocs } from '@craft-agent/shared/docs'
 import { ensureDefaultPermissions } from '@craft-agent/shared/agent/permissions-config'
 import { ensureToolIcons } from '@craft-agent/shared/config'
 import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
+import { IPC_CHANNELS } from '../shared/types'
 import { handleDeepLink } from './deep-link'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
@@ -111,6 +113,7 @@ const DEEPLINK_SCHEME = process.env.KATA_DEEPLINK_SCHEME || process.env.CRAFT_DE
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let daemonManager: DaemonManager | null = null
+let trayManager: TrayManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -321,10 +324,59 @@ app.whenReady().then(async () => {
       'bun',
       daemonScript,
       configDir,
-      (event) => mainLog.info('[daemon] event:', event.type),
-      (state) => mainLog.info('[daemon] state:', state),
+      (event) => {
+        mainLog.info('[daemon] event:', event.type)
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
+        }
+      },
+      (state) => {
+        mainLog.info('[daemon] state:', state)
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_STATE_CHANGED, state)
+        }
+        trayManager?.updateState(state)
+      },
     )
     logDiagnostic('DaemonManager created')
+
+    // Initialize system tray icon (provides background access when windows are closed)
+    logDiagnostic('Creating TrayManager...')
+    const resourcesDir = join(__dirname, '../resources')
+    trayManager = new TrayManager(
+      resourcesDir,
+      () => {
+        // Show window callback: focus existing or create new
+        if (windowManager?.hasWindows()) {
+          const windows = windowManager.getAllWindows()
+          if (windows.length > 0) {
+            const win = windows[0].window
+            if (win.isMinimized()) win.restore()
+            win.show()
+            win.focus()
+          }
+        } else if (windowManager) {
+          const workspaces = getWorkspaces()
+          if (workspaces.length > 0) {
+            windowManager.createWindow({ workspaceId: workspaces[0].id })
+          }
+        }
+      },
+      async () => {
+        // Start daemon callback
+        if (daemonManager) {
+          await daemonManager.start()
+        }
+      },
+      async () => {
+        // Stop daemon callback
+        if (daemonManager) {
+          await daemonManager.stop()
+        }
+      },
+    )
+    trayManager.create()
+    logDiagnostic('TrayManager created')
 
     // Initialize notification service
     logDiagnostic('Initializing notification service...')
@@ -407,10 +459,12 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  // On macOS, apps typically stay active until explicitly quit
-  if (process.platform !== 'darwin') {
-    app.quit()
+  // Keep app alive when daemon is running (tray provides access)
+  const daemonRunning = daemonManager?.getState() === 'running'
+  if (process.platform === 'darwin' || daemonRunning) {
+    return // Stay alive: macOS convention or daemon needs to keep running
   }
+  app.quit()
 })
 
 // Track if we're in the process of quitting (to avoid re-entry)
@@ -460,6 +514,12 @@ app.on('before-quit', async (event) => {
       } catch (error) {
         mainLog.error('Failed to stop daemon:', error)
       }
+    }
+
+    // Destroy tray icon
+    if (trayManager) {
+      trayManager.destroy()
+      trayManager = null
     }
 
     // If update is in progress, let electron-updater handle the quit flow

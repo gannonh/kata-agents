@@ -12,6 +12,7 @@ export {
   AppSettingsPage,
   AppearanceSettingsPage,
   WorkspaceSettingsPage,
+  ChannelSettingsPage,
   PermissionsSettingsPage,
   LabelsSettingsPage,
   ShortcutsPage,

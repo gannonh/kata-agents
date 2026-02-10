@@ -417,6 +417,41 @@ const api: ElectronAPI = {
   getPrStatus: (dirPath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PR_STATUS, dirPath),
 
+  // Daemon management
+  getDaemonStatus: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STATUS),
+  startDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_START),
+  stopDaemon: () => ipcRenderer.invoke(IPC_CHANNELS.DAEMON_STOP),
+
+  // Channel configuration
+  getChannels: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_GET, workspaceId),
+  updateChannel: (workspaceId: string, config: import('@craft-agent/shared/channels').ChannelConfig) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_UPDATE, workspaceId, config),
+  deleteChannel: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNELS_DELETE, workspaceId, channelSlug),
+
+  // Channel credentials
+  setChannelCredential: (workspaceId: string, channelSlug: string, value: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_SET, workspaceId, channelSlug, value),
+  deleteChannelCredential: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_DELETE, workspaceId, channelSlug),
+  hasChannelCredential: (workspaceId: string, channelSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREDENTIAL_EXISTS, workspaceId, channelSlug),
+  onDaemonStateChanged: (callback: (state: import('../shared/types').DaemonManagerState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/types').DaemonManagerState) => {
+      callback(state)
+    }
+    ipcRenderer.on(IPC_CHANNELS.DAEMON_STATE_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DAEMON_STATE_CHANGED, handler)
+  },
+  onDaemonEvent: (callback: (event: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, daemonEvent: any) => {
+      callback(daemonEvent)
+    }
+    ipcRenderer.on(IPC_CHANNELS.DAEMON_EVENT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DAEMON_EVENT, handler)
+  },
+
   // Git status change listener (for real-time updates)
   onGitStatusChanged: (callback: (workspaceDir: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, workspaceDir: string) => {
