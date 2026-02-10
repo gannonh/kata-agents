@@ -162,6 +162,7 @@ export async function createSession(
     permissionMode?: SessionConfig['permissionMode'];
     enabledSourceSlugs?: string[];
     model?: string;
+    channel?: SessionConfig['channel'];
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
@@ -188,6 +189,7 @@ export async function createSession(
     permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
     model: options?.model,
+    channel: options?.channel,
   };
 
   // Save empty session
@@ -398,6 +400,8 @@ function headerToMetadata(header: SessionHeader, workspaceRootPath: string): Ses
       lastFinalMessageId: header.lastFinalMessageId,
       // Explicit unread flag - single source of truth for NEW badge (state machine approach)
       hasUnread: header.hasUnread,
+      // Channel origin for daemon-created sessions
+      channel: header.channel,
     };
   } catch {
     return null;
