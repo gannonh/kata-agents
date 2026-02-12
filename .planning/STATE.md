@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 17 — End-to-End Message Processing
-**Plan:** 02 of 2 complete
-**Status:** Phase complete
-**Last activity:** 2026-02-10 - Completed 17-02-PLAN.md
+**Plan:** 04 of 4 complete
+**Status:** Phase complete (gap closure)
+**Last activity:** 2026-02-12 - Completed 17-04-PLAN.md
 
 ```
-Progress: [████████████████████████] 100% (18 of 18 plans complete across 8 phases)
+Progress: [████████████████████████] 100% (20 of 20 plans complete across 8 phases)
 ```
 
 ---
@@ -29,7 +29,7 @@ Progress: [███████████████████████
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (18 plans)
+- v0.7.0: 20 requirements in 8 phases (20 plans)
 
 ---
 
@@ -136,12 +136,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-10
-**Stopped at:** Completed 17-02-PLAN.md (main process message handler and session routing)
+**Last session:** 2026-02-12
+**Stopped at:** Completed 17-04-PLAN.md (headless message persistence gap closure)
 **Resume file:** None
 
-**Next action:** All v0.7.0 plans complete. Ready for integration testing and release preparation.
+**Next action:** All v0.7.0 plans complete (including gap closure). Ready for integration testing and release preparation.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 17 Plan 02 complete_
+_Last updated: 2026-02-12 after Phase 17 Plan 04 complete_
