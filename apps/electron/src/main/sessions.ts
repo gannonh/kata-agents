@@ -2438,6 +2438,16 @@ export class SessionManager {
       agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
     }
 
+    // Persist user message (mirrors sendMessage pattern)
+    const userMessage: Message = {
+      id: generateMessageId(),
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+    }
+    managed.messages.push(userMessage)
+    managed.lastMessageAt = Date.now()
+
     // Collect final assistant text from the chat generator
     let responseText = ''
     const chatGenerator = agent.chat(content)
@@ -2449,7 +2459,20 @@ export class SessionManager {
       }
     }
 
+    // Persist assistant response message
+    if (responseText) {
+      const assistantMessage: Message = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: responseText,
+        timestamp: Date.now(),
+      }
+      managed.messages.push(assistantMessage)
+    }
+
     // Persist session state after headless execution
+    // Messages array now includes user + assistant messages, so
+    // messageCount will be correctly computed in the JSONL header
     this.persistSession(managed)
 
     sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
