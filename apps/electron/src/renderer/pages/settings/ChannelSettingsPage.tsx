@@ -118,15 +118,42 @@ export default function ChannelSettingsPage() {
       const updated = { ...channel, enabled };
       try {
         await window.electronAPI.updateChannel(activeWorkspaceId, updated);
-        setChannels((prev) =>
-          prev.map((c) => (c.slug === channel.slug ? updated : c)),
-        );
+        setChannels((prev) => {
+          const next = prev.map((c) =>
+            c.slug === channel.slug ? updated : c,
+          );
+          // Auto-start daemon when first channel enabled
+          if (enabled && daemonState === "stopped") {
+            const anyEnabled = next.some((c) => c.enabled);
+            if (anyEnabled) {
+              window.electronAPI.startDaemon().catch((err) =>
+                console.error(
+                  "[ChannelSettings] Auto-start daemon failed:",
+                  err,
+                ),
+              );
+            }
+          }
+          // Auto-stop daemon when last channel disabled
+          if (!enabled && daemonState === "running") {
+            const anyEnabled = next.some((c) => c.enabled);
+            if (!anyEnabled) {
+              window.electronAPI.stopDaemon().catch((err) =>
+                console.error(
+                  "[ChannelSettings] Auto-stop daemon failed:",
+                  err,
+                ),
+              );
+            }
+          }
+          return next;
+        });
       } catch (err) {
         console.error("[ChannelSettings] Failed to update channel:", err);
         toast.error("Failed to update channel");
       }
     },
-    [activeWorkspaceId],
+    [activeWorkspaceId, daemonState],
   );
 
   const handleDeleteChannel = useCallback(
