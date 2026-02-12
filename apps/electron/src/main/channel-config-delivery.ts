@@ -119,11 +119,13 @@ export async function deliverChannelConfigs(
 
     if (configs.length > 0) {
       const adapterTypes = new Set(configs.map((c) => c.adapter))
+      // Map adapter types to plugin IDs (slack → kata-slack, whatsapp → kata-whatsapp)
+      const pluginIds = Array.from(adapterTypes).map(type => `kata-${type}`)
       workspacePayloads.push({
         workspaceId: workspace.id,
         configs,
         tokens,
-        enabledPlugins: [...adapterTypes],
+        enabledPlugins: pluginIds,
       })
     }
   }

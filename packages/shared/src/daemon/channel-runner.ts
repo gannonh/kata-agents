@@ -126,10 +126,12 @@ export class ChannelRunner {
           startedCount++;
           this.log(`Started adapter: ${config.slug} (${config.adapter})`);
         } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          this.log(`Failed to start adapter ${config.slug}: ${errorMsg}`);
           this.emit({
             type: 'plugin_error',
             pluginId: config.slug,
-            error: err instanceof Error ? err.message : String(err),
+            error: errorMsg,
           });
         }
       }

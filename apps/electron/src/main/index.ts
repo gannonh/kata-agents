@@ -328,6 +328,9 @@ app.whenReady().then(async () => {
       configDir,
       (event) => {
         mainLog.info('[daemon] event:', event.type)
+        if (event.type === 'plugin_error') {
+          mainLog.error(`[daemon] Plugin error - ${event.pluginId}: ${event.error}`)
+        }
 
         // Handle process_message internally (daemon -> main -> daemon round-trip)
         if (event.type === 'process_message' && sessionManager && daemonManager) {

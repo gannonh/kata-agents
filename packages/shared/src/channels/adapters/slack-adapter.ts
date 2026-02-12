@@ -54,7 +54,12 @@ export class SlackChannelAdapter implements ChannelAdapter {
     this._id = config.slug;
 
     // Resolve bot identity to filter self-messages
-    const authResult = await this.client.auth.test();
+    let authResult;
+    try {
+      authResult = await this.client.auth.test();
+    } catch (err) {
+      throw new Error(`Slack auth.test() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     this.botUserId = (authResult.user_id as string) ?? null;
     this.botId = (authResult.bot_id as string) ?? null;
 
