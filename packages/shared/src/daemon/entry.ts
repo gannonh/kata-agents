@@ -75,13 +75,16 @@ async function main(): Promise<void> {
 
   emit({ type: 'status_changed', status: 'running' });
 
-  // Consumer timer: dequeue inbound messages and emit process_message events
   const CONSUMER_INTERVAL_MS = 1000;
   const consumerTimer = setInterval(() => {
-    while (activeProcessing < MAX_CONCURRENT) {
-      const msg = queue.dequeue('inbound');
-      if (!msg) break;
-      emitProcessMessage(msg);
+    try {
+      while (activeProcessing < MAX_CONCURRENT) {
+        const msg = queue.dequeue('inbound');
+        if (!msg) break;
+        emitProcessMessage(msg);
+      }
+    } catch (err) {
+      log(`Consumer loop error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, CONSUMER_INTERVAL_MS);
 
@@ -165,46 +168,50 @@ async function main(): Promise<void> {
         }
         case 'message_processed': {
           activeProcessing = Math.max(0, activeProcessing - 1);
-          if (cmd.success) {
-            queue.markProcessed(cmd.messageId);
-            log(`Message ${cmd.messageId} processed successfully`);
-            // Enqueue outbound response and deliver via adapter
-            if (cmd.response && state.channelRunner) {
-              const originalRow = queue.getDb().query(
-                'SELECT channel_id, payload FROM messages WHERE id = $id',
-              ).get({ $id: cmd.messageId }) as { channel_id: string; payload: string } | null;
-              if (originalRow) {
-                const originalPayload = JSON.parse(originalRow.payload) as {
-                  metadata?: Record<string, unknown>;
-                  replyTo?: { threadId?: string };
-                };
-                const outboundChannelId = (
-                  originalPayload.metadata?.slackChannel ??
-                  originalPayload.metadata?.jid ??
-                  ''
-                ) as string;
-                const threadId = originalPayload.replyTo?.threadId;
-                const outboundMsg: OutboundMessage = {
-                  channelId: outboundChannelId,
-                  content: cmd.response,
-                  threadId,
-                };
-                const outboundId = queue.enqueue('outbound', originalRow.channel_id, outboundMsg);
-                state.channelRunner.deliverOutbound(originalRow.channel_id, outboundMsg)
-                  .then(() => {
-                    queue.markProcessed(outboundId);
-                    emit({ type: 'message_sent', channelId: originalRow.channel_id, messageId: String(outboundId) });
-                  })
-                  .catch((err: unknown) => {
-                    queue.markFailed(outboundId, err instanceof Error ? err.message : String(err));
-                    log(`Outbound delivery failed for message ${outboundId}: ${err}`);
-                  });
-              }
-            }
-          } else {
+
+          if (!cmd.success) {
             queue.markFailed(cmd.messageId, cmd.error ?? 'unknown error');
             log(`Message ${cmd.messageId} processing failed: ${cmd.error}`);
+            break;
           }
+
+          queue.markProcessed(cmd.messageId);
+          log(`Message ${cmd.messageId} processed successfully`);
+
+          if (!cmd.response || !state.channelRunner) break;
+
+          const originalRow = queue.getDb().query(
+            'SELECT channel_id, payload FROM messages WHERE id = $id',
+          ).get({ $id: cmd.messageId }) as { channel_id: string; payload: string } | null;
+
+          if (!originalRow) break;
+
+          const originalPayload = JSON.parse(originalRow.payload) as {
+            metadata?: Record<string, unknown>;
+            replyTo?: { threadId?: string };
+          };
+          const outboundChannelId = (
+            originalPayload.metadata?.slackChannel ??
+            originalPayload.metadata?.jid ??
+            ''
+          ) as string;
+          const outboundMsg: OutboundMessage = {
+            channelId: outboundChannelId,
+            content: cmd.response,
+            threadId: originalPayload.replyTo?.threadId,
+          };
+
+          const outboundId = queue.enqueue('outbound', originalRow.channel_id, outboundMsg);
+          state.channelRunner.deliverOutbound(originalRow.channel_id, outboundMsg)
+            .then(() => {
+              queue.markProcessed(outboundId);
+              emit({ type: 'message_sent', channelId: originalRow.channel_id, messageId: String(outboundId) });
+            })
+            .catch((err: unknown) => {
+              queue.markFailed(outboundId, err instanceof Error ? err.message : String(err));
+              log(`Outbound delivery failed for message ${outboundId}: ${err}`);
+            });
+
           break;
         }
       }

@@ -2417,66 +2417,63 @@ export class SessionManager {
   /**
    * Run agent chat headlessly (no IPC events to renderer).
    * Used by daemon message processing where there is no active UI session.
-   * Returns the final assistant text response.
+   * Returns the final assistant text response, or throws on execution failure.
    */
   async sendMessageHeadless(sessionId: string, content: string): Promise<string> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (managed.isProcessing) throw new Error(`Session ${sessionId} is already processing`)
 
-    const agent = await this.getOrCreateAgent(managed)
+    managed.isProcessing = true
+    try {
+      const agent = await this.getOrCreateAgent(managed)
 
-    // Load sources for context (same as sendMessage but skip renderer events)
-    const workspaceRootPath = managed.workspace.rootPath
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
+      const workspaceRootPath = managed.workspace.rootPath
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
 
-    if (managed.enabledSourceSlugs?.length) {
-      const sources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs)
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      const { mcpServers, apiServers } = await buildServersFromSources(sources, sessionPath)
-      const intendedSlugs = sources.filter(s => s.config.enabled && s.config.isAuthenticated).map(s => s.config.slug)
-      agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-    }
-
-    // Persist user message (mirrors sendMessage pattern)
-    const userMessage: Message = {
-      id: generateMessageId(),
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-    }
-    managed.messages.push(userMessage)
-    managed.lastMessageAt = Date.now()
-
-    // Collect final assistant text from the chat generator
-    let responseText = ''
-    const chatGenerator = agent.chat(content)
-
-    for await (const event of chatGenerator) {
-      // Capture the final assistant text blocks
-      if (event.type === 'text_complete' && event.text) {
-        responseText = event.text
+      if (managed.enabledSourceSlugs?.length) {
+        const sources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs)
+        const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+        const { mcpServers, apiServers } = await buildServersFromSources(sources, sessionPath)
+        const intendedSlugs = sources.filter(s => s.config.enabled && s.config.isAuthenticated).map(s => s.config.slug)
+        agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
       }
-    }
 
-    // Persist assistant response message
-    if (responseText) {
-      const assistantMessage: Message = {
+      const userMessage: Message = {
         id: generateMessageId(),
-        role: 'assistant',
-        content: responseText,
+        role: 'user',
+        content,
         timestamp: Date.now(),
       }
-      managed.messages.push(assistantMessage)
+      managed.messages.push(userMessage)
+      managed.lastMessageAt = Date.now()
+
+      let responseText = ''
+      const chatGenerator = agent.chat(content)
+
+      for await (const event of chatGenerator) {
+        if (event.type === 'text_complete' && event.text) {
+          responseText = event.text
+        }
+      }
+
+      if (responseText) {
+        const assistantMessage: Message = {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: responseText,
+          timestamp: Date.now(),
+        }
+        managed.messages.push(assistantMessage)
+      }
+
+      this.persistSession(managed)
+      sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
+      return responseText
+    } finally {
+      managed.isProcessing = false
     }
-
-    // Persist session state after headless execution
-    // Messages array now includes user + assistant messages, so
-    // messageCount will be correctly computed in the JSONL header
-    this.persistSession(managed)
-
-    sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
-    return responseText
   }
 
   /**

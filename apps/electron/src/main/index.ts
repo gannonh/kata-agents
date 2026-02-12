@@ -321,16 +321,26 @@ app.whenReady().then(async () => {
     // Resolve the adapter type (e.g. "slack") from a channel's config.json on disk.
     // The daemon sends the channel slug (e.g. "slack-kata-agent") as channelId, but
     // the renderer needs the adapter type to look up the correct icon.
+    const adapterTypeCache = new Map<string, string>()
     function resolveAdapterType(workspaceId: string, channelSlug: string): string {
+      const cacheKey = `${workspaceId}:${channelSlug}`
+      const cached = adapterTypeCache.get(cacheKey)
+      if (cached) return cached
+
       try {
         const workspace = getWorkspaceByNameOrId(workspaceId)
         if (!workspace) return channelSlug
+
         const rootPath = workspace.rootPath.replace(/^~/, homedir())
         const configPath = join(rootPath, 'channels', channelSlug, 'config.json')
         if (!existsSync(configPath)) return channelSlug
+
         const config = JSON.parse(readFileSync(configPath, 'utf-8'))
-        return config.adapter || channelSlug
-      } catch {
+        const adapterType = config.adapter || channelSlug
+        adapterTypeCache.set(cacheKey, adapterType)
+        return adapterType
+      } catch (err) {
+        mainLog.error(`[resolveAdapterType] Failed for ${channelSlug}:`, err)
         return channelSlug
       }
     }
