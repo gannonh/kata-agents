@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 18 — Channel Fit and Finish
-**Plan:** 0 of 3 complete
-**Status:** Planned, ready for execution
-**Last activity:** 2026-02-13 - Phase 18 planned (3 plans)
+**Plan:** 1 of 3 complete
+**Status:** In progress
+**Last activity:** 2026-02-13 - Phase 18 Plan 01 complete (markdown conversion, channel context, reset)
 
 ```
-Progress: [████████████████████░░░░] 87% (20 of 23 plans complete across 9 phases)
+Progress: [█████████████████████░░░] 91% (21 of 23 plans complete across 9 phases)
 ```
 
 ---
@@ -138,11 +138,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-13
-**Stopped at:** Phase 18 planned (3 plans created)
+**Stopped at:** Phase 18 Plan 01 complete
 **Resume file:** None
 
-**Next action:** Execute Phase 18 Plan 01 (markdown conversion, channel context, conversation reset, message truncation).
+**Next action:** Execute Phase 18 Plan 02.
 
 ---
 
-_Last updated: 2026-02-13 after Phase 18 planning complete_
+_Last updated: 2026-02-13 after Phase 18 Plan 01 complete_
