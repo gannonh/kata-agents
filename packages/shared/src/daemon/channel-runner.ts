@@ -15,6 +15,19 @@ import type { WhatsAppChannelAdapter } from '../channels/adapters/whatsapp-adapt
 import type { MessageQueue } from './message-queue.ts';
 import type { DaemonEvent } from './types.ts';
 
+/** Patterns that trigger a conversation reset (new session key) */
+const RESET_PATTERNS = [
+  /^\/reset$/i,
+  /^\/new$/i,
+  /^reset\s+conversation$/i,
+  /^start\s+over$/i,
+];
+
+function isResetCommand(content: string): boolean {
+  const trimmed = content.trim();
+  return RESET_PATTERNS.some(p => p.test(trimmed));
+}
+
 /** Factory function that creates an adapter instance for a given type identifier */
 export type AdapterFactory = (type: string) => ChannelAdapter | null;
 
@@ -37,6 +50,7 @@ interface RunningAdapter {
 export class ChannelRunner {
   private adapters: Map<string, RunningAdapter> = new Map();
   private triggerMatchers: Map<string, TriggerMatcher> = new Map();
+  private resetCounters: Map<string, number> = new Map();
   private adapterFactory: AdapterFactory;
 
   constructor(
@@ -148,14 +162,21 @@ export class ChannelRunner {
       return;
     }
 
-    // Resolve session key
     const channelSourceId = msg.channelId;
-    const sessionKey = resolveSessionKey(
-      slug,
-      workspaceId,
-      msg.replyTo?.threadId,
-      channelSourceId,
-    );
+    const threadKey = msg.replyTo?.threadId ?? channelSourceId;
+
+    // Detect conversation reset
+    if (isResetCommand(msg.content)) {
+      const baseKey = `${slug}:${workspaceId}:${threadKey}`;
+      const count = (this.resetCounters.get(baseKey) ?? 0) + 1;
+      this.resetCounters.set(baseKey, count);
+      this.log(`Reset command detected for ${slug}, counter=${count}`);
+      return; // Do not enqueue the reset keyword itself
+    }
+
+    // Resolve session key (with reset counter for fresh sessions after reset)
+    const resetCount = this.resetCounters.get(`${slug}:${workspaceId}:${threadKey}`) ?? 0;
+    const sessionKey = resolveSessionKey(slug, workspaceId, msg.replyTo?.threadId, channelSourceId, resetCount);
     msg.metadata.sessionKey = sessionKey;
     msg.metadata.workspaceId = workspaceId;
 
@@ -193,5 +214,6 @@ export class ChannelRunner {
     }
     this.adapters.clear();
     this.triggerMatchers.clear();
+    this.resetCounters.clear();
   }
 }

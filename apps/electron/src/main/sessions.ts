@@ -1540,6 +1540,7 @@ export class SessionManager {
           enabled: true,
           logFilePath: getLogFilePath(),
         } : undefined,
+        channel: managed.channel ? { adapter: managed.channel.adapter, slug: managed.channel.slug } : undefined,
       })
       sessionLog.info(`Created agent for session ${managed.id}${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
