@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 17 — End-to-End Message Processing
-**Plan:** 04 of 4 complete
-**Status:** Phase complete (gap closure)
-**Last activity:** 2026-02-12 - Completed 17-03-PLAN.md and 17-04-PLAN.md
+**Phase:** 18 — Channel Fit and Finish
+**Plan:** 0 of 3 complete
+**Status:** Planned, ready for execution
+**Last activity:** 2026-02-13 - Phase 18 planned (3 plans)
 
 ```
-Progress: [████████████████████████] 100% (20 of 20 plans complete across 8 phases)
+Progress: [████████████████████░░░░] 87% (20 of 23 plans complete across 9 phases)
 ```
 
 ---
@@ -29,7 +29,7 @@ Progress: [███████████████████████
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (20 plans)
+- v0.7.0: 20 requirements in 9 phases (23 plans)
 
 ---
 
@@ -111,6 +111,7 @@ See PROJECT.md Key Decisions table for full history.
   - Phase 15: Channel credential storage + session channel attribution (Gaps 1, 4)
   - Phase 16: Channel creation UI + daemon config delivery (Gaps 2, 3)
   - Phase 17: End-to-end message processing (Gap 5)
+- Phase 18 added (2026-02-13): Channel fit and finish (markdown stripping, channel awareness, chat lifecycle management, end-user setup docs)
 
 ### Active Todos
 
@@ -136,12 +137,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-12
-**Stopped at:** Completed 17-03-PLAN.md and 17-04-PLAN.md (gap closure)
+**Last session:** 2026-02-13
+**Stopped at:** Phase 18 planned (3 plans created)
 **Resume file:** None
 
-**Next action:** All v0.7.0 plans complete (including gap closure). Ready for integration testing and release preparation.
+**Next action:** Execute Phase 18 Plan 01 (markdown conversion, channel context, conversation reset, message truncation).
 
 ---
 
-_Last updated: 2026-02-12 after Phase 17 Plans 03 and 04 complete_
+_Last updated: 2026-02-13 after Phase 18 planning complete_
