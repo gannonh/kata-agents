@@ -13,12 +13,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Milestone:** v0.7.0 Always-On Assistant
 **Phase:** 18 — Channel Fit and Finish
-**Plan:** 1 of 3 complete
+**Plan:** 2 of 3 complete
 **Status:** In progress
-**Last activity:** 2026-02-13 - Phase 18 Plan 01 complete (markdown conversion, channel context, reset)
+**Last activity:** 2026-02-13 - Phase 18 Plan 02 complete (Slack Socket Mode for slash commands)
 
 ```
-Progress: [█████████████████████░░░] 91% (21 of 23 plans complete across 9 phases)
+Progress: [██████████████████████░░] 96% (22 of 23 plans complete across 9 phases)
 ```
 
 ---
@@ -105,6 +105,12 @@ See PROJECT.md Key Decisions table for full history.
 - persistSession() for channel/name persistence (updateSessionMetadata doesn't support channel field)
 - process_message events excluded from renderer broadcast
 
+**Phase 18 Plan 02 decisions:**
+- App-level token stored as separate channel credential with slug `{channel}-app-token`
+- SocketModeClient created in start() after polling setup (additive, non-breaking)
+- Slash command body typed as Record<string, string> with fallback defaults for optional fields
+- socketConnected flag tracks Socket Mode health independently from poll health
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -138,11 +144,11 @@ None.
 ## Session Continuity
 
 **Last session:** 2026-02-13
-**Stopped at:** Phase 18 Plan 01 complete
+**Stopped at:** Phase 18 Plan 02 complete
 **Resume file:** None
 
-**Next action:** Execute Phase 18 Plan 02.
+**Next action:** Execute Phase 18 Plan 03.
 
 ---
 
-_Last updated: 2026-02-13 after Phase 18 Plan 01 complete_
+_Last updated: 2026-02-13 after Phase 18 Plan 02 complete_
