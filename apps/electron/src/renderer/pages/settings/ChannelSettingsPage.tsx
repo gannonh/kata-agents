@@ -59,6 +59,7 @@ interface ChannelFormState {
   adapter: "slack" | "whatsapp" | "";
   name: string;
   credential: string;
+  appToken: string;
   channelIds: string;
   triggerPatterns: string;
   pollIntervalMs: number;
@@ -68,6 +69,7 @@ const initialFormState: ChannelFormState = {
   adapter: "",
   name: "",
   credential: "",
+  appToken: "",
   channelIds: "",
   triggerPatterns: "",
   pollIntervalMs: 10000,
@@ -235,25 +237,42 @@ export default function ChannelSettingsPage() {
         ? form.triggerPatterns.split(",").map((s) => s.trim()).filter(Boolean)
         : undefined;
 
+      const appTokenSlug =
+        form.adapter === "slack" && form.appToken.trim()
+          ? `${slug}-app-token`
+          : undefined;
+
       const config: ChannelConfig = {
         slug,
         enabled: true,
         adapter: form.adapter,
         pollIntervalMs: pollInterval,
-        credentials: { channelSlug: slug },
+        credentials: {
+          channelSlug: slug,
+          ...(appTokenSlug ? { appTokenSlug } : {}),
+        },
         filter: {
           channelIds: channelIdList,
           triggerPatterns: triggerPatternList,
         },
       };
 
-      // Config first, then credential (each IPC mutation triggers debounced daemon delivery)
+      // Config first, then credentials (each IPC mutation triggers debounced daemon delivery)
       await window.electronAPI.updateChannel(activeWorkspaceId, config);
       await window.electronAPI.setChannelCredential(
         activeWorkspaceId,
         slug,
         form.credential,
       );
+
+      // Store app-level token as a separate channel credential
+      if (appTokenSlug && form.appToken.trim()) {
+        await window.electronAPI.setChannelCredential(
+          activeWorkspaceId,
+          appTokenSlug,
+          form.appToken.trim(),
+        );
+      }
 
       setChannels((prev) => [...prev, config]);
       setShowForm(false);
@@ -430,6 +449,17 @@ export default function ChannelSettingsPage() {
                               }))
                             }
                             placeholder="xoxb-..."
+                          />
+                          <SettingsSecretInput
+                            label="App-Level Token (optional)"
+                            value={form.appToken}
+                            onChange={(value) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                appToken: value,
+                              }))
+                            }
+                            placeholder="xapp-..."
                           />
                           <SettingsInput
                             label="Channel IDs"

@@ -99,10 +99,17 @@ export class ChannelRunner {
               });
               continue;
             }
-            (adapter as SlackChannelAdapter).configure(token, {
-              get: (aid, cid) => this.queue.getPollingState(aid, cid),
-              set: (aid, cid, ts) => this.queue.setPollingState(aid, cid, ts),
-            });
+            const appToken = config.credentials.appTokenSlug
+              ? wsConfig.tokens.get(config.credentials.appTokenSlug) ?? undefined
+              : undefined;
+            (adapter as SlackChannelAdapter).configure(
+              token,
+              {
+                get: (aid, cid) => this.queue.getPollingState(aid, cid),
+                set: (aid, cid, ts) => this.queue.setPollingState(aid, cid, ts),
+              },
+              appToken,
+            );
             break;
           }
           case 'whatsapp': {

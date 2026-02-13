@@ -114,6 +114,16 @@ export async function deliverChannelConfigs(
         }
       }
 
+      // Resolve app-level token for Socket Mode (slash commands)
+      if (config.credentials.appTokenSlug) {
+        const appToken = await credManager.getChannelCredential(workspace.id, config.credentials.appTokenSlug)
+        if (appToken) {
+          tokens[config.credentials.appTokenSlug] = appToken
+        } else {
+          console.warn(`[channel-config-delivery] Missing app-level token for channel "${slug}" (appTokenSlug: ${config.credentials.appTokenSlug})`)
+        }
+      }
+
       configs.push(config)
     }
 
