@@ -7,7 +7,7 @@
  */
 
 import { WebClient } from '@slack/web-api';
-import type { ChannelAdapter, ChannelConfig, ChannelMessage } from '../types.ts';
+import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../types.ts';
 
 /** Callbacks for persisting polling state across adapter restarts */
 export interface PollingStateFns {
@@ -54,7 +54,12 @@ export class SlackChannelAdapter implements ChannelAdapter {
     this._id = config.slug;
 
     // Resolve bot identity to filter self-messages
-    const authResult = await this.client.auth.test();
+    let authResult;
+    try {
+      authResult = await this.client.auth.test();
+    } catch (err) {
+      throw new Error(`Slack auth.test() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     this.botUserId = (authResult.user_id as string) ?? null;
     this.botId = (authResult.bot_id as string) ?? null;
 
@@ -147,6 +152,15 @@ export class SlackChannelAdapter implements ChannelAdapter {
             }
           : undefined,
     };
+  }
+
+  async send(message: OutboundMessage): Promise<void> {
+    if (!this.client) throw new Error('SlackChannelAdapter not configured');
+    await this.client.chat.postMessage({
+      channel: message.channelId,
+      text: message.content,
+      thread_ts: message.threadId,
+    });
   }
 
   async stop(): Promise<void> {

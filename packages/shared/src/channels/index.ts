@@ -9,6 +9,7 @@ export type {
   ChannelMessage,
   ChannelFilter,
   ChannelConfig,
+  OutboundMessage,
 } from './types.ts';
 
 export { TriggerMatcher } from './trigger-matcher.ts';

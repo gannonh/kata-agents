@@ -12,12 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 16 — Channel Creation UI and Config Delivery (complete)
-**Plan:** 02 of 2 complete
-**Status:** Phase 16 complete
+**Phase:** 17 — End-to-End Message Processing
+**Plan:** 04 of 4 complete
+**Status:** Phase complete (gap closure)
+**Last activity:** 2026-02-12 - Completed 17-03-PLAN.md and 17-04-PLAN.md
 
 ```
-Progress: [█████████████████████░░░] 88% (16 of 16 plans complete across 7 of 8 phases; 1 phase unplanned)
+Progress: [████████████████████████] 100% (20 of 20 plans complete across 8 phases)
 ```
 
 ---
@@ -28,7 +29,7 @@ Progress: [█████████████████████░░
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 8 phases (16 plans so far)
+- v0.7.0: 20 requirements in 8 phases (20 plans)
 
 ---
 
@@ -94,6 +95,16 @@ See PROJECT.md Key Decisions table for full history.
 **Phase 16 Plan 02 decisions:**
 - No new architectural decisions; follows existing inline form patterns from Phase 14
 
+**Phase 17 Plan 01 decisions:**
+- Tasks 2 (consumer loop) and 3 (deliverOutbound) committed together due to compile-time dependency
+- workspaceId added to message metadata in ChannelRunner.handleMessage for consumer extraction
+
+**Phase 17 Plan 02 decisions:**
+- Used text_complete event for response capture (matches AgentEvent discriminated union)
+- Used storedToMessage() for session loading (existing pattern)
+- persistSession() for channel/name persistence (updateSessionMetadata doesn't support channel field)
+- process_message events excluded from renderer broadcast
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -125,12 +136,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-10
-**Stopped at:** Completed Phase 16 Plan 02 (channel creation form)
+**Last session:** 2026-02-12
+**Stopped at:** Completed 17-03-PLAN.md and 17-04-PLAN.md (gap closure)
 **Resume file:** None
 
-**Next action:** Plan Phase 17 (end-to-end message processing), then execute.
+**Next action:** All v0.7.0 plans complete (including gap closure). Ready for integration testing and release preparation.
 
 ---
 
-_Last updated: 2026-02-10 after Phase 16 complete_
+_Last updated: 2026-02-12 after Phase 17 Plans 03 and 04 complete_

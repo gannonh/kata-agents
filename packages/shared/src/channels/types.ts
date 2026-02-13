@@ -37,6 +37,9 @@ export interface ChannelAdapter {
 
   /** Most recent error message, or null if healthy */
   getLastError(): string | null;
+
+  /** Send an outbound message through this adapter (optional) */
+  send?(message: OutboundMessage): Promise<void>;
 }
 
 /**
@@ -110,4 +113,21 @@ export interface ChannelConfig {
 
   /** Optional filter to restrict which messages are processed */
   filter?: ChannelFilter;
+}
+
+/**
+ * A message to be sent through a channel adapter.
+ */
+export interface OutboundMessage {
+  /** Target channel identifier within the platform (e.g., Slack channel ID, WhatsApp JID) */
+  channelId: string;
+
+  /** Message body text */
+  content: string;
+
+  /** Thread identifier for threaded replies */
+  threadId?: string;
+
+  /** Adapter-specific metadata */
+  metadata?: Record<string, unknown>;
 }
