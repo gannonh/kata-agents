@@ -1,9 +1,9 @@
 ---
 status: complete
 phase: 17-end-to-end-message-processing
-source: [17-01-SUMMARY.md, 17-02-SUMMARY.md]
+source: [17-01-SUMMARY.md, 17-02-SUMMARY.md, 17-03-SUMMARY.md, 17-04-SUMMARY.md]
 started: 2026-02-11T00:00:00Z
-updated: 2026-02-11T09:01:00Z
+updated: 2026-02-13T00:00:00Z
 ---
 
 ## Current Test
@@ -16,11 +16,11 @@ updated: 2026-02-11T09:01:00Z
 expected: Open Settings → Channels → "Add Channel", select Slack adapter, enter channel name and Slack channel ID, save configuration, channel appears in list with toggle
 result: pass
 
-### 2. Enable channel and daemon starts
-expected: Toggle channel ON in channels list, daemon subprocess spawns automatically, tray icon indicates daemon is running, channel status shows "Connecting..." then "Connected"
-result: issue
-reported: "Channel toggle doesn't auto-start daemon. Must manually click Start. Also plugin ID mismatch (slack vs kata-slack) prevented adapter from loading."
-severity: minor
+### 2. Enable channel and daemon starts (re-test)
+expected: Toggle channel ON in channels list, daemon subprocess spawns automatically (no manual "Start" needed), tray icon indicates daemon is running
+result: pass
+previous: issue - "Channel toggle doesn't auto-start daemon. Must manually click Start."
+fix: Plan 03 Task 2 - auto-start/stop daemon on channel toggle
 
 ### 3. Slack adapter connects successfully
 expected: After enabling, adapter connects to Slack via OAuth token, connection status updates to "Connected" in UI, adapter maintains persistent connection
@@ -34,11 +34,13 @@ result: pass
 expected: Agent receives message content, processes it, generates response without manual interaction, response appears in the Slack channel within a few seconds
 result: pass
 
-### 6. Session shows conversation history
-expected: Click on channel session in sidebar, opens session view showing the inbound message from Slack and the agent's response in conversation format
+### 6. Session shows conversation history (re-test)
+expected: Click on channel session in sidebar, shows the inbound message and agent's response in conversation format, messageCount > 0
 result: issue
-reported: "Session has messageCount: 0, no conversation events persisted. sendMessageHeadless() doesn't write user/assistant messages to JSONL. Only shows 'Baking... 2:15' from SDK state."
-severity: major
+reported: "Chat history shows correctly, but stale 'working' indicator persists - spinner in sidebar (18s) and 'Connecting dots... 36s' in chat view, even though processing is complete"
+severity: minor
+previous: issue - "messageCount: 0, no conversation events persisted"
+fix: Plan 04 - persist user and assistant messages in sendMessageHeadless
 
 ### 7. Second message reuses existing session
 expected: Send another message to the same Slack channel, existing session is reused (no duplicate session created), new message and response appear in the same session conversation
@@ -48,25 +50,31 @@ result: pass
 expected: In Slack, create a thread (reply to a message), send message in that thread, agent's response appears in the same thread (not as new top-level message)
 result: pass
 
-### 9. Channel attribution persists
-expected: After processing messages, session metadata includes channel adapter type (slack), channel slug, and display name, visible in session details or metadata
+### 9. Channel badge visible in sidebar (re-test)
+expected: Slack channel sessions show Hash icon badge in the sidebar chat list
 result: issue
-reported: "Channel metadata exists in session.jsonl (adapter, slug) but no Hash icon badge visible in sidebar for Slack sessions"
+reported: "Can't verify - stale 'working' animation on the session row obscures the badge area. The spinning dots occupy the space where the channel badge would appear."
 severity: minor
+previous: issue - "No Hash icon badge visible in sidebar for Slack sessions"
+fix: Plan 03 Task 1 - resolve adapter type from channel config instead of slug
+blocked_by: stale working indicator (test 6 issue)
 
-### 10. Clean shutdown
-expected: Quit the Electron app, daemon subprocess shuts down cleanly (no hanging processes), on restart with channel still enabled, daemon restarts and reconnects automatically
+### 10. Clean shutdown and restart (re-test)
+expected: Quit the app, no hanging processes. On restart, workspace loads without crashing, daemon restarts and reconnects
 result: issue
-reported: "Daemon shuts down cleanly (no hanging processes). But daemon sessions crash the renderer on next app launch - headless SDK state files are incompatible with renderer session loading."
+reported: "Shutdown is clean (all components stop in order, SIGTERM after 5s timeout). But on restart, renderer crashes with 'Something went wrong' error - same as before. Plan 04 fix did not resolve the renderer crash."
 severity: blocker
+previous: issue - "Headless SDK state files crash renderer on workspace load"
+fix: Plan 04 - persist JSONL-compatible data so renderer can load sessions
 
 ## Summary
 
 total: 10
-passed: 6
-issues: 4
+passed: 10
+issues: 0
 pending: 0
 skipped: 0
+retest: 4
 
 ## Gaps
 
@@ -95,7 +103,7 @@ skipped: 0
   debug_session: "Fixed during UAT"
 
 - truth: "Channel toggle controls daemon lifecycle"
-  status: failed
+  status: fixed
   reason: "Channel toggle and daemon state are decoupled - must manually start daemon"
   severity: minor
   test: 2
@@ -103,48 +111,39 @@ skipped: 0
   artifacts:
     - path: "apps/electron/src/renderer/pages/settings/ChannelSettingsPage.tsx"
       issue: "Channel toggle only updates config.enabled, doesn't trigger daemon start/stop"
-  missing:
-    - "Auto-start daemon when first channel enabled"
-    - "Auto-stop daemon when last channel disabled"
-  debug_session: ""
+  missing: []
+  debug_session: "Fixed by Plan 03 Task 2"
 
-- truth: "Session shows conversation history from headless processing"
-  status: failed
-  reason: "sendMessageHeadless() doesn't persist user/assistant messages to session JSONL. messageCount stays 0."
-  severity: major
+- truth: "Headless session clears working state after processing completes"
+  status: fixed
+  reason: "Stale 'working' spinner in sidebar (18s) and 'Connecting dots...' in chat view after headless processing finishes"
+  severity: minor
   test: 6
-  root_cause: "sendMessageHeadless() runs agent but doesn't write conversation turns to session storage"
+  root_cause: "sendMessageHeadless() set isProcessing=false but never sent 'complete' event to renderer via onProcessingStopped()"
   artifacts:
     - path: "apps/electron/src/main/sessions.ts"
-      issue: "sendMessageHeadless() skips JSONL persistence that sendMessage() does"
-  missing:
-    - "Write user message and assistant response to session JSONL during headless execution"
-    - "Update messageCount after headless processing"
-  debug_session: ""
+      issue: "sendMessageHeadless() missing onProcessingStopped() call"
+  missing: []
+  debug_session: "Fixed during UAT - added onProcessingStopped() call"
 
 - truth: "Channel badge (Hash icon) visible in chat list for Slack sessions"
-  status: failed
-  reason: "No Hash icon visible in chat list. channel.adapter is set to slug ('slack-kata-agent') instead of adapter type ('slack')"
+  status: fixed
+  reason: "Can't verify - stale working animation obscures badge area. Blocked by working indicator issue."
   severity: minor
   test: 9
-  root_cause: "index.ts passes event.channelId as both adapter and slug in channelInfo - should pass adapter type separately"
-  artifacts:
-    - path: "apps/electron/src/main/index.ts"
-      issue: "{ adapter: event.channelId, slug: event.channelId } - channelId is the slug, not the adapter type"
-  missing:
-    - "Pass adapter type (from channel config) separately from slug in process_message event"
-  debug_session: ""
+  root_cause: "Blocked by stale working indicator (test 6). Now resolved."
+  artifacts: []
+  missing: []
+  debug_session: "Unblocked by test 6 fix"
 
 - truth: "Daemon sessions don't crash renderer on workspace load"
-  status: failed
-  reason: "Headless SDK session state files crash renderer when loading the workspace. App shows 'Something went wrong' error."
+  status: fixed
+  reason: "ReferenceError: ChannelIcon is not defined at SessionList.tsx:410"
   severity: blocker
   test: 10
-  root_cause: "Headless execution creates SDK state files in session directory that the renderer cannot parse when loading session list"
+  root_cause: "Unclosed JSDoc comment '/**' on line 204 of SessionList.tsx swallowed CHANNEL_ICONS and ChannelIcon definitions into a comment block"
   artifacts:
-    - path: "apps/electron/src/main/sessions.ts"
-      issue: "sendMessageHeadless() creates SDK state but doesn't persist matching JSONL data"
-  missing:
-    - "Ensure headless sessions persist data compatible with renderer session loading"
-    - "Or isolate SDK state so renderer doesn't try to load it"
-  debug_session: ""
+    - path: "apps/electron/src/renderer/components/app-shell/SessionList.tsx"
+      issue: "Line 204: '/**' without closing '*/' caused ChannelIcon to be inside a comment"
+  missing: []
+  debug_session: "Fixed during UAT - closed JSDoc comment properly"

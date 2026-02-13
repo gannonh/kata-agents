@@ -2469,10 +2469,12 @@ export class SessionManager {
       }
 
       this.persistSession(managed)
+      this.onProcessingStopped(sessionId, 'complete')
       sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
       return responseText
-    } finally {
-      managed.isProcessing = false
+    } catch (error) {
+      this.onProcessingStopped(sessionId, 'error')
+      throw error
     }
   }
 
