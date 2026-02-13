@@ -1,12 +1,17 @@
 /**
  * Slack Channel Adapter
  *
- * Polls Slack conversations.history with oldest timestamp tracking,
- * filters bot messages to prevent self-reply loops, and converts
- * Slack messages to ChannelMessage format.
+ * Hybrid poll+subscribe adapter for Slack. Polls conversations.history
+ * with oldest timestamp tracking for message history, and optionally
+ * subscribes via Socket Mode (WebSocket) for slash command events.
+ *
+ * When an app-level token (xapp-) is provided via configure(), the adapter
+ * starts a SocketModeClient to receive slash commands in real time.
+ * Without an app-level token, the adapter operates in poll-only mode.
  */
 
 import { WebClient } from '@slack/web-api';
+import { SocketModeClient } from '@slack/socket-mode';
 import { markdownToSlack } from 'md-to-slack';
 import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../types.ts';
 
@@ -20,7 +25,8 @@ export interface PollingStateFns {
 }
 
 /**
- * Slack channel adapter using conversations.history polling.
+ * Slack channel adapter using conversations.history polling with optional
+ * Socket Mode subscription for slash commands.
  * Requires configure() before start().
  */
 export class SlackChannelAdapter implements ChannelAdapter {
@@ -36,6 +42,9 @@ export class SlackChannelAdapter implements ChannelAdapter {
   private healthy = false;
   private lastErrorMsg: string | null = null;
   private pollingStateFns: PollingStateFns | null = null;
+  private appToken: string | null = null;
+  private socketClient: SocketModeClient | null = null;
+  private socketConnected = false;
 
   get id(): string {
     return this._id;
@@ -43,11 +52,13 @@ export class SlackChannelAdapter implements ChannelAdapter {
 
   /**
    * Configure the adapter with a Slack bot token and optional polling state persistence.
+   * When an app-level token (xapp-) is provided, Socket Mode is enabled for slash commands.
    * Must be called before start().
    */
-  configure(token: string, pollingState?: PollingStateFns): void {
+  configure(token: string, pollingState?: PollingStateFns, appToken?: string): void {
     this.client = new WebClient(token, { retryConfig: { retries: 3 } });
     this.pollingStateFns = pollingState ?? null;
+    this.appToken = appToken ?? null;
   }
 
   async start(config: ChannelConfig, onMessage: (msg: ChannelMessage) => void): Promise<void> {
@@ -85,6 +96,37 @@ export class SlackChannelAdapter implements ChannelAdapter {
 
     // Run initial poll immediately
     await this.poll(config, onMessage);
+
+    // Start Socket Mode for slash commands (if app-level token provided)
+    if (this.appToken) {
+      this.socketClient = new SocketModeClient({ appToken: this.appToken });
+
+      this.socketClient.on('slash_commands', async ({ body, ack }: { body: Record<string, string>; ack: (response?: Record<string, string>) => Promise<void> }) => {
+        // Acknowledge within 3 seconds (Slack requirement)
+        await ack({ text: 'Processing...' });
+
+        // Convert slash command to ChannelMessage
+        const command = body.command ?? '';
+        const channelMessage: ChannelMessage = {
+          id: `cmd-${body.trigger_id ?? 'unknown'}`,
+          channelId: this._id,
+          source: body.user_id ?? 'unknown',
+          timestamp: Date.now(),
+          content: body.text ? `${command} ${body.text}` : command,
+          metadata: {
+            slackChannel: body.channel_id,
+            team: body.team_id,
+            command: body.command,
+            triggerId: body.trigger_id,
+            responseUrl: body.response_url,
+          },
+        };
+        onMessage(channelMessage);
+      });
+
+      await this.socketClient.start();
+      this.socketConnected = true;
+    }
   }
 
   private async poll(config: ChannelConfig, onMessage: (msg: ChannelMessage) => void): Promise<void> {
@@ -181,11 +223,21 @@ export class SlackChannelAdapter implements ChannelAdapter {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    if (this.socketClient) {
+      await this.socketClient.disconnect();
+      this.socketClient = null;
+      this.socketConnected = false;
+    }
     this.client = null;
+    this.appToken = null;
     this.healthy = false;
   }
 
   isHealthy(): boolean {
+    // If socket mode is configured but disconnected, report unhealthy
+    if (this.appToken && !this.socketConnected) {
+      return false;
+    }
     return this.healthy;
   }
 

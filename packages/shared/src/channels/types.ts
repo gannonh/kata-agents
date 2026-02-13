@@ -109,6 +109,8 @@ export interface ChannelConfig {
     sourceSlug?: string;
     /** Channel slug for dedicated channel credentials (preferred path) */
     channelSlug?: string;
+    /** Slug for app-level token credential (xapp-), required for Socket Mode (slash commands) */
+    appTokenSlug?: string;
   };
 
   /** Optional filter to restrict which messages are processed */
