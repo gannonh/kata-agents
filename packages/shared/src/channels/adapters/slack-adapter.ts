@@ -7,7 +7,11 @@
  */
 
 import { WebClient } from '@slack/web-api';
+import { markdownToSlack } from 'md-to-slack';
 import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../types.ts';
+
+/** Safe margin below Slack's 40K text limit */
+const SLACK_MAX_TEXT_LENGTH = 39_000;
 
 /** Callbacks for persisting polling state across adapter restarts */
 export interface PollingStateFns {
@@ -156,9 +160,18 @@ export class SlackChannelAdapter implements ChannelAdapter {
 
   async send(message: OutboundMessage): Promise<void> {
     if (!this.client) throw new Error('SlackChannelAdapter not configured');
+
+    // Convert standard markdown to Slack mrkdwn
+    let text = markdownToSlack(message.content);
+
+    // Truncate if exceeding Slack's text limit
+    if (text.length > SLACK_MAX_TEXT_LENGTH) {
+      text = text.slice(0, SLACK_MAX_TEXT_LENGTH) + '\n\n... (response truncated)';
+    }
+
     await this.client.chat.postMessage({
       channel: message.channelId,
-      text: message.content,
+      text,
       thread_ts: message.threadId,
     });
   }

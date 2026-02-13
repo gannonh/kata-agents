@@ -9,11 +9,13 @@ const mockAuthTest = mock(() =>
 const mockConversationsHistory = mock(() =>
   Promise.resolve({ messages: [] as Record<string, unknown>[] }),
 );
+const mockChatPostMessage = mock(() => Promise.resolve({ ok: true }));
 
 mock.module('@slack/web-api', () => ({
   WebClient: class MockWebClient {
     auth = { test: mockAuthTest };
     conversations = { history: mockConversationsHistory };
+    chat = { postMessage: mockChatPostMessage };
     constructor(_token: string, _opts?: unknown) {}
   },
 }));
@@ -53,6 +55,8 @@ describe('SlackChannelAdapter', () => {
     mockConversationsHistory.mockImplementation(() =>
       Promise.resolve({ messages: [] as Record<string, unknown>[] }),
     );
+    mockChatPostMessage.mockReset();
+    mockChatPostMessage.mockImplementation(() => Promise.resolve({ ok: true }));
   });
 
   afterEach(async () => {
@@ -302,5 +306,88 @@ describe('SlackChannelAdapter', () => {
   test('adapter name and type are correct', () => {
     expect(adapter.name).toBe('Slack');
     expect(adapter.type).toBe('poll');
+  });
+
+  test('send() converts markdown bold to mrkdwn bold', async () => {
+    adapter.configure('xoxb-test-token');
+
+    await adapter.send({
+      channelId: 'C_GENERAL',
+      content: 'Hello **world**!',
+    });
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mockChatPostMessage.mock.calls as any)[0][0] as Record<string, unknown>;
+    expect(call.text).toBe('Hello *world*!');
+    expect(call.channel).toBe('C_GENERAL');
+  });
+
+  test('send() converts markdown italic to mrkdwn italic', async () => {
+    adapter.configure('xoxb-test-token');
+
+    await adapter.send({
+      channelId: 'C_GENERAL',
+      content: 'This is *emphasized* text',
+    });
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mockChatPostMessage.mock.calls as any)[0][0] as Record<string, unknown>;
+    expect(call.text).toBe('This is _emphasized_ text');
+  });
+
+  test('send() passes thread_ts for threaded replies', async () => {
+    adapter.configure('xoxb-test-token');
+
+    await adapter.send({
+      channelId: 'C_GENERAL',
+      content: 'Thread reply',
+      threadId: '1700000001.000100',
+    });
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mockChatPostMessage.mock.calls as any)[0][0] as Record<string, unknown>;
+    expect(call.thread_ts).toBe('1700000001.000100');
+  });
+
+  test('send() truncates messages exceeding 39K chars', async () => {
+    adapter.configure('xoxb-test-token');
+    const longContent = 'a'.repeat(40_000);
+
+    await adapter.send({
+      channelId: 'C_GENERAL',
+      content: longContent,
+    });
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mockChatPostMessage.mock.calls as any)[0][0] as Record<string, unknown>;
+    const text = call.text as string;
+    expect(text.length).toBeLessThan(40_000);
+    expect(text).toContain('... (response truncated)');
+  });
+
+  test('send() does not truncate messages under 39K chars', async () => {
+    adapter.configure('xoxb-test-token');
+    const content = 'a'.repeat(38_000);
+
+    await adapter.send({
+      channelId: 'C_GENERAL',
+      content,
+    });
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = (mockChatPostMessage.mock.calls as any)[0][0] as Record<string, unknown>;
+    const text = call.text as string;
+    expect(text).not.toContain('... (response truncated)');
+  });
+
+  test('send() throws if not configured', async () => {
+    await expect(
+      adapter.send({ channelId: 'C_GENERAL', content: 'test' }),
+    ).rejects.toThrow('SlackChannelAdapter not configured');
   });
 });
