@@ -2,7 +2,7 @@ import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessag
 import { getDefaultOptions, resetClaudeConfigCheck } from './options.ts';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
-import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext, formatGitContext } from '../prompts/system.ts';
+import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext, formatGitContext, formatChannelContext } from '../prompts/system.ts';
 import type { GitState, PrInfo } from '../git/types.ts';
 // Plan types are used by UI components; not needed in craft-agent.ts since Safe Mode is user-controlled
 import { parseError, type AgentError } from './errors.ts';
@@ -121,6 +121,10 @@ export interface CraftAgentConfig {
   debugMode?: {                // Debug mode configuration (when running in dev)
     enabled: boolean;          // Whether debug mode is active
     logFilePath?: string;      // Path to the log file for querying
+  };
+  channel?: {                  // Channel context for daemon-managed sessions
+    adapter: string;           // Adapter type (e.g., "slack", "whatsapp")
+    slug: string;              // Channel slug identifier
   };
 }
 
@@ -896,7 +900,7 @@ export class CraftAgent {
             this.config.debugMode,
             this.workspaceRootPath,
             this.config.session?.workingDirectory
-          ),
+          ) + formatChannelContext(this.config.channel),
         },
         // Use sdkCwd for SDK session storage - this is set once at session creation and never changes.
         // This ensures SDK can always find session transcripts regardless of workingDirectory changes.

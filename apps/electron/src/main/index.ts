@@ -71,7 +71,7 @@ const machineId = createHash('sha256').update(hostname() + homedir()).digest('he
 Sentry.setUser({ id: machineId })
 
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { SessionManager } from './sessions'
 import { DaemonManager } from './daemon-manager'
 import { deliverChannelConfigs } from './channel-config-delivery'
@@ -80,7 +80,7 @@ import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
-import { getWorkspaces, loadStoredConfig } from '@craft-agent/shared/config'
+import { getWorkspaces, getWorkspaceByNameOrId, loadStoredConfig } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { initializeDocs } from '@craft-agent/shared/docs'
 import { ensureDefaultPermissions } from '@craft-agent/shared/agent/permissions-config'
@@ -318,6 +318,33 @@ app.whenReady().then(async () => {
     sessionManager.setWindowManager(windowManager)
     logDiagnostic('WindowManager set on SessionManager')
 
+    // Resolve the adapter type (e.g. "slack") from a channel's config.json on disk.
+    // The daemon sends the channel slug (e.g. "slack-kata-agent") as channelId, but
+    // the renderer needs the adapter type to look up the correct icon.
+    const adapterTypeCache = new Map<string, string>()
+    function resolveAdapterType(workspaceId: string, channelSlug: string): string {
+      const cacheKey = `${workspaceId}:${channelSlug}`
+      const cached = adapterTypeCache.get(cacheKey)
+      if (cached) return cached
+
+      try {
+        const workspace = getWorkspaceByNameOrId(workspaceId)
+        if (!workspace) return channelSlug
+
+        const rootPath = workspace.rootPath.replace(/^~/, homedir())
+        const configPath = join(rootPath, 'channels', channelSlug, 'config.json')
+        if (!existsSync(configPath)) return channelSlug
+
+        const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+        const adapterType = config.adapter || channelSlug
+        adapterTypeCache.set(cacheKey, adapterType)
+        return adapterType
+      } catch (err) {
+        mainLog.error(`[resolveAdapterType] Failed for ${channelSlug}:`, err)
+        return channelSlug
+      }
+    }
+
     // Initialize daemon manager (does not auto-start; Phase 12+ triggers start)
     logDiagnostic('Creating DaemonManager...')
     const configDir = process.env.KATA_CONFIG_DIR || process.env.CRAFT_CONFIG_DIR || join(homedir(), '.kata-agents')
@@ -328,6 +355,38 @@ app.whenReady().then(async () => {
       configDir,
       (event) => {
         mainLog.info('[daemon] event:', event.type)
+        if (event.type === 'plugin_error') {
+          mainLog.error(`[daemon] Plugin error - ${event.pluginId}: ${event.error}`)
+        }
+
+        // Handle process_message internally (daemon -> main -> daemon round-trip)
+        if (event.type === 'process_message' && sessionManager && daemonManager) {
+          sessionManager.processDaemonMessage(
+            event.workspaceId,
+            event.sessionKey,
+            event.content,
+            { adapter: resolveAdapterType(event.workspaceId, event.channelId), slug: event.channelId },
+          ).then((response) => {
+            daemonManager!.sendCommand({
+              type: 'message_processed',
+              messageId: event.messageId,
+              response,
+              success: true,
+            })
+          }).catch((err) => {
+            mainLog.error('[daemon] Message processing error:', err)
+            daemonManager!.sendCommand({
+              type: 'message_processed',
+              messageId: event.messageId,
+              response: '',
+              success: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
+          return // Don't broadcast internal events to renderer
+        }
+
+        // Broadcast other events to renderer windows
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.DAEMON_EVENT, event)
         }

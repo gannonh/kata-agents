@@ -114,16 +114,28 @@ export async function deliverChannelConfigs(
         }
       }
 
+      // Resolve app-level token for Socket Mode (slash commands)
+      if (config.credentials.appTokenSlug) {
+        const appToken = await credManager.getChannelCredential(workspace.id, config.credentials.appTokenSlug)
+        if (appToken) {
+          tokens[config.credentials.appTokenSlug] = appToken
+        } else {
+          console.warn(`[channel-config-delivery] Missing app-level token for channel "${slug}" (appTokenSlug: ${config.credentials.appTokenSlug})`)
+        }
+      }
+
       configs.push(config)
     }
 
     if (configs.length > 0) {
       const adapterTypes = new Set(configs.map((c) => c.adapter))
+      // Map adapter types to plugin IDs (slack → kata-slack, whatsapp → kata-whatsapp)
+      const pluginIds = Array.from(adapterTypes).map(type => `kata-${type}`)
       workspacePayloads.push({
         workspaceId: workspace.id,
         configs,
         tokens,
-        enabledPlugins: [...adapterTypes],
+        enabledPlugins: pluginIds,
       })
     }
   }

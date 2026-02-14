@@ -500,6 +500,25 @@ These help with UI feedback and result summarization.`;
 }
 
 /**
+ * Format channel context for the system prompt.
+ * Returns guidance for the agent when responding through a channel adapter,
+ * or empty string for direct (non-channel) sessions.
+ */
+export function formatChannelContext(channel?: { adapter: string; slug: string }): string {
+  if (!channel) return '';
+  const label = channel.adapter.charAt(0).toUpperCase() + channel.adapter.slice(1);
+  return `\n\n<channel_context adapter="${channel.adapter}" slug="${channel.slug}">
+You are responding through a ${label} channel. Your responses are delivered as ${label} messages, not rendered markdown. Adjust your output:
+- Keep responses concise and conversational
+- Avoid tables (not supported in Slack mrkdwn)
+- Avoid image markdown syntax (not supported)
+- Minimize large code blocks (hard to read in chat)
+- Use simple formatting: bold, italic, code, lists, quotes
+- Do not include HTML tags
+</channel_context>`;
+}
+
+/**
  * Format git context for injection into user messages.
  * Returns concise XML-tagged context for the agent, or empty string if no git info.
  * Includes current branch (or detached HEAD) and PR information when available.

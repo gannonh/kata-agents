@@ -62,6 +62,17 @@ export type DaemonCommand =
       taskType: TaskType;
       schedule: string;
       action: TaskAction;
+    }
+  | {
+      type: 'message_processed';
+      /** Queue row ID of the processed message */
+      messageId: number;
+      /** Agent response text */
+      response: string;
+      /** Whether processing succeeded */
+      success: boolean;
+      /** Error description if processing failed */
+      error?: string;
     };
 
 /**
@@ -108,4 +119,19 @@ export type DaemonEvent =
       taskId: number;
       /** Workspace the task belongs to */
       workspaceId: string;
+    }
+  | {
+      type: 'process_message';
+      /** Queue row ID of the message to process */
+      messageId: number;
+      /** Channel adapter slug that received the message */
+      channelId: string;
+      /** Workspace the message belongs to */
+      workspaceId: string;
+      /** Resolved session key for routing */
+      sessionKey: string;
+      /** Message body text */
+      content: string;
+      /** Adapter-specific metadata */
+      metadata: Record<string, unknown>;
     };
