@@ -15,7 +15,7 @@ import { SocketModeClient } from '@slack/socket-mode';
 import { markdownToSlack } from 'md-to-slack';
 import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../types.ts';
 
-/** Safe margin below Slack's 40K text limit */
+/** 1K below Slack's 40K chat.postMessage text limit to leave room for the truncation suffix */
 const SLACK_MAX_TEXT_LENGTH = 39_000;
 
 /** Callbacks for persisting polling state across adapter restarts */
@@ -99,34 +99,53 @@ export class SlackChannelAdapter implements ChannelAdapter {
 
     // Start Socket Mode for slash commands (if app-level token provided)
     if (this.appToken) {
-      this.socketClient = new SocketModeClient({ appToken: this.appToken });
-
-      this.socketClient.on('slash_commands', async ({ body, ack }: { body: Record<string, string>; ack: (response?: Record<string, string>) => Promise<void> }) => {
-        // Acknowledge within 3 seconds (Slack requirement)
-        await ack({ text: 'Processing...' });
-
-        // Convert slash command to ChannelMessage
-        const command = body.command ?? '';
-        const channelMessage: ChannelMessage = {
-          id: `cmd-${body.trigger_id ?? 'unknown'}`,
-          channelId: this._id,
-          source: body.user_id ?? 'unknown',
-          timestamp: Date.now(),
-          content: body.text ? `${command} ${body.text}` : command,
-          metadata: {
-            slackChannel: body.channel_id,
-            team: body.team_id,
-            command: body.command,
-            triggerId: body.trigger_id,
-            responseUrl: body.response_url,
-          },
-        };
-        onMessage(channelMessage);
-      });
-
-      await this.socketClient.start();
-      this.socketConnected = true;
+      await this.startSocketMode(onMessage);
     }
+  }
+
+  private async startSocketMode(onMessage: (msg: ChannelMessage) => void, retries = 2): Promise<void> {
+    this.socketClient = new SocketModeClient({ appToken: this.appToken! });
+
+    this.socketClient.on('slash_commands', async ({ body, ack }: { body: Record<string, string>; ack: (response?: Record<string, string>) => Promise<void> }) => {
+      // Acknowledge within 3 seconds (Slack requirement)
+      await ack({ text: 'Processing...' });
+
+      // Convert slash command to ChannelMessage
+      const command = body.command ?? '';
+      const channelMessage: ChannelMessage = {
+        id: `cmd-${body.trigger_id ?? 'unknown'}`,
+        channelId: this._id,
+        source: body.user_id ?? 'unknown',
+        timestamp: Date.now(),
+        content: body.text ? `${command} ${body.text}` : command,
+        metadata: {
+          slackChannel: body.channel_id,
+          team: body.team_id,
+          command: body.command,
+          triggerId: body.trigger_id,
+          responseUrl: body.response_url,
+        },
+      };
+      onMessage(channelMessage);
+    });
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        await this.socketClient.start();
+        this.socketConnected = true;
+        return;
+      } catch (err) {
+        this.lastErrorMsg = `Socket Mode start failed: ${err instanceof Error ? err.message : String(err)}`;
+        if (attempt < retries) {
+          // Exponential backoff: 1s, 2s
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+        }
+      }
+    }
+
+    // All retries exhausted - adapter runs in poll-only mode
+    this.socketClient = null;
+    this.healthy = false;
   }
 
   private async poll(config: ChannelConfig, onMessage: (msg: ChannelMessage) => void): Promise<void> {

@@ -71,7 +71,8 @@ const machineId = createHash('sha256').update(hostname() + homedir()).digest('he
 Sentry.setUser({ id: machineId })
 
 import { join } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile } from 'fs/promises'
 import { SessionManager } from './sessions'
 import { DaemonManager } from './daemon-manager'
 import { deliverChannelConfigs } from './channel-config-delivery'
@@ -322,7 +323,7 @@ app.whenReady().then(async () => {
     // The daemon sends the channel slug (e.g. "slack-kata-agent") as channelId, but
     // the renderer needs the adapter type to look up the correct icon.
     const adapterTypeCache = new Map<string, string>()
-    function resolveAdapterType(workspaceId: string, channelSlug: string): string {
+    async function resolveAdapterType(workspaceId: string, channelSlug: string): Promise<string> {
       const cacheKey = `${workspaceId}:${channelSlug}`
       const cached = adapterTypeCache.get(cacheKey)
       if (cached) return cached
@@ -335,7 +336,8 @@ app.whenReady().then(async () => {
         const configPath = join(rootPath, 'channels', channelSlug, 'config.json')
         if (!existsSync(configPath)) return channelSlug
 
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+        const raw = await readFile(configPath, 'utf-8')
+        const config = JSON.parse(raw)
         const adapterType = config.adapter || channelSlug
         adapterTypeCache.set(cacheKey, adapterType)
         return adapterType
@@ -361,13 +363,17 @@ app.whenReady().then(async () => {
 
         // Handle process_message internally (daemon -> main -> daemon round-trip)
         if (event.type === 'process_message' && sessionManager && daemonManager) {
-          sessionManager.processDaemonMessage(
-            event.workspaceId,
-            event.sessionKey,
-            event.content,
-            { adapter: resolveAdapterType(event.workspaceId, event.channelId), slug: event.channelId },
+          // Capture reference before async gap to avoid stale non-null assertion
+          const dm = daemonManager
+          resolveAdapterType(event.workspaceId, event.channelId).then((adapter) =>
+            sessionManager!.processDaemonMessage(
+              event.workspaceId,
+              event.sessionKey,
+              event.content,
+              { adapter, slug: event.channelId },
+            ),
           ).then((response) => {
-            daemonManager!.sendCommand({
+            dm.sendCommand({
               type: 'message_processed',
               messageId: event.messageId,
               response,
@@ -375,7 +381,7 @@ app.whenReady().then(async () => {
             })
           }).catch((err) => {
             mainLog.error('[daemon] Message processing error:', err)
-            daemonManager!.sendCommand({
+            dm.sendCommand({
               type: 'message_processed',
               messageId: event.messageId,
               response: '',

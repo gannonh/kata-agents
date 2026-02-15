@@ -76,6 +76,8 @@ async function main(): Promise<void> {
   emit({ type: 'status_changed', status: 'running' });
 
   const CONSUMER_INTERVAL_MS = 1000;
+  const MAX_CONSECUTIVE_ERRORS = 5;
+  let consecutiveErrors = 0;
   const consumerTimer = setInterval(() => {
     try {
       while (activeProcessing < MAX_CONCURRENT) {
@@ -83,8 +85,14 @@ async function main(): Promise<void> {
         if (!msg) break;
         emitProcessMessage(msg);
       }
+      consecutiveErrors = 0;
     } catch (err) {
-      log(`Consumer loop error: ${err instanceof Error ? err.message : String(err)}`);
+      consecutiveErrors++;
+      log(`Consumer loop error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${err instanceof Error ? err.message : String(err)}`);
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        log('Consumer loop hit max consecutive errors, emitting error status');
+        emit({ type: 'status_changed', status: 'error', error: `Consumer loop failed ${MAX_CONSECUTIVE_ERRORS} times consecutively` });
+      }
     }
   }, CONSUMER_INTERVAL_MS);
 
@@ -170,7 +178,7 @@ async function main(): Promise<void> {
           activeProcessing = Math.max(0, activeProcessing - 1);
 
           if (!cmd.success) {
-            queue.markFailed(cmd.messageId, cmd.error ?? 'unknown error');
+            queue.markFailed(cmd.messageId, cmd.error);
             log(`Message ${cmd.messageId} processing failed: ${cmd.error}`);
             break;
           }

@@ -69,10 +69,19 @@ export type DaemonCommand =
       messageId: number;
       /** Agent response text */
       response: string;
-      /** Whether processing succeeded */
-      success: boolean;
-      /** Error description if processing failed */
-      error?: string;
+      /** Processing succeeded */
+      success: true;
+    }
+  | {
+      type: 'message_processed';
+      /** Queue row ID of the processed message */
+      messageId: number;
+      /** Empty response on failure */
+      response: string;
+      /** Processing failed */
+      success: false;
+      /** Error description */
+      error: string;
     };
 
 /**
