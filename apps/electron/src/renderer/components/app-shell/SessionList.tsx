@@ -201,7 +201,7 @@ interface SessionItemProps {
   onLabelsChange?: (sessionId: string, labels: string[]) => void
 }
 
-/**
+/** Channel adapter icon mapping */
 const CHANNEL_ICONS: Record<string, typeof Radio> = {
   slack: Hash,
   whatsapp: MessageCircle,

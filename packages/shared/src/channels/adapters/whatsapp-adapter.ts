@@ -13,7 +13,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
-import type { ChannelAdapter, ChannelConfig, ChannelMessage } from '../types.ts';
+import type { ChannelAdapter, ChannelConfig, ChannelMessage, OutboundMessage } from '../types.ts';
 
 /** Callback for QR code data (base64 or terminal string) */
 export type QrCallback = (qr: string) => void;
@@ -144,6 +144,11 @@ export class WhatsAppChannelAdapter implements ChannelAdapter {
     });
 
     this.sock.ev.on('creds.update', saveCreds);
+  }
+
+  async send(message: OutboundMessage): Promise<void> {
+    if (!this.sock) throw new Error('WhatsAppChannelAdapter not connected');
+    await this.sock.sendMessage(message.channelId, { text: message.content });
   }
 
   async stop(): Promise<void> {

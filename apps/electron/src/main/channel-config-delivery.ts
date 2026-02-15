@@ -17,6 +17,7 @@ import type { DaemonManager } from './daemon-manager'
 import type { ChannelConfig } from '@craft-agent/shared/channels'
 import { getWorkspaces } from '@craft-agent/shared/config'
 import type { CredentialManager } from '@craft-agent/shared/credentials'
+import { mainLog } from './logger'
 
 /** Slug validation — duplicates ipc.ts isValidSlug (intentional to avoid circular dependency) */
 const VALID_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/
@@ -63,7 +64,7 @@ export async function deliverChannelConfigs(
     try {
       slugs = readdirSync(channelsDir)
     } catch (err) {
-      console.warn(`[channel-config-delivery] Cannot read channels directory for workspace ${workspace.id}:`, err)
+      mainLog.warn(`[channel-config-delivery] Cannot read channels directory for workspace ${workspace.id}:`, err)
       continue
     }
 
@@ -85,7 +86,7 @@ export async function deliverChannelConfigs(
         const raw = readFileSync(configPath, 'utf-8')
         config = JSON.parse(raw) as ChannelConfig
       } catch (err) {
-        console.error(`[channel-config-delivery] Skipping malformed config at "${configPath}" (workspace: ${workspace.id}, slug: "${slug}"):`, err)
+        mainLog.error(`[channel-config-delivery] Skipping malformed config at "${configPath}" (workspace: ${workspace.id}, slug: "${slug}"):`, err)
         continue
       }
 
@@ -99,7 +100,7 @@ export async function deliverChannelConfigs(
         if (token) {
           tokens[config.credentials.channelSlug] = token
         } else {
-          console.warn(`[channel-config-delivery] Missing credential for channel "${slug}" (channelSlug: ${config.credentials.channelSlug})`)
+          mainLog.warn(`[channel-config-delivery] Missing credential for channel "${slug}" (channelSlug: ${config.credentials.channelSlug})`)
         }
       } else if (config.credentials.sourceSlug) {
         const cred = await credManager.get({
@@ -110,7 +111,17 @@ export async function deliverChannelConfigs(
         if (cred?.value) {
           tokens[config.credentials.sourceSlug] = cred.value
         } else {
-          console.warn(`[channel-config-delivery] Missing source credential for channel "${slug}" (sourceSlug: ${config.credentials.sourceSlug})`)
+          mainLog.warn(`[channel-config-delivery] Missing source credential for channel "${slug}" (sourceSlug: ${config.credentials.sourceSlug})`)
+        }
+      }
+
+      // Resolve app-level token for Socket Mode (slash commands)
+      if (config.credentials.appTokenSlug) {
+        const appToken = await credManager.getChannelCredential(workspace.id, config.credentials.appTokenSlug)
+        if (appToken) {
+          tokens[config.credentials.appTokenSlug] = appToken
+        } else {
+          mainLog.warn(`[channel-config-delivery] Missing app-level token for channel "${slug}" (appTokenSlug: ${config.credentials.appTokenSlug})`)
         }
       }
 
@@ -119,11 +130,13 @@ export async function deliverChannelConfigs(
 
     if (configs.length > 0) {
       const adapterTypes = new Set(configs.map((c) => c.adapter))
+      // Map adapter types to plugin IDs (slack → kata-slack, whatsapp → kata-whatsapp)
+      const pluginIds = Array.from(adapterTypes).map(type => `kata-${type}`)
       workspacePayloads.push({
         workspaceId: workspace.id,
         configs,
         tokens,
-        enabledPlugins: [...adapterTypes],
+        enabledPlugins: pluginIds,
       })
     }
   }
@@ -150,7 +163,7 @@ export function scheduleChannelConfigDelivery(
   deliveryTimer = setTimeout(() => {
     deliveryTimer = null
     deliverChannelConfigs(daemonManager, credentialManagerGetter).catch((err) => {
-      console.error('[channel-config-delivery] Scheduled delivery failed:', err)
+      mainLog.error('[channel-config-delivery] Scheduled delivery failed:', err)
     })
   }, 100)
 }

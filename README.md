@@ -73,6 +73,16 @@ Connect external data sources to your workspace:
 | **REST APIs**   | Google (Gmail, Calendar, Drive), Slack, Microsoft |
 | **Local Files** | Filesystem, Obsidian vaults, Git repos            |
 
+### Channels
+
+Connect communication platforms for always-on, background message processing:
+
+| Channel   | Mode              | Features                              |
+| --------- | ----------------- | ------------------------------------- |
+| **Slack** | Poll + Subscribe  | Channel messages, slash commands       |
+
+See [Slack Setup Guide](docs/slack-setup.md) for configuration instructions.
+
 ### Permission Modes
 
 | Mode        | Display     | Behavior                               |

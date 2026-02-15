@@ -1540,6 +1540,7 @@ export class SessionManager {
           enabled: true,
           logFilePath: getLogFilePath(),
         } : undefined,
+        channel: managed.channel ? { adapter: managed.channel.adapter, slug: managed.channel.slug } : undefined,
       })
       sessionLog.info(`Created agent for session ${managed.id}${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
@@ -2412,6 +2413,151 @@ export class SessionManager {
 
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
     sessionLog.info(`Deleted session ${sessionId}`)
+  }
+
+  /**
+   * Run agent chat headlessly (no IPC events to renderer).
+   * Used by daemon message processing where there is no active UI session.
+   * Returns the final assistant text response, or throws on execution failure.
+   */
+  async sendMessageHeadless(sessionId: string, content: string): Promise<string> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (managed.isProcessing) throw new Error(`Session ${sessionId} is already processing`)
+
+    managed.isProcessing = true
+    try {
+      const agent = await this.getOrCreateAgent(managed)
+
+      const workspaceRootPath = managed.workspace.rootPath
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+
+      if (managed.enabledSourceSlugs?.length) {
+        const sources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs)
+        const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+        const { mcpServers, apiServers } = await buildServersFromSources(sources, sessionPath)
+        const intendedSlugs = sources.filter(s => s.config.enabled && s.config.isAuthenticated).map(s => s.config.slug)
+        agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+      }
+
+      const userMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+      }
+      managed.messages.push(userMessage)
+      managed.lastMessageAt = Date.now()
+
+      let responseText = ''
+      const chatGenerator = agent.chat(content)
+
+      for await (const event of chatGenerator) {
+        if (event.type === 'text_complete' && event.text) {
+          responseText = event.text
+        }
+      }
+
+      if (responseText) {
+        const assistantMessage: Message = {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: responseText,
+          timestamp: Date.now(),
+        }
+        managed.messages.push(assistantMessage)
+      }
+
+      this.persistSession(managed)
+      this.onProcessingStopped(sessionId, 'complete')
+      sessionLog.info(`Headless message processed for ${sessionId}: ${responseText.length} chars`)
+      return responseText
+    } catch (error) {
+      this.onProcessingStopped(sessionId, 'error')
+      throw error
+    }
+  }
+
+  /**
+   * Process an inbound daemon channel message.
+   * Creates or reuses a session identified by sessionKey, then runs the agent headlessly.
+   * Returns the agent's text response.
+   */
+  async processDaemonMessage(
+    workspaceId: string,
+    sessionKey: string,
+    content: string,
+    channelInfo: { adapter: string; slug: string; displayName?: string },
+  ): Promise<string> {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
+
+    // Find existing session by matching name === sessionKey
+    let sessionId: string | undefined
+    for (const [id, managed] of this.sessions) {
+      if (managed.name === sessionKey && managed.workspace.id === workspaceId) {
+        sessionId = id
+        break
+      }
+    }
+
+    // If not found in memory, check persisted sessions
+    if (!sessionId) {
+      const storedSessions = listStoredSessions(workspace.rootPath)
+      const existing = storedSessions.find(s => s.name === sessionKey)
+      if (existing) {
+        // Load the session into memory
+        const loaded = loadStoredSession(workspace.rootPath, existing.id)
+        if (loaded) {
+          const managed: ManagedSession = {
+            id: loaded.id,
+            workspace,
+            agent: null,
+            messages: (loaded.messages ?? []).map(storedToMessage),
+            isProcessing: false,
+            lastMessageAt: loaded.lastMessageAt ?? loaded.lastUsedAt,
+            streamingText: '',
+            processingGeneration: 0,
+            isFlagged: loaded.isFlagged ?? false,
+            permissionMode: loaded.permissionMode ?? 'safe',
+            sdkSessionId: loaded.sdkSessionId,
+            workingDirectory: loaded.workingDirectory,
+            sdkCwd: loaded.sdkCwd,
+            name: loaded.name,
+            channel: loaded.channel ?? { adapter: channelInfo.adapter, slug: channelInfo.slug, displayName: channelInfo.displayName },
+            messageQueue: [],
+            backgroundShellCommands: new Map(),
+            messagesLoaded: true,
+          }
+          this.sessions.set(loaded.id, managed)
+          sessionId = loaded.id
+        }
+      }
+    }
+
+    // Create new session if no match found
+    if (!sessionId) {
+      const session = await this.createSession(workspaceId, {
+        permissionMode: 'safe',
+        workingDirectory: 'user_default',
+      })
+      sessionId = session.id
+
+      // Set channel attribution and session name (sessionKey) on the managed session
+      const managed = this.sessions.get(sessionId)!
+      managed.name = sessionKey
+      managed.channel = {
+        adapter: channelInfo.adapter,
+        slug: channelInfo.slug,
+        displayName: channelInfo.displayName,
+      }
+
+      // Persist the name and channel info immediately
+      this.persistSession(managed)
+    }
+
+    return await this.sendMessageHeadless(sessionId, content)
   }
 
   async sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions, existingMessageId?: string, _isAuthRetry?: boolean): Promise<void> {

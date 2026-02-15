@@ -290,6 +290,70 @@ describe('ChannelRunner', () => {
     expect(errorEvent.error).toContain('No token found');
   });
 
+  test('startAll passes appToken to Slack adapter configure when appTokenSlug is present', async () => {
+    const config = makeConfig({
+      slug: 'ch-slash',
+      credentials: { sourceSlug: 'slack-token', appTokenSlug: 'slack-app-token' },
+    });
+    const wsConfigs = new Map([
+      [
+        'ws-1',
+        {
+          workspaceId: 'ws-1',
+          configs: [config],
+          tokens: new Map([
+            ['slack-token', 'xoxb-test'],
+            ['slack-app-token', 'xapp-test-app'],
+          ]),
+        },
+      ],
+    ]);
+
+    let capturedAdapter: ReturnType<typeof makeFakeAdapter> | null = null;
+    const factory = () => {
+      capturedAdapter = makeFakeAdapter();
+      return capturedAdapter;
+    };
+
+    const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    await runner.startAll();
+
+    expect(capturedAdapter).not.toBeNull();
+    // configure was called with token, pollingState, and appToken
+    const configureCall = (capturedAdapter!.configure as ReturnType<typeof mock>).mock.calls[0] as unknown[];
+    expect(configureCall[0]).toBe('xoxb-test');
+    expect(configureCall[2]).toBe('xapp-test-app');
+  });
+
+  test('startAll passes undefined appToken when appTokenSlug is absent', async () => {
+    const config = makeConfig({ slug: 'ch-poll-only' });
+    const wsConfigs = new Map([
+      [
+        'ws-1',
+        {
+          workspaceId: 'ws-1',
+          configs: [config],
+          tokens: new Map([['slack-token', 'xoxb-test']]),
+        },
+      ],
+    ]);
+
+    let capturedAdapter: ReturnType<typeof makeFakeAdapter> | null = null;
+    const factory = () => {
+      capturedAdapter = makeFakeAdapter();
+      return capturedAdapter;
+    };
+
+    const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    await runner.startAll();
+
+    expect(capturedAdapter).not.toBeNull();
+    const configureCall = (capturedAdapter!.configure as ReturnType<typeof mock>).mock.calls[0] as unknown[];
+    expect(configureCall[0]).toBe('xoxb-test');
+    // appToken should be undefined when no appTokenSlug configured
+    expect(configureCall[2]).toBeUndefined();
+  });
+
   test('stopAll calls stop on all running adapters', async () => {
     const config1 = makeConfig({ slug: 'ch-a' });
     const config2 = makeConfig({ slug: 'ch-b' });

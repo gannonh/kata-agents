@@ -53,4 +53,28 @@ describe('resolveSessionKey', () => {
     expect(parts[1]).toBe('slack');
     expect(parts[2]).toMatch(/^[a-f0-9]{12}$/);
   });
+
+  test('resetCount=0 produces the same key as default (no suffix)', () => {
+    const defaultKey = resolveSessionKey('slack', 'ws1', 'thread1', 'C123');
+    const explicitZero = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 0);
+    expect(defaultKey).toBe(explicitZero);
+  });
+
+  test('resetCount=1 produces a different key from resetCount=0', () => {
+    const key0 = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 0);
+    const key1 = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 1);
+    expect(key0).not.toBe(key1);
+  });
+
+  test('resetCount=1 is deterministic (same inputs produce same output)', () => {
+    const key1a = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 1);
+    const key1b = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 1);
+    expect(key1a).toBe(key1b);
+  });
+
+  test('different resetCount values produce different keys', () => {
+    const key1 = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 1);
+    const key2 = resolveSessionKey('slack', 'ws1', 'thread1', 'C123', 2);
+    expect(key1).not.toBe(key2);
+  });
 });
