@@ -52,6 +52,8 @@ export class ChannelRunner {
   private triggerMatchers: Map<string, TriggerMatcher> = new Map();
   private resetCounters: Map<string, number> = new Map();
   private adapterFactory: AdapterFactory;
+  private lastHealthState: Map<string, boolean> = new Map();
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private queue: MessageQueue,
@@ -159,6 +161,27 @@ export class ChannelRunner {
     }
 
     this.log(`Started ${startedCount} adapter(s)`);
+
+    // Start health polling (30s interval, initial poll after first interval)
+    this.healthTimer = setInterval(() => this.pollHealth(), 30_000);
+  }
+
+  private pollHealth(): void {
+    for (const [slug, { adapter }] of this.adapters) {
+      const healthy = adapter.isHealthy();
+      const previous = this.lastHealthState.get(slug);
+
+      // Only emit on state change (or first poll)
+      if (previous === undefined || previous !== healthy) {
+        this.lastHealthState.set(slug, healthy);
+        this.emit({
+          type: 'channel_health',
+          channelId: slug,
+          healthy,
+          error: healthy ? null : adapter.getLastError(),
+        });
+      }
+    }
   }
 
   private handleMessage(slug: string, workspaceId: string, msg: ChannelMessage): void {
@@ -211,6 +234,12 @@ export class ChannelRunner {
   }
 
   async stopAll(): Promise<void> {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+    this.lastHealthState.clear();
+
     for (const [slug, { adapter }] of this.adapters) {
       try {
         await adapter.stop();
