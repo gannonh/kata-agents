@@ -45,7 +45,7 @@ import { getAuthState } from '@craft-agent/shared/auth'
 import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath, setExecutable } from '@craft-agent/shared/agent'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
-import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
+import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, type ChannelOrigin, IPC_CHANNELS, generateMessageId } from '../shared/types'
 import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
@@ -340,11 +340,7 @@ interface ManagedSession {
   // Total message count (pre-computed in JSONL header for fast list loading)
   messageCount?: number
   // Channel origin for daemon-created sessions (absent for direct/interactive sessions)
-  channel?: {
-    adapter: string
-    slug: string
-    displayName?: string
-  }
+  channel?: ChannelOrigin
   // Message queue for handling new messages while processing
   // When a message arrives during processing, we interrupt and queue
   messageQueue: Array<{
@@ -2450,6 +2446,13 @@ export class SessionManager {
       managed.messages.push(userMessage)
       managed.lastMessageAt = Date.now()
 
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: userMessage,
+        status: 'processing',
+      }, managed.workspace.id)
+
       let responseText = ''
       const chatGenerator = agent.chat(content)
 
@@ -2467,6 +2470,12 @@ export class SessionManager {
           timestamp: Date.now(),
         }
         managed.messages.push(assistantMessage)
+
+        this.sendEvent({
+          type: 'text_complete',
+          sessionId,
+          text: responseText,
+        }, managed.workspace.id)
       }
 
       this.persistSession(managed)
