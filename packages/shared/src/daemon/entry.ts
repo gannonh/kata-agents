@@ -147,17 +147,21 @@ async function main(): Promise<void> {
           log(`PluginManager loaded with ${enabledPluginIds.size} enabled plugin(s)`);
           // configDir (~/.kata-agents/) used because daemon initializes plugins
           // globally across all workspaces, not per-workspace.
-          await state.pluginManager.initializeAll({
-            workspaceRootPath: configDir,
-            getCredential: async () => null,
-            logger: {
-              info: (msg: string) => log(`[plugin] ${msg}`),
-              warn: (msg: string) => log(`[plugin:warn] ${msg}`),
-              error: (msg: string) => log(`[plugin:error] ${msg}`),
-              debug: (msg: string) => log(`[plugin:debug] ${msg}`),
-            },
-          });
-          log('PluginManager initialized');
+          try {
+            await state.pluginManager.initializeAll({
+              workspaceRootPath: configDir,
+              getCredential: async () => null,
+              logger: {
+                info: (msg: string) => log(`[plugin] ${msg}`),
+                warn: (msg: string) => log(`[plugin:warn] ${msg}`),
+                error: (msg: string) => log(`[plugin:error] ${msg}`),
+                debug: (msg: string) => log(`[plugin:debug] ${msg}`),
+              },
+            });
+            log('PluginManager initialized');
+          } catch (err) {
+            log(`[ERROR] Plugin initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
           // Build workspace configs map
           const workspaceConfigs = new Map<
             string,

@@ -385,4 +385,133 @@ describe('ChannelRunner', () => {
     expect((adapters[0]!.stop as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
     expect((adapters[1]!.stop as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
   });
+
+  describe('health polling', () => {
+    function makeRunnerWithAdapter(adapterOverrides: Partial<ChannelAdapter> = {}) {
+      const config = makeConfig({ slug: 'ch-health' });
+      const wsConfigs = new Map([
+        [
+          'ws-1',
+          {
+            workspaceId: 'ws-1',
+            configs: [config],
+            tokens: new Map([['slack-token', 'xoxb-test']]),
+          },
+        ],
+      ]);
+
+      const adapter = makeFakeAdapter(adapterOverrides);
+      const factory = () => adapter;
+      const events: DaemonEvent[] = [];
+      const emit = (event: DaemonEvent) => events.push(event);
+      const runner = new ChannelRunner(queue, emit, wsConfigs, () => {}, factory);
+
+      return { runner, adapter, events };
+    }
+
+    test('pollHealth emits channel_health on first poll', async () => {
+      const { runner, events } = makeRunnerWithAdapter({ isHealthy: () => true });
+      await runner.startAll();
+
+      // Manually invoke pollHealth via the private method
+      (runner as unknown as { pollHealth: () => void }).pollHealth();
+
+      const healthEvents = events.filter((e) => e.type === 'channel_health');
+      expect(healthEvents).toHaveLength(1);
+      const evt = healthEvents[0] as { type: 'channel_health'; channelId: string; healthy: boolean; error: string | null };
+      expect(evt.channelId).toBe('ch-health');
+      expect(evt.healthy).toBe(true);
+      expect(evt.error).toBeNull();
+    });
+
+    test('pollHealth deduplicates when state unchanged', async () => {
+      const { runner, events } = makeRunnerWithAdapter({ isHealthy: () => true });
+      await runner.startAll();
+
+      const poll = (runner as unknown as { pollHealth: () => void }).pollHealth.bind(runner);
+      poll();
+      poll();
+      poll();
+
+      const healthEvents = events.filter((e) => e.type === 'channel_health');
+      expect(healthEvents).toHaveLength(1);
+    });
+
+    test('pollHealth emits on state change healthy→unhealthy', async () => {
+      let healthy = true;
+      const { runner, events } = makeRunnerWithAdapter({
+        isHealthy: () => healthy,
+        getLastError: () => 'connection lost',
+      });
+      await runner.startAll();
+
+      const poll = (runner as unknown as { pollHealth: () => void }).pollHealth.bind(runner);
+      poll(); // first poll: healthy=true
+
+      healthy = false;
+      poll(); // second poll: healthy=false (state change)
+
+      const healthEvents = events.filter((e) => e.type === 'channel_health');
+      expect(healthEvents).toHaveLength(2);
+
+      const unhealthy = healthEvents[1] as { type: 'channel_health'; healthy: boolean; error: string | null };
+      expect(unhealthy.healthy).toBe(false);
+      expect(unhealthy.error).toBe('connection lost');
+    });
+
+    test('pollHealth emits on state change unhealthy→healthy', async () => {
+      let healthy = false;
+      const { runner, events } = makeRunnerWithAdapter({
+        isHealthy: () => healthy,
+        getLastError: () => 'timeout',
+      });
+      await runner.startAll();
+
+      const poll = (runner as unknown as { pollHealth: () => void }).pollHealth.bind(runner);
+      poll(); // first: unhealthy
+
+      healthy = true;
+      poll(); // second: healthy (state change)
+
+      const healthEvents = events.filter((e) => e.type === 'channel_health');
+      expect(healthEvents).toHaveLength(2);
+
+      const recovered = healthEvents[1] as { type: 'channel_health'; healthy: boolean; error: string | null };
+      expect(recovered.healthy).toBe(true);
+      expect(recovered.error).toBeNull();
+    });
+
+    test('pollHealth catches exceptions and emits unhealthy', async () => {
+      const { runner, events } = makeRunnerWithAdapter({
+        isHealthy: () => { throw new Error('adapter crashed'); },
+      });
+      await runner.startAll();
+
+      const poll = (runner as unknown as { pollHealth: () => void }).pollHealth.bind(runner);
+      poll();
+
+      const healthEvents = events.filter((e) => e.type === 'channel_health');
+      expect(healthEvents).toHaveLength(1);
+
+      const evt = healthEvents[0] as { type: 'channel_health'; healthy: boolean; error: string | null };
+      expect(evt.healthy).toBe(false);
+      expect(evt.error).toBe('adapter crashed');
+    });
+
+    test('stopAll clears health timer and state', async () => {
+      const { runner } = makeRunnerWithAdapter();
+      await runner.startAll();
+
+      const timerBefore = (runner as unknown as { healthTimer: ReturnType<typeof setInterval> | null }).healthTimer;
+      expect(timerBefore).not.toBeNull();
+
+      await runner.stopAll();
+
+      const timerAfter = (runner as unknown as { healthTimer: ReturnType<typeof setInterval> | null }).healthTimer;
+      expect(timerAfter).toBeNull();
+
+      const stateMap = (runner as unknown as { lastHealthState: Map<string, boolean> }).lastHealthState;
+      expect(stateMap.size).toBe(0);
+    });
+  });
 });

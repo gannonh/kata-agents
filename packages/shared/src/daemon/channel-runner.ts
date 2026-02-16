@@ -168,18 +168,31 @@ export class ChannelRunner {
 
   private pollHealth(): void {
     for (const [slug, { adapter }] of this.adapters) {
-      const healthy = adapter.isHealthy();
-      const previous = this.lastHealthState.get(slug);
+      try {
+        const healthy = adapter.isHealthy();
+        const previous = this.lastHealthState.get(slug);
 
-      // Only emit on state change (or first poll)
-      if (previous === undefined || previous !== healthy) {
-        this.lastHealthState.set(slug, healthy);
-        this.emit({
-          type: 'channel_health',
-          channelId: slug,
-          healthy,
-          error: healthy ? null : adapter.getLastError(),
-        });
+        // Only emit on state change (or first poll)
+        if (previous === undefined || previous !== healthy) {
+          this.lastHealthState.set(slug, healthy);
+          this.emit({
+            type: 'channel_health',
+            channelId: slug,
+            healthy,
+            error: healthy ? null : adapter.getLastError(),
+          });
+        }
+      } catch (err) {
+        this.log(`Health check failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+        if (this.lastHealthState.get(slug) !== false) {
+          this.lastHealthState.set(slug, false);
+          this.emit({
+            type: 'channel_health',
+            channelId: slug,
+            healthy: false,
+            error: err instanceof Error ? err.message : 'Health check exception',
+          });
+        }
       }
     }
   }
