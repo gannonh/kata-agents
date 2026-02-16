@@ -145,6 +145,8 @@ async function main(): Promise<void> {
           state.pluginManager = new PluginManager([...enabledPluginIds], log);
           state.pluginManager.loadBuiltinPlugins();
           log(`PluginManager loaded with ${enabledPluginIds.size} enabled plugin(s)`);
+          // configDir (~/.kata-agents/) used because daemon initializes plugins
+          // globally across all workspaces, not per-workspace.
           await state.pluginManager.initializeAll({
             workspaceRootPath: configDir,
             getCredential: async () => null,

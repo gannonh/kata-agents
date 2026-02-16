@@ -83,7 +83,12 @@ export interface PluginService {
  * Gives plugins access to workspace resources without exposing internal daemon state.
  */
 export interface PluginContext {
-  /** Absolute path to the active workspace root (e.g., ~/.kata-agents/workspaces/xxx) */
+  /**
+   * Base path for plugin file resolution.
+   * In session context: workspace root (e.g., ~/.kata-agents/workspaces/xxx).
+   * In daemon context: global config dir (e.g., ~/.kata-agents/) since the
+   * daemon serves multiple workspaces and initializes plugins globally.
+   */
   workspaceRootPath: string;
 
   /** Retrieve a stored credential by source slug. Returns null if not found. */

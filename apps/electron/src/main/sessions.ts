@@ -2412,8 +2412,9 @@ export class SessionManager {
   }
 
   /**
-   * Run agent chat headlessly (no IPC events to renderer).
-   * Used by daemon message processing where there is no active UI session.
+   * Run agent chat headlessly for daemon message processing.
+   * Emits user_message and text_complete IPC events for UI sync when windows
+   * are available; logs warnings otherwise.
    * Returns the final assistant text response, or throws on execution failure.
    */
   async sendMessageHeadless(sessionId: string, content: string): Promise<string> {
