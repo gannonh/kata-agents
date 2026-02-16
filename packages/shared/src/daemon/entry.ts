@@ -145,6 +145,17 @@ async function main(): Promise<void> {
           state.pluginManager = new PluginManager([...enabledPluginIds], log);
           state.pluginManager.loadBuiltinPlugins();
           log(`PluginManager loaded with ${enabledPluginIds.size} enabled plugin(s)`);
+          await state.pluginManager.initializeAll({
+            workspaceRootPath: configDir,
+            getCredential: async () => null,
+            logger: {
+              info: (msg: string) => log(`[plugin] ${msg}`),
+              warn: (msg: string) => log(`[plugin:warn] ${msg}`),
+              error: (msg: string) => log(`[plugin:error] ${msg}`),
+              debug: (msg: string) => log(`[plugin:debug] ${msg}`),
+            },
+          });
+          log('PluginManager initialized');
           // Build workspace configs map
           const workspaceConfigs = new Map<
             string,
