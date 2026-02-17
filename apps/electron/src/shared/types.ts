@@ -12,6 +12,7 @@ import type {
   StoredAttachment as CoreStoredAttachment,
   ContentBadge,
   ToolDisplayMeta,
+  ChannelOrigin,
 } from '@craft-agent/core/types';
 
 // Import mode types from dedicated subpath export (avoids pulling in SDK)
@@ -34,6 +35,7 @@ export type {
   CoreStoredAttachment as StoredAttachment,
   ContentBadge,
   ToolDisplayMeta,
+  ChannelOrigin,
 };
 
 // Import and re-export auth types for onboarding
@@ -337,14 +339,7 @@ export interface Session {
   // Total message count (pre-computed in JSONL header)
   messageCount?: number
   /** Channel origin for daemon-created sessions (absent for direct/interactive sessions) */
-  channel?: {
-    /** Adapter type: 'slack', 'whatsapp', etc. */
-    adapter: string
-    /** Channel config slug */
-    slug: string
-    /** Display name for the channel source (e.g., '#general', 'Support Group') */
-    displayName?: string
-  }
+  channel?: ChannelOrigin
   // Token usage for context tracking
   tokenUsage?: {
     inputTokens: number

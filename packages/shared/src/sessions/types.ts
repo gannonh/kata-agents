@@ -11,7 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
-import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
+import type { ChannelOrigin, StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
 
 /**
  * Todo state for sessions (user-controlled, never automatic)
@@ -107,11 +107,7 @@ export interface SessionConfig {
     awaitingCompaction: boolean;
   };
   /** Channel origin for daemon-created sessions (absent for direct/interactive sessions) */
-  channel?: {
-    adapter: string;
-    slug: string;
-    displayName?: string;
-  };
+  channel?: ChannelOrigin;
 }
 
 /**
@@ -193,11 +189,7 @@ export interface SessionHeader {
   /** ID of the last final (non-intermediate) assistant message - for unread detection without loading messages */
   lastFinalMessageId?: string;
   /** Channel origin for daemon-created sessions */
-  channel?: {
-    adapter: string;
-    slug: string;
-    displayName?: string;
-  };
+  channel?: ChannelOrigin;
 }
 
 /**
@@ -252,9 +244,5 @@ export interface SessionMetadata {
   /** Token usage statistics (from JSONL header, available without loading messages) */
   tokenUsage?: SessionTokenUsage;
   /** Channel origin for daemon-created sessions */
-  channel?: {
-    adapter: string;
-    slug: string;
-    displayName?: string;
-  };
+  channel?: ChannelOrigin;
 }

@@ -12,13 +12,13 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 **Milestone:** v0.7.0 Always-On Assistant
-**Phase:** 18 — Channel Fit and Finish
-**Plan:** 3 of 3 complete
-**Status:** Milestone complete (all phases done)
-**Last activity:** 2026-02-13 - Phase 18 complete (channel fit and finish)
+**Phase:** 19 — Tech Debt Cleanup
+**Plan:** 1 of 1
+**Status:** Phase complete
+**Last activity:** 2026-02-15 - Completed 19-01-PLAN.md
 
 ```
-Progress: [████████████████████████] 100% (23 of 23 plans complete across 9 phases)
+Progress: [████████████████████████] 100% (24 of 24 plans complete across 10 phases)
 ```
 
 ---
@@ -29,7 +29,7 @@ Progress: [███████████████████████
 - v0.4.0: 10 requirements in 2 phases (6 plans)
 - v0.6.0: 12 requirements in 5 phases (14 plans)
 - v0.6.1: 10 requirements in 2 phases (6 plans) -- 2 days
-- v0.7.0: 20 requirements in 9 phases (23 plans)
+- v0.7.0: 20 requirements in 10 phases (24 plans)
 
 ---
 
@@ -111,6 +111,11 @@ See PROJECT.md Key Decisions table for full history.
 - Slash command body typed as Record<string, string> with fallback defaults for optional fields
 - socketConnected flag tracks Socket Mode health independently from poll health
 
+**Phase 19 Plan 01 decisions:**
+- ChannelOrigin defined in core session.ts alongside Session interface (single source of truth)
+- Plugin initializeAll() getCredential returns null (daemon does not yet resolve per-source credentials)
+- Health polling interval set to 30s with dedup (emit only on state change)
+
 ### Roadmap Evolution
 
 - Phases 15-17 added (2026-02-10): Gap analysis from Phase 14 identified 5 gaps grouped into 3 phases
@@ -118,6 +123,7 @@ See PROJECT.md Key Decisions table for full history.
   - Phase 16: Channel creation UI + daemon config delivery (Gaps 2, 3)
   - Phase 17: End-to-end message processing (Gap 5)
 - Phase 18 added (2026-02-13): Channel fit and finish (markdown stripping, channel awareness, chat lifecycle management, end-user setup docs)
+- Phase 19 added (2026-02-15): Tech debt cleanup from v0.7.0 milestone audit
 
 ### Active Todos
 
@@ -143,12 +149,12 @@ None.
 
 ## Session Continuity
 
-**Last session:** 2026-02-13
-**Stopped at:** Phase 18 Plan 03 complete (Phase 18 complete, all 23 plans complete)
+**Last session:** 2026-02-15
+**Stopped at:** Completed 19-01-PLAN.md
 **Resume file:** None
 
-**Next action:** Phase 18 complete. All v0.7.0 plans executed. Ready for milestone closure.
+**Next action:** v0.7.0 milestone complete. All 24 plans across 10 phases executed.
 
 ---
 
-_Last updated: 2026-02-13 after Phase 18 verified and complete_
+_Last updated: 2026-02-15 after completing Phase 19 Plan 01 (tech debt cleanup)_
