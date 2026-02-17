@@ -159,8 +159,8 @@ Renderer
     channelId: string;
     /** Whether the adapter is healthy */
     healthy: boolean;
-    /** Error message if unhealthy */
-    error?: string;
+    /** Error message if unhealthy, null if healthy */
+    error: string | null;
   }
 ```
 

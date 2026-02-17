@@ -2476,6 +2476,7 @@ export class SessionManager {
           type: 'text_complete',
           sessionId,
           text: responseText,
+          isIntermediate: false,
         }, managed.workspace.id)
       }
 

@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { ChannelRunner } from '../channel-runner.ts';
 import type { ChannelAdapter, ChannelConfig, ChannelMessage } from '../../channels/types.ts';
 import type { DaemonEvent } from '../types.ts';
@@ -67,11 +67,20 @@ describe('ChannelRunner', () => {
   let queue: MessageQueue;
   let events: DaemonEvent[];
   let emitFn: (event: DaemonEvent) => void;
+  let lastRunner: ChannelRunner | null = null;
 
   beforeEach(() => {
     queue = makeFakeQueue();
     events = [];
     emitFn = (event) => events.push(event);
+    lastRunner = null;
+  });
+
+  afterEach(async () => {
+    if (lastRunner) {
+      await lastRunner.stopAll();
+      lastRunner = null;
+    }
   });
 
   test('startAll creates adapters for each enabled config', async () => {
@@ -96,6 +105,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(adapters).toHaveLength(2);
@@ -124,6 +134,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(adapters).toHaveLength(0);
@@ -145,6 +156,7 @@ describe('ChannelRunner', () => {
     const factory = () => null;
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(events).toHaveLength(1);
@@ -174,6 +186,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     // Simulate a message arriving
@@ -209,6 +222,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     // Message without the trigger pattern
@@ -238,6 +252,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     const msg = makeMessage({
@@ -276,6 +291,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     // Adapter was created but not started due to missing token
@@ -316,6 +332,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(capturedAdapter).not.toBeNull();
@@ -345,6 +362,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(capturedAdapter).not.toBeNull();
@@ -376,6 +394,7 @@ describe('ChannelRunner', () => {
     };
 
     const runner = new ChannelRunner(queue, emitFn, wsConfigs, () => {}, factory);
+    lastRunner = runner;
     await runner.startAll();
 
     expect(adapters).toHaveLength(2);
@@ -405,6 +424,7 @@ describe('ChannelRunner', () => {
       const events: DaemonEvent[] = [];
       const emit = (event: DaemonEvent) => events.push(event);
       const runner = new ChannelRunner(queue, emit, wsConfigs, () => {}, factory);
+      lastRunner = runner;
 
       return { runner, adapter, events };
     }

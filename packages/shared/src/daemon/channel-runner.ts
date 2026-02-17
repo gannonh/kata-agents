@@ -162,8 +162,10 @@ export class ChannelRunner {
 
     this.log(`Started ${startedCount} adapter(s)`);
 
-    // Start health polling (30s interval, initial poll after first interval)
-    this.healthTimer = setInterval(() => this.pollHealth(), 30_000);
+    // Start health polling only if there are running adapters
+    if (this.adapters.size > 0) {
+      this.healthTimer = setInterval(() => this.pollHealth(), 30_000);
+    }
   }
 
   private pollHealth(): void {
@@ -190,7 +192,7 @@ export class ChannelRunner {
             type: 'channel_health',
             channelId: slug,
             healthy: false,
-            error: err instanceof Error ? err.message : 'Health check exception',
+            error: err instanceof Error ? err.message : String(err),
           });
         }
       }
