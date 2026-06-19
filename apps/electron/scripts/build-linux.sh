@@ -189,9 +189,18 @@ bun run electron:build
 echo "Packaging app with electron-builder..."
 cd "$ELECTRON_DIR"
 
+# Config: use a release-generated config (github publish + channel) when
+# ELECTRON_BUILDER_CONFIG is set by the release workflow; otherwise the static
+# electron-builder.yml.
+CONFIG_ARG=""
+if [ -n "$ELECTRON_BUILDER_CONFIG" ]; then
+    echo "Using electron-builder config: $ELECTRON_BUILDER_CONFIG"
+    CONFIG_ARG="--config $ELECTRON_BUILDER_CONFIG"
+fi
+
 # Run electron-builder
 # Note: electron-builder may build both archs due to config, but we only use the requested one
-npx electron-builder --linux --${ARCH}
+npx electron-builder --linux --${ARCH} $CONFIG_ARG
 
 # 8. Verify the AppImage was built
 # electron-builder uses Linux-style arch names: x86_64 for x64, aarch64 for arm64

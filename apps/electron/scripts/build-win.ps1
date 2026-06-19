@@ -411,6 +411,15 @@ while ($retryCount -lt $maxRetries) {
 [System.GC]::Collect()
 [System.GC]::WaitForPendingFinalizers()
 
+# Config: use a release-generated config (github publish + channel) when
+# ELECTRON_BUILDER_CONFIG is set by the release workflow; otherwise the static
+# electron-builder.yml.
+$ConfigArgs = @()
+if ($env:ELECTRON_BUILDER_CONFIG) {
+    Write-Host "Using electron-builder config: $env:ELECTRON_BUILDER_CONFIG"
+    $ConfigArgs = @('--config', $env:ELECTRON_BUILDER_CONFIG)
+}
+
 # Run electron-builder with retry logic for EBUSY errors
 Push-Location $ElectronDir
 $maxBuilderRetries = 3
@@ -428,7 +437,7 @@ while (-not $builderSuccess -and $builderRetry -lt $maxBuilderRetries) {
         Start-Sleep -Seconds 1
     }
 
-    npx electron-builder --win --x64 2>&1 | Tee-Object -Variable builderOutput
+    npx electron-builder --win --x64 @ConfigArgs 2>&1 | Tee-Object -Variable builderOutput
 
     if ($LASTEXITCODE -eq 0) {
         $builderSuccess = $true
