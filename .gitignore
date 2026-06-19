@@ -80,3 +80,6 @@ views.json
 .claude-plugin/
 sessions/
 statuses/
+
+# Generated per-build electron-builder config (release-config.ts)
+apps/electron/electron-builder.generated.yml

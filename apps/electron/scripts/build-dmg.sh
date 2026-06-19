@@ -228,21 +228,24 @@ if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
     export CSC_NAME="$CSC_NAME_CLEAN"
 fi
 
-# Add notarization if all credentials are available
+# Notarization: electron-builder notarizes automatically when APPLE_ID,
+# APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID are present and hardenedRuntime
+# is enabled (it is, in electron-builder.yml). No extra flag is needed.
 if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
-    echo "Notarization enabled"
-    export APPLE_ID="$APPLE_ID"
-    export APPLE_TEAM_ID="$APPLE_TEAM_ID"
-    export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD"
+    echo "Notarization enabled (APPLE_* credentials present)"
+fi
 
-    # Enable notarization in electron-builder by setting env vars
-    # The electron-builder.yml has notarize section commented out,
-    # but we can enable it via environment
-    export NOTARIZE=true
+# Config: use a release-generated config (github publish + channel) when
+# ELECTRON_BUILDER_CONFIG is set by the release workflow; otherwise the static
+# electron-builder.yml (stable github default).
+CONFIG_ARG=""
+if [ -n "$ELECTRON_BUILDER_CONFIG" ]; then
+    echo "Using electron-builder config: $ELECTRON_BUILDER_CONFIG"
+    CONFIG_ARG="--config $ELECTRON_BUILDER_CONFIG"
 fi
 
 # Run electron-builder
-npx electron-builder $BUILDER_ARGS
+npx electron-builder $BUILDER_ARGS $CONFIG_ARG
 
 # 8. Verify the DMG was built
 # electron-builder.yml uses artifactName to output: Kata-Agents-${arch}.dmg

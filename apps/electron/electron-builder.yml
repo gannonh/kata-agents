@@ -73,10 +73,17 @@ files:
 extraMetadata:
   main: dist/main.cjs
 
-# Auto-update: electron-updater fetches from this URL for update manifests (.yml files)
+# Auto-update feed: GitHub Releases. The bundled app-update.yml is generated
+# from this block. For release builds, scripts/build/release-config.ts overlays
+# the per-channel publish config (releaseType + channel) and the Nightly product
+# name onto a generated config; this static block is the stable default used by
+# local `electron:dist` builds. Releases are uploaded by the workflow's
+# softprops/action-gh-release step, not by `electron-builder --publish`.
 publish:
-  provider: generic
-  url: https://agents.craft.do/electron/latest
+  - provider: github
+    owner: gannonh
+    repo: kata-agents
+    releaseType: release
 
 # Disable ASAR to avoid decompression overhead and click delays
 asar: false
