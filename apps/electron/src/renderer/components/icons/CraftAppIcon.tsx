@@ -6,7 +6,7 @@ interface CraftAppIconProps {
 }
 
 /**
- * CraftAppIcon - Displays the Kata logo (colorful "C" icon)
+ * CraftAppIcon - Displays the Kata logo
  */
 export function CraftAppIcon({ className, size = 64 }: CraftAppIconProps) {
   return (
