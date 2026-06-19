@@ -2,11 +2,18 @@
 type: Spec
 title: Rebrand Kata Agents — Phase 1 (user-facing)
 description: Scope, decisions, change set, and verification plan for renaming Craft Agents to Kata Agents in all user-visible surfaces while preserving identity infrastructure.
-tags: [rebrand, kata, phase-1, in-progress]
+tags: [rebrand, kata, phase-1, implemented]
 timestamp: 2026-06-19T00:00:00Z
 ---
 
 # Rebrand fork to "Kata Agents" — Phase 1 (user-facing)
+
+## Status
+
+- **Plan**: Approved (user decisions captured below).
+- **Build**: Implemented (2026-06-19). See
+  `docs/specs/rebrand-kata-agents-phase-1-build-report.md`.
+- **Verify**: Pending runtime/dev-run + packaged-build acceptance.
 
 ## Context
 This repo is a fork of **Craft Agents** (`craft-agent`), an Electron desktop app + supporting
