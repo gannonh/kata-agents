@@ -11,8 +11,10 @@ timestamp: 2026-06-19T00:00:00Z
 ## Status
 
 - **Plan**: Approved (2026-06-19, user-approved after adversarial review).
-- **Build**: Not started.
-- **Verify**: Not started.
+- **Build**: Implemented (2026-06-19). See
+  [build report](2026-06-19-ci-release-pipeline-build-report.md).
+- **Verify**: Not started. AC1/AC3/AC5/AC6/AC9 require maintainer execution with
+  configured repo secrets (see build report "Evidence" section).
 
 ## Goal
 

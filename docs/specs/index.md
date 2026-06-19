@@ -5,9 +5,7 @@ Post-fork rebrand + infra roadmap, four sequenced projects: **A** brand tail →
 
 ## Active
 
-* [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — **Project B**. GitHub
-  Actions CI + nightly/stable desktop release pipeline (Bun toolchain), publishing to GitHub Releases
-  with the kata-code auto-update shape. Status: Plan approved; Build not started.
+_None._
 
 ## Planned
 
@@ -20,4 +18,8 @@ Post-fork rebrand + infra roadmap, four sequenced projects: **A** brand tail →
 
 ## Completed
 
+* [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — **Project B**. GitHub
+  Actions CI + nightly/stable desktop release pipeline (Bun toolchain) publishing to GitHub Releases
+  with the kata-code auto-update shape. Status: implemented. Ops docs:
+  [../operations/ci.md](../operations/ci.md), [../operations/release.md](../operations/release.md).
 * [rebrand-kata-agents-phase-1.md](rebrand-kata-agents-phase-1.md) — Rename all user-facing "Craft Agents" surfaces to "Kata Agents" while preserving identity infrastructure (appId, deep-link scheme, config dir, env vars, publish URLs). See [rebrand-kata-agents-phase-1-build-report.md](rebrand-kata-agents-phase-1-build-report.md).

@@ -2,6 +2,11 @@
 
 ## 2026-06-19
 
+* **Implemented**: Project B CI/release pipeline.
+  * Spec: [specs/2026-06-19-ci-release-pipeline.md](specs/2026-06-19-ci-release-pipeline.md)
+  * Build report: [specs/2026-06-19-ci-release-pipeline-build-report.md](specs/2026-06-19-ci-release-pipeline-build-report.md)
+  * **New section**: [operations/](operations/) with [ci.md](operations/ci.md) and [release.md](operations/release.md) (CI gate, release pipeline, auto-update shape, required secrets).
+  * **Updated**: [index.md](index.md) (added operations section + recent work), [specs/index.md](specs/index.md) moved Project B from Active to Completed.
 * **Completed**: Phase 1 user-facing rebrand from Craft Agents to Kata Agents.
   * Spec: [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md)
   * Build report: [specs/rebrand-kata-agents-phase-1-build-report.md](specs/rebrand-kata-agents-phase-1-build-report.md)
