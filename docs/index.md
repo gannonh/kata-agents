@@ -14,8 +14,11 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **Rebrand Phase 1** — [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md) — rename all user-facing "Craft" surfaces to "Kata" while preserving identity infrastructure
 * **ADRs** — [adrs/](adrs/) — no ADRs recorded yet; seed is in place for future decisions
+
+## Recent work
+
+* **Rebrand Phase 1** — [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md) — rename all user-facing "Craft" surfaces to "Kata" while preserving identity infrastructure. Status: completed. Build report: [specs/rebrand-kata-agents-phase-1-build-report.md](specs/rebrand-kata-agents-phase-1-build-report.md)
 
 ## Root project files
 
