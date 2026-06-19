@@ -7,7 +7,7 @@ Post-fork rebrand + infra roadmap, four sequenced projects: **A** brand tail →
 
 * [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — **Project B**. GitHub
   Actions CI + nightly/stable desktop release pipeline (Bun toolchain), publishing to GitHub Releases
-  with the kata-code auto-update shape. Status: Plan (draft, in review).
+  with the kata-code auto-update shape. Status: Plan approved; Build not started.
 
 ## Planned
 
