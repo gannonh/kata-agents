@@ -72,3 +72,11 @@ credentials.enc
 # act (local GitHub Actions runner)
 .secrets
 .actrc
+
+# Kata Agent local data (sessions, credentials, config)
+config.json
+events.jsonl
+views.json
+.claude-plugin/
+sessions/
+statuses/
