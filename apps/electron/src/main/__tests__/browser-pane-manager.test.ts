@@ -793,7 +793,7 @@ describe('BrowserPaneManager', () => {
     const instance = (manager as any).instances.get('toolbar-finish-load-replay')
 
     instance.currentUrl = 'https://craft.do'
-    instance.title = 'Craft'
+    instance.title = 'Kata'
     instance.isLoading = true
     instance.canGoBack = true
     instance.canGoForward = true
@@ -809,7 +809,7 @@ describe('BrowserPaneManager', () => {
       'browser-toolbar:state-update',
       {
         url: 'https://craft.do',
-        title: 'Craft',
+        title: 'Kata',
         isLoading: true,
         canGoBack: true,
         canGoForward: true,

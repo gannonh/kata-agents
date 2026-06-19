@@ -131,7 +131,7 @@ function renderMenuSection(
 }
 
 /**
- * Desktop AppMenu — Craft logo dropdown with Edit/View/Window/Settings/Help/Debug submenus.
+ * Desktop AppMenu — Kata logo dropdown with Edit/View/Window/Settings/Help/Debug submenus.
  *
  * Behavior matches the pre-refactor version that lived inline in `TopBar.tsx`.
  * Labels, hotkey strings, and update-actions are pulled from `menu-schema.ts`

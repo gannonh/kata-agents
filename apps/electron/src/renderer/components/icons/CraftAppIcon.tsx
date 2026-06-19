@@ -6,13 +6,13 @@ interface CraftAppIconProps {
 }
 
 /**
- * CraftAppIcon - Displays the Craft logo (colorful "C" icon)
+ * CraftAppIcon - Displays the Kata logo (colorful "C" icon)
  */
 export function CraftAppIcon({ className, size = 64 }: CraftAppIconProps) {
   return (
     <img
       src={craftLogo}
-      alt="Craft"
+      alt="Kata"
       width={size}
       height={size}
       className={className}
