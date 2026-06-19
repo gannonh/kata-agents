@@ -4,7 +4,7 @@
  * in both the callback server and the playground preview.
  */
 
-import { CRAFT_LOGO_HTML } from '../branding.ts';
+import { KATA_LOGO_SVG } from '../branding.ts';
 
 export type AppType = 'terminal' | 'electron';
 
@@ -43,7 +43,7 @@ export function generateCallbackPage(options: {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Craft - ${title}</title>
+  <title>Kata - ${title}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -60,16 +60,16 @@ export function generateCallbackPage(options: {
     }
 
     .logo {
-      /* Purple accent: oklch(0.62 0.13 293) */
-      color: #8b5fb3;
-      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
-      font-size: 6px;
-      line-height: 1;
-      white-space: pre;
-      /* Negative letter-spacing to close gaps between block characters */
-      letter-spacing: -0.05em;
+      width: 64px;
+      height: 64px;
       /* 48px above the card */
       margin-bottom: 48px;
+    }
+
+    .logo svg {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
 
     .content {
@@ -170,12 +170,12 @@ export function generateCallbackPage(options: {
 </head>
 <body>
   <div class="content">
-    <pre class="logo">${CRAFT_LOGO_HTML}</pre>
+    <div class="logo">${KATA_LOGO_SVG}</div>
     <div class="card">
       <div class="status">${statusMessage}</div>
     </div>
     <div class="hint">${isSuccess ? 'You can now return to the application.' : 'Please close this window and try again.'}</div>
-    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">Craft Agents</a>` : ''}
+    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">Kata Agents</a>` : ''}
   </div>
   <script>${autoCloseScript}</script>
 </body>

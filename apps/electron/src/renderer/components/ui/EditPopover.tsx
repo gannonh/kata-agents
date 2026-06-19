@@ -312,7 +312,7 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Follow the patterns in ~/.craft-agent/docs/sources.md. ' +
         'After creating the source, call source_test with the source slug to verify the configuration.',
     },
-    example: 'Connect to my Craft space',
+    example: 'Connect to my Kata space',
     overridePlaceholder: 'What would you like to connect?',
     displayLabelKey: 'editPopover.label.addSource',
     exampleKey: 'editPopover.example.addSource',

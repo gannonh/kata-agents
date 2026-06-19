@@ -3,22 +3,25 @@ interface CraftAgentsSymbolProps {
 }
 
 /**
- * Craft Agents "E" symbol - the small pixel art icon
- * Uses accent color from theme (currentColor from className)
+ * Kata Agents app icon symbol - matches resources/icon.svg.
+ * Tan (#d4a574) kanji mark on a dark (#18181b) rounded square.
  */
 export function CraftAgentsSymbol({ className }: CraftAgentsSymbolProps) {
   return (
     <svg
-      viewBox="452 368 115 129"
+      viewBox="0 0 64 64"
       className={className}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path
-        d="M474.78218,393.8 L474.78218,368 L566.666667,368 L566.666667,393.8 L474.78218,393.8 Z M521.101,419.6 L521.102306,445.4 L452,445.4 L452,393.8 L566.666667,393.8 L566.666667,419.6 L521.101,419.6 Z M474.78218,497 L474.775667,471.2 L452,471.2 L452,445.4 L566.666667,445.4 L566.666667,497 L474.78218,497 Z"
-        fill="currentColor"
-        fillRule="nonzero"
-      />
+      <rect width="64" height="64" rx="14" fill="#18181b" />
+      <g transform="translate(10, 9)">
+        <rect x="0" y="0" width="44" height="7" rx="3.5" fill="#d4a574" />
+        <rect x="0" y="15" width="24" height="7" rx="3.5" fill="#d4a574" />
+        <rect x="18" y="7" width="7" height="15" rx="3.5" fill="#d4a574" />
+        <rect x="0" y="30" width="44" height="7" rx="3.5" fill="#d4a574" />
+        <rect x="18" y="37" width="7" height="9" rx="3.5" fill="#d4a574" />
+      </g>
     </svg>
   )
 }

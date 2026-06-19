@@ -1,3 +1,11 @@
+---
+type: Reference
+title: craft-cli — CLI Reference
+description: Terminal client for the Kata Agent server; connects over WebSocket to a running headless server.
+tags: [cli, reference, websocket]
+timestamp: 2026-06-19T00:00:00Z
+---
+
 # craft-cli — CLI Reference
 
 Terminal client for Craft Agent server. Connects over WebSocket (`ws://` or `wss://`) to a running headless server.

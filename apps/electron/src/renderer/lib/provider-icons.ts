@@ -55,8 +55,8 @@ const providerDisplayNames: Record<string, string> = {
   minimax: 'Minimax',
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
-  pi: 'Craft Agents Backend',
-  pi_compat: 'Craft Agents Backend',
+  pi: 'Kata Agents Backend',
+  pi_compat: 'Kata Agents Backend',
   vercel: 'Vercel',
 }
 
