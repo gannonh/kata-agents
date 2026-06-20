@@ -105,6 +105,18 @@ jobs:
 
           echo "Resolved: channel=$channel version=$version tag=$tag prerelease=$is_prerelease make_latest=$make_latest dry_run=$dry_run"
 
+          {
+            echo "## Release parameters"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **channel** | \`$channel\` |"
+            echo "| **version** | \`$version\` |"
+            echo "| **tag** | \`$tag\` |"
+            echo "| **prerelease** | \`$is_prerelease\` |"
+            echo "| **make_latest** | \`$make_latest\` |"
+            echo "| **dry_run** | \`$dry_run\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── Fail fast if macOS signing secrets are absent ────────────────────────────
   signing_gate:
     needs: release_meta
