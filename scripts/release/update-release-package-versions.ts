@@ -17,6 +17,7 @@
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** Manifests that carry the desktop app version (the electron build reads these). */
 export const DEFAULT_RELEASE_PACKAGE_FILES = [
@@ -40,7 +41,7 @@ export function setPackageVersion(
 }
 
 function repoRoot(): string {
-  return resolve(dirname(new URL(import.meta.url).pathname), '..', '..')
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 }
 
 interface CliArgs {

@@ -18,6 +18,7 @@
 
 import { readFileSync, appendFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export function resolveStableCore(version: string): string {
   return version.replace(/[-+].*$/, '')
@@ -59,7 +60,7 @@ export function resolveNightlyReleaseMetadata(
 }
 
 function repoRoot(): string {
-  return resolve(dirname(new URL(import.meta.url).pathname), '..', '..')
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 }
 
 function readDesktopBaseVersion(rootDir: string): string {

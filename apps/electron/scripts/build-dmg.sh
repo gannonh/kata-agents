@@ -245,7 +245,7 @@ if [ -n "$ELECTRON_BUILDER_CONFIG" ]; then
 fi
 
 # Run electron-builder
-npx electron-builder $BUILDER_ARGS $CONFIG_ARG
+npx electron-builder $BUILDER_ARGS $CONFIG_ARG --publish never
 
 # 8. Verify the DMG was built
 # electron-builder.yml uses artifactName to output: Kata-Agents-${arch}.dmg
