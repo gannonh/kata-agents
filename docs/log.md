@@ -1,5 +1,12 @@
 # Documentation Bundle Update Log
 
+## 2026-06-20
+
+* **Drafted**: Update UX parity spec.
+  * Spec: [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md)
+  * **Updated**: [specs/index.md](specs/index.md) moved the spec into Active; [specs/log.md](specs/log.md) records the planning entry.
+  * Scope: port Kata Code's desktop update UX to Kata Agents while preserving Project B release feed semantics and identity infrastructure.
+
 ## 2026-06-19
 
 * **Implemented**: Project B CI/release pipeline.

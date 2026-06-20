@@ -5,7 +5,7 @@ Post-fork rebrand + infra roadmap, four sequenced projects: **A** brand tail →
 
 ## Active
 
-_None._
+* [2026-06-20-update-ux-parity-with-kata-code-design.md](2026-06-20-update-ux-parity-with-kata-code-design.md): Port Kata Code's desktop update UX to Kata Agents: background checks, manual download/install, sidebar pill, Stable/Nightly update track selector, native check dialogs, production diagnostics, and update docs. Status: drafted and awaiting user review.
 
 ## Planned
 

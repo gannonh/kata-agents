@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-20
+
+* **Drafted**: [2026-06-20-update-ux-parity-with-kata-code-design.md](2026-06-20-update-ux-parity-with-kata-code-design.md): Plan to port Kata Code's desktop update UX to Kata Agents: stateful background checks, manual download/install, sidebar update pill, Stable/Nightly track selection, native up-to-date/error dialogs, production updater diagnostics, and required docs updates. Added to Active in [index.md](index.md). Adversarial review found no remaining blocking or medium issues after revision.
+
 ## 2026-06-19
 
 * **Implemented**: [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — Project B
