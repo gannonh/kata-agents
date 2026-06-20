@@ -24,6 +24,7 @@
 import { parse, stringify } from 'yaml'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export type Channel = 'stable' | 'nightly'
 
@@ -137,7 +138,7 @@ function parseArgs(argv: string[]): CliArgs {
 function main(): void {
   const args = parseArgs(process.argv.slice(2))
 
-  const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '..', '..')
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
   const basePath = args.base ?? resolve(repoRoot, 'apps/electron/electron-builder.yml')
   const outPath = args.out ?? resolve(repoRoot, 'apps/electron/electron-builder.generated.yml')
 
