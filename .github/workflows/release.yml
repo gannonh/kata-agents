@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "!v*-nightly.*"
+  schedule:
+    # Automatic nightly every 3 hours (UTC). Only proceeds when main has
+    # changed since the last nightly tag (see check_changes job below).
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -13,6 +18,10 @@ on:
           - stable
           - nightly
         default: stable
+      version:
+        description: "Release version (for example 0.10.4 or v0.10.4). Required for stable."
+        type: string
+        required: false
       dry_run:
         description: "Build + sign only; create no GitHub Release and publish nothing"
         type: boolean
@@ -28,8 +37,47 @@ permissions:
   contents: read
 
 jobs:
+  # ── Skip scheduled runs when main has not changed since the last nightly ──
+  check_changes:
+    name: Check for changes since last nightly
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: check
+        name: Compare HEAD to last nightly tag
+        run: |
+          set -euo pipefail
+          last_nightly_tag=$(git tag --list 'v*-nightly.*' --sort=-creatordate | head -n 1)
+          if [[ -z "$last_nightly_tag" ]]; then
+            echo "No previous nightly tag found. Proceeding with release."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last_nightly_sha=$(git rev-parse "$last_nightly_tag^{commit}")
+          head_sha=$(git rev-parse HEAD)
+
+          if [[ "$last_nightly_sha" == "$head_sha" ]]; then
+            echo "No changes on main since last nightly release ($last_nightly_tag). Skipping."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changes detected on main since $last_nightly_tag ($last_nightly_sha → $head_sha). Proceeding."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Resolve channel / version / tag / prerelease / make_latest ───────────────
   release_meta:
+    needs: [check_changes]
+    if: |
+      !failure() && !cancelled() &&
+      (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
     runs-on: ubuntu-latest
     outputs:
       channel: ${{ steps.meta.outputs.channel }}
@@ -53,6 +101,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -71,6 +120,18 @@ jobs:
             fi
             name="$tag"
             dry_run="false"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            # Scheduled run is always a nightly.
+            channel="nightly"
+            dry_run="false"
+            meta="$(bun run scripts/release/resolve-nightly-release.ts \
+              --date "$(date -u +%Y%m%d)" \
+              --run-number "$RUN_NUMBER" \
+              --sha "$SHA")"
+            version="$(printf '%s\n' "$meta" | grep '^version=' | cut -d= -f2-)"
+            tag="$(printf '%s\n' "$meta" | grep '^tag=' | cut -d= -f2-)"
+            name="$(printf '%s\n' "$meta" | grep '^name=' | cut -d= -f2-)"
+            is_prerelease="true"; make_latest="false"
           else
             # workflow_dispatch
             channel="${INPUT_CHANNEL:-stable}"
@@ -86,7 +147,17 @@ jobs:
               name="$(printf '%s\n' "$meta" | grep '^name=' | cut -d= -f2-)"
               is_prerelease="true"; make_latest="false"
             else
-              version="$(bun --print "require('./apps/electron/package.json').version")"
+              # Stable dispatch: the version input is the source of truth.
+              raw="${INPUT_VERSION:-}"
+              if [ -z "$raw" ]; then
+                echo "workflow_dispatch stable releases require the 'version' input." >&2
+                exit 1
+              fi
+              version="${raw#v}"
+              if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+                echo "Invalid release version: $raw" >&2
+                exit 1
+              fi
               tag="v$version"
               name="$tag"
               is_prerelease="false"; make_latest="true"
