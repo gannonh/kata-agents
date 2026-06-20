@@ -10,7 +10,7 @@ timestamp: 2026-06-20T00:00:00Z
 
 ## Status
 
-- **Plan**: Drafted after user alignment and adversarial review on 2026-06-20; awaiting user review.
+- **Plan**: Approved 2026-06-20 after user alignment and adversarial review.
 - **Build**: Not started.
 - **Verify**: Not started.
 
