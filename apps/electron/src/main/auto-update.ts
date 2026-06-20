@@ -2,8 +2,14 @@
  * Auto-update module using electron-updater
  *
  * Handles checking for updates, downloading, and installing via the standard
- * electron-updater library. Updates are served from https://agents.craft.do/electron/latest
- * using the generic provider (YAML manifests + binaries on R2/S3).
+ * electron-updater library. Updates are served from GitHub Releases using the
+ * github provider; the feed (app-update.yml) is generated at build time by the
+ * electron-builder publish config (see scripts/build/release-config.ts).
+ *
+ * Channels: the installed build's version selects its feed — a nightly build
+ * (`X.Y.Z-nightly.*`) follows the `nightly` channel (nightly*.yml prereleases);
+ * any other build follows `latest` (latest*.yml stable releases). Updates whose
+ * version does not match the installed channel are ignored.
  *
  * Platform behavior:
  * - macOS: Downloads zip, extracts and swaps app bundle atomically
@@ -20,6 +26,7 @@ import { platform } from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
 import { mainLog } from './logger'
+import { resolveUpdateChannel } from './update-channel'
 import { getAppVersion } from '@craft-agent/shared/version'
 import {
   getDismissedUpdateVersion,
@@ -124,6 +131,16 @@ function broadcastDownloadProgress(progress: number): void {
 
 // ─── Configure electron-updater ───────────────────────────────────────────────
 
+// Channel: follow the feed matching this installed build. Nightly builds opt
+// into prereleases; stable builds stay on latest*.yml. This pins the updater to
+// the right manifest (nightly*.yml vs latest*.yml) on the github provider.
+const INSTALLED_CHANNEL = resolveUpdateChannel(getAppVersion())
+autoUpdater.channel = INSTALLED_CHANNEL
+autoUpdater.allowPrerelease = INSTALLED_CHANNEL === 'nightly'
+mainLog.info(
+  `[auto-update] Update channel: ${INSTALLED_CHANNEL} (allowPrerelease=${autoUpdater.allowPrerelease})`,
+)
+
 // Auto-download updates in the background after detection
 autoUpdater.autoDownload = true
 
@@ -145,6 +162,16 @@ autoUpdater.on('checking-for-update', () => {
 })
 
 autoUpdater.on('update-available', (info) => {
+  // Belt-and-suspenders channel guard: the channel-specific manifest should
+  // already exclude other channels, but never let a nightly version surface to
+  // a stable install (or vice versa).
+  if (resolveUpdateChannel(info.version) !== INSTALLED_CHANNEL) {
+    mainLog.info(
+      `[auto-update] Ignoring update ${info.version}: does not match installed channel ${INSTALLED_CHANNEL}`,
+    )
+    return
+  }
+
   mainLog.info(`[auto-update] Update available: ${updateInfo.currentVersion} → ${info.version}`)
 
   // First, check electron-updater's internal state (most reliable)

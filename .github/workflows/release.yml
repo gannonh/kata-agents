@@ -1,0 +1,270 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options:
+          - stable
+          - nightly
+        default: stable
+      dry_run:
+        description: "Build + sign only; create no GitHub Release and publish nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Build/meta jobs only read the repo. The release job elevates to contents:write
+# (see below) to create the release and upload assets.
+permissions:
+  contents: read
+
+jobs:
+  # ── Resolve channel / version / tag / prerelease / make_latest ───────────────
+  release_meta:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+      make_latest: ${{ steps.meta.outputs.make_latest }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            # Tag push: the tag is the source of truth.
+            tag="$REF_NAME"
+            version="${tag#v}"
+            if printf '%s' "$version" | grep -q -- '-nightly\.'; then
+              channel="nightly"; is_prerelease="true"; make_latest="false"
+            else
+              channel="stable"; is_prerelease="false"; make_latest="true"
+            fi
+            name="$tag"
+            dry_run="false"
+          else
+            # workflow_dispatch
+            channel="${INPUT_CHANNEL:-stable}"
+            dry_run="${INPUT_DRY_RUN:-false}"
+            if [ "$channel" = "nightly" ]; then
+              # Compute X.Y.(Z+1)-nightly.YYYYMMDD.N from apps/electron/package.json.
+              meta="$(bun run scripts/release/resolve-nightly-release.ts \
+                --date "$(date -u +%Y%m%d)" \
+                --run-number "$RUN_NUMBER" \
+                --sha "$SHA")"
+              version="$(printf '%s\n' "$meta" | grep '^version=' | cut -d= -f2-)"
+              tag="$(printf '%s\n' "$meta" | grep '^tag=' | cut -d= -f2-)"
+              name="$(printf '%s\n' "$meta" | grep '^name=' | cut -d= -f2-)"
+              is_prerelease="true"; make_latest="false"
+            else
+              version="$(bun --print "require('./apps/electron/package.json').version")"
+              tag="v$version"
+              name="$tag"
+              is_prerelease="false"; make_latest="true"
+            fi
+          fi
+
+          {
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "name=$name"
+            echo "is_prerelease=$is_prerelease"
+            echo "make_latest=$make_latest"
+            echo "dry_run=$dry_run"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved: channel=$channel version=$version tag=$tag prerelease=$is_prerelease make_latest=$make_latest dry_run=$dry_run"
+
+  # ── Fail fast if macOS signing secrets are absent ────────────────────────────
+  signing_gate:
+    needs: release_meta
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Validate macOS signing secrets
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bun run scripts/release/check-macos-release-signing.ts
+
+  # ── Build packaged artifacts per platform ────────────────────────────────────
+  build:
+    needs: [release_meta, signing_gate]
+    runs-on: ${{ matrix.os }}
+    # macOS is the primary release gate. Windows/Linux are unsigned best-effort
+    # legs that must not block the release if they fail (Platform assumption).
+    continue-on-error: ${{ matrix.platform != 'mac' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+            arch: arm64
+          - os: macos-14
+            platform: mac
+            arch: x64
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Align package versions to release version
+        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}"
+
+      - name: Generate electron-builder release config
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${{ github.workspace }}/apps/electron/electron-builder.generated.yml"
+          bun run scripts/build/release-config.ts \
+            --version "${{ needs.release_meta.outputs.version }}" \
+            --channel "${{ needs.release_meta.outputs.channel }}" \
+            --repository "${{ github.repository }}" \
+            --out "$out"
+          echo "ELECTRON_BUILDER_CONFIG=$out" >> "$GITHUB_ENV"
+
+      - name: Build macOS (signed + notarized)
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash apps/electron/scripts/build-dmg.sh ${{ matrix.arch }}
+
+      - name: Build Linux (unsigned, best-effort)
+        if: matrix.platform == 'linux'
+        run: bash apps/electron/scripts/build-linux.sh ${{ matrix.arch }}
+
+      - name: Build Windows (unsigned, best-effort)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: pwsh -ExecutionPolicy Bypass -File apps/electron/scripts/build-win.ps1
+
+      - name: Collect release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: warn
+          path: |
+            apps/electron/release/*.dmg
+            apps/electron/release/*.zip
+            apps/electron/release/*.exe
+            apps/electron/release/*.AppImage
+            apps/electron/release/*.blockmap
+            apps/electron/release/*.yml
+
+  # ── Create the GitHub Release and upload assets ──────────────────────────────
+  release:
+    needs: [release_meta, build]
+    if: needs.release_meta.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    # The default GITHUB_TOKEN is not assumed writable; grant it explicitly here.
+    permissions:
+      contents: write
+    steps:
+      - name: Download built assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release_meta.outputs.tag }}
+          name: ${{ needs.release_meta.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ needs.release_meta.outputs.is_prerelease }}
+          make_latest: ${{ needs.release_meta.outputs.make_latest }}
+          generate_release_notes: true
+          files: dist/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── npm CLI publish — SCAFFOLDED BUT DISABLED in Project B ────────────────────
+  # `if: false` keeps this job permanently skipped so nothing is published to npm
+  # under the soon-to-be-renamed @craft-agent/* scope. Project C enables npm
+  # publishing (after the scope/env rename); flip the guard there and wire
+  # NPM_TOKEN. Until then this job documents the intended shape only.
+  publish_cli:
+    needs: [release_meta, release]
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Publish CLI to npm
+        # dist-tag follows the channel: nightly → "nightly", stable → "latest".
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          dist_tag="latest"
+          if [ "${{ needs.release_meta.outputs.channel }}" = "nightly" ]; then
+            dist_tag="nightly"
+          fi
+          echo "Would publish apps/cli with --tag $dist_tag (disabled in Project B)"
+          # cd apps/cli && npm publish --tag "$dist_tag" --access public

@@ -80,3 +80,9 @@ views.json
 .claude-plugin/
 sessions/
 statuses/
+
+# Generated per-build electron-builder config (release-config.ts)
+apps/electron/electron-builder.generated.yml
+
+# UAT evidence (skill artifacts, not for commit)
+uat-evidence/

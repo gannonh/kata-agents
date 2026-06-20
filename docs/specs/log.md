@@ -2,6 +2,12 @@
 
 ## 2026-06-19
 
+* **Implemented**: [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — Project B
+  CI/release pipeline built across phases 1–5: green `validate:ci` + `ci.yml`, github-provider
+  release config + repaired build entry points, channel-aware desktop updater, nightly/stable
+  `release.yml` (signed+notarized macOS, best-effort Windows/Linux, GitHub Releases via softprops),
+  disabled npm publish scaffold, and ops docs. Moved Active → Completed in [index.md](index.md). See
+  [build report](2026-06-19-ci-release-pipeline-build-report.md).
 * **Drafted**: [2026-06-19-ci-release-pipeline.md](2026-06-19-ci-release-pipeline.md) — Project B
   spec for GitHub Actions CI + nightly/stable desktop release pipeline (Bun toolchain) publishing to
   GitHub Releases with the kata-code auto-update shape. Revised after adversarial review (runtime
