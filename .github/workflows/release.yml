@@ -191,6 +191,7 @@ jobs:
   # ── Fail fast if macOS signing secrets are absent ────────────────────────────
   signing_gate:
     needs: release_meta
+    if: ${{ !failure() && !cancelled() && needs.release_meta.result == 'success' }}
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -211,6 +212,7 @@ jobs:
   # ── Build packaged artifacts per platform ────────────────────────────────────
   build:
     needs: [release_meta, signing_gate]
+    if: ${{ !failure() && !cancelled() && needs.release_meta.result == 'success' && needs.signing_gate.result == 'success' }}
     runs-on: ${{ matrix.os }}
     # macOS is the primary release gate. Windows/Linux are unsigned best-effort
     # legs that must not block the release if they fail (Platform assumption).
@@ -296,7 +298,7 @@ jobs:
   # ── Create the GitHub Release and upload assets ──────────────────────────────
   release:
     needs: [release_meta, build]
-    if: needs.release_meta.outputs.dry_run != 'true'
+    if: ${{ !failure() && !cancelled() && needs.release_meta.result == 'success' && needs.build.result == 'success' && needs.release_meta.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
     # The default GITHUB_TOKEN is not assumed writable; grant it explicitly here.
     permissions:
