@@ -511,6 +511,62 @@ export interface UpdateInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop update state machine (kata-code parity)
+// ---------------------------------------------------------------------------
+
+/** Runtime updater status. Mirrors kata-code's DesktopUpdateStatus. */
+export type DesktopUpdateStatus =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+/** Selectable update track. "latest" follows stable releases (latest*.yml),
+ *  "nightly" follows prereleases (nightly*.yml). */
+export type DesktopUpdateChannel = 'latest' | 'nightly'
+
+/** Which updater action an error originated from, for retry decisions. */
+export type DesktopUpdateErrorContext = 'check' | 'download' | 'install'
+
+/**
+ * Full runtime update state. The installed app version supplies the default
+ * channel; a persisted user preference can override it (AC6). The reinstall
+ * button in the sidebar/settings is driven by `status` + `downloadedVersion`.
+ */
+export interface DesktopUpdateState {
+  enabled: boolean
+  status: DesktopUpdateStatus
+  channel: DesktopUpdateChannel
+  currentVersion: string
+  availableVersion: string | null
+  downloadedVersion: string | null
+  downloadPercent: number | null
+  checkedAt: string | null
+  message: string | null
+  errorContext: DesktopUpdateErrorContext | null
+  canRetry: boolean
+}
+
+/** Result of a manual or background update check. */
+export interface DesktopUpdateCheckResult {
+  checked: boolean
+  state: DesktopUpdateState
+}
+
+/** Result of a download or install action. `accepted=false` means the action
+ *  was rejected (e.g. wrong state); `completed=false` means it started but did
+ *  not finish (caller should inspect `state`). */
+export interface DesktopUpdateActionResult {
+  accepted: boolean
+  completed: boolean
+  state: DesktopUpdateState
+}
+
+// ---------------------------------------------------------------------------
 // Workspace types
 // ---------------------------------------------------------------------------
 

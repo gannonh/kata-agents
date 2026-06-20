@@ -67,6 +67,11 @@ export interface StoredConfig {
   colorTheme?: string;  // ID of selected preset theme (e.g., 'dracula', 'nord'). Default: 'default'
   // Auto-update
   dismissedUpdateVersion?: string;  // Version that user dismissed (skip notifications for this version)
+  // Selected update track (AC6): 'latest' follows stable releases, 'nightly' follows prereleases.
+  // The installed build version supplies the default; `updateChannelConfiguredByUser`
+  // distinguishes an explicit user choice from a stale/legacy value.
+  updateChannel?: 'latest' | 'nightly';
+  updateChannelConfiguredByUser?: boolean;
   // Input settings
   autoCapitalisation?: boolean;  // Auto-capitalize first letter when typing (default: true)
   sendMessageKey?: 'enter' | 'cmd-enter';  // Key to send messages (default: 'enter')
@@ -1530,6 +1535,60 @@ export function clearDismissedUpdateVersion(): void {
   const config = loadStoredConfig();
   if (!config) return;
   delete config.dismissedUpdateVersion;
+  saveConfig(config);
+}
+
+// ============================================
+// Auto-Update Selected Channel
+// ============================================
+
+/** Nightly version format selects the nightly feed: `X.Y.Z-nightly.YYYYMMDD.N`. */
+const NIGHTLY_VERSION_PATTERN = /-nightly\./
+
+/** Version-derived default update track for an installed build. */
+function resolveDefaultUpdateChannel(installedVersion: string): 'latest' | 'nightly' {
+  return NIGHTLY_VERSION_PATTERN.test(installedVersion) ? 'nightly' : 'latest'
+}
+
+export interface ResolvedUpdateChannel {
+  channel: 'latest' | 'nightly'
+  configuredByUser: boolean
+}
+
+/**
+ * Resolve the effective update channel for an installed build (AC6).
+ *
+ * The installed version supplies the default track. Only an explicit user
+ * preference (`updateChannelConfiguredByUser: true`) overrides it — a legacy
+ * config value written before this flag existed must NOT silently force a
+ * stable build onto the nightly feed.
+ */
+export function getUpdateChannel(installedVersion: string): ResolvedUpdateChannel {
+  const config = loadStoredConfig();
+  if (config?.updateChannelConfiguredByUser === true && config.updateChannel) {
+    return { channel: config.updateChannel, configuredByUser: true };
+  }
+  return { channel: resolveDefaultUpdateChannel(installedVersion), configuredByUser: false };
+}
+
+/**
+ * Persist an explicit user update-track choice. Always records
+ * `configuredByUser: true` so the choice is honored across restarts.
+ */
+export function setUpdateChannel(channel: 'latest' | 'nightly'): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  config.updateChannel = channel;
+  config.updateChannelConfiguredByUser = true;
+  saveConfig(config);
+}
+
+/** Clear any persisted update-track preference, reverting to the version default. */
+export function clearUpdateChannel(): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  delete config.updateChannel;
+  delete config.updateChannelConfiguredByUser;
   saveConfig(config);
 }
 
