@@ -1422,6 +1422,7 @@
   "update.installConfirm": "更新をインストールして再起動しますか？\n\n実行中のタスクは中断されます。続行する前に準備ができていることを確認してください。",
   "update.installFailedTitle": "更新をインストールできませんでした",
   "update.restartToUpdate": "再起動して更新",
+  "update.trackChangeFailed": "更新チャネルを変更できませんでした",
   "update.unknownError": "不明なエラー",
   "update.upToDateDescription": "バージョン {{version}} が最新です。",
   "update.upToDateTitle": "最新です",

@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -122,6 +123,9 @@ export default function AppSettingsPage() {
       await window.electronAPI.setUpdateChannel(channel)
     } catch (error) {
       console.error('Failed to change update track:', error)
+      toast.error(t('update.trackChangeFailed'), {
+        description: error instanceof Error ? error.message : t('update.unknownError'),
+      })
     } finally {
       setIsChangingTrack(false)
     }
@@ -364,14 +368,14 @@ export default function AppSettingsPage() {
                       </Button>
                     </SettingsRow>
                   )}
-                  {isElectron && (
+                  {isElectron && update.state?.enabled && (
                     <SettingsRow
                       label={t("settings.about.updateTrack")}
                       description={t("settings.about.updateTrackDesc")}
                     >
                       <select
                         className="border border-border rounded px-2 py-1 text-sm bg-background"
-                        value={update.state?.channel ?? 'latest'}
+                        value={update.state.channel}
                         onChange={(e) => void handleTrackChange(e.target.value as 'latest' | 'nightly')}
                         disabled={isChangingTrack}
                       >

@@ -1422,6 +1422,7 @@
   "update.installConfirm": "Zainstalować aktualizację i uruchomić ponownie?\n\nTrwające zadania zostaną przerwane. Upewnij się, że jesteś gotowy, zanim kontynuujesz.",
   "update.installFailedTitle": "Nie udało się zainstalować aktualizacji",
   "update.restartToUpdate": "Uruchom ponownie, aby zaktualizować",
+  "update.trackChangeFailed": "Nie udało się zmienić kanału aktualizacji",
   "update.unknownError": "Nieznany błąd",
   "update.upToDateDescription": "Wersja {{version}} jest najnowsza.",
   "update.upToDateTitle": "Masz najnowszą wersję",

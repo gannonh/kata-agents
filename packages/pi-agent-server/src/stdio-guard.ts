@@ -7,8 +7,8 @@
  */
 
 interface StdoutTakeoverState {
-  rawStdoutWrite: (chunk: string, callback?: (error?: Error | null) => void) => boolean;
-  rawStderrWrite: (chunk: string, callback?: (error?: Error | null) => void) => boolean;
+  rawStdoutWrite: typeof process.stdout.write;
+  rawStderrWrite: typeof process.stderr.write;
   originalStdoutWrite: typeof process.stdout.write;
 }
 
@@ -17,13 +17,16 @@ let stdoutTakeoverState: StdoutTakeoverState | undefined;
 export function takeOverStdout(): void {
   if (stdoutTakeoverState) return;
 
-  const rawStdoutWrite = process.stdout.write.bind(process.stdout) as StdoutTakeoverState['rawStdoutWrite'];
-  const rawStderrWrite = process.stderr.write.bind(process.stderr) as StdoutTakeoverState['rawStderrWrite'];
+  const rawStdoutWrite = process.stdout.write.bind(process.stdout);
+  const rawStderrWrite = process.stderr.write.bind(process.stderr);
   const originalStdoutWrite = process.stdout.write;
 
   process.stdout.write = ((chunk, encodingOrCallback, callback) => {
     if (typeof encodingOrCallback === 'function') {
       return rawStderrWrite(String(chunk), encodingOrCallback);
+    }
+    if (typeof encodingOrCallback === 'string') {
+      return rawStderrWrite(String(chunk), encodingOrCallback, callback);
     }
     return rawStderrWrite(String(chunk), callback);
   }) as typeof process.stdout.write;

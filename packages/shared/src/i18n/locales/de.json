@@ -1422,6 +1422,7 @@
   "update.installConfirm": "Update installieren und neu starten?\n\nLaufende Aufgaben werden unterbrochen. Stellen Sie sicher, dass Sie bereit sind, bevor Sie fortfahren.",
   "update.installFailedTitle": "Update konnte nicht installiert werden",
   "update.restartToUpdate": "Zum Aktualisieren neu starten",
+  "update.trackChangeFailed": "Update-Kanal konnte nicht geändert werden",
   "update.unknownError": "Unbekannter Fehler",
   "update.upToDateDescription": "Version {{version}} ist die neueste.",
   "update.upToDateTitle": "Sie sind auf dem neuesten Stand",

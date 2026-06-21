@@ -1422,6 +1422,7 @@
   "update.installConfirm": "安装更新并重启？\n\n运行中的任务将被中断。请确保在继续之前已准备好。",
   "update.installFailedTitle": "无法安装更新",
   "update.restartToUpdate": "重启以更新",
+  "update.trackChangeFailed": "无法更改更新渠道",
   "update.unknownError": "未知错误",
   "update.upToDateDescription": "版本 {{version}} 是最新版本。",
   "update.upToDateTitle": "已是最新版本",

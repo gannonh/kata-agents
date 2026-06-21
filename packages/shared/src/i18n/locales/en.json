@@ -1422,6 +1422,7 @@
   "update.installConfirm": "Install the update and restart?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
   "update.installFailedTitle": "Could not install update",
   "update.restartToUpdate": "Restart to update",
+  "update.trackChangeFailed": "Could not change update track",
   "update.unknownError": "Unknown error",
   "update.upToDateDescription": "Version {{version}} is the latest.",
   "update.upToDateTitle": "You're up to date",

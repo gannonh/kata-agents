@@ -1422,6 +1422,7 @@
   "update.installConfirm": "Telepíted a frissítést és újraindítod?\n\nA futó feladatok megszakadnak. Győződj meg róla, hogy készen állsz, mielőtt folytatod.",
   "update.installFailedTitle": "Nem sikerült telepíteni a frissítést",
   "update.restartToUpdate": "Újraindítás a frissítéshez",
+  "update.trackChangeFailed": "Nem sikerült módosítani a frissítési csatornát",
   "update.unknownError": "Ismeretlen hiba",
   "update.upToDateDescription": "A(z) {{version}} verzió a legújabb.",
   "update.upToDateTitle": "Naprakész",

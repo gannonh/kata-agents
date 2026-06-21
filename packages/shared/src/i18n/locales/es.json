@@ -1422,6 +1422,7 @@
   "update.installConfirm": "¿Instalar la actualización y reiniciar?\n\nLas tareas en curso se interrumpirán. Asegúrate de estar listo antes de continuar.",
   "update.installFailedTitle": "No se pudo instalar la actualización",
   "update.restartToUpdate": "Reiniciar para actualizar",
+  "update.trackChangeFailed": "No se pudo cambiar el canal de actualización",
   "update.unknownError": "Error desconocido",
   "update.upToDateDescription": "La versión {{version}} es la más reciente.",
   "update.upToDateTitle": "Estás actualizado",

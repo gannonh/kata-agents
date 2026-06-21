@@ -23,7 +23,7 @@ import { autoUpdater } from 'electron-updater'
 import { BrowserWindow } from 'electron'
 import log from 'electron-log/main'
 import { mainLog } from './logger'
-import { resolveSelectedChannel, type UpdateChannel } from './update-channel'
+import { resolveSelectedChannel, resolveUpdateChannel, type UpdateChannel } from './update-channel'
 import { getAppVersion } from '@craft-agent/shared/version'
 import { getUpdateChannel, setUpdateChannel as persistUpdateChannel } from '@craft-agent/shared/config'
 import { RPC_CHANNELS } from '../shared/types'
@@ -194,11 +194,13 @@ export async function configureUpdates(): Promise<void> {
 
 function applyAutoUpdaterChannel(channel: UpdateChannel): void {
   const allowsPrerelease = channel === 'nightly'
+  const installedChannel = resolveUpdateChannel(getAppVersion())
   autoUpdater.channel = channel
   autoUpdater.allowPrerelease = allowsPrerelease
-  // Allow downgrade when switching from a higher channel to a lower one
-  // (e.g. nightly build switching back to stable), mirroring kata-code.
-  autoUpdater.allowDowngrade = allowsPrerelease
+  // Allow downgrade when on nightly, or when a nightly build is tracking stable
+  // so startup/poll checks can offer a lower stable release (AC6).
+  autoUpdater.allowDowngrade =
+    allowsPrerelease || (channel === 'latest' && installedChannel === 'nightly')
 }
 
 function scheduleStartupCheck(): void {
@@ -323,8 +325,11 @@ export async function checkForUpdate(reason: string = 'manual'): Promise<Desktop
     return { checked: true, state: getUpdateState() }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Check failed'
-    const failedAt = new Date().toISOString()
-    updateStateBy((s) => reduceDesktopUpdateStateOnCheckFailure(s, message, failedAt))
+    // electron-updater emits 'error' before rejecting; skip duplicate reducer.
+    if (updateState.status === 'checking') {
+      const failedAt = new Date().toISOString()
+      updateStateBy((s) => reduceDesktopUpdateStateOnCheckFailure(s, message, failedAt))
+    }
     mainLog.error('[auto-update] check failed:', message)
     return { checked: true, state: getUpdateState() }
   } finally {
@@ -352,7 +357,10 @@ export async function downloadUpdate(): Promise<DesktopUpdateActionResult> {
     return { accepted: true, completed: true, state: getUpdateState() }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Download failed'
-    updateStateBy((s) => reduceDesktopUpdateStateOnDownloadFailure(s, message))
+    // electron-updater emits 'error' before rejecting; skip duplicate reducer.
+    if (downloadInFlight) {
+      updateStateBy((s) => reduceDesktopUpdateStateOnDownloadFailure(s, message))
+    }
     mainLog.error('[auto-update] download failed:', message)
     return { accepted: true, completed: false, state: getUpdateState() }
   } finally {
