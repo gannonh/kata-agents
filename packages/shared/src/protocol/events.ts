@@ -10,7 +10,7 @@ import { RPC_CHANNELS } from './channels'
 import type {
   SessionEvent,
   UnreadSummary,
-  UpdateInfo,
+  DesktopUpdateState,
   BrowserInstanceInfo,
   DeepLinkNavigation,
 } from './dto'
@@ -36,9 +36,8 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.theme.PREFERENCES_CHANGED]: [preferences: { mode: string; colorTheme: string; font: string }]
   [RPC_CHANNELS.theme.WORKSPACE_THEME_CHANGED]: [data: { workspaceId: string; themeId: string | null }]
 
-  // Update broadcasts (global)
-  [RPC_CHANNELS.update.AVAILABLE]: [info: UpdateInfo]
-  [RPC_CHANNELS.update.DOWNLOAD_PROGRESS]: [progress: number]
+  // Update broadcasts (global) — canonical state for sidebar pill + Settings
+  [RPC_CHANNELS.update.STATE_CHANGED]: [state: DesktopUpdateState]
 
   // Badge broadcasts (global)
   [RPC_CHANNELS.badge.DRAW]: [data: { count: number; iconDataUrl: string }]

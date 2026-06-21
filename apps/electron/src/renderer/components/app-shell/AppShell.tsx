@@ -119,6 +119,7 @@ import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
+import { SidebarUpdatePill } from "./SidebarUpdatePill"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -2496,6 +2497,7 @@ function AppShellContent({
                 {/* Agent Tree: Hierarchical list of agents */}
                 {/* Agents section removed */}
                 </div>
+                <SidebarUpdatePill />
               </div>
 
             </div>

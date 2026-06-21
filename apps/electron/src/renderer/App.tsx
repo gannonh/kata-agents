@@ -318,8 +318,9 @@ export default function App() {
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
 
-  // Auto-update state
-  const updateChecker = useUpdateChecker()
+  // Subscribe to desktop update state broadcasts (sidebar/settings read
+  // the same canonical state via useDesktopUpdate in AppShell/Settings).
+  useUpdateChecker()
 
   // Splash screen state - tracks when app is fully ready (all data loaded)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)

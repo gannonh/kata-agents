@@ -62,8 +62,21 @@ if (isDebugMode) {
   }
   log.transports.console.level = 'debug'
 } else {
-  // Disable file and console transports in production
-  log.transports.file.level = false
+  // Production builds: console transport stays off, but file logging stays ON
+  // (info level, 5MB rotation) so updater and main-process issues are
+  // diagnosable from the log file (see docs/specs/2026-06-20-update-ux-parity-
+  // with-kata-code-design.md AC9). Console output is intentionally suppressed to
+  // keep packaged builds quiet.
+  log.transports.file.format = ({ message }) => [
+    JSON.stringify({
+      timestamp: message.date.toISOString(),
+      level: message.level,
+      scope: message.scope,
+      message: message.data,
+    }),
+  ]
+  log.transports.file.maxSize = 5 * 1024 * 1024 // 5MB
+  log.transports.file.level = 'info'
   log.transports.console.level = false
 }
 

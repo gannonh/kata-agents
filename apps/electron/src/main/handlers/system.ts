@@ -35,10 +35,11 @@ export const CORE_HANDLED_CHANNELS = [
 
 export const GUI_HANDLED_CHANNELS = [
   RPC_CHANNELS.update.CHECK,
-  RPC_CHANNELS.update.GET_INFO,
+  RPC_CHANNELS.update.GET_STATE,
+  RPC_CHANNELS.update.SET_CHANNEL,
+  RPC_CHANNELS.update.DOWNLOAD,
   RPC_CHANNELS.update.INSTALL,
-  RPC_CHANNELS.update.DISMISS,
-  RPC_CHANNELS.update.GET_DISMISSED,
+  RPC_CHANNELS.update.GET_LOG_PATH,
   RPC_CHANNELS.badge.REFRESH,
   RPC_CHANNELS.badge.SET_ICON,
   RPC_CHANNELS.window.GET_FOCUS_STATE,
@@ -268,15 +269,25 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
   const { sessionManager } = deps
   const windowManager = deps.windowManager
 
-  // Auto-update handlers
-  server.handle(RPC_CHANNELS.update.CHECK, async () => {
-    const { checkForUpdates } = await import('../auto-update')
-    return checkForUpdates({ autoDownload: true })
+  // Auto-update handlers (stateful controller)
+  server.handle(RPC_CHANNELS.update.GET_STATE, async () => {
+    const { getUpdateState } = await import('../auto-update')
+    return getUpdateState()
   })
 
-  server.handle(RPC_CHANNELS.update.GET_INFO, async () => {
-    const { getUpdateInfo } = await import('../auto-update')
-    return getUpdateInfo()
+  server.handle(RPC_CHANNELS.update.SET_CHANNEL, async (_ctx, channel: 'latest' | 'nightly') => {
+    const { setUpdateChannel } = await import('../auto-update')
+    return setUpdateChannel(channel)
+  })
+
+  server.handle(RPC_CHANNELS.update.CHECK, async () => {
+    const { checkForUpdate } = await import('../auto-update')
+    return checkForUpdate('settings')
+  })
+
+  server.handle(RPC_CHANNELS.update.DOWNLOAD, async () => {
+    const { downloadUpdate } = await import('../auto-update')
+    return downloadUpdate()
   })
 
   server.handle(RPC_CHANNELS.update.INSTALL, async () => {
@@ -284,14 +295,9 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     return installUpdate()
   })
 
-  server.handle(RPC_CHANNELS.update.DISMISS, async (_ctx, version: string) => {
-    const { setDismissedUpdateVersion } = await import('@craft-agent/shared/config')
-    setDismissedUpdateVersion(version)
-  })
-
-  server.handle(RPC_CHANNELS.update.GET_DISMISSED, async () => {
-    const { getDismissedUpdateVersion } = await import('@craft-agent/shared/config')
-    return getDismissedUpdateVersion()
+  server.handle(RPC_CHANNELS.update.GET_LOG_PATH, async () => {
+    const { getUpdateLogPath } = await import('../auto-update')
+    return getUpdateLogPath()
   })
 
   // Menu actions from renderer (for unified Kata menu)

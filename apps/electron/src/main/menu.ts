@@ -57,23 +57,53 @@ export async function rebuildMenu(): Promise<void> {
   }
 
   // Get current update state
-  const { getUpdateInfo, installUpdate, checkForUpdates } = await import('./auto-update')
-  const updateInfo = getUpdateInfo()
-  const updateReady = updateInfo.available && updateInfo.downloadState === 'ready'
+  const { getUpdateState, installUpdate, checkForUpdate } = await import('./auto-update')
+  const updateState = getUpdateState()
+  const updateReady = updateState.status === 'downloaded' && updateState.downloadedVersion
+
+  // Native dialog for menu-initiated checks (AC8): shows up-to-date / error /
+  // unavailable results so the user sees something when the sidebar has no
+  // visible change. The sidebar pill handles available/downloaded states.
+  const runMenuCheck = async (): Promise<void> => {
+    try {
+      const { dialog } = await import('electron')
+      const result = await checkForUpdate('menu')
+      const state = result.state
+      if (!result.checked) {
+        return
+      }
+      if (state.status === 'up-to-date') {
+        await dialog.showMessageBox({
+          type: 'info',
+          title: i18n.t('menu.upToDateTitle'),
+          message: i18n.t('menu.upToDateMessage', { version: state.currentVersion }),
+          buttons: ['OK'],
+        })
+      } else if (state.status === 'error') {
+        await dialog.showMessageBox({
+          type: 'warning',
+          title: i18n.t('menu.checkFailedTitle'),
+          message: i18n.t('menu.checkFailedMessage'),
+          detail: state.message ?? i18n.t('menu.checkFailedUnknown'),
+          buttons: ['OK'],
+        })
+      }
+    } catch (err) {
+      mainLog.error('[menu] check-for-updates failed:', err)
+    }
+  }
 
   // Build the update menu item based on state
   const updateMenuItem: Electron.MenuItemConstructorOptions = updateReady
     ? {
-        label: i18n.t("menu.installUpdateVersion", { version: updateInfo.latestVersion }),
+        label: i18n.t("menu.installUpdateVersion", { version: updateState.downloadedVersion }),
         click: async () => {
           await installUpdate()
         }
       }
     : {
         label: i18n.t("menu.checkForUpdatesEllipsis"),
-        click: async () => {
-          await checkForUpdates({ autoDownload: true })
-        }
+        click: runMenuCheck
       }
 
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -196,9 +226,9 @@ export async function rebuildMenu(): Promise<void> {
         {
           label: i18n.t("menu.checkForUpdates"),
           click: async () => {
-            const { checkForUpdates } = await import('./auto-update')
-            const info = await checkForUpdates({ autoDownload: true })
-            mainLog.info('[debug-menu] Update check result:', info)
+            const { checkForUpdate } = await import('./auto-update')
+            const result = await checkForUpdate('debug')
+            mainLog.info('[debug-menu] Update check result:', result)
           }
         },
         {

@@ -87,12 +87,14 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // update — local auto-update
   RPC_CHANNELS.update.CHECK,
-  RPC_CHANNELS.update.GET_INFO,
+  RPC_CHANNELS.update.GET_STATE,
+  RPC_CHANNELS.update.SET_CHANNEL,
+  RPC_CHANNELS.update.DOWNLOAD,
   RPC_CHANNELS.update.INSTALL,
-  RPC_CHANNELS.update.DISMISS,
-  RPC_CHANNELS.update.GET_DISMISSED,
-  RPC_CHANNELS.update.AVAILABLE,
-  RPC_CHANNELS.update.DOWNLOAD_PROGRESS,
+  RPC_CHANNELS.update.GET_LOG_PATH,
+  // STATE_CHANGED is a global broadcast from the local Electron updater
+  // controller; classify locally so the exhaustiveness router is satisfied.
+  RPC_CHANNELS.update.STATE_CHANGED,
 
   // releaseNotes — local app info
   RPC_CHANNELS.releaseNotes.GET,

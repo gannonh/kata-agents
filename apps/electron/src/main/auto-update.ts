@@ -1,23 +1,22 @@
 /**
- * Auto-update module using electron-updater
+ * Auto-update controller using electron-updater.
  *
- * Handles checking for updates, downloading, and installing via the standard
- * electron-updater library. Updates are served from GitHub Releases using the
- * github provider; the feed (app-update.yml) is generated at build time by the
- * electron-builder publish config (see scripts/build/release-config.ts).
+ * Stateful desktop update UX modeled on kata-code's DesktopUpdates. The
+ * installed build supplies the default channel; a persisted user preference
+ * can override it from Settings (AC6). Background checks run after launch and
+ * on a poll interval, but the app does NOT auto-download — the user clicks
+ * "Update available" / "Download" to fetch, and "Restart to update" to install
+ * (AC1, AC3, AC4).
  *
- * Channels: the installed build's version selects its feed — a nightly build
- * (`X.Y.Z-nightly.*`) follows the `nightly` channel (nightly*.yml prereleases);
- * any other build follows `latest` (latest*.yml stable releases). Updates whose
- * version does not match the installed channel are ignored.
+ * Every updater event is reduced into a `DesktopUpdateState` and broadcast to
+ * all renderer windows as the canonical source for the sidebar pill and
+ * Settings action button (AC9). See
+ * `docs/specs/2026-06-20-update-ux-parity-with-kata-code-design.md`.
  *
- * Platform behavior:
+ * Platform behavior is unchanged from the prior implementation:
  * - macOS: Downloads zip, extracts and swaps app bundle atomically
  * - Windows: Downloads NSIS installer, runs silently on quit
  * - Linux: Downloads AppImage, replaces current file
- *
- * All platforms support download-progress events (electron-updater v6.8.0+).
- * quitAndInstall() handles restart natively — no external scripts.
  */
 
 import { autoUpdater } from 'electron-updater'
@@ -25,417 +24,432 @@ import { app, BrowserWindow } from 'electron'
 import { platform } from 'os'
 import * as path from 'path'
 import * as fs from 'fs'
+import log from 'electron-log/main'
 import { mainLog } from './logger'
-import { resolveUpdateChannel } from './update-channel'
+import { resolveSelectedChannel, type UpdateChannel } from './update-channel'
 import { getAppVersion } from '@craft-agent/shared/version'
-import {
-  getDismissedUpdateVersion,
-  clearDismissedUpdateVersion,
-} from '@craft-agent/shared/config'
-import { readJsonFileSync } from '@craft-agent/shared/utils/files'
-import { RPC_CHANNELS, type UpdateInfo } from '../shared/types'
+import { getUpdateChannel, setUpdateChannel as persistUpdateChannel } from '@craft-agent/shared/config'
+import { RPC_CHANNELS } from '../shared/types'
+import type {
+  DesktopUpdateActionResult,
+  DesktopUpdateCheckResult,
+  DesktopUpdateState,
+} from '../shared/types'
 import type { EventSink } from '@craft-agent/server-core/transport'
+import {
+  createInitialDesktopUpdateState,
+  reduceDesktopUpdateStateOnChannelReset,
+  reduceDesktopUpdateStateOnCheckFailure,
+  reduceDesktopUpdateStateOnCheckStart,
+  reduceDesktopUpdateStateOnDownloadComplete,
+  reduceDesktopUpdateStateOnDownloadFailure,
+  reduceDesktopUpdateStateOnDownloadProgress,
+  reduceDesktopUpdateStateOnDownloadStart,
+  reduceDesktopUpdateStateOnInstallFailure,
+  reduceDesktopUpdateStateOnNoUpdate,
+  reduceDesktopUpdateStateOnUpdateAvailable,
+} from './update-state'
 
-// Platform detection
 const PLATFORM = platform()
 const IS_MAC = PLATFORM === 'darwin'
 const IS_WINDOWS = PLATFORM === 'win32'
 
-// Get the update cache directory path (for file watcher fallback on macOS)
-// electron-updater uses these paths:
-// - Windows: %LOCALAPPDATA%/{appName}-updater/pending
-// - macOS: ~/Library/Caches/{appName}-updater/pending
-// - Linux: ~/.cache/{appName}-updater/pending
-function getUpdateCacheDir(): string {
-  const appName = app.getName()
-  if (IS_MAC) {
-    return path.join(app.getPath('home'), 'Library', 'Caches', `${appName}-updater`, 'pending')
-  } else if (IS_WINDOWS) {
-    // Windows uses LOCALAPPDATA, not APPDATA (roaming)
-    const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local')
-    return path.join(localAppData, `${appName}-updater`, 'pending')
-  } else {
-    // Linux
-    return path.join(app.getPath('home'), '.cache', `${appName}-updater`, 'pending')
-  }
-}
+// Background-check timing. Startup check is delayed so the app settles before
+// hitting the network; the poll cadence matches kata-code's 4-minute interval.
+const STARTUP_CHECK_DELAY_MS = 15_000
+const POLL_INTERVAL_MS = 4 * 60_000
 
-// Module state — keeps track of update info for IPC queries
-let updateInfo: UpdateInfo = {
-  available: false,
-  currentVersion: getAppVersion(),
-  latestVersion: null,
-  downloadState: 'idle',
-  downloadProgress: 0,
-}
+// Module state ----------------------------------------------------------------
+
+let updateState: DesktopUpdateState = createInitialDesktopUpdateState(
+  getAppVersion(),
+  resolveSelectedChannel(getAppVersion(), toPreference(getUpdateChannel(getAppVersion()))).channel,
+)
 
 let eventSink: EventSink | null = null
 
-// Flag to indicate update is in progress — used to prevent force exit during quitAndInstall
+// In-flight guards prevent concurrent check/download/install actions and the
+// channel-switch lock (AC7). Each is a boolean ref rather than a richer mutex
+// because the state machine already encodes "is an action active".
+let checkInFlight = false
+let downloadInFlight = false
+let installInFlight = false
+let configured = false
+let quitting = false
+
+// Flag to prevent force-exit during quitAndInstall (read by index.ts).
 let __isUpdating = false
 
-// Hook fired immediately before quitAndInstall, while BrowserWindows still exist.
-// electron-updater destroys windows between quitAndInstall and before-quit firing,
-// so the regular before-quit save site would see an empty array.
+// Hook fired immediately before quitAndInstall, while BrowserWindows still
+// exist. electron-updater destroys windows between quitAndInstall and
+// before-quit firing, so the regular before-quit save site would see an empty
+// array (AC4: multi-window state preservation).
 let beforeUpdateQuitHook: (() => void) | null = null
 
-/**
- * Register a callback to run inside installUpdate() before quitAndInstall.
- * Used by index.ts to snapshot multi-window state while windows are still alive.
- */
-export function setBeforeUpdateQuitHook(fn: () => void): void {
-  beforeUpdateQuitHook = fn
-}
+// Poll timer handle, cleared on quit.
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+// Configuration -------------------------------------------------------------
 
 /**
- * Check if an update installation is in progress.
- * Used by main process to avoid force-quitting during update.
+ * Convert a resolved { channel, configuredByUser } from config into the shape
+ * `resolveSelectedChannel` expects. Kept here so the controller doesn't leak
+ * storage internals into update-channel.ts (which must stay electron-free).
  */
-export function isUpdating(): boolean {
-  return __isUpdating
+function toPreference(resolved: ReturnType<typeof getUpdateChannel>): {
+  channel: UpdateChannel
+  configuredByUser: boolean | undefined
+} | undefined {
+  return { channel: resolved.channel, configuredByUser: resolved.configuredByUser }
 }
 
-/**
- * Set the event sink for broadcasting update events to renderer windows
- */
+function broadcastState(): void {
+  if (!eventSink) return
+  const snapshot = { ...updateState }
+  eventSink(RPC_CHANNELS.update.STATE_CHANGED, { to: 'all' }, snapshot)
+}
+
+function setState(next: DesktopUpdateState): void {
+  updateState = next
+  broadcastState()
+}
+
+function updateStateBy(
+  reducer: (current: DesktopUpdateState) => DesktopUpdateState,
+): DesktopUpdateState {
+  const next = reducer(updateState)
+  setState(next)
+  return next
+}
+
+// Exported API --------------------------------------------------------------
+
+export interface AutoUpdateEventSink {
+  setAutoUpdateEventSink(sink: EventSink): void
+}
+
 export function setAutoUpdateEventSink(sink: EventSink): void {
   eventSink = sink
 }
 
+export function setBeforeUpdateQuitHook(fn: () => void): void {
+  beforeUpdateQuitHook = fn
+}
+
+export function isUpdating(): boolean {
+  return __isUpdating
+}
+
+export function getUpdateState(): DesktopUpdateState {
+  return { ...updateState }
+}
+
 /**
- * Get current update info (called by IPC handler)
+ * Whether any update action is active, used to block channel changes (AC7).
  */
-export function getUpdateInfo(): UpdateInfo {
-  return { ...updateInfo }
+function activeAction(): 'check' | 'download' | 'install' | null {
+  if (installInFlight) return 'install'
+  if (downloadInFlight) return 'download'
+  if (checkInFlight) return 'check'
+  return null
 }
+
+// Configuration --------------------------------------------------------------
 
 /**
- * Broadcast update info to all renderer windows.
- * Creates a snapshot to avoid race conditions during broadcast.
- */
-function broadcastUpdateInfo(): void {
-  if (!eventSink) return
-
-  const snapshot = { ...updateInfo }
-  eventSink(RPC_CHANNELS.update.AVAILABLE, { to: 'all' }, snapshot)
-}
-
-/**
- * Broadcast download progress to all renderer windows.
- */
-function broadcastDownloadProgress(progress: number): void {
-  if (!eventSink) return
-
-  eventSink(RPC_CHANNELS.update.DOWNLOAD_PROGRESS, { to: 'all' }, progress)
-}
-
-// ─── Configure electron-updater ───────────────────────────────────────────────
-
-// Channel: follow the feed matching this installed build. Nightly builds opt
-// into prereleases; stable builds stay on latest*.yml. This pins the updater to
-// the right manifest (nightly*.yml vs latest*.yml) on the github provider.
-const INSTALLED_CHANNEL = resolveUpdateChannel(getAppVersion())
-autoUpdater.channel = INSTALLED_CHANNEL
-autoUpdater.allowPrerelease = INSTALLED_CHANNEL === 'nightly'
-mainLog.info(
-  `[auto-update] Update channel: ${INSTALLED_CHANNEL} (allowPrerelease=${autoUpdater.allowPrerelease})`,
-)
-
-// Auto-download updates in the background after detection
-autoUpdater.autoDownload = true
-
-// Install on app quit (if update is downloaded but user hasn't clicked "Restart")
-autoUpdater.autoInstallOnAppQuit = true
-
-// Use the logger for electron-updater internal logging
-autoUpdater.logger = {
-  info: (msg: unknown) => mainLog.info('[electron-updater]', msg),
-  warn: (msg: unknown) => mainLog.warn('[electron-updater]', msg),
-  error: (msg: unknown) => mainLog.error('[electron-updater]', msg),
-  debug: (msg: unknown) => mainLog.info('[electron-updater:debug]', msg),
-}
-
-// ─── Event handlers ───────────────────────────────────────────────────────────
-
-autoUpdater.on('checking-for-update', () => {
-  mainLog.info('[auto-update] Checking for updates...')
-})
-
-autoUpdater.on('update-available', (info) => {
-  // Belt-and-suspenders channel guard: the channel-specific manifest should
-  // already exclude other channels, but never let a nightly version surface to
-  // a stable install (or vice versa).
-  if (resolveUpdateChannel(info.version) !== INSTALLED_CHANNEL) {
-    mainLog.info(
-      `[auto-update] Ignoring update ${info.version}: does not match installed channel ${INSTALLED_CHANNEL}`,
-    )
-    return
-  }
-
-  mainLog.info(`[auto-update] Update available: ${updateInfo.currentVersion} → ${info.version}`)
-
-  // First, check electron-updater's internal state (most reliable)
-  const internalState = checkElectronUpdaterState()
-  if (internalState.ready) {
-    mainLog.info(`[auto-update] electron-updater reports download ready`)
-    updateInfo = {
-      ...updateInfo,
-      available: true,
-      latestVersion: info.version,
-      downloadState: 'ready',
-      downloadProgress: 100,
-    }
-    broadcastUpdateInfo()
-    return
-  }
-
-  // Fallback: check if file exists in cache directory
-  const existing = checkForExistingDownload()
-  if (existing.exists) {
-    mainLog.info(`[auto-update] Update already downloaded (file check), setting state to ready`)
-    updateInfo = {
-      ...updateInfo,
-      available: true,
-      latestVersion: info.version,
-      downloadState: 'ready',
-      downloadProgress: 100,
-    }
-    broadcastUpdateInfo()
-    return
-  }
-
-  updateInfo = {
-    ...updateInfo,
-    available: true,
-    latestVersion: info.version,
-    downloadState: 'downloading',
-    downloadProgress: 0,
-  }
-  broadcastUpdateInfo()
-})
-
-autoUpdater.on('update-not-available', (info) => {
-  mainLog.info(`[auto-update] Already up to date (${info.version})`)
-
-  updateInfo = {
-    ...updateInfo,
-    available: false,
-    latestVersion: info.version,
-    downloadState: 'idle',
-  }
-  broadcastUpdateInfo()
-})
-
-autoUpdater.on('download-progress', (progress) => {
-  const percent = Math.round(progress.percent)
-  updateInfo = { ...updateInfo, downloadProgress: percent }
-  broadcastDownloadProgress(percent)
-})
-
-autoUpdater.on('update-downloaded', async (info) => {
-  mainLog.info(`[auto-update] Update downloaded: v${info.version}`)
-
-  updateInfo = {
-    ...updateInfo,
-    available: true,
-    latestVersion: info.version,
-    downloadState: 'ready',
-    downloadProgress: 100,
-  }
-  broadcastUpdateInfo()
-
-  // Rebuild menu to show "Install Update..." option
-  const { rebuildMenu } = await import('./menu')
-  rebuildMenu()
-})
-
-autoUpdater.on('error', (error) => {
-  mainLog.error('[auto-update] Error:', error.message)
-
-  updateInfo = {
-    ...updateInfo,
-    downloadState: 'error',
-    error: error.message,
-  }
-  broadcastUpdateInfo()
-})
-
-// ─── Exported API ─────────────────────────────────────────────────────────────
-
-/**
- * Check if electron-updater already has a validated download ready.
- * This uses electron-updater's internal state which is more reliable than file checks.
- */
-function checkElectronUpdaterState(): { ready: boolean; version?: string } {
-  try {
-    // Access electron-updater's internal downloadedUpdateHelper
-    // @ts-expect-error - accessing internal API for reliability
-    const helper = autoUpdater.downloadedUpdateHelper
-    if (helper) {
-      mainLog.info(`[auto-update] downloadedUpdateHelper exists, cacheDir: ${helper.cacheDir}`)
-      // @ts-expect-error - accessing internal API
-      const versionInfo = helper.versionInfo
-      if (versionInfo) {
-        mainLog.info(`[auto-update] electron-updater has validated download: ${JSON.stringify(versionInfo)}`)
-        return { ready: true, version: versionInfo.version }
-      }
-    }
-  } catch (error) {
-    mainLog.warn('[auto-update] Error checking electron-updater state:', error)
-  }
-  return { ready: false }
-}
-
-/**
- * Options for checkForUpdates
- */
-interface CheckOptions {
-  /** If true, automatically start download when update is found (default: true) */
-  autoDownload?: boolean
-}
-
-/**
- * Check if a downloaded update already exists in the cache directory.
- * This helps detect updates that were downloaded in a previous session.
- */
-function checkForExistingDownload(): { exists: boolean; version?: string } {
-  try {
-    const cacheDir = getUpdateCacheDir()
-    mainLog.info(`[auto-update] Checking cache directory: ${cacheDir}`)
-
-    if (!fs.existsSync(cacheDir)) {
-      mainLog.info(`[auto-update] Cache directory does not exist`)
-      return { exists: false }
-    }
-
-    const files = fs.readdirSync(cacheDir)
-    mainLog.info(`[auto-update] Files in cache: ${JSON.stringify(files)}`)
-
-    // Look for update info file that electron-updater creates
-    const updateInfoFile = files.find(f => f === 'update-info.json')
-    if (updateInfoFile) {
-      const infoPath = path.join(cacheDir, updateInfoFile)
-      const info = readJsonFileSync(infoPath) as Record<string, unknown> | null
-      mainLog.info(`[auto-update] update-info.json contents: ${JSON.stringify(info)}`)
-
-      // electron-updater uses 'fileName' (not 'path') in update-info.json
-      const fileName = (info?.fileName || info?.path) as string | undefined
-      if (fileName && fs.existsSync(path.join(cacheDir, fileName))) {
-        mainLog.info(`[auto-update] Found existing download via update-info.json: ${fileName}`)
-        return { exists: true, version: info?.version as string }
-      }
-    }
-
-    // Fallback: check for any installer/zip/dmg file
-    const downloadFile = files.find(f =>
-      f.endsWith('.zip') ||
-      f.endsWith('.exe') ||
-      f.endsWith('.AppImage') ||
-      f.endsWith('.dmg') ||
-      f.endsWith('.nupkg')
-    )
-    if (downloadFile) {
-      mainLog.info(`[auto-update] Found existing download file: ${downloadFile}`)
-      return { exists: true }
-    }
-
-    mainLog.info(`[auto-update] No existing download found in cache`)
-    return { exists: false }
-  } catch (error) {
-    mainLog.warn('[auto-update] Error checking for existing download:', error)
-    return { exists: false }
-  }
-}
-
-/**
- * Check for available updates.
- * Returns the current UpdateInfo state after check completes.
+ * Configure the updater and start background checks. Idempotent. Called once
+ * on app launch from index.ts. Sets the initial state (enabled/disabled),
+ * wires electron-updater events, applies the persisted channel preference,
+ * and starts the startup + poll checks.
  *
- * @param options.autoDownload - If false, only checks without downloading (for manual "Check Now")
+ * Dev mock feed (AC13 verification): setting KATA_UPDATES_MOCK=1 (with optional
+ * KATA_UPDATES_MOCK_PORT) redirects the updater to a localhost generic provider
+ * so update-available/download/downloaded transitions can be exercised without
+ * a real GitHub release.
  */
-export async function checkForUpdates(options: CheckOptions = {}): Promise<UpdateInfo> {
-  const { autoDownload = true } = options
+export async function configureUpdates(): Promise<void> {
+  if (configured) return
+  configured = true
 
-  // Temporarily override autoDownload for this check if needed
-  // (e.g., manual check from settings shouldn't auto-download on metered connections)
-  const previousAutoDownload = autoUpdater.autoDownload
-  autoUpdater.autoDownload = autoDownload
+  const installedVersion = getAppVersion()
+  const resolved = resolveSelectedChannel(installedVersion, toPreference(getUpdateChannel(installedVersion)))
+
+  const mockUpdates = process.env.KATA_UPDATES_MOCK === '1'
+  const mockPort = process.env.KATA_UPDATES_MOCK_PORT ?? '0'
 
   try {
-    // Check for updates - this returns a promise that resolves with the check result
-    const result = await autoUpdater.checkForUpdates()
-
-    // If update is available and was already downloaded, the update-downloaded event
-    // should fire. Wait a moment for events to settle before returning.
-    if (result?.updateInfo) {
-      // Give electron-updater time to fire update-downloaded if file exists
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      // Double-check: if we're still showing 'downloading' but file exists, update state
-      if (updateInfo.downloadState === 'downloading') {
-        const existing = checkForExistingDownload()
-        if (existing.exists) {
-          mainLog.info('[auto-update] Update already downloaded, updating state to ready')
-          updateInfo = {
-            ...updateInfo,
-            downloadState: 'ready',
-            downloadProgress: 100,
-          }
-          broadcastUpdateInfo()
-        }
-      }
+    if (mockUpdates) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: `http://localhost:${mockPort}`,
+      } as any)
+      mainLog.info('[auto-update] using mock update feed', { port: mockPort })
+    } else {
+      applyAutoUpdaterChannel(resolved.channel)
     }
-  } catch (error) {
-    mainLog.error('[auto-update] Check failed:', error)
-    updateInfo = {
-      ...updateInfo,
-      downloadState: 'error',
-      error: error instanceof Error ? error.message : 'Check failed',
-    }
-  } finally {
-    // Restore previous autoDownload setting
-    autoUpdater.autoDownload = previousAutoDownload
+  } catch (err) {
+    // Missing app-update.yml / not packaged: surface as disabled, but keep the
+    // app running. The renderer treats `enabled=false` as "hide the pill".
+    mainLog.warn('[auto-update] feed unavailable, updates disabled:', err instanceof Error ? err.message : err)
+    setState({ ...updateState, enabled: false, status: 'disabled' })
+    return
   }
 
-  return getUpdateInfo()
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  attachUpdaterEventHandlers()
+
+  setState({
+    ...createInitialDesktopUpdateState(installedVersion, resolved.channel),
+    enabled: true,
+    status: 'idle',
+  })
+
+  mainLog.info('[auto-update] Configured', {
+    channel: resolved.channel,
+    configuredByUser: resolved.configuredByUser,
+    autoDownload: false,
+  })
+  broadcastState()
+
+  // Startup check (delayed) + recurring poll.
+  scheduleStartupCheck()
+  startPolling()
+}
+
+function applyAutoUpdaterChannel(channel: UpdateChannel): void {
+  const allowsPrerelease = channel === 'nightly'
+  autoUpdater.channel = channel
+  autoUpdater.allowPrerelease = allowsPrerelease
+  // Allow downgrade when switching from a higher channel to a lower one
+  // (e.g. nightly build switching back to stable), mirroring kata-code.
+  autoUpdater.allowDowngrade = allowsPrerelease
+}
+
+function scheduleStartupCheck(): void {
+  setTimeout(() => {
+    checkForUpdate('startup').catch((err) => {
+      mainLog.error('[auto-update] startup check failed:', err instanceof Error ? err.message : err)
+    })
+  }, STARTUP_CHECK_DELAY_MS)
+}
+
+function startPolling(): void {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(() => {
+    checkForUpdate('poll').catch((err) => {
+      mainLog.error('[auto-update] poll check failed:', err instanceof Error ? err.message : err)
+    })
+  }, POLL_INTERVAL_MS)
 }
 
 /**
- * Install the downloaded update and restart the app.
- * Calls electron-updater's quitAndInstall which handles:
- * - macOS: Extracts zip and swaps app bundle
- * - Windows: Runs NSIS installer silently
- * - Linux: Replaces AppImage file
- * Then relaunches the app automatically.
+ * Stop background checks and mark quitting. Called from index.ts on
+ * before-quit so a poll never fires mid-shutdown.
  */
-export async function installUpdate(): Promise<void> {
-  if (updateInfo.downloadState !== 'ready') {
-    throw new Error('No update ready to install')
+export function stopUpdates(): void {
+  quitting = true
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+// electron-updater event handlers ------------------------------------------
+
+function attachUpdaterEventHandlers(): void {
+  autoUpdater.on('checking-for-update', () => {
+    mainLog.info('[auto-update] checking for updates')
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    // Belt-and-suspenders channel guard: the channel-specific manifest should
+    // already exclude other channels, but never let a nightly version surface
+    // to a stable install (or vice versa).
+    if (info.version && resolveSelectedChannel(info.version).channel !== updateState.channel) {
+      mainLog.info(
+        `[auto-update] ignoring update ${info.version}: does not match selected channel ${updateState.channel}`,
+      )
+      const checkedAt = new Date().toISOString()
+      updateStateBy((s) => reduceDesktopUpdateStateOnNoUpdate(s, checkedAt))
+      return
+    }
+
+    mainLog.info(`[auto-update] update available: ${updateState.currentVersion} → ${info.version}`)
+    const checkedAt = new Date().toISOString()
+    updateStateBy((s) => reduceDesktopUpdateStateOnUpdateAvailable(s, info.version, checkedAt))
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    mainLog.info(`[auto-update] up to date (${info?.version ?? '?'})`)
+    const checkedAt = new Date().toISOString()
+    updateStateBy((s) => reduceDesktopUpdateStateOnNoUpdate(s, checkedAt))
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.round(progress.percent)
+    updateStateBy((s) => reduceDesktopUpdateStateOnDownloadProgress(s, percent))
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    mainLog.info(`[auto-update] update downloaded: v${info.version}`)
+    updateStateBy((s) => reduceDesktopUpdateStateOnDownloadComplete(s, info.version))
+  })
+
+  autoUpdater.on('error', (error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    mainLog.error('[auto-update] error:', message)
+
+    if (installInFlight) {
+      updateStateBy((s) => reduceDesktopUpdateStateOnInstallFailure(s, message))
+      installInFlight = false
+      __isUpdating = false
+      return
+    }
+    if (downloadInFlight) {
+      updateStateBy((s) => reduceDesktopUpdateStateOnDownloadFailure(s, message))
+    } else {
+      const checkedAt = new Date().toISOString()
+      updateStateBy((s) => ({
+        ...s,
+        status: 'error',
+        message,
+        checkedAt,
+        errorContext: 'check',
+        canRetry: s.availableVersion !== null || s.downloadedVersion !== null,
+      }))
+    }
+  })
+}
+
+// Actions -------------------------------------------------------------------
+
+export interface CheckOptions {
+  /** Why the check was triggered (startup/poll/menu/settings/channel-change). */
+  reason?: string
+}
+
+/**
+ * Check for updates without downloading (AC1). Returns the resulting state so
+ * the renderer/main can react.
+ */
+export async function checkForUpdate(reason: string = 'manual'): Promise<DesktopUpdateCheckResult> {
+  if (quitting) return { checked: false, state: getUpdateState() }
+  if (!configured) return { checked: false, state: getUpdateState() }
+  if (checkInFlight) return { checked: false, state: getUpdateState() }
+
+  const current = updateState
+  if (current.status === 'downloading' || current.status === 'downloaded') {
+    mainLog.info('[auto-update] skipping check while update active', { reason, status: current.status })
+    return { checked: false, state: getUpdateState() }
   }
 
-  mainLog.info('[auto-update] Installing update and restarting...')
+  checkInFlight = true
+  const checkedAt = new Date().toISOString()
+  updateStateBy((s) => reduceDesktopUpdateStateOnCheckStart(s, checkedAt))
+  mainLog.info('[auto-update] checking for updates', { reason })
 
-  updateInfo = { ...updateInfo, downloadState: 'installing' }
-  broadcastUpdateInfo()
+  try {
+    await autoUpdater.checkForUpdates()
+    return { checked: true, state: getUpdateState() }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Check failed'
+    const failedAt = new Date().toISOString()
+    updateStateBy((s) => reduceDesktopUpdateStateOnCheckFailure(s, message, failedAt))
+    mainLog.error('[auto-update] check failed:', message)
+    return { checked: true, state: getUpdateState() }
+  } finally {
+    checkInFlight = false
+  }
+}
 
-  // Clear dismissed version since user is explicitly updating
-  clearDismissedUpdateVersion()
+/**
+ * Download the currently-available update (AC3). The renderer's sidebar pill
+ * starts a download by calling this; progress is broadcast via state changes.
+ */
+export async function downloadUpdate(): Promise<DesktopUpdateActionResult> {
+  if (!configured) return { accepted: false, completed: false, state: getUpdateState() }
+  if (downloadInFlight) return { accepted: false, completed: false, state: getUpdateState() }
+  if (updateState.status !== 'available' && updateState.status !== 'error') {
+    return { accepted: false, completed: false, state: getUpdateState() }
+  }
 
-  // Set flag to prevent force exit from breaking electron-updater's shutdown sequence
+  downloadInFlight = true
+  updateStateBy((s) => reduceDesktopUpdateStateOnDownloadStart(s))
+  mainLog.info('[auto-update] downloading update')
+
+  try {
+    await autoUpdater.downloadUpdate()
+    return { accepted: true, completed: true, state: getUpdateState() }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Download failed'
+    updateStateBy((s) => reduceDesktopUpdateStateOnDownloadFailure(s, message))
+    mainLog.error('[auto-update] download failed:', message)
+    return { accepted: true, completed: false, state: getUpdateState() }
+  } finally {
+    downloadInFlight = false
+  }
+}
+
+/**
+ * Switch update tracks (AC6). Persists the choice, reconfigures the updater,
+ * resets stale state from the previous channel, and runs a check on the new
+ * channel. Blocked while a check/download/install is active (AC7).
+ */
+export async function setUpdateChannel(
+  channel: UpdateChannel,
+): Promise<DesktopUpdateState> {
+  const active = activeAction()
+  if (active) {
+    throw new Error(`Cannot change update tracks while an update ${active} action is in progress.`)
+  }
+  if (channel === updateState.channel) return getUpdateState()
+
+  persistUpdateChannel(channel)
+  applyAutoUpdaterChannel(channel)
+
+  updateStateBy((s) => reduceDesktopUpdateStateOnChannelReset(s, channel))
+  mainLog.info('[auto-update] switched update track', { channel })
+
+  // Immediately check the new channel. Allow a one-time downgrade so a stable
+  // build that switched to nightly can pick up a lower nightly version, matching
+  // kata-code's channel-change semantics.
+  const previousAllowDowngrade = autoUpdater.allowDowngrade
+  autoUpdater.allowDowngrade = true
+  try {
+    await checkForUpdate('channel-change')
+  } finally {
+    autoUpdater.allowDowngrade = previousAllowDowngrade
+  }
+  return getUpdateState()
+}
+
+/**
+ * Install the downloaded update and restart (AC4). Prompts handled by the
+ * renderer before calling this; the pre-update window-state hook is run while
+ * windows still exist.
+ */
+export async function installUpdate(): Promise<DesktopUpdateActionResult> {
+  if (quitting) return { accepted: false, completed: false, state: getUpdateState() }
+  if (!configured) return { accepted: false, completed: false, state: getUpdateState() }
+  if (updateState.status !== 'downloaded') {
+    mainLog.warn('[auto-update] install requested but no update downloaded')
+    return { accepted: false, completed: false, state: getUpdateState() }
+  }
+
+  installInFlight = true
   __isUpdating = true
 
   // Diagnostic correlation with before-quit's [update-flow] log. If these
   // window counts diverge, electron-updater is destroying windows between
-  // here and before-quit firing — confirms the multi-window restore bug.
+  // here and before-quit firing.
   mainLog.info('[update-flow] installUpdate pre-quit', {
     electronWindowCount: BrowserWindow.getAllWindows().length,
-    downloadState: updateInfo.downloadState,
-    latestVersion: updateInfo.latestVersion,
+    status: updateState.status,
+    downloadedVersion: updateState.downloadedVersion,
   })
 
-  // Snapshot window state BEFORE quitAndInstall — electron-updater destroys
-  // BrowserWindows between this call and before-quit firing, so the regular
-  // before-quit save would clobber window-state.json with an empty array.
   try {
     beforeUpdateQuitHook?.()
   } catch (err) {
@@ -443,53 +457,98 @@ export async function installUpdate(): Promise<void> {
   }
 
   try {
-    // isSilent=false shows the installer UI on Windows if needed (fallback)
-    // isForceRunAfter=true ensures the app relaunches after install
+    // isSilent=false shows the installer UI on Windows if needed (fallback);
+    // isForceRunAfter=true ensures the app relaunches after install.
     autoUpdater.quitAndInstall(false, true)
+    return { accepted: true, completed: false, state: getUpdateState() }
   } catch (error) {
+    installInFlight = false
     __isUpdating = false
-    mainLog.error('[auto-update] quitAndInstall failed:', error)
-    updateInfo = { ...updateInfo, downloadState: 'error' }
-    broadcastUpdateInfo()
-    throw error
+    const message = error instanceof Error ? error.message : 'Install failed'
+    updateStateBy((s) => reduceDesktopUpdateStateOnInstallFailure(s, message))
+    mainLog.error('[auto-update] quitAndInstall failed:', message)
+    return { accepted: true, completed: false, state: getUpdateState() }
   }
 }
 
+// Legacy launch hook (index.ts calls this) ----------------------------------
+
 /**
- * Result of update check on launch
+ * Result of update check on launch. Kept for index.ts compatibility; the
+ * renderer now drives its own UI from broadcast state.
  */
 export interface UpdateOnLaunchResult {
-  action: 'none' | 'skipped' | 'ready' | 'downloading'
-  reason?: string
+  action: 'none' | 'available' | 'checking'
   version?: string | null
 }
 
 /**
- * Check for updates on app launch.
- * - Checks immediately (no delay)
- * - Respects dismissed version (skips notification but allows manual check)
- * - Auto-downloads if update available
+ * Check for updates on app launch. Replaced the old auto-download-on-launch
+ * behavior: now configures the controller and triggers a background check
+ * without downloading (AC1).
  */
 export async function checkForUpdatesOnLaunch(): Promise<UpdateOnLaunchResult> {
-  mainLog.info('[auto-update] Checking for updates on launch...')
-
-  const info = await checkForUpdates({ autoDownload: true })
-
-  if (!info.available) {
-    return { action: 'none' }
+  await configureUpdates()
+  await checkForUpdate('startup').catch((err) => {
+    mainLog.error('[auto-update] launch check failed:', err instanceof Error ? err.message : err)
+  })
+  if (updateState.status === 'available') {
+    return { action: 'available', version: updateState.availableVersion }
   }
+  return { action: 'checking' }
+}
 
-  // Check if this version was dismissed by user
-  const dismissedVersion = getDismissedUpdateVersion()
-  if (dismissedVersion === info.latestVersion) {
-    mainLog.info(`[auto-update] Update ${info.latestVersion} was dismissed, skipping notification`)
-    return { action: 'skipped', reason: 'dismissed', version: info.latestVersion }
+// Cache-directory diagnostics (kept for debugging the download path) -------
+
+function getUpdateCacheDir(): string {
+  const appName = app.getName()
+  if (IS_MAC) {
+    return path.join(app.getPath('home'), 'Library', 'Caches', `${appName}-updater`, 'pending')
+  } else if (IS_WINDOWS) {
+    const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local')
+    return path.join(localAppData, `${appName}-updater`, 'pending')
+  } else {
+    return path.join(app.getPath('home'), '.cache', `${appName}-updater`, 'pending')
   }
+}
 
-  if (info.downloadState === 'ready') {
-    return { action: 'ready', version: info.latestVersion }
+/**
+ * Inspect the updater cache directory for a previously-downloaded update.
+ * Used only for diagnostics; the runtime state machine is the source of truth.
+ */
+export function diagnoseExistingDownload(): { exists: boolean; version?: string; cacheDir: string } {
+  const cacheDir = getUpdateCacheDir()
+  if (!fs.existsSync(cacheDir)) return { exists: false, cacheDir }
+  const files = fs.readdirSync(cacheDir)
+  const updateInfoFile = files.find((f) => f === 'update-info.json')
+  if (updateInfoFile) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readJsonFileSync } = require('@craft-agent/shared/utils/files') as typeof import('@craft-agent/shared/utils/files')
+      const info = readJsonFileSync(path.join(cacheDir, updateInfoFile)) as Record<string, unknown> | null
+      const fileName = (info?.fileName || info?.path) as string | undefined
+      if (fileName && fs.existsSync(path.join(cacheDir, fileName))) {
+        return { exists: true, version: info?.version as string | undefined, cacheDir }
+      }
+    } catch {
+      // fall through to file-pattern check
+    }
   }
+  const downloadFile = files.find((f) =>
+    f.endsWith('.zip') || f.endsWith('.exe') || f.endsWith('.AppImage') || f.endsWith('.dmg') || f.endsWith('.nupkg'),
+  )
+  return { exists: Boolean(downloadFile), cacheDir }
+}
 
-  // Download in progress — will notify when ready via update-downloaded event
-  return { action: 'downloading', version: info.latestVersion }
+/**
+ * Path to the updater diagnostics log file, exposed to Settings (AC9).
+ */
+export function getUpdateLogPath(): string | null {
+  try {
+    // electron-log resolves the active file transport path.
+    const file = log.transports?.file?.getFile?.()
+    return file?.path ?? null
+  } catch {
+    return null
+  }
 }

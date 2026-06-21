@@ -119,12 +119,12 @@ export const RPC_CHANNELS = {
   },
   update: {
     CHECK: 'update:check',
-    GET_INFO: 'update:getInfo',
+    GET_STATE: 'update:getState',
+    SET_CHANNEL: 'update:setChannel',
+    DOWNLOAD: 'update:download',
     INSTALL: 'update:install',
-    DISMISS: 'update:dismiss',
-    GET_DISMISSED: 'update:getDismissed',
-    AVAILABLE: 'update:available',
-    DOWNLOAD_PROGRESS: 'update:downloadProgress',
+    STATE_CHANGED: 'update:stateChanged',
+    GET_LOG_PATH: 'update:getLogPath',
   },
   shell: {
     OPEN_URL: 'shell:openUrl',

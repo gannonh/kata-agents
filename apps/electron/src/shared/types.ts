@@ -201,6 +201,9 @@ import type {
   GitBashStatus,
   ClaudeOAuthResult,
   UpdateInfo,
+  DesktopUpdateState,
+  DesktopUpdateCheckResult,
+  DesktopUpdateActionResult,
   WorkspaceSettings,
   PermissionModeState,
   BrowserInstanceInfo,
@@ -346,14 +349,14 @@ export interface ElectronAPI {
   /** Check whether the server registered a handler for a given RPC channel. */
   isChannelAvailable(channel: string): boolean
 
-  // Auto-update
-  checkForUpdates(): Promise<UpdateInfo>
-  getUpdateInfo(): Promise<UpdateInfo>
-  installUpdate(): Promise<void>
-  dismissUpdate(version: string): Promise<void>
-  getDismissedUpdateVersion(): Promise<string | null>
-  onUpdateAvailable(callback: (info: UpdateInfo) => void): () => void
-  onUpdateDownloadProgress(callback: (progress: number) => void): () => void
+  // Auto-update (stateful controller — AC1-AC9)
+  getUpdateState(): Promise<DesktopUpdateState>
+  setUpdateChannel(channel: 'latest' | 'nightly'): Promise<DesktopUpdateState>
+  checkForUpdates(): Promise<DesktopUpdateCheckResult>
+  downloadUpdate(): Promise<DesktopUpdateActionResult>
+  installUpdate(): Promise<DesktopUpdateActionResult>
+  onUpdateState(callback: (state: DesktopUpdateState) => void): () => void
+  getUpdateLogPath(): Promise<string | null>
 
   // Release notes
   getReleaseNotes(): Promise<string>

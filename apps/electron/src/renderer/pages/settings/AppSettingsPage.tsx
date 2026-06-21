@@ -112,17 +112,30 @@ export default function AppSettingsPage() {
 
   // Auto-update state (Check Now / Update Ready only shown in Electron, not WebUI)
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
-  const updateChecker = useUpdateChecker()
+  const update = useUpdateChecker()
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
+  const [isChangingTrack, setIsChangingTrack] = useState(false)
 
   const handleCheckForUpdates = useCallback(async () => {
     setIsCheckingForUpdates(true)
     try {
-      await updateChecker.checkForUpdates()
+      await update.checkForUpdates()
     } finally {
       setIsCheckingForUpdates(false)
     }
-  }, [updateChecker])
+  }, [update])
+
+  const handleTrackChange = useCallback(async (channel: 'latest' | 'nightly') => {
+    if (channel === update.state?.channel) return
+    setIsChangingTrack(true)
+    try {
+      await window.electronAPI.setUpdateChannel(channel)
+    } catch (error) {
+      console.error('Failed to change update track:', error)
+    } finally {
+      setIsChangingTrack(false)
+    }
+  }, [update.state?.channel])
 
   // Load settings on mount
   const loadSettings = useCallback(async () => {
@@ -314,43 +327,70 @@ export default function AppSettingsPage() {
                   <SettingsRow label={t("settings.about.version")}>
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">
-                        {updateChecker.updateInfo?.currentVersion ?? t("common.loading")}
+                        {update.state?.currentVersion ?? t("common.loading")}
                       </span>
-                      {isElectron && updateChecker.isDownloading && updateChecker.updateInfo?.latestVersion && (
+                      {isElectron && update.state?.status === 'downloading' && typeof update.state.downloadPercent === 'number' && (
                         <div className="flex items-center gap-2 text-muted-foreground text-sm">
                           <Spinner className="w-3 h-3" />
-                          <span>{t("settings.about.downloading", { version: updateChecker.updateInfo.latestVersion, percent: updateChecker.downloadProgress })}</span>
+                          <span>{t("settings.about.downloading", { version: update.state.availableVersion ?? '', percent: Math.floor(update.state.downloadPercent) })}</span>
                         </div>
                       )}
                     </div>
                   </SettingsRow>
-                  {isElectron && (
+                  {isElectron && update.state && (
                     <SettingsRow label={t("settings.about.checkForUpdates")}>
                       <Button
-                        variant="outline"
+                        variant={update.action === 'install' ? 'default' : 'outline'}
                         size="sm"
-                        onClick={handleCheckForUpdates}
-                        disabled={isCheckingForUpdates}
+                        onClick={() => {
+                          if (update.action === 'download') {
+                            void update.downloadUpdate()
+                          } else if (update.action === 'install') {
+                            void update.installUpdate()
+                          } else {
+                            void handleCheckForUpdates()
+                          }
+                        }}
+                        disabled={update.buttonDisabled || isCheckingForUpdates}
                       >
-                        {isCheckingForUpdates ? (
+                        {isCheckingForUpdates || update.state.status === 'checking' ? (
                           <>
                             <Spinner className="mr-1.5" />
                             {t("common.checking")}
                           </>
+                        ) : update.action === 'download' ? (
+                          t("settings.about.download")
+                        ) : update.action === 'install' ? (
+                          t("settings.about.restartToUpdate", { version: update.state.downloadedVersion ?? update.state.availableVersion ?? '' })
+                        ) : update.state.status === 'downloading' ? (
+                          t("settings.about.downloadingLabel")
+                        ) : update.state.status === 'up-to-date' ? (
+                          t("settings.about.upToDate")
                         ) : (
                           t("settings.about.checkNow")
                         )}
                       </Button>
                     </SettingsRow>
                   )}
-                  {isElectron && updateChecker.isReadyToInstall && updateChecker.updateInfo?.latestVersion && (
-                    <SettingsRow label={t("settings.about.updateReady")}>
-                      <Button
-                        size="sm"
-                        onClick={updateChecker.installUpdate}
+                  {isElectron && (
+                    <SettingsRow
+                      label={t("settings.about.updateTrack")}
+                      description={t("settings.about.updateTrackDesc")}
+                    >
+                      <select
+                        className="border border-border rounded px-2 py-1 text-sm bg-background"
+                        value={update.state?.channel ?? 'latest'}
+                        onChange={(e) => void handleTrackChange(e.target.value as 'latest' | 'nightly')}
+                        disabled={isChangingTrack}
                       >
-                        {t("settings.about.restartToUpdate", { version: updateChecker.updateInfo.latestVersion })}
-                      </Button>
+                        <option value="latest">{t("settings.about.trackStable")}</option>
+                        <option value="nightly">{t("settings.about.trackNightly")}</option>
+                      </select>
+                    </SettingsRow>
+                  )}
+                  {isElectron && update.state?.status === 'error' && update.state.message && (
+                    <SettingsRow label={t("settings.about.updateError")}>
+                      <span className="text-destructive text-sm">{update.state.message}</span>
                     </SettingsRow>
                   )}
                 </SettingsCard>

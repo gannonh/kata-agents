@@ -281,12 +281,29 @@ export const mockElectronAPI = {
 
   // Debug menu actions invoked by the mobile menu's Debug sub-page in dev mode.
   // The real implementations call into the auto-updater; the playground just logs.
-  checkForUpdates: () => {
-    console.log('[Playground] checkForUpdates called')
-  },
-  installUpdate: () => {
-    console.log('[Playground] installUpdate called')
-  },
+  getUpdateState: async () => ({
+    enabled: false, status: 'disabled', channel: 'latest',
+    currentVersion: '0.0.0-playground', availableVersion: null,
+    downloadedVersion: null, downloadPercent: null, checkedAt: null,
+    message: null, errorContext: null, canRetry: false,
+  }),
+  setUpdateChannel: async (_channel: 'latest' | 'nightly') => ({
+    enabled: false, status: 'disabled', channel: _channel,
+    currentVersion: '0.0.0-playground', availableVersion: null,
+    downloadedVersion: null, downloadPercent: null, checkedAt: null,
+    message: null, errorContext: null, canRetry: false,
+  }),
+  checkForUpdates: async () => ({
+    checked: false,
+    state: { enabled: false, status: 'disabled', channel: 'latest',
+      currentVersion: '0.0.0-playground', availableVersion: null,
+      downloadedVersion: null, downloadPercent: null, checkedAt: null,
+      message: null, errorContext: null, canRetry: false },
+  }),
+  downloadUpdate: async () => ({ accepted: false, completed: false, state: { enabled: false } as any }),
+  installUpdate: async () => ({ accepted: false, completed: false, state: { enabled: false } as any }),
+  onUpdateState: () => () => {},
+  getUpdateLogPath: async () => null,
 
   // ChatDisplay required mocks
   readPreferences: async () => {

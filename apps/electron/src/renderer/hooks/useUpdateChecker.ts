@@ -1,156 +1,172 @@
 /**
- * Update Checker Hook
+ * Desktop update state hook.
  *
- * Manages auto-update state for the Electron app.
- * - Listens for update availability broadcasts from main process
- * - Tracks download progress
- * - Provides methods to check for updates and install
- * - Shows toast notification when update is ready
- * - Persistent dismissal across app restarts (per version)
+ * Subscribes to the main-process update controller's broadcast
+ * `DesktopUpdateState` and exposes it plus pure helpers for the sidebar pill
+ * and Settings action button. Mirrors kata-code's `useDesktopUpdateState` +
+ * `desktopUpdate.logic`, retargeted to Kata Agents' ElectronAPI.
+ *
+ * Manual-download parity (AC1, AC3, AC4): the app does NOT auto-download.
+ * `Update available` starts the download; `Restart to update` installs after a
+ * confirmation dialog.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { UpdateInfo } from '../../shared/types'
+import type { DesktopUpdateState } from '../../shared/types'
 
-interface UseUpdateCheckerResult {
-  /** Current update info */
-  updateInfo: UpdateInfo | null
-  /** Whether an update is available */
-  updateAvailable: boolean
-  /** Whether update is currently downloading */
-  isDownloading: boolean
-  /** Whether update is ready to install */
-  isReadyToInstall: boolean
-  /** Download progress (0-100) */
-  downloadProgress: number
-  /** Check for updates manually */
-  checkForUpdates: () => Promise<void>
-  /** Install the downloaded update and restart */
+export type UpdateButtonAction = 'download' | 'install' | 'none'
+
+export interface UseDesktopUpdateResult {
+  /** Current update state from the controller (null before first hydration). */
+  state: DesktopUpdateState | null
+  /** Whether the sidebar/settings should surface an action button. */
+  showButton: boolean
+  /** Whether the action button should be disabled. */
+  buttonDisabled: boolean
+  /** Resolved click action for the current state. */
+  action: UpdateButtonAction
+  /** Start a download (AC3). */
+  downloadUpdate: () => Promise<void>
+  /** Install the downloaded update (AC4). The renderer shows a confirm first. */
   installUpdate: () => Promise<void>
+  /** Manually check for updates (Settings Check Now / sidebar fallback). */
+  checkForUpdates: () => Promise<void>
 }
 
-// Toast ID for update notification (allows dismiss/update)
-const UPDATE_TOAST_ID = 'update-available'
+/**
+ * Resolved click action for the current state. Drives the sidebar pill label
+ * and the Settings button text. Kept pure (exported) so it is unit-testable.
+ */
+export function resolveUpdateButtonAction(state: DesktopUpdateState | null): UpdateButtonAction {
+  if (!state) return 'none'
+  if (state.downloadedVersion) return 'install'
+  if (state.status === 'available') return 'download'
+  if (state.status === 'error' && state.errorContext === 'download' && state.availableVersion) {
+    return 'download'
+  }
+  return 'none'
+}
 
-export function useUpdateChecker(): UseUpdateCheckerResult {
+/**
+ * Whether the sidebar/settings should show the action button at all (AC2).
+ * Hidden when updates are disabled, idle, up to date, or in a state with no
+ * actionable step.
+ */
+export function shouldShowUpdateButton(state: DesktopUpdateState | null): boolean {
+  if (!state || !state.enabled) return false
+  if (state.status === 'downloading') return true
+  return resolveUpdateButtonAction(state) !== 'none'
+}
+
+export function isUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
+  return state?.status === 'downloading'
+}
+
+export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
+  if (!state || !state.enabled) return false
+  return (
+    state.status !== 'checking' &&
+    state.status !== 'downloading' &&
+    state.status !== 'downloaded' &&
+    state.status !== 'disabled'
+  )
+}
+
+export function useDesktopUpdate(): UseDesktopUpdateResult {
   const { t } = useTranslation()
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
-  // Track if we've shown the toast for this version to avoid duplicates
-  const shownToastVersionRef = useRef<string | null>(null)
+  const [state, setState] = useState<DesktopUpdateState | null>(null)
+  const installConfirmMessageRef = useRef<string>(t('update.installConfirm'))
 
-  // Show toast notification when update is ready
-  const showUpdateToast = useCallback((version: string, onInstall: () => void) => {
-    // Don't show if already shown for this version in this session
-    if (shownToastVersionRef.current === version) {
-      return
-    }
-    shownToastVersionRef.current = version
-
-    toast.info(t('toast.updateReady', { version }), {
-      id: UPDATE_TOAST_ID,
-      description: t('toast.restartToApply'),
-      duration: 10000, // 10 seconds, then auto-dismiss
-      action: {
-        label: t('toast.restart'),
-        onClick: onInstall,
-      },
-      onDismiss: () => {
-        // Persist dismissal so we don't show again after app restart
-        window.electronAPI.dismissUpdate(version)
-      },
+  // Hydrate on mount and subscribe to state broadcasts.
+  useEffect(() => {
+    let disposed = false
+    window.electronAPI.getUpdateState().then((initial) => {
+      if (!disposed) setState(initial)
     })
-  }, [t])
-
-  // Install the update
-  const installUpdate = useCallback(async () => {
-    try {
-      // Dismiss the update toast first
-      toast.dismiss(UPDATE_TOAST_ID)
-      toast.info(t('toast.installingUpdate'), {
-        description: t('toast.appWillRestart'),
-        duration: 5000,
-      })
-      await window.electronAPI.installUpdate()
-    } catch (error) {
-      console.error('[useUpdateChecker] Install failed:', error)
-      toast.error(t('toast.failedToInstallUpdate'), {
-        description: error instanceof Error ? error.message : 'Unknown error',
-      })
+    const unsubscribe = window.electronAPI.onUpdateState((next) => {
+      setState(next)
+    })
+    return () => {
+      disposed = true
+      unsubscribe()
     }
   }, [])
 
-  // Load initial state and check if update ready
-  useEffect(() => {
-    const checkAndNotify = async (info: UpdateInfo) => {
-      if (!info.available || !info.latestVersion) return
-      if (info.downloadState !== 'ready') return
+  const action = resolveUpdateButtonAction(state)
+  const showButton = shouldShowUpdateButton(state)
+  const buttonDisabled = isUpdateButtonDisabled(state)
 
-      // Check if this version was dismissed
-      const dismissedVersion = await window.electronAPI.getDismissedUpdateVersion()
-      if (dismissedVersion === info.latestVersion) {
-        return
-      }
-
-      // Show toast for ready update
-      showUpdateToast(info.latestVersion, installUpdate)
-    }
-
-    // Get initial update info
-    window.electronAPI.getUpdateInfo().then((info) => {
-      setUpdateInfo(info)
-      checkAndNotify(info)
-    })
-
-    // Subscribe to update availability changes
-    const cleanupAvailable = window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateInfo(info)
-      checkAndNotify(info)
-    })
-
-    // Subscribe to download progress updates
-    const cleanupProgress = window.electronAPI.onUpdateDownloadProgress((progress) => {
-      setUpdateInfo((prev) => prev ? { ...prev, downloadProgress: progress } : prev)
-    })
-
-    return () => {
-      cleanupAvailable()
-      cleanupProgress()
-    }
-  }, [showUpdateToast, installUpdate])
-
-  // Check for updates manually
-  const checkForUpdates = useCallback(async () => {
+  const downloadUpdate = useCallback(async () => {
     try {
-      const info = await window.electronAPI.checkForUpdates()
-      setUpdateInfo(info)
-
-      if (!info.available) {
-        toast.success(t('toast.upToDate'), {
-          description: t('toast.versionIsLatest', { version: info.currentVersion }),
-          duration: 3000,
+      const result = await window.electronAPI.downloadUpdate()
+      if (!result.completed && result.state?.message) {
+        toast.error(t('update.downloadFailedTitle'), {
+          description: result.state.message,
         })
-      } else if (info.downloadState === 'ready' && info.latestVersion) {
-        // If already ready, show toast (clear any previous dismissal since user explicitly checked)
-        shownToastVersionRef.current = null // Reset so toast can show again
-        showUpdateToast(info.latestVersion, installUpdate)
+      } else if (result.completed) {
+        toast.success(t('update.downloadedTitle'), {
+          description: t('update.downloadedRestartDescription'),
+        })
       }
     } catch (error) {
-      console.error('[useUpdateChecker] Check failed:', error)
-      toast.error(t('toast.failedToCheckUpdates'), {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(t('update.downloadFailedTitle'), {
+        description: error instanceof Error ? error.message : t('update.unknownError'),
       })
     }
-  }, [showUpdateToast, installUpdate])
+  }, [t])
+
+  const installUpdate = useCallback(async () => {
+    const version = state?.downloadedVersion ?? state?.availableVersion
+    const confirmed = window.confirm(
+      t('update.installConfirm', { version: version ?? '' }),
+    )
+    if (!confirmed) return
+    try {
+      await window.electronAPI.installUpdate()
+    } catch (error) {
+      toast.error(t('update.installFailedTitle'), {
+        description: error instanceof Error ? error.message : t('update.unknownError'),
+      })
+    }
+  }, [state, t])
+
+  const checkForUpdates = useCallback(async () => {
+    try {
+      const result = await window.electronAPI.checkForUpdates()
+      if (!result.checked) {
+        // Check was suppressed (e.g. an action is in flight or updates disabled).
+        return
+      }
+      if (result.state.status === 'up-to-date') {
+        toast.success(t('update.upToDateTitle'), {
+          description: t('update.upToDateDescription', { version: result.state.currentVersion }),
+        })
+      } else if (result.state.status === 'error') {
+        toast.error(t('update.checkFailedTitle'), {
+          description: result.state.message ?? t('update.unknownError'),
+        })
+      }
+    } catch (error) {
+      toast.error(t('update.checkFailedTitle'), {
+        description: error instanceof Error ? error.message : t('update.unknownError'),
+      })
+    }
+  }, [t])
+
+  installConfirmMessageRef.current = t('update.installConfirm')
 
   return {
-    updateInfo,
-    updateAvailable: updateInfo?.available ?? false,
-    isDownloading: updateInfo?.downloadState === 'downloading',
-    isReadyToInstall: updateInfo?.downloadState === 'ready',
-    downloadProgress: updateInfo?.downloadProgress ?? 0,
-    checkForUpdates,
+    state,
+    showButton,
+    buttonDisabled,
+    action,
+    downloadUpdate,
     installUpdate,
+    checkForUpdates,
   }
 }
+
+/** Backward-compatible export name (callers still import useUpdateChecker). */
+export const useUpdateChecker = useDesktopUpdate

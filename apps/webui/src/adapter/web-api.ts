@@ -153,14 +153,40 @@ export function createWebApi(options: WebApiOptions): {
       window.open(`${window.location.origin}/?session=${sessionId}`, '_blank')
     },
 
-    // Auto-update — not applicable to web (but expose server version for About page)
-    checkForUpdates: () => Promise.resolve({ available: false, currentVersion: client.getServerVersion() ?? '' } as any),
-    getUpdateInfo: () => Promise.resolve({ available: false, currentVersion: client.getServerVersion() ?? '' } as any),
-    installUpdate: () => Promise.resolve(),
-    dismissUpdate: () => Promise.resolve(),
-    getDismissedUpdateVersion: () => Promise.resolve(null),
-    onUpdateAvailable: () => () => {},
-    onUpdateDownloadProgress: () => () => {},
+    // Auto-update — not applicable to web. Stub the stateful API so the
+    // renderer (webui build) renders in a disabled update state.
+    getUpdateState: () => Promise.resolve({
+      enabled: false,
+      status: 'disabled',
+      channel: 'latest',
+      currentVersion: client.getServerVersion() ?? '',
+      availableVersion: null,
+      downloadedVersion: null,
+      downloadPercent: null,
+      checkedAt: null,
+      message: null,
+      errorContext: null,
+      canRetry: false,
+    } as any),
+    setUpdateChannel: () => Promise.resolve({
+      enabled: false, status: 'disabled', channel: 'latest',
+      currentVersion: client.getServerVersion() ?? '', availableVersion: null,
+      downloadedVersion: null, downloadPercent: null, checkedAt: null,
+      message: null, errorContext: null, canRetry: false,
+    } as any),
+    checkForUpdates: () => Promise.resolve({
+      checked: false,
+      state: { enabled: false, status: 'disabled', channel: 'latest',
+        currentVersion: client.getServerVersion() ?? '', availableVersion: null,
+        downloadedVersion: null, downloadPercent: null, checkedAt: null,
+        message: null, errorContext: null, canRetry: false },
+    } as any),
+    downloadUpdate: () => Promise.resolve({ accepted: false, completed: false, state: { enabled: false }
+      as any }),
+    installUpdate: () => Promise.resolve({ accepted: false, completed: false, state: { enabled: false }
+      as any),
+    onUpdateState: () => () => {},
+    getUpdateLogPath: () => Promise.resolve(null),
     // Release notes — serve from server via RPC (same content as Electron)
     getReleaseNotes: () => client.invoke('releaseNotes:get') as Promise<string>,
     getLatestReleaseVersion: () => client.invoke('releaseNotes:getLatestVersion') as Promise<string | undefined>,

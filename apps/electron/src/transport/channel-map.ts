@@ -88,14 +88,14 @@ export const CHANNEL_MAP = {
   getHomeDir: invoke(RPC_CHANNELS.system.HOME_DIR),
   isDebugMode: invoke(RPC_CHANNELS.system.IS_DEBUG_MODE),
 
-  // Auto-update
+  // Auto-update (stateful controller)
+  getUpdateState: invoke(RPC_CHANNELS.update.GET_STATE),
+  setUpdateChannel: invoke(RPC_CHANNELS.update.SET_CHANNEL),
   checkForUpdates: invoke(RPC_CHANNELS.update.CHECK),
-  getUpdateInfo: invoke(RPC_CHANNELS.update.GET_INFO),
+  downloadUpdate: invoke(RPC_CHANNELS.update.DOWNLOAD),
   installUpdate: invoke(RPC_CHANNELS.update.INSTALL),
-  dismissUpdate: invoke(RPC_CHANNELS.update.DISMISS),
-  getDismissedUpdateVersion: invoke(RPC_CHANNELS.update.GET_DISMISSED),
-  onUpdateAvailable: listener(RPC_CHANNELS.update.AVAILABLE),
-  onUpdateDownloadProgress: listener(RPC_CHANNELS.update.DOWNLOAD_PROGRESS),
+  onUpdateState: listener(RPC_CHANNELS.update.STATE_CHANGED),
+  getUpdateLogPath: invoke(RPC_CHANNELS.update.GET_LOG_PATH),
 
   // Release notes
   getReleaseNotes: invoke(RPC_CHANNELS.releaseNotes.GET),
