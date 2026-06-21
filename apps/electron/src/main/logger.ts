@@ -35,23 +35,20 @@ function resolveDebugMode(): boolean {
 
 export const isDebugMode = resolveDebugMode()
 
-// Configure transports based on debug mode
+// File transport: JSON format + 5MB rotation applies to both debug and production.
+log.transports.file.format = ({ message }) => [
+  JSON.stringify({
+    timestamp: message.date.toISOString(),
+    level: message.level,
+    scope: message.scope,
+    message: message.data,
+  }),
+]
+log.transports.file.maxSize = 5 * 1024 * 1024
+
 if (isDebugMode) {
-  // JSON format for file (agent-parseable)
-  // Note: format expects (params: FormatParams) => any[], where params.message has the LogMessage fields
-  log.transports.file.format = ({ message }) => [
-    JSON.stringify({
-      timestamp: message.date.toISOString(),
-      level: message.level,
-      scope: message.scope,
-      message: message.data,
-    }),
-  ]
-
-  log.transports.file.maxSize = 5 * 1024 * 1024 // 5MB
-
-  // Console output in debug mode with readable format
-  // Note: format must return an array - electron-log's transformStyles calls .reduce() on it
+  // Console output in debug mode with readable format.
+  // Note: format must return an array — electron-log's transformStyles calls .reduce() on it.
   log.transports.console.format = ({ message }) => {
     const scope = message.scope ? `[${message.scope}]` : ''
     const level = message.level.toUpperCase().padEnd(5)
@@ -62,20 +59,8 @@ if (isDebugMode) {
   }
   log.transports.console.level = 'debug'
 } else {
-  // Production builds: console transport stays off, but file logging stays ON
-  // (info level, 5MB rotation) so updater and main-process issues are
-  // diagnosable from the log file (see docs/specs/2026-06-20-update-ux-parity-
-  // with-kata-code-design.md AC9). Console output is intentionally suppressed to
-  // keep packaged builds quiet.
-  log.transports.file.format = ({ message }) => [
-    JSON.stringify({
-      timestamp: message.date.toISOString(),
-      level: message.level,
-      scope: message.scope,
-      message: message.data,
-    }),
-  ]
-  log.transports.file.maxSize = 5 * 1024 * 1024 // 5MB
+  // Production builds: file logging stays ON (info level) so updater and
+  // main-process issues are diagnosable. Console output is suppressed.
   log.transports.file.level = 'info'
   log.transports.console.level = false
 }

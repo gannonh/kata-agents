@@ -11,7 +11,7 @@
  * confirmation dialog.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { DesktopUpdateState } from '../../shared/types'
@@ -77,7 +77,6 @@ export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
 export function useDesktopUpdate(): UseDesktopUpdateResult {
   const { t } = useTranslation()
   const [state, setState] = useState<DesktopUpdateState | null>(null)
-  const installConfirmMessageRef = useRef<string>(t('update.installConfirm'))
 
   // Hydrate on mount and subscribe to state broadcasts.
   useEffect(() => {
@@ -154,8 +153,6 @@ export function useDesktopUpdate(): UseDesktopUpdateResult {
       })
     }
   }, [t])
-
-  installConfirmMessageRef.current = t('update.installConfirm')
 
   return {
     state,

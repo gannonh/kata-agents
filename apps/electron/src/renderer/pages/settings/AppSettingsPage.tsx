@@ -137,6 +137,31 @@ export default function AppSettingsPage() {
     }
   }, [update.state?.channel])
 
+  const handleUpdateAction = useCallback(() => {
+    if (update.action === 'download') {
+      void update.downloadUpdate()
+    } else if (update.action === 'install') {
+      void update.installUpdate()
+    } else {
+      void handleCheckForUpdates()
+    }
+  }, [update, handleCheckForUpdates])
+
+  function getUpdateButtonContent() {
+    const s = update.state
+    if (!s) return t("settings.about.checkNow")
+    if (isCheckingForUpdates || s.status === 'checking') {
+      return <><Spinner className="mr-1.5" />{t("common.checking")}</>
+    }
+    if (update.action === 'download') return t("settings.about.download")
+    if (update.action === 'install') {
+      return t("settings.about.restartToUpdate", { version: s.downloadedVersion ?? s.availableVersion ?? '' })
+    }
+    if (s.status === 'downloading') return t("settings.about.downloadingLabel")
+    if (s.status === 'up-to-date') return t("settings.about.upToDate")
+    return t("settings.about.checkNow")
+  }
+
   // Load settings on mount
   const loadSettings = useCallback(async () => {
     if (!window.electronAPI) return
@@ -342,33 +367,10 @@ export default function AppSettingsPage() {
                       <Button
                         variant={update.action === 'install' ? 'default' : 'outline'}
                         size="sm"
-                        onClick={() => {
-                          if (update.action === 'download') {
-                            void update.downloadUpdate()
-                          } else if (update.action === 'install') {
-                            void update.installUpdate()
-                          } else {
-                            void handleCheckForUpdates()
-                          }
-                        }}
+                        onClick={handleUpdateAction}
                         disabled={update.buttonDisabled || isCheckingForUpdates}
                       >
-                        {isCheckingForUpdates || update.state.status === 'checking' ? (
-                          <>
-                            <Spinner className="mr-1.5" />
-                            {t("common.checking")}
-                          </>
-                        ) : update.action === 'download' ? (
-                          t("settings.about.download")
-                        ) : update.action === 'install' ? (
-                          t("settings.about.restartToUpdate", { version: update.state.downloadedVersion ?? update.state.availableVersion ?? '' })
-                        ) : update.state.status === 'downloading' ? (
-                          t("settings.about.downloadingLabel")
-                        ) : update.state.status === 'up-to-date' ? (
-                          t("settings.about.upToDate")
-                        ) : (
-                          t("settings.about.checkNow")
-                        )}
+                        {getUpdateButtonContent()}
                       </Button>
                     </SettingsRow>
                   )}
