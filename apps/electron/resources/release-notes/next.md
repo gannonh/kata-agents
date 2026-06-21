@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Redesigned update experience** — The app now checks for updates in the background and surfaces an `Update available` pill in the sidebar instead of auto-downloading. Click to download, then `Restart to update` to install on your schedule. A new Settings → About **Update track** selector switches between **Stable** and **Nightly**; the installed build supplies the default, and your choice persists and takes effect immediately. The macOS app menu `Check for Updates…` now shows a native up-to-date or failure dialog. Production builds now keep an updater diagnostics log for troubleshooting.
+
 ## Improvements
 
 ## Bug Fixes

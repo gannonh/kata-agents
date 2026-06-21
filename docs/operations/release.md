@@ -42,10 +42,14 @@ stable release. The nightly version/tag are computed by
   `softprops/action-gh-release@v2` (not `electron-builder --publish`), which
   controls the prerelease/latest flags.
 * At runtime (`apps/electron/src/main/auto-update.ts`), the installed build's
-  version selects its channel: nightly builds set
-  `autoUpdater.channel = 'nightly'` + `allowPrerelease = true` and resolve
-  `nightly*.yml`; everything else stays on `latest*.yml`. Updates whose version
-  does not match the installed channel are ignored.
+  version supplies the **default** channel; a persisted user-selected track
+  (Settings → About → Update track) overrides that default. Nightly builds /
+  nightly selection set `autoUpdater.channel = 'nightly'` + `allowPrerelease = true`
+  and resolve `nightly*.yml`; everything else stays on `latest*.yml`. Updates
+  whose version does not match the selected channel are ignored. Switching tracks
+  reconfigures the updater immediately, resets stale update state, and re-checks
+  the new channel; channel changes are blocked while a check/download/install is
+  active. Release artifacts and manifest names are unchanged.
 
 ## Jobs
 
