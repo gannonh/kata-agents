@@ -11,7 +11,10 @@ timestamp: 2026-06-20T00:00:00Z
 ## Status
 
 - **Plan**: Approved 2026-06-20 after user alignment and adversarial review.
-- **Build**: Not started.
+- **Build**: Implemented (2026-06-20). Phases 1-4 landed; Phase 5 verification
+  green. See `2026-06-20-update-ux-parity-with-kata-code-build-report.md`.
+  Independent subagent review was unavailable (subagent dispatch unstable);
+  single-agent self-review recorded in the build report.
 - **Verify**: Not started.
 
 ## Goal

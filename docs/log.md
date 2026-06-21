@@ -2,6 +2,14 @@
 
 ## 2026-06-20
 
+* **Implemented**: Update UX parity spec.
+  * Spec: [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md)
+  * Build report: [specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md](specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md)
+  * **Updated**: [specs/index.md](specs/index.md) moves the spec to implemented; [specs/log.md](specs/log.md) records the build and the earlier planning entry; [operations/release.md](operations/release.md) documents the new selected-channel runtime contract.
+  * Scope: ported Kata Code's desktop update UX to Kata Agents while preserving Project B release feed semantics and identity infrastructure.
+
+## 2026-06-20
+
 * **Drafted**: Update UX parity spec.
   * Spec: [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md)
   * **Updated**: [specs/index.md](specs/index.md) moved the spec into Active; [specs/log.md](specs/log.md) records the planning entry.
