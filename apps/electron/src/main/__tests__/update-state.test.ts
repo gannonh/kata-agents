@@ -89,6 +89,23 @@ describe('reduceDesktopUpdateStateOnCheckFailure', () => {
     expect(next.canRetry).toBe(true)
     expect(next.downloadPercent).toBeNull()
   })
+
+  test('preserves available status when a version is already known', () => {
+    const available = {
+      ...initialState(),
+      enabled: true,
+      status: 'available' as const,
+      availableVersion: '0.10.4',
+    }
+
+    const next = reduceDesktopUpdateStateOnCheckFailure(available, 'network down', CHECKED_AT)
+
+    expect(next.status).toBe('available')
+    expect(next.availableVersion).toBe('0.10.4')
+    expect(next.message).toBe('network down')
+    expect(next.errorContext).toBe('check')
+    expect(next.canRetry).toBe(true)
+  })
 })
 
 describe('reduceDesktopUpdateStateOnUpdateAvailable', () => {

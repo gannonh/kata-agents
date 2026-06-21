@@ -151,15 +151,20 @@ export async function configureUpdates(): Promise<void> {
 
   const mockUpdates = process.env.KATA_UPDATES_MOCK === '1'
   const mockPort = process.env.KATA_UPDATES_MOCK_PORT ?? '0'
+  const mockPortNumber = Number(mockPort)
+  if (!Number.isInteger(mockPortNumber) || mockPortNumber < 0 || mockPortNumber > 65535) {
+    throw new Error(`Invalid KATA_UPDATES_MOCK_PORT: ${mockPort}`)
+  }
+  const mockFeedUrl = `http://127.0.0.1:${mockPortNumber}`
 
   try {
     if (mockUpdates) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       autoUpdater.setFeedURL({
         provider: 'generic',
-        url: `http://localhost:${mockPort}`,
+        url: mockFeedUrl,
       } as any)
-      mainLog.info('[auto-update] using mock update feed', { port: mockPort })
+      mainLog.info('[auto-update] using mock update feed', { port: mockPortNumber })
     } else {
       applyAutoUpdaterChannel(resolved.channel)
     }
@@ -344,7 +349,10 @@ export async function checkForUpdate(reason: string = 'manual'): Promise<Desktop
 export async function downloadUpdate(): Promise<DesktopUpdateActionResult> {
   if (!configured) return { accepted: false, completed: false, state: getUpdateState() }
   if (downloadInFlight) return { accepted: false, completed: false, state: getUpdateState() }
-  if (updateState.status !== 'available' && updateState.status !== 'error') {
+  const canDownload =
+    updateState.status === 'available' ||
+    (updateState.status === 'error' && updateState.availableVersion !== null)
+  if (!canDownload) {
     return { accepted: false, completed: false, state: getUpdateState() }
   }
 
@@ -378,7 +386,7 @@ export async function setUpdateChannel(
 ): Promise<DesktopUpdateState> {
   const active = activeAction()
   if (active) {
-    throw new Error(`Cannot change update tracks while an update ${active} action is in progress.`)
+    throw new Error('UPDATE_ACTION_IN_PROGRESS')
   }
   if (channel === updateState.channel) return getUpdateState()
 
@@ -409,6 +417,7 @@ export async function setUpdateChannel(
 export async function installUpdate(): Promise<DesktopUpdateActionResult> {
   if (quitting) return { accepted: false, completed: false, state: getUpdateState() }
   if (!configured) return { accepted: false, completed: false, state: getUpdateState() }
+  if (installInFlight) return { accepted: false, completed: false, state: getUpdateState() }
   if (updateState.status !== 'downloaded') {
     mainLog.warn('[auto-update] install requested but no update downloaded')
     return { accepted: false, completed: false, state: getUpdateState() }

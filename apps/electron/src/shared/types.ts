@@ -201,6 +201,7 @@ import type {
   GitBashStatus,
   ClaudeOAuthResult,
   DesktopUpdateState,
+  DesktopUpdateChannel,
   DesktopUpdateCheckResult,
   DesktopUpdateActionResult,
   WorkspaceSettings,
@@ -350,7 +351,7 @@ export interface ElectronAPI {
 
   // Auto-update (stateful controller — AC1-AC9)
   getUpdateState(): Promise<DesktopUpdateState>
-  setUpdateChannel(channel: 'latest' | 'nightly'): Promise<DesktopUpdateState>
+  setUpdateChannel(channel: DesktopUpdateChannel): Promise<DesktopUpdateState>
   checkForUpdates(): Promise<DesktopUpdateCheckResult>
   downloadUpdate(): Promise<DesktopUpdateActionResult>
   installUpdate(): Promise<DesktopUpdateActionResult>

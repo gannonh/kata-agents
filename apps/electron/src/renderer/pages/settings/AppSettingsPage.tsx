@@ -123,9 +123,15 @@ export default function AppSettingsPage() {
       await window.electronAPI.setUpdateChannel(channel)
     } catch (error) {
       console.error('Failed to change update track:', error)
-      toast.error(t('update.trackChangeFailed'), {
-        description: error instanceof Error ? error.message : t('update.unknownError'),
-      })
+      const description =
+        error instanceof Error && error.message === 'UPDATE_ACTION_IN_PROGRESS'
+          ? t('update.actionInProgress')
+          : error instanceof Error && error.message === 'INVALID_UPDATE_CHANNEL'
+            ? t('update.invalidChannel')
+            : error instanceof Error
+              ? error.message
+              : t('update.unknownError')
+      toast.error(t('update.trackChangeFailed'), { description })
     } finally {
       setIsChangingTrack(false)
     }
@@ -377,7 +383,11 @@ export default function AppSettingsPage() {
                         className="border border-border rounded px-2 py-1 text-sm bg-background"
                         value={update.state.channel}
                         onChange={(e) => void handleTrackChange(e.target.value as 'latest' | 'nightly')}
-                        disabled={isChangingTrack}
+                        disabled={
+                          isChangingTrack ||
+                          update.state.status === 'checking' ||
+                          update.state.status === 'downloading'
+                        }
                       >
                         <option value="latest">{t("settings.about.trackStable")}</option>
                         <option value="nightly">{t("settings.about.trackNightly")}</option>

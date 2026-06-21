@@ -82,9 +82,12 @@ export function reduceDesktopUpdateStateOnCheckFailure(
   message: string,
   checkedAt: string,
 ): DesktopUpdateState {
+  // Preserve `available` when we still know the version so the download CTA
+  // stays visible after a transient check failure (poll/manual re-check).
+  const status: DesktopUpdateStatus = state.availableVersion ? 'available' : 'error'
   return {
     ...state,
-    status: 'error',
+    status,
     message,
     checkedAt,
     downloadPercent: null,

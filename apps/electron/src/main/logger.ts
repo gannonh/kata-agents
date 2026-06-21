@@ -163,10 +163,11 @@ function writeMessagingGatewayLog(
     })
   }
 
+  // Production main log: message only — full context stays in the dedicated file.
   if (level === 'error') {
-    mainLog.error('[messaging-gateway]', message, entry)
+    mainLog.error('[messaging-gateway]', message)
   } else if (level === 'warn') {
-    mainLog.warn('[messaging-gateway]', message, entry)
+    mainLog.warn('[messaging-gateway]', message)
   } else if (isDebugMode) {
     mainLog.info('[messaging-gateway]', message, entry)
   }

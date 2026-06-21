@@ -77,7 +77,7 @@ export async function rebuildMenu(): Promise<void> {
           type: 'info',
           title: i18n.t('menu.upToDateTitle'),
           message: i18n.t('menu.upToDateMessage', { version: state.currentVersion }),
-          buttons: ['OK'],
+          buttons: [i18n.t('common.ok')],
         })
       } else if (state.status === 'error') {
         await dialog.showMessageBox({
@@ -85,7 +85,7 @@ export async function rebuildMenu(): Promise<void> {
           title: i18n.t('menu.checkFailedTitle'),
           message: i18n.t('menu.checkFailedMessage'),
           detail: state.message ?? i18n.t('menu.checkFailedUnknown'),
-          buttons: ['OK'],
+          buttons: [i18n.t('common.ok')],
         })
       }
     } catch (err) {

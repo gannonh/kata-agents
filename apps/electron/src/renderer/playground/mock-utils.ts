@@ -201,6 +201,22 @@ export const playgroundAllowListHandle: PlaygroundAllowListHandle = {
 // Mock electronAPI
 // ============================================================================
 
+function disabledPlaygroundUpdateState(channel: 'latest' | 'nightly' = 'latest') {
+  return {
+    enabled: false,
+    status: 'disabled' as const,
+    channel,
+    currentVersion: '0.0.0-playground',
+    availableVersion: null,
+    downloadedVersion: null,
+    downloadPercent: null,
+    checkedAt: null,
+    message: null,
+    errorContext: null,
+    canRetry: false,
+  }
+}
+
 export const mockElectronAPI = {
   isDebugMode: async () => true,
 
@@ -281,27 +297,22 @@ export const mockElectronAPI = {
 
   // Debug menu actions invoked by the mobile menu's Debug sub-page in dev mode.
   // The real implementations call into the auto-updater; the playground just logs.
-  getUpdateState: async () => ({
-    enabled: false, status: 'disabled', channel: 'latest',
-    currentVersion: '0.0.0-playground', availableVersion: null,
-    downloadedVersion: null, downloadPercent: null, checkedAt: null,
-    message: null, errorContext: null, canRetry: false,
-  }),
-  setUpdateChannel: async (_channel: 'latest' | 'nightly') => ({
-    enabled: false, status: 'disabled', channel: _channel,
-    currentVersion: '0.0.0-playground', availableVersion: null,
-    downloadedVersion: null, downloadPercent: null, checkedAt: null,
-    message: null, errorContext: null, canRetry: false,
-  }),
+  getUpdateState: async () => disabledPlaygroundUpdateState(),
+  setUpdateChannel: async (_channel: 'latest' | 'nightly') => disabledPlaygroundUpdateState(_channel),
   checkForUpdates: async () => ({
     checked: false,
-    state: { enabled: false, status: 'disabled', channel: 'latest',
-      currentVersion: '0.0.0-playground', availableVersion: null,
-      downloadedVersion: null, downloadPercent: null, checkedAt: null,
-      message: null, errorContext: null, canRetry: false },
+    state: disabledPlaygroundUpdateState(),
   }),
-  downloadUpdate: async () => ({ accepted: false, completed: false, state: { enabled: false } as any }),
-  installUpdate: async () => ({ accepted: false, completed: false, state: { enabled: false } as any }),
+  downloadUpdate: async () => ({
+    accepted: false,
+    completed: false,
+    state: disabledPlaygroundUpdateState(),
+  }),
+  installUpdate: async () => ({
+    accepted: false,
+    completed: false,
+    state: disabledPlaygroundUpdateState(),
+  }),
   onUpdateState: () => () => {},
   getUpdateLogPath: async () => null,
 

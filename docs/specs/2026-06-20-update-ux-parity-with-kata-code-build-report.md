@@ -150,7 +150,7 @@ getEnabled/getGain/getStatus/setEnabled`) and 8 `BrowserPaneManager` tests.
 - The 10 pre-existing test failures (`rtk:*` RPC registration, `BrowserPaneManager`)
   are out of scope and were already failing on the base commit.
 - Deep diff verification of `app-update.yml` inside a packaged build (confirming
-  the github provider + repo point at `gannonh/kata-agents`) is a Verify-time
+  the GitHub provider + repo point at `gannonh/kata-agents`) is a Verify-time
   packaged-build check.
 
 ## Callouts

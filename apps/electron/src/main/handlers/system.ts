@@ -274,7 +274,10 @@ export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps):
     return getUpdateState()
   })
 
-  server.handle(RPC_CHANNELS.update.SET_CHANNEL, async (_ctx, channel: 'latest' | 'nightly') => {
+  server.handle(RPC_CHANNELS.update.SET_CHANNEL, async (_ctx, channel: unknown) => {
+    if (channel !== 'latest' && channel !== 'nightly') {
+      throw new Error('INVALID_UPDATE_CHANNEL')
+    }
     const { setUpdateChannel } = await import('../auto-update')
     return setUpdateChannel(channel)
   })

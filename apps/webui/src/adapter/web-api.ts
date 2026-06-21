@@ -83,7 +83,9 @@ export function createWebApi(options: WebApiOptions): {
     (ch) => client.isChannelAvailable(ch),
   )
 
-  function disabledUpdateState() {
+  type DisabledUpdateState = Awaited<ReturnType<ElectronAPI['getUpdateState']>>
+
+  function disabledUpdateState(): DisabledUpdateState {
     return {
       enabled: false, status: 'disabled' as const, channel: 'latest' as const,
       currentVersion: client.getServerVersion() ?? '', availableVersion: null,
@@ -164,11 +166,11 @@ export function createWebApi(options: WebApiOptions): {
 
     // Auto-update — not applicable to web. Stub the stateful API so the
     // renderer (webui build) renders in a disabled update state.
-    getUpdateState: () => Promise.resolve(disabledUpdateState() as any),
-    setUpdateChannel: () => Promise.resolve(disabledUpdateState() as any),
-    checkForUpdates: () => Promise.resolve({ checked: false, state: disabledUpdateState() } as any),
-    downloadUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() } as any),
-    installUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() } as any),
+    getUpdateState: () => Promise.resolve(disabledUpdateState()),
+    setUpdateChannel: () => Promise.resolve(disabledUpdateState()),
+    checkForUpdates: () => Promise.resolve({ checked: false, state: disabledUpdateState() }),
+    downloadUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() }),
+    installUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() }),
     onUpdateState: () => () => {},
     getUpdateLogPath: () => Promise.resolve(null),
     // Release notes — serve from server via RPC (same content as Electron)

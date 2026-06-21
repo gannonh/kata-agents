@@ -1565,8 +1565,12 @@ export interface ResolvedUpdateChannel {
  */
 export function getUpdateChannel(installedVersion: string): ResolvedUpdateChannel {
   const config = loadStoredConfig();
-  if (config?.updateChannelConfiguredByUser === true && config.updateChannel) {
-    return { channel: config.updateChannel, configuredByUser: true };
+  const persistedChannel = config?.updateChannel;
+  const isValidPersistedChannel =
+    persistedChannel === 'latest' || persistedChannel === 'nightly';
+
+  if (config?.updateChannelConfiguredByUser === true && isValidPersistedChannel) {
+    return { channel: persistedChannel, configuredByUser: true };
   }
   return { channel: resolveDefaultUpdateChannel(installedVersion), configuredByUser: false };
 }
