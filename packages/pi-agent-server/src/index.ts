@@ -23,6 +23,7 @@ import { homedir } from 'node:os';
 // Pi SDK
 import {
   createAgentSession,
+  DefaultResourceLoader,
   SessionManager as PiSessionManager,
   AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
@@ -34,6 +35,7 @@ import {
   createFindToolDefinition,
   createLsToolDefinition,
 } from '@mariozechner/pi-coding-agent';
+import { takeOverStdout, writeRawStdout } from './stdio-guard.ts';
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -283,7 +285,23 @@ let callbackPort = 0;
 
 function send(msg: OutboundMessage): void {
   const line = JSON.stringify(msg);
-  process.stdout.write(line + '\n');
+  // writeRawStdout bypasses takeOverStdout's stderr redirect — required for JSONL.
+  writeRawStdout(line + '\n');
+}
+
+/** Pi SDK resource loader scoped to Kata: no extensions/skills from .pi package config. */
+async function createIsolatedResourceLoader(cwd: string, agentDir: string): Promise<DefaultResourceLoader> {
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+  });
+  await loader.reload();
+  return loader;
 }
 
 function debugLog(message: string): void {
@@ -582,8 +600,10 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Extension isolation: set agentDir to a temp directory under session path
   // to prevent loading global Pi extensions from ~/.pi/agent
+  let isolatedAgentDir: string | undefined;
   if (initConfig.sessionPath) {
     const agentDir = initConfig.agentDir || join(initConfig.sessionPath, '.pi-agent');
+    isolatedAgentDir = agentDir;
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
 
@@ -660,6 +680,12 @@ async function ensureSession(): Promise<AgentSession> {
   if (piThinkingLevel) {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
+
+  // Skip Pi CLI extensions/skills/themes; Kata supplies its own tool surface.
+  sessionOptions.resourceLoader = await createIsolatedResourceLoader(
+    cwd,
+    isolatedAgentDir ?? join(homedir(), '.pi', 'agent'),
+  );
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
@@ -938,13 +964,18 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     }
 
     // Create minimal ephemeral session
+    const ephemeralCwd = resolvedCwd();
+    const ephemeralAgentDir = initConfig!.sessionPath
+      ? join(initConfig!.sessionPath, '.pi-agent')
+      : join(homedir(), '.pi', 'agent');
     const ephemeralOptions: CreateAgentSessionOptions = {
-      cwd: resolvedCwd(),
+      cwd: ephemeralCwd,
       authStorage,
       modelRegistry,
       tools: [],
       sessionManager: PiSessionManager.inMemory(),
       model: piModel,
+      resourceLoader: await createIsolatedResourceLoader(ephemeralCwd, ephemeralAgentDir),
     };
 
     const { session: ephemeralSession } = await createAgentSession(ephemeralOptions);
@@ -1747,6 +1778,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 }
 
 function main(): void {
+  // Pi SDK package installs and other subprocess output must not land on stdout —
+  // this process speaks JSONL on stdout (same pattern as Pi's runRpcMode).
+  takeOverStdout();
+
   debugLog('Pi agent server starting');
 
   const rl = createInterface({ input: process.stdin });

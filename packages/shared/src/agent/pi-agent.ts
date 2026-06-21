@@ -460,6 +460,8 @@ export class PiAgent extends BaseAgent {
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
         // Propagate debug mode
         CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
+        // Kata embeds Pi as a JSONL subprocess — skip Pi CLI package installs on startup.
+        PI_OFFLINE: '1',
       },
     });
 
