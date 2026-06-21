@@ -150,15 +150,15 @@ export async function configureUpdates(): Promise<void> {
   const resolved = resolveSelectedChannel(installedVersion, getUpdateChannel(installedVersion))
 
   const mockUpdates = process.env.KATA_UPDATES_MOCK === '1'
-  const mockPort = process.env.KATA_UPDATES_MOCK_PORT ?? '0'
-  const mockPortNumber = Number(mockPort)
-  if (!Number.isInteger(mockPortNumber) || mockPortNumber < 0 || mockPortNumber > 65535) {
-    throw new Error(`Invalid KATA_UPDATES_MOCK_PORT: ${mockPort}`)
-  }
-  const mockFeedUrl = `http://127.0.0.1:${mockPortNumber}`
 
   try {
     if (mockUpdates) {
+      const mockPort = process.env.KATA_UPDATES_MOCK_PORT ?? '0'
+      const mockPortNumber = Number(mockPort)
+      if (!Number.isInteger(mockPortNumber) || mockPortNumber < 0 || mockPortNumber > 65535) {
+        throw new Error(`Invalid KATA_UPDATES_MOCK_PORT: ${mockPort}`)
+      }
+      const mockFeedUrl = `http://127.0.0.1:${mockPortNumber}`
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       autoUpdater.setFeedURL({
         provider: 'generic',
