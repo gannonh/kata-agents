@@ -3,7 +3,6 @@ import {
   resolveUpdateButtonAction,
   shouldShowUpdateButton,
   isUpdateButtonDisabled,
-  canCheckForUpdate,
 } from '../useUpdateChecker'
 import type { DesktopUpdateState } from '../../../shared/types'
 
@@ -93,21 +92,3 @@ describe('isUpdateButtonDisabled', () => {
   })
 })
 
-describe('canCheckForUpdate', () => {
-  test('blocked during active states', () => {
-    expect(canCheckForUpdate(state({ status: 'checking' }))).toBe(false)
-    expect(canCheckForUpdate(state({ status: 'downloading' }))).toBe(false)
-    expect(canCheckForUpdate(state({ status: 'downloaded' }))).toBe(false)
-  })
-
-  test('allowed when idle / available / up-to-date', () => {
-    expect(canCheckForUpdate(state())).toBe(true)
-    expect(canCheckForUpdate(state({ status: 'available' }))).toBe(true)
-    expect(canCheckForUpdate(state({ status: 'up-to-date' }))).toBe(true)
-  })
-
-  test('disallowed when disabled / null', () => {
-    expect(canCheckForUpdate(null)).toBe(false)
-    expect(canCheckForUpdate(state({ enabled: false, status: 'disabled' }))).toBe(false)
-  })
-})

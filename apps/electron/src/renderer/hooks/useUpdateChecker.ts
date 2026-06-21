@@ -64,16 +64,6 @@ export function isUpdateButtonDisabled(state: DesktopUpdateState | null): boolea
   return state?.status === 'downloading'
 }
 
-export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
-  if (!state || !state.enabled) return false
-  return (
-    state.status !== 'checking' &&
-    state.status !== 'downloading' &&
-    state.status !== 'downloaded' &&
-    state.status !== 'disabled'
-  )
-}
-
 export function useDesktopUpdate(): UseDesktopUpdateResult {
   const { t } = useTranslation()
   const [state, setState] = useState<DesktopUpdateState | null>(null)
@@ -165,5 +155,3 @@ export function useDesktopUpdate(): UseDesktopUpdateResult {
   }
 }
 
-/** Backward-compatible export name (callers still import useUpdateChecker). */
-export const useUpdateChecker = useDesktopUpdate

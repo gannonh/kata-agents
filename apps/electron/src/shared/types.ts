@@ -200,7 +200,6 @@ import type {
   McpToolsResult,
   GitBashStatus,
   ClaudeOAuthResult,
-  UpdateInfo,
   DesktopUpdateState,
   DesktopUpdateCheckResult,
   DesktopUpdateActionResult,

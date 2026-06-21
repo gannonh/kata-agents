@@ -83,6 +83,15 @@ export function createWebApi(options: WebApiOptions): {
     (ch) => client.isChannelAvailable(ch),
   )
 
+  function disabledUpdateState() {
+    return {
+      enabled: false, status: 'disabled' as const, channel: 'latest' as const,
+      currentVersion: client.getServerVersion() ?? '', availableVersion: null,
+      downloadedVersion: null, downloadPercent: null, checkedAt: null,
+      message: null, errorContext: null, canRetry: false,
+    }
+  }
+
   // Override LOCAL_ONLY methods with web-compatible implementations
   const webOverrides: Partial<ElectronAPI> = {
     // Shell operations — use browser APIs
@@ -155,36 +164,11 @@ export function createWebApi(options: WebApiOptions): {
 
     // Auto-update — not applicable to web. Stub the stateful API so the
     // renderer (webui build) renders in a disabled update state.
-    getUpdateState: () => Promise.resolve({
-      enabled: false,
-      status: 'disabled',
-      channel: 'latest',
-      currentVersion: client.getServerVersion() ?? '',
-      availableVersion: null,
-      downloadedVersion: null,
-      downloadPercent: null,
-      checkedAt: null,
-      message: null,
-      errorContext: null,
-      canRetry: false,
-    } as any),
-    setUpdateChannel: () => Promise.resolve({
-      enabled: false, status: 'disabled', channel: 'latest',
-      currentVersion: client.getServerVersion() ?? '', availableVersion: null,
-      downloadedVersion: null, downloadPercent: null, checkedAt: null,
-      message: null, errorContext: null, canRetry: false,
-    } as any),
-    checkForUpdates: () => Promise.resolve({
-      checked: false,
-      state: { enabled: false, status: 'disabled', channel: 'latest',
-        currentVersion: client.getServerVersion() ?? '', availableVersion: null,
-        downloadedVersion: null, downloadPercent: null, checkedAt: null,
-        message: null, errorContext: null, canRetry: false },
-    } as any),
-    downloadUpdate: () => Promise.resolve({ accepted: false, completed: false, state: { enabled: false }
-      as any }),
-    installUpdate: () => Promise.resolve({ accepted: false, completed: false, state: { enabled: false }
-      as any),
+    getUpdateState: () => Promise.resolve(disabledUpdateState() as any),
+    setUpdateChannel: () => Promise.resolve(disabledUpdateState() as any),
+    checkForUpdates: () => Promise.resolve({ checked: false, state: disabledUpdateState() } as any),
+    downloadUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() } as any),
+    installUpdate: () => Promise.resolve({ accepted: false, completed: false, state: disabledUpdateState() } as any),
     onUpdateState: () => () => {},
     getUpdateLogPath: () => Promise.resolve(null),
     // Release notes — serve from server via RPC (same content as Electron)

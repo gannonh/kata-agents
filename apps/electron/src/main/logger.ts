@@ -204,7 +204,6 @@ export const messagingGatewayLog: MessagingLogger = new StructuredMessagingGatew
  * Returns undefined if file logging is disabled.
  */
 export function getLogFilePath(): string | undefined {
-  if (!isDebugMode) return undefined
   return log.transports.file.getFile()?.path
 }
 

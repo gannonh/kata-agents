@@ -1,5 +1,4 @@
-import { resolve } from 'path'
-import { join } from 'path'
+import { resolve, join } from 'path'
 import { homedir } from 'os'
 import { execSync } from 'child_process'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'

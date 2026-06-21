@@ -24,7 +24,7 @@ import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { useNotifications } from '@/hooks/useNotifications'
 import { useSession } from '@/hooks/useSession'
-import { useUpdateChecker } from '@/hooks/useUpdateChecker'
+import { useDesktopUpdate } from '@/hooks/useUpdateChecker'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
@@ -320,7 +320,7 @@ export default function App() {
 
   // Subscribe to desktop update state broadcasts (sidebar/settings read
   // the same canonical state via useDesktopUpdate in AppShell/Settings).
-  useUpdateChecker()
+  useDesktopUpdate()
 
   // Splash screen state - tracks when app is fully ready (all data loaded)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)

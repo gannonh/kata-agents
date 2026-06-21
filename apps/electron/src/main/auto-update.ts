@@ -20,10 +20,7 @@
  */
 
 import { autoUpdater } from 'electron-updater'
-import { app, BrowserWindow } from 'electron'
-import { platform } from 'os'
-import * as path from 'path'
-import * as fs from 'fs'
+import { BrowserWindow } from 'electron'
 import log from 'electron-log/main'
 import { mainLog } from './logger'
 import { resolveSelectedChannel, type UpdateChannel } from './update-channel'
@@ -50,10 +47,6 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from './update-state'
 
-const PLATFORM = platform()
-const IS_MAC = PLATFORM === 'darwin'
-const IS_WINDOWS = PLATFORM === 'win32'
-
 // Background-check timing. Startup check is delayed so the app settles before
 // hitting the network; the poll cadence matches kata-code's 4-minute interval.
 const STARTUP_CHECK_DELAY_MS = 15_000
@@ -61,10 +54,8 @@ const POLL_INTERVAL_MS = 4 * 60_000
 
 // Module state ----------------------------------------------------------------
 
-let updateState: DesktopUpdateState = createInitialDesktopUpdateState(
-  getAppVersion(),
-  resolveSelectedChannel(getAppVersion(), toPreference(getUpdateChannel(getAppVersion()))).channel,
-)
+// Channel is resolved in configureUpdates(); initial sentinel uses the version default.
+let updateState: DesktopUpdateState = createInitialDesktopUpdateState(getAppVersion(), 'latest')
 
 let eventSink: EventSink | null = null
 
@@ -91,18 +82,6 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // Configuration -------------------------------------------------------------
 
-/**
- * Convert a resolved { channel, configuredByUser } from config into the shape
- * `resolveSelectedChannel` expects. Kept here so the controller doesn't leak
- * storage internals into update-channel.ts (which must stay electron-free).
- */
-function toPreference(resolved: ReturnType<typeof getUpdateChannel>): {
-  channel: UpdateChannel
-  configuredByUser: boolean | undefined
-} | undefined {
-  return { channel: resolved.channel, configuredByUser: resolved.configuredByUser }
-}
-
 function broadcastState(): void {
   if (!eventSink) return
   const snapshot = { ...updateState }
@@ -123,10 +102,6 @@ function updateStateBy(
 }
 
 // Exported API --------------------------------------------------------------
-
-export interface AutoUpdateEventSink {
-  setAutoUpdateEventSink(sink: EventSink): void
-}
 
 export function setAutoUpdateEventSink(sink: EventSink): void {
   eventSink = sink
@@ -172,7 +147,7 @@ export async function configureUpdates(): Promise<void> {
   configured = true
 
   const installedVersion = getAppVersion()
-  const resolved = resolveSelectedChannel(installedVersion, toPreference(getUpdateChannel(installedVersion)))
+  const resolved = resolveSelectedChannel(installedVersion, getUpdateChannel(installedVersion))
 
   const mockUpdates = process.env.KATA_UPDATES_MOCK === '1'
   const mockPort = process.env.KATA_UPDATES_MOCK_PORT ?? '0'
@@ -211,7 +186,6 @@ export async function configureUpdates(): Promise<void> {
     configuredByUser: resolved.configuredByUser,
     autoDownload: false,
   })
-  broadcastState()
 
   // Startup check (delayed) + recurring poll.
   scheduleStartupCheck()
@@ -309,16 +283,10 @@ function attachUpdaterEventHandlers(): void {
     }
     if (downloadInFlight) {
       updateStateBy((s) => reduceDesktopUpdateStateOnDownloadFailure(s, message))
+      downloadInFlight = false
     } else {
       const checkedAt = new Date().toISOString()
-      updateStateBy((s) => ({
-        ...s,
-        status: 'error',
-        message,
-        checkedAt,
-        errorContext: 'check',
-        canRetry: s.availableVersion !== null || s.downloadedVersion !== null,
-      }))
+      updateStateBy((s) => reduceDesktopUpdateStateOnCheckFailure(s, message, checkedAt))
     }
   })
 }
@@ -469,75 +437,6 @@ export async function installUpdate(): Promise<DesktopUpdateActionResult> {
     mainLog.error('[auto-update] quitAndInstall failed:', message)
     return { accepted: true, completed: false, state: getUpdateState() }
   }
-}
-
-// Legacy launch hook (index.ts calls this) ----------------------------------
-
-/**
- * Result of update check on launch. Kept for index.ts compatibility; the
- * renderer now drives its own UI from broadcast state.
- */
-export interface UpdateOnLaunchResult {
-  action: 'none' | 'available' | 'checking'
-  version?: string | null
-}
-
-/**
- * Check for updates on app launch. Replaced the old auto-download-on-launch
- * behavior: now configures the controller and triggers a background check
- * without downloading (AC1).
- */
-export async function checkForUpdatesOnLaunch(): Promise<UpdateOnLaunchResult> {
-  await configureUpdates()
-  await checkForUpdate('startup').catch((err) => {
-    mainLog.error('[auto-update] launch check failed:', err instanceof Error ? err.message : err)
-  })
-  if (updateState.status === 'available') {
-    return { action: 'available', version: updateState.availableVersion }
-  }
-  return { action: 'checking' }
-}
-
-// Cache-directory diagnostics (kept for debugging the download path) -------
-
-function getUpdateCacheDir(): string {
-  const appName = app.getName()
-  if (IS_MAC) {
-    return path.join(app.getPath('home'), 'Library', 'Caches', `${appName}-updater`, 'pending')
-  } else if (IS_WINDOWS) {
-    const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local')
-    return path.join(localAppData, `${appName}-updater`, 'pending')
-  } else {
-    return path.join(app.getPath('home'), '.cache', `${appName}-updater`, 'pending')
-  }
-}
-
-/**
- * Inspect the updater cache directory for a previously-downloaded update.
- * Used only for diagnostics; the runtime state machine is the source of truth.
- */
-export function diagnoseExistingDownload(): { exists: boolean; version?: string; cacheDir: string } {
-  const cacheDir = getUpdateCacheDir()
-  if (!fs.existsSync(cacheDir)) return { exists: false, cacheDir }
-  const files = fs.readdirSync(cacheDir)
-  const updateInfoFile = files.find((f) => f === 'update-info.json')
-  if (updateInfoFile) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readJsonFileSync } = require('@craft-agent/shared/utils/files') as typeof import('@craft-agent/shared/utils/files')
-      const info = readJsonFileSync(path.join(cacheDir, updateInfoFile)) as Record<string, unknown> | null
-      const fileName = (info?.fileName || info?.path) as string | undefined
-      if (fileName && fs.existsSync(path.join(cacheDir, fileName))) {
-        return { exists: true, version: info?.version as string | undefined, cacheDir }
-      }
-    } catch {
-      // fall through to file-pattern check
-    }
-  }
-  const downloadFile = files.find((f) =>
-    f.endsWith('.zip') || f.endsWith('.exe') || f.endsWith('.AppImage') || f.endsWith('.dmg') || f.endsWith('.nupkg'),
-  )
-  return { exists: Boolean(downloadFile), cacheDir }
 }
 
 /**

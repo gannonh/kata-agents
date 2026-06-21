@@ -31,7 +31,7 @@ import {
   SettingsToggle,
   SettingsInput,
 } from '@/components/settings'
-import { useUpdateChecker } from '@/hooks/useUpdateChecker'
+import { useDesktopUpdate } from '@/hooks/useUpdateChecker'
 
 export const meta: DetailsPageMeta = {
   navigator: 'settings',
@@ -112,18 +112,8 @@ export default function AppSettingsPage() {
 
   // Auto-update state (Check Now / Update Ready only shown in Electron, not WebUI)
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
-  const update = useUpdateChecker()
-  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
+  const update = useDesktopUpdate()
   const [isChangingTrack, setIsChangingTrack] = useState(false)
-
-  const handleCheckForUpdates = useCallback(async () => {
-    setIsCheckingForUpdates(true)
-    try {
-      await update.checkForUpdates()
-    } finally {
-      setIsCheckingForUpdates(false)
-    }
-  }, [update])
 
   const handleTrackChange = useCallback(async (channel: 'latest' | 'nightly') => {
     if (channel === update.state?.channel) return
@@ -143,14 +133,14 @@ export default function AppSettingsPage() {
     } else if (update.action === 'install') {
       void update.installUpdate()
     } else {
-      void handleCheckForUpdates()
+      void update.checkForUpdates()
     }
-  }, [update, handleCheckForUpdates])
+  }, [update])
 
   function getUpdateButtonContent() {
     const s = update.state
     if (!s) return t("settings.about.checkNow")
-    if (isCheckingForUpdates || s.status === 'checking') {
+    if (s.status === 'checking') {
       return <><Spinner className="mr-1.5" />{t("common.checking")}</>
     }
     if (update.action === 'download') return t("settings.about.download")
@@ -368,7 +358,7 @@ export default function AppSettingsPage() {
                         variant={update.action === 'install' ? 'default' : 'outline'}
                         size="sm"
                         onClick={handleUpdateAction}
-                        disabled={update.buttonDisabled || isCheckingForUpdates}
+                        disabled={update.buttonDisabled}
                       >
                         {getUpdateButtonContent()}
                       </Button>

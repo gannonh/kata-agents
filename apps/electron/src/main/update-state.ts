@@ -26,19 +26,13 @@ import type {
   DesktopUpdateStatus,
 } from '../shared/types'
 
-/**
- * Status to surface after a download fails. If we still know an available
- * version, return to `available` so the sidebar pill can offer the download
- * again; otherwise surface a hard error.
- */
-export function nextStatusAfterDownloadFailure(
+function nextStatusAfterDownloadFailure(
   currentState: DesktopUpdateState,
 ): DesktopUpdateStatus {
   return currentState.availableVersion ? 'available' : 'error'
 }
 
-/** Whether a retry is possible after a download failure (only if a version is known). */
-export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): boolean {
+function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): boolean {
   return currentState.availableVersion !== null
 }
 
