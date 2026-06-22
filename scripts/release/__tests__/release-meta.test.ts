@@ -68,7 +68,33 @@ describe('mergeManifests', () => {
     expect(merged.sha512).toBeUndefined()
   })
 
-  test('resolves conflicting entries by preferring the secondary manifest', () => {
+  test('filters cross-arch stale entries: primary keeps arm64, secondary keeps x64', () => {
+    // Simulates real electron-builder output: each build emits entries for BOTH
+    // architectures, but only the actually-built arch has correct hashes.
+    const merged = mergeManifests('mac', {
+      version: '0.10.5',
+      files: [
+        { url: 'Kata-Agents-arm64.zip', sha512: 'correct-arm64-hash', size: 100 },
+        { url: 'Kata-Agents-x64.zip', sha512: 'stale-x64-from-arm64-build', size: 200 },
+      ],
+      releaseDate: '2026-06-21T22:00:00.000Z',
+    }, {
+      version: '0.10.5',
+      files: [
+        { url: 'Kata-Agents-arm64.zip', sha512: 'stale-arm64-from-x64-build', size: 100 },
+        { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-hash', size: 200 },
+      ],
+      releaseDate: '2026-06-21T22:00:00.000Z',
+    })
+
+    // arm64 entry from primary (correct), x64 entry from secondary (correct)
+    expect(merged.files).toEqual([
+      { url: 'Kata-Agents-arm64.zip', sha512: 'correct-arm64-hash', size: 100 },
+      { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-hash', size: 200 },
+    ])
+  })
+
+  test('secondary x64 entry overwrites stale primary x64 entry', () => {
     const merged = mergeManifests('mac', {
       version: '0.10.5',
       files: [{ url: 'Kata-Agents-x64.zip', sha512: 'stale-arm64-build-hash', size: 100 }],
@@ -79,7 +105,6 @@ describe('mergeManifests', () => {
       releaseDate: '2026-06-21T22:00:00.000Z',
     })
 
-    // The secondary (x64) build produced the authoritative x64 zip
     expect(merged.files).toEqual([
       { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-build-hash', size: 200 },
     ])
