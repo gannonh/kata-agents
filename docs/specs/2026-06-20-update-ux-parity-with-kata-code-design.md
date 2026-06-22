@@ -116,7 +116,7 @@ manifest names remain unchanged.
 7. Channel changes are blocked while an update check, download, or install is active, and the user sees an actionable error if the change cannot be applied.
 8. The macOS native app menu `Check for Updates...` shows a native dialog when the app is up to date, when updates are unavailable, or when the check fails. If non-macOS builds expose the same menu action, they follow the same result contract.
 9. Production builds retain updater diagnostics in a local file, expose the diagnostics path through Settings, and support opening or showing that file from the diagnostics row.
-10. The copyright outcome is explicitly recorded before Build signoff: either app-facing metadata changes to `Copyright © 2026 Kata Code Contributors`, or it remains unchanged with maintainer approval. In both outcomes, existing `LICENSE` and `NOTICE` ownership notices remain preserved unless a separate legal cleanup is approved.
+10. The copyright outcome is explicitly recorded before Build signoff: either app-facing metadata changes to `Copyright © 2026 Gannon Hall`, or it remains unchanged with maintainer approval. In both outcomes, existing `LICENSE` and `NOTICE` ownership notices remain preserved unless a separate legal cleanup is approved.
 11. All new user-facing strings are translated through i18n keys that exist in every locale file.
 12. Tests cover the pure update-state reducer, channel selection, update-track persistence, sidebar/settings action decisions, menu check result behavior, and no-auto-download-before-user-click behavior. Any omitted test category must be listed in the Build report with rationale and maintainer approval.
 13. Manual verification includes a packaged stable build detecting a newer stable release or mocked stable feed, plus a nightly build or mocked nightly feed proving Nightly track behavior and switching back to Stable.
@@ -284,7 +284,7 @@ Recommended implementation:
 
 The user requested `Kata Code Contributors` if Apache allows it. Apache 2.0 allows additional copyright notices for modifications, but this repository also has existing `LICENSE` and `NOTICE` entries for Craft Docs Ltd. The build should update only app-facing metadata if approved by maintainers:
 
-- `apps/electron/electron-builder.yml` `copyright` -> `Copyright © 2026 Kata Code Contributors`.
+- `apps/electron/electron-builder.yml` `copyright` -> `Copyright © 2026 Gannon Hall`.
 
 Do not remove Craft Docs Ltd. from `LICENSE` or `NOTICE` in this spec.
 
@@ -320,7 +320,7 @@ Acceptance tie-in: AC 2, AC 3, AC 4, AC 5, AC 8, AC 11.
 
 ### Phase 4 - Copyright, release notes, and docs
 
-- Record the maintainer-approved copyright outcome. If approved, update app-facing copyright metadata to `Copyright © 2026 Kata Code Contributors`; otherwise leave it unchanged and record the approval to defer.
+- Record the maintainer-approved copyright outcome. If approved, update app-facing copyright metadata to `Copyright © 2026 Gannon Hall`; otherwise leave it unchanged and record the approval to defer.
 - Preserve `LICENSE` and `NOTICE`.
 - Add a release-notes bullet to `apps/electron/resources/release-notes/next.md`.
 - Update `docs/operations/release.md` and any related OKF docs/logs for the new selected-channel runtime contract after implementation.

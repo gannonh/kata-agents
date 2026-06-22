@@ -50,7 +50,7 @@ timestamp: 2026-06-20T00:00:00Z
   AppSettingsPage, menu.ts, index.ts, webui adapter, playground mock-utils).
   Added i18n keys to all 7 locales, alphabetically sorted.
 - **Phase 4 — Copyright, release notes, ops docs.** `electron-builder.yml`
-  copyright -> `Copyright © 2026 Kata Code Contributors` (LICENSE/NOTICE
+  copyright -> `Copyright © 2026 Gannon Hall` (LICENSE/NOTICE
   preserved). Release-notes feature bullet added. `docs/operations/release.md`
   updated for the new selected-channel runtime contract.
 - **Phase 5 — Verification.** Typechecks + i18n gates + 53 update-UX tests pass.
