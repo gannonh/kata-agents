@@ -395,32 +395,15 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.release_meta.result == 'success' && needs.release.result == 'success' && needs.release_meta.outputs.channel == 'stable' && needs.release_meta.outputs.dry_run != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Push the post-release version bump back to main with the built-in token.
+    permissions:
+      contents: write
     steps:
-      - id: app_token
-        name: Mint release app token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-
-      - name: Resolve GitHub App bot identity
-        id: app_bot
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
-        run: |
-          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
-          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
-          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
-
       - name: Checkout main
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token }}
           persist-credentials: true
 
       - name: Setup Bun
@@ -447,8 +430,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "${{ steps.app_bot.outputs.name }}"
-          git config user.email "${{ steps.app_bot.outputs.email }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add package.json apps/electron/package.json bun.lock
           git commit -m "chore(release): prepare $RELEASE_TAG"
