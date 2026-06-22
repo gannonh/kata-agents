@@ -17,7 +17,7 @@ and the desktop auto-updater pulls per-channel updates from those releases.
 | --- | --- |
 | Push tag `v*.*.*` | Channel inferred from the tag: `…-nightly.*` → nightly prerelease; otherwise stable. |
 | `schedule` | Automatic nightly every 3h (UTC); only proceeds when `main` changed since the last nightly tag. |
-| `workflow_dispatch` | Inputs `channel` (`stable` \| `nightly`), `version` (required for stable), and `dry_run` (boolean). |
+| `workflow_dispatch` | Inputs `channel` (`stable` \| `nightly`), `version` (optional; stable defaults to the latest nightly's version), and `dry_run` (boolean). |
 
 ## Channel model
 
@@ -31,6 +31,12 @@ stable release. The nightly version/tag are computed by
 `scripts/release/resolve-nightly-release.ts` from `apps/electron/package.json`.
 The `finalize` job keeps that package version in sync after each stable
 release (see Jobs).
+
+A **stable** dispatch normally omits the `version` input: `release_meta` derives
+the version from the stable core of the most recent nightly tag
+(`v0.10.6-nightly.20260622.40` → `0.10.6`), since a stable release always ships
+the version last validated on nightly. Pass `version` only to override; if no
+input is given and no nightly tag exists, the job fails fast.
 
 ## Auto-update shape
 

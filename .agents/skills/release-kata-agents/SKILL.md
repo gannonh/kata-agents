@@ -19,7 +19,8 @@ Releases are published to https://github.com/gannonh/kata-agents/releases via
 - **`schedule`** — automatic nightly every 3 hours; only proceeds when `main` has
   changed since the last nightly tag (see `check_changes` job); no input needed
 - **`workflow_dispatch`** — manual dispatch with `channel` (stable|nightly),
-  `version` (required for stable, ignored for nightly), and `dry_run` (true|false)
+  `version` (optional — stable defaults to the latest nightly's version,
+  ignored for nightly), and `dry_run` (true|false)
 - **Tag push** — pushing a `v*.*.*` tag (excluding `v*-nightly.*`) triggers a
   stable release automatically
 
@@ -43,8 +44,8 @@ git status
 git log origin/main..HEAD  # should be empty
 
 # Check current development version in electron package (the nightly target
-# is computed as X.Y.(Z+1) from this value; stable dispatch uses the version
-# input instead)
+# is computed as X.Y.(Z+1) from this value; stable derives its version from the
+# latest nightly tag, or from the version input when provided)
 bun --print "require('./apps/electron/package.json').version"
 
 # Confirm secrets are configured
@@ -93,22 +94,30 @@ gh workflow run release.yml --repo gannonh/kata-agents \
 gh workflow run release.yml --repo gannonh/kata-agents \
   --field channel=nightly --field dry_run=false
 
-# Stable Dry Run (version is required for stable)
+# Stable Dry Run (version auto-derived from the latest nightly)
 gh workflow run release.yml --repo gannonh/kata-agents \
-  --field channel=stable --field version=0.10.4 --field dry_run=true
+  --field channel=stable --field dry_run=true
 
-# Stable Release (dispatch — version is required)
+# Stable Release (dispatch — version auto-derived from the latest nightly)
 gh workflow run release.yml --repo gannonh/kata-agents \
-  --field channel=stable --field version=0.10.4 --field dry_run=false
+  --field channel=stable --field dry_run=false
+
+# Stable Release with an explicit version (override the derived default)
+gh workflow run release.yml --repo gannonh/kata-agents \
+  --field channel=stable --field version=0.10.6 --field dry_run=false
 
 # Stable Release (tag push — alternative to dispatch)
-git tag v0.10.4 && git push origin v0.10.4
+git tag v0.10.6 && git push origin v0.10.6
 ```
 
-For **stable dispatch**, the `version` input is the source of truth. It may be
-`0.10.4` or `v0.10.4`; the leading `v` is stripped and the tag becomes `v<version>`.
-The `version` input is required — stable dispatch without it fails the `release_meta`
-job. Stable dispatch no longer reads `apps/electron/package.json`.
+For **stable dispatch**, the `version` input is optional. When omitted, the
+`release_meta` job derives the version from the **most recent nightly tag**
+(its stable core, e.g. `v0.10.6-nightly.20260622.40` → `0.10.6`) — a stable
+release always ships the version last validated on nightly, so you normally
+never pass a version. Pass `version` (`0.10.6` or `v0.10.6`) only to override
+the derived default; the leading `v` is stripped and the tag becomes
+`v<version>`. If no version is given and no nightly tag exists, the job fails
+fast. Stable dispatch does not read `apps/electron/package.json`.
 
 For **nightly**, the version is computed automatically as
 `X.Y.(Z+1)-nightly.YYYYMMDD.N` from the current `apps/electron/package.json` version.
