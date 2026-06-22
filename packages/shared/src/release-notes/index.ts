@@ -90,6 +90,13 @@ export function initializeReleaseNotes(): void {
 }
 
 /**
+ * Strict `X.Y.Z` release-note filenames. The accumulator `next.md` and any
+ * other non-versioned file must never reach the What's New overlay — they would
+ * otherwise surface as a bogus "version" once few/no real notes exist.
+ */
+const VERSIONED_NOTE = /^(\d+)\.(\d+)\.(\d+)\.md$/;
+
+/**
  * Parse version from filename (e.g., "0.4.1.md" → "0.4.1").
  */
 function parseVersion(filename: string): string {
@@ -122,6 +129,7 @@ export interface ReleaseNote {
 export function getReleaseNotesList(): ReleaseNote[] {
   const notes = getBundledReleaseNotes();
   return Object.entries(notes)
+    .filter(([filename]) => VERSIONED_NOTE.test(filename))
     .map(([filename, content]) => ({
       version: parseVersion(filename),
       content,
