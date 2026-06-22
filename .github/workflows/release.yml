@@ -259,6 +259,7 @@ jobs:
             --version "${{ needs.release_meta.outputs.version }}" \
             --channel "${{ needs.release_meta.outputs.channel }}" \
             --repository "${{ github.repository }}" \
+            --arch "${{ matrix.arch }}" \
             --out "$out"
           echo "ELECTRON_BUILDER_CONFIG=$out" >> "$GITHUB_ENV"
 

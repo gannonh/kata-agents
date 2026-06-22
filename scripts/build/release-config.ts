@@ -69,6 +69,38 @@ export function resolveProductName(channel: Channel, base = APP_BASE_NAME): stri
   return channel === 'nightly' ? `${base} (Nightly)` : base
 }
 
+export type Arch = 'arm64' | 'x64' | 'universal'
+
+/**
+ * Restrict the macOS target arch arrays to a single arch.
+ *
+ * The base config lists both `arm64` and `x64` under each `mac.target` entry.
+ * electron-builder treats an explicit per-target `arch` array as authoritative
+ * and ignores the CLI `--arm64`/`--x64` flag, so a per-arch matrix leg would
+ * otherwise build BOTH arches. Two legs each emitting `Kata-Agents-arm64.zip`
+ * and `Kata-Agents-x64.zip` then collide when the release job merges artifacts,
+ * corrupting the uploaded zips. Pinning the arch per leg keeps each leg's
+ * output (and its update manifest) single-arch and collision-free.
+ */
+export function restrictMacArch(base: Record<string, unknown>, arch: Arch): Record<string, unknown> {
+  const mac = base.mac
+  if (!mac || typeof mac !== 'object') return base
+  const macObj = mac as Record<string, unknown>
+  const targets = macObj.target
+  if (!Array.isArray(targets)) return base
+
+  const restrictedTargets = targets.map((entry) => {
+    if (entry && typeof entry === 'object' && Array.isArray((entry as { arch?: unknown }).arch)) {
+      const e = entry as { arch: string[] }
+      // Only narrow targets that actually offer this arch; leave others intact.
+      return e.arch.includes(arch) ? { ...e, arch: [arch] } : entry
+    }
+    return entry
+  })
+
+  return { ...base, mac: { ...macObj, target: restrictedTargets } }
+}
+
 export interface GenerateOptions {
   /** Parsed base electron-builder config. */
   base: Record<string, unknown>
@@ -76,6 +108,8 @@ export interface GenerateOptions {
   repository: string
   /** Overrides the version-inferred channel when set. */
   channel?: Channel
+  /** Pin macOS targets to a single arch (per-arch matrix legs). */
+  arch?: Arch
 }
 
 /**
@@ -84,8 +118,9 @@ export interface GenerateOptions {
  */
 export function generateConfig(opts: GenerateOptions): Record<string, unknown> {
   const channel = opts.channel ?? resolveChannelFromVersion(opts.version)
+  const base = opts.arch ? restrictMacArch(opts.base, opts.arch) : opts.base
   return {
-    ...opts.base,
+    ...base,
     productName: resolveProductName(channel),
     publish: [buildPublishConfig(channel, opts.repository)],
   }
@@ -97,6 +132,7 @@ interface CliArgs {
   repository?: string
   base?: string
   out?: string
+  arch?: Arch
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -128,6 +164,13 @@ function parseArgs(argv: string[]): CliArgs {
         args.out = value
         i += 1
         break
+      case '--arch':
+        if (value !== 'arm64' && value !== 'x64' && value !== 'universal') {
+          throw new Error(`--arch must be "arm64", "x64", or "universal", got "${value}"`)
+        }
+        args.arch = value
+        i += 1
+        break
       default:
         throw new Error(`Unknown argument: ${flag}`)
     }
@@ -153,7 +196,7 @@ function main(): void {
   }
 
   const base = parse(readFileSync(basePath, 'utf-8')) as Record<string, unknown>
-  const generated = generateConfig({ base, version, repository, channel: args.channel })
+  const generated = generateConfig({ base, version, repository, channel: args.channel, arch: args.arch })
 
   writeFileSync(outPath, stringify(generated), 'utf-8')
   // The release workflow captures stdout to pass `--config <path>` downstream.
