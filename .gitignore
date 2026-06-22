@@ -86,3 +86,4 @@ apps/electron/electron-builder.generated.yml
 
 # UAT evidence (skill artifacts, not for commit)
 uat-evidence/
+.agents/skills/
