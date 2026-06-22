@@ -188,6 +188,21 @@ jobs:
             echo "| **dry_run** | \`$dry_run\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Stable releases must ship versioned What's New notes. Nightlies don't
+      # (they don't promote next.md). This gate runs in release_meta so it fails
+      # fast on both dry runs and real releases, before any build work.
+      - name: Require stable release notes
+        if: steps.meta.outputs.channel == 'stable'
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          notes="apps/electron/resources/release-notes/${version}.md"
+          if [[ ! -f "$notes" ]]; then
+            echo "::error::Stable release ${version} is missing release notes at ${notes}. Promote next.md to ${version}.md (see docs/operations/release.md) before releasing." >&2
+            exit 1
+          fi
+          echo "Found release notes: $notes"
+
   # ── Fail fast if macOS signing secrets are absent ────────────────────────────
   signing_gate:
     needs: release_meta

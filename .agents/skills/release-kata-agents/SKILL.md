@@ -53,6 +53,31 @@ gh secret list --repo gannonh/kata-agents
 #           APPLE_TEAM_ID, APPLE_SIGNING_IDENTITY
 ```
 
+### Stable releases require versioned release notes
+
+A stable release **must** ship a `What's New` note for its version, or the
+`release_meta` job fails immediately (on both dry run and real release):
+
+```
+::error::Stable release <version> is missing release notes at
+apps/electron/resources/release-notes/<version>.md
+```
+
+Before a stable dry run or release, promote the accumulated `next.md` into the
+versioned file and reset the accumulator:
+
+```bash
+# e.g. releasing 0.10.6
+mv apps/electron/resources/release-notes/next.md \
+   apps/electron/resources/release-notes/0.10.6.md
+# Edit 0.10.6.md: replace the "Pending Release Notes" header with
+# "# v0.10.6 — <title>" and drop empty sections.
+# Recreate an empty next.md (Features/Improvements/Bug Fixes/Breaking Changes).
+```
+
+Commit and push this before dispatching. Nightlies do **not** need a versioned
+note (they never promote `next.md`), so the gate only applies to stable.
+
 ---
 
 ## Dispatch commands
@@ -109,6 +134,7 @@ gh api repos/gannonh/kata-agents/actions/jobs/JOB_ID/logs | tail -80
 The workflow has these jobs: `check_changes` (scheduled only) → `release_meta` →
 `signing_gate` → `build` (matrix) → `release` → `finalize` (stable only) → `publish_cli` (disabled).
 - `check_changes` is skipped on non-schedule events
+- `release_meta` fails fast for **stable** when `apps/electron/resources/release-notes/<version>.md` is missing (runs on dry run + real)
 - `build` has four matrix legs: `macos-14 arm64` (required), `macos-14 x64` (required),
   `ubuntu-latest linux x64` (best-effort, `continue-on-error`), `windows-latest win x64` (best-effort)
 - The `release` job only runs when `dry_run != true`
@@ -158,6 +184,7 @@ gh release view --repo gannonh/kata-agents <tag>
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `Stable release <version> is missing release notes` | No `apps/electron/resources/release-notes/<version>.md` | Promote `next.md` to `<version>.md`, commit, push, re-dispatch (see Pre-flight) |
 | `GitHub Personal Access Token is not set` | electron-builder trying to auto-publish | Add `--publish never` to the electron-builder invocation in the build script |
 | `Release package manifest not found: D:\D:\...` | Windows path doubling from `.pathname` | Use `fileURLToPath(import.meta.url)` instead of `new URL(import.meta.url).pathname` |
 | `signing_gate` fails | Missing Apple secrets | Run `gh secret list --repo gannonh/kata-agents` and add missing secrets from `.env` |

@@ -57,6 +57,10 @@ release (see Jobs).
 ## Jobs
 
 1. `release_meta` — resolves channel/version/tag/name/is_prerelease/make_latest/dry_run.
+   For **stable** it also fails fast (on dry run *and* real release) if the
+   versioned release notes file `apps/electron/resources/release-notes/<version>.md`
+   is missing — promote `next.md` to `<version>.md` before releasing (see the
+   release runbook). Nightlies are exempt (they never promote `next.md`).
 2. `signing_gate` (macOS) — fails fast if any signing secret is missing.
 3. `build` — matrix: macOS arm64 + x64 **signed + notarized** (primary gate);
    Windows + Linux **unsigned best-effort** (`continue-on-error`). Each leg
