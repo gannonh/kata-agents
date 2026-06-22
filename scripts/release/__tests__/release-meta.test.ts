@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   resolveNightlyReleaseMetadata,
   resolveNightlyTargetVersion,
   resolveStableCore,
 } from '../resolve-nightly-release'
-import { mergeManifests } from '../merge-update-manifests'
+import { mergeManifests, reconcileManifestWithAssets } from '../merge-update-manifests'
 import { setPackageVersion } from '../update-release-package-versions'
 import {
   MACOS_RELEASE_SIGNING_SECRET_NAMES,
@@ -68,46 +72,79 @@ describe('mergeManifests', () => {
     expect(merged.sha512).toBeUndefined()
   })
 
-  test('filters cross-arch stale entries: primary keeps arm64, secondary keeps x64', () => {
-    // Simulates real electron-builder output: each build emits entries for BOTH
-    // architectures, but only the actually-built arch has correct hashes.
+  test('unions per-arch entries by url, deduping shared urls', () => {
     const merged = mergeManifests('mac', {
       version: '0.10.5',
       files: [
-        { url: 'Kata-Agents-arm64.zip', sha512: 'correct-arm64-hash', size: 100 },
-        { url: 'Kata-Agents-x64.zip', sha512: 'stale-x64-from-arm64-build', size: 200 },
+        { url: 'Kata-Agents-arm64.zip', sha512: 'a', size: 1 },
+        { url: 'Kata-Agents-x64.zip', sha512: 'stale', size: 2 },
       ],
       releaseDate: '2026-06-21T22:00:00.000Z',
     }, {
       version: '0.10.5',
       files: [
-        { url: 'Kata-Agents-arm64.zip', sha512: 'stale-arm64-from-x64-build', size: 100 },
-        { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-hash', size: 200 },
+        { url: 'Kata-Agents-arm64.zip', sha512: 'stale', size: 1 },
+        { url: 'Kata-Agents-x64.zip', sha512: 'b', size: 2 },
       ],
       releaseDate: '2026-06-21T22:00:00.000Z',
     })
 
-    // arm64 entry from primary (correct), x64 entry from secondary (correct)
-    expect(merged.files).toEqual([
-      { url: 'Kata-Agents-arm64.zip', sha512: 'correct-arm64-hash', size: 100 },
-      { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-hash', size: 200 },
+    // Each url appears once; hashes are placeholders reconciled from disk later.
+    expect(merged.files.map((f) => f.url)).toEqual([
+      'Kata-Agents-arm64.zip',
+      'Kata-Agents-x64.zip',
     ])
   })
+})
 
-  test('secondary x64 entry overwrites stale primary x64 entry', () => {
-    const merged = mergeManifests('mac', {
-      version: '0.10.5',
-      files: [{ url: 'Kata-Agents-x64.zip', sha512: 'stale-arm64-build-hash', size: 100 }],
-      releaseDate: '2026-06-21T22:00:00.000Z',
-    }, {
-      version: '0.10.5',
-      files: [{ url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-build-hash', size: 200 }],
-      releaseDate: '2026-06-21T22:00:00.000Z',
-    })
+describe('reconcileManifestWithAssets', () => {
+  test('rewrites sha512 and size from the actual asset on disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'manifest-reconcile-'))
+    try {
+      const armBytes = Buffer.from('arm64 payload')
+      const x64Bytes = Buffer.from('a longer x64 payload')
+      writeFileSync(join(dir, 'Kata-Agents-arm64.zip'), armBytes)
+      writeFileSync(join(dir, 'Kata-Agents-x64.zip'), x64Bytes)
 
-    expect(merged.files).toEqual([
-      { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-build-hash', size: 200 },
-    ])
+      const reconciled = reconcileManifestWithAssets({
+        version: '0.10.5',
+        // Deliberately wrong hash/size — must be overwritten from disk so the
+        // published manifest can never describe a file other than the upload.
+        files: [
+          { url: 'Kata-Agents-arm64.zip', sha512: 'WRONG', size: 999 },
+          { url: 'Kata-Agents-x64.zip', sha512: 'WRONG', size: 1 },
+        ],
+        releaseDate: '2026-06-21T22:00:00.000Z',
+      }, dir)
+
+      expect(reconciled.files).toEqual([
+        {
+          url: 'Kata-Agents-arm64.zip',
+          sha512: createHash('sha512').update(armBytes).digest('base64'),
+          size: armBytes.byteLength,
+        },
+        {
+          url: 'Kata-Agents-x64.zip',
+          sha512: createHash('sha512').update(x64Bytes).digest('base64'),
+          size: x64Bytes.byteLength,
+        },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('throws when a referenced asset is missing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'manifest-reconcile-'))
+    try {
+      expect(() => reconcileManifestWithAssets({
+        version: '0.10.5',
+        files: [{ url: 'Kata-Agents-arm64.zip', sha512: 'x', size: 1 }],
+        releaseDate: '2026-06-21T22:00:00.000Z',
+      }, dir)).toThrow(/missing asset/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
