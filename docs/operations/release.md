@@ -75,12 +75,14 @@ input is given and no nightly tag exists, the job fails fast.
    dmg/zip/exe/AppImage/blockmap/`*.yml`.
 4. `release` — `permissions: contents: write`; skipped when `dry_run=true`;
    creates the GitHub Release and attaches all collected assets.
-5. `finalize` — **stable only**, non-dry-run. After a stable release ships,
-   checks out `main` with the GitHub App token, runs
-   `scripts/release/update-release-package-versions.ts <version>`, refreshes
-   `bun.lock`, and commits `chore(release): prepare v<version>` back to `main`.
-   This is what makes the next nightly resolve to `X.Y.(Z+1)-nightly.*` instead
-   of reusing the just-released stable version. Skipped for nightly and dry runs.
+5. `finalize` — **stable only**, non-dry-run. Declares `permissions:
+   contents: write` and checks out `main` with the built-in `GITHUB_TOKEN`,
+   runs `scripts/release/update-release-package-versions.ts <version>`,
+   refreshes `bun.lock`, and commits `chore(release): prepare v<version>` back
+   to `main` as `github-actions[bot]`. This is what makes the next nightly
+   resolve to `X.Y.(Z+1)-nightly.*` instead of reusing the just-released stable
+   version. The push targets the unprotected `main` directly; no GitHub App is
+   involved. Skipped for nightly and dry runs.
 6. `publish_cli` — **disabled** (`if: false`) in Project B; enabled in Project C.
 
 ## Dry run
@@ -103,12 +105,13 @@ signing values are exported from the kata-code `.env`
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for the Apple ID (notarization). | Generate at appleid.apple.com → Sign-In and Security → App-Specific Passwords. |
 | `APPLE_TEAM_ID` | Apple Developer team ID (`ZBZKKWF95G`). | kata-code `.env` / Apple Developer membership page. |
 | `APPLE_SIGNING_IDENTITY` | Developer ID Application identity name (`Developer ID Application: …`). Used to pick the signing identity. | kata-code `.env`. |
-| `GITHUB_TOKEN` | Create the release and upload assets. The release job grants `contents: write`. | Provided automatically by GitHub Actions — no manual setup; ensure repo Actions permissions allow write or rely on the job-level `permissions` block. |
+| `GITHUB_TOKEN` | Create the release + upload assets (`release` job) and push the post-stable version bump to `main` (`finalize` job). Both jobs grant `contents: write`. | Provided automatically by GitHub Actions. **Repo requirement:** Settings → Actions → General → Workflow permissions must be **Read and write** (`default_workflow_permissions: write`), or release creation and the finalize push 403. |
 | `CRAFT_ANTHROPIC_API_KEY` *(optional)* | `validate-server.yml` integration run. | Existing Anthropic API key. |
 | `STITCH_API_KEY` *(optional)* | `validate-server.yml` integration run. | Existing. |
-| `RELEASE_APP_ID` | GitHub App ID for the `finalize` job to push the post-stable version bump to `main`. | Create a GitHub App (repo contents:write on `gannonh/kata-agents`); see the runbook. |
-| `RELEASE_APP_PRIVATE_KEY` | Private key (.pem) for the `finalize` job's GitHub App. | Generated when you create the App. |
 | `NPM_TOKEN` *(future, Project C)* | npm publish (the `publish_cli` job, disabled in B). | Add when enabling npm publishing. |
+
+> `finalize` no longer uses a GitHub App. The former `RELEASE_APP_ID` /
+> `RELEASE_APP_PRIVATE_KEY` secrets are unused and can be deleted.
 
 > Windows code-signing is deferred — no certificate is available, so Windows
 > artifacts are unsigned best-effort.

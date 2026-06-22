@@ -214,9 +214,18 @@ All values are in `/Volumes/EVO/dev/kata-agents/.env`.
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization |
 | `APPLE_TEAM_ID` | Apple Developer team ID (`ZBZKKWF95G`) |
 | `APPLE_SIGNING_IDENTITY` | Developer ID Application identity |
-| `RELEASE_APP_ID` | GitHub App ID for the `finalize` job (post-stable version bump to `main`) |
-| `RELEASE_APP_PRIVATE_KEY` | Private key (`.pem`) for the `finalize` GitHub App |
-| `GITHUB_TOKEN` | Auto-provided by Actions — no setup needed |
+| `GITHUB_TOKEN` | Auto-provided by Actions — no setup needed. Creates the release and pushes the `finalize` version bump. |
+
+`finalize` no longer uses a GitHub App; the old `RELEASE_APP_ID` /
+`RELEASE_APP_PRIVATE_KEY` secrets are unused and can be deleted.
+
+**Repo requirement:** Settings → Actions → General → Workflow permissions must
+be **Read and write**, or both release creation and the `finalize` push fail
+with 403 (`Resource not accessible by integration`). Verify with:
+```bash
+gh api repos/gannonh/kata-agents/actions/permissions/workflow
+# expect: "default_workflow_permissions":"write"
+```
 
 To re-set a secret from `.env`:
 ```bash
@@ -230,8 +239,14 @@ gh secret set SECRET_NAME --repo gannonh/kata-agents --body "value"
 1. Verify the release page looks correct at https://github.com/gannonh/kata-agents/releases
 2. **Stable releases**: the `finalize` job automatically bumps
    `apps/electron/package.json` + `package.json` on `main` to the shipped
-   version and commits `chore(release): prepare v<version>`, so the next nightly
-   resolves to `X.Y.(Z+1)-nightly.*`. No manual bump needed. If `finalize` skips
-   or fails (missing `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`), bump manually
-   as a fallback and fix the secrets before the next stable.
+   version (pushed via `GITHUB_TOKEN` as `github-actions[bot]`) and commits
+   `chore(release): prepare v<version>`, so the next nightly resolves to
+   `X.Y.(Z+1)-nightly.*`. No manual bump needed. If `finalize` fails, the
+   fallback is to bump manually:
+   ```bash
+   bun run scripts/release/update-release-package-versions.ts <version>
+   bun install --lockfile-only --ignore-scripts
+   git add package.json apps/electron/package.json bun.lock
+   git commit -m "chore(release): prepare v<version>" && git push origin main
+   ```
 3. Update `docs/specs/index.md` and `docs/log.md` if this release closes a project milestone
