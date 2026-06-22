@@ -68,16 +68,21 @@ describe('mergeManifests', () => {
     expect(merged.sha512).toBeUndefined()
   })
 
-  test('rejects conflicting entries for the same asset', () => {
-    expect(() => mergeManifests('mac', {
+  test('resolves conflicting entries by preferring the secondary manifest', () => {
+    const merged = mergeManifests('mac', {
       version: '0.10.5',
-      files: [{ url: 'Kata-Agents-arm64.zip', sha512: 'a', size: 1 }],
+      files: [{ url: 'Kata-Agents-x64.zip', sha512: 'stale-arm64-build-hash', size: 100 }],
       releaseDate: '2026-06-21T22:00:00.000Z',
     }, {
       version: '0.10.5',
-      files: [{ url: 'Kata-Agents-arm64.zip', sha512: 'b', size: 1 }],
+      files: [{ url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-build-hash', size: 200 }],
       releaseDate: '2026-06-21T22:00:00.000Z',
-    })).toThrow(/conflicting file entry/)
+    })
+
+    // The secondary (x64) build produced the authoritative x64 zip
+    expect(merged.files).toEqual([
+      { url: 'Kata-Agents-x64.zip', sha512: 'correct-x64-build-hash', size: 200 },
+    ])
   })
 })
 

@@ -93,12 +93,16 @@ export function mergeManifests(platform: Platform, primary: UpdateManifest, seco
     throw new Error(`Cannot merge ${label} manifests with different versions (${primary.version} vs ${secondary.version})`)
   }
 
+  // Seed with primary entries, then let secondary overwrite on conflict.
+  // electron-builder emits manifest entries for all configured architectures
+  // even when only one arch is built, so the arm64 manifest may reference
+  // x64 files with stale hashes. The secondary (x64) build produced the
+  // authoritative x64 artifacts, so its entries take precedence.
   const filesByUrl = new Map<string, UpdateFile>()
-  for (const file of [...primary.files, ...secondary.files]) {
-    const existing = filesByUrl.get(file.url)
-    if (existing && (existing.sha512 !== file.sha512 || existing.size !== file.size)) {
-      throw new Error(`Cannot merge ${label} manifests: conflicting file entry for ${file.url}`)
-    }
+  for (const file of primary.files) {
+    filesByUrl.set(file.url, file)
+  }
+  for (const file of secondary.files) {
     filesByUrl.set(file.url, file)
   }
 
