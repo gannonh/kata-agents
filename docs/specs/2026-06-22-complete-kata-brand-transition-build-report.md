@@ -17,7 +17,7 @@ timestamp: 2026-06-22T00:00:00Z
 | | SHA |
 |---|-----|
 | Base | `09b0c75b56205caa12b9d491b91f02ae1cc4ea43` |
-| Final | *(see `git rev-parse HEAD` on branch `feat/complete-kata-brand-transition`)* |
+| Final | `2df966ff` |
 
 ## Tasks completed
 
