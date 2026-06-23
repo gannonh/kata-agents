@@ -10,7 +10,7 @@ timestamp: 2026-06-22T00:00:00Z
 
 ## Status
 
-- **Plan**: Draft. User intent: one spec to complete the brand transition. If implementation is too large for one PR, split Build into smaller PRs under this spec. Adversarial review completed with no remaining blocker or major issues after revision.
+- **Plan**: Approved 2026-06-22. User intent: one spec to complete the brand transition. If implementation is too large for one PR, split Build into smaller PRs under this spec. Adversarial review completed with no remaining blocker or major issues after revision.
 - **Build**: Not started.
 - **Verify**: Not started.
 
