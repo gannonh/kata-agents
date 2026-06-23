@@ -345,8 +345,8 @@ else
 # Kata Agent launcher - handles Linux-specific AppImage issues
 
 APPIMAGE_PATH="$HOME/.kata-agents/app/Kata-Agents-x64.AppImage"
-ELECTRON_CACHE="$HOME/.config/@kata-agent"
-ELECTRON_CACHE_ALT="$HOME/.cache/@kata-agent"
+ELECTRON_CACHE="$HOME/.config/@kata-sh"
+ELECTRON_CACHE_ALT="$HOME/.cache/@kata-sh"
 
 # Verify AppImage exists
 if [ ! -f "$APPIMAGE_PATH" ]; then

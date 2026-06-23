@@ -76,7 +76,7 @@ export class CraftMcpClient {
 
   constructor(config: McpClientConfig) {
     this.client = new Client({
-      name: 'kata-agents',
+      name: 'kata-agent',
       version: '1.0.0',
     });
 

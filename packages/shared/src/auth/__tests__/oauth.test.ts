@@ -1170,7 +1170,7 @@ describe('prepareMcpOAuth', () => {
 
     const result = await prepareMcpOAuth('https://example.com/mcp', { callbackPort: 8914 });
 
-    expect(result.clientId).toBe('kata-agents');
+    expect(result.clientId).toBe('kata-agent');
     expect(result.clientSecret).toBeUndefined();
     expect(result.authUrl).toContain('client_id=kata-agent');
     expect(result.provider).toBe('mcp');

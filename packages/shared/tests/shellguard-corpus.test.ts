@@ -840,7 +840,7 @@ describe('ShellGuard corpus: resource exhaustion', () => {
 
 describe('ShellGuard corpus: kata-agent CLI allowlist', () => {
   const shouldAllow = [
-    'kata-agents',
+    'kata-agent',
     'kata-agent --help',
     'kata-agent --version',
     'kata-agent --discover',

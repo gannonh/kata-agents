@@ -372,7 +372,7 @@ export function getSystemPrompt(
   // Note: Date/time context is now added to user messages instead of system prompt
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
-  const basePrompt = getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
+  const basePrompt = getKataAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
   const fullPrompt = `${basePrompt}${preferences}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
@@ -450,7 +450,7 @@ function getKataAgentEnvironmentMarker(): string {
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  * @param includeCoAuthoredBy - Whether to include the Co-Authored-By git trailer instruction (default: true)
  */
-function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+function getKataAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
@@ -587,7 +587,7 @@ Read relevant context files using the Read tool - they contain architecture info
 | Markdown Preview | \`${DOC_REFS.markdownPreview}\` | When displaying rendered .md files inline |
 | Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_tool\`) |
 | LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |${FEATURE_FLAGS.kataAgentsCli ? `
-| Kata CLI | \`${DOC_REFS.craftCli}\` | When managing labels/sources/skills/automations via \`kata-agent\` |` : ''}
+| Kata CLI | \`${DOC_REFS.kataCli}\` | When managing labels/sources/skills/automations via \`kata-agent\` |` : ''}
 
 **IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - these have specific patterns that differ from standard approaches.${FEATURE_FLAGS.kataAgentsCli ? `
 
@@ -599,7 +599,7 @@ Prefer \`kata-agent\` CLI over direct file edits for labels, sources, skills, an
 - Sources help: \`kata-agent source --help\`
 - Skills help: \`kata-agent skill --help\`
 - Automations help: \`kata-agent automation --help\`
-- Canonical reference: \`${DOC_REFS.craftCli}\`` : ''}
+- Canonical reference: \`${DOC_REFS.kataCli}\`` : ''}
 
 ## User preferences
 

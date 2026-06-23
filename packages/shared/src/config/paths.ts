@@ -2,7 +2,7 @@
  * Centralized path configuration for Kata Agent.
  *
  * Supports multi-instance development via KATA_CONFIG_DIR environment variable.
- * When running from a numbered folder (e.g., craft-tui-agent-1), the detect-instance.sh
+ * When running from a numbered folder (e.g., kata-agent-1), the detect-instance.sh
  * script sets KATA_CONFIG_DIR to ~/.kata-agents-1, allowing multiple instances to run
  * simultaneously with separate configurations.
  *

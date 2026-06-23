@@ -16,7 +16,7 @@
  * Available modules:
  *   - agent: ClaudeAgent SDK wrapper, plan tools
  *   - auth: OAuth, token management, auth state
- *   - clients: Craft API client
+ *   - clients: Kata API client
  *   - config: Storage, models, preferences
  *   - credentials: Encrypted credential storage
  *   - mcp: MCP client, connection validation

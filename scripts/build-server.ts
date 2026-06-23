@@ -532,7 +532,7 @@ function createRootConfig(config: ServerBuildConfig): void {
 
   // Create workspace symlinks in node_modules/@kata-sh/
   // Bun needs these to resolve workspace package imports at runtime
-  const scopeDir = join(outputDir, 'node_modules', '@kata-agent');
+  const scopeDir = join(outputDir, 'node_modules', '@kata-sh');
   mkdirSync(scopeDir, { recursive: true });
 
   const packagesDir = join(outputDir, 'packages');
@@ -570,7 +570,7 @@ function createEntryScripts(config: ServerBuildConfig): void {
   mkdirSync(binDir, { recursive: true });
 
   // bin/kata-server — main entry wrapper
-  const craftServer = `#!/bin/sh
+  const kataServer = `#!/bin/sh
 set -e
 
 # Resolve the distribution root
@@ -593,7 +593,7 @@ export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
 # Use bundled Bun runtime
 exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
 `;
-  writeFileSync(join(binDir, 'kata-server'), craftServer);
+  writeFileSync(join(binDir, 'kata-server'), kataServer);
 
   // start.sh — convenience entry
   const startSh = `#!/bin/sh
@@ -650,7 +650,7 @@ if [ "\${1:-}" = "--systemd" ]; then
     exit 1
   fi
 
-  SERVICE_USER="\${KATA_USER:-\$(logname 2>/dev/null || echo craft)}"
+  SERVICE_USER="\${KATA_USER:-\$(logname 2>/dev/null || echo kata)}"
   SERVICE_FILE="/etc/systemd/system/kata-server.service"
 
   cat > "$SERVICE_FILE" <<UNIT
@@ -752,13 +752,13 @@ services:
       # - KATA_RPC_TLS_CERT=/certs/cert.pem
       # - KATA_RPC_TLS_KEY=/certs/key.pem
     volumes:
-      - craft-data:/root/.kata-agents
+      - kata-data:/root/.kata-agents
       # TLS — mount cert directory
       # - ./certs:/certs:ro
     restart: unless-stopped
 
 volumes:
-  craft-data:
+  kata-data:
 `;
   writeFileSync(join(outputDir, 'docker-compose.yml'), dockerCompose);
 }

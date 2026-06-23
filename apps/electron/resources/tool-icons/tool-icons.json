@@ -1,7 +1,7 @@
 {
   "version": 1,
   "tools": [
-    { "id": "kata-agents", "displayName": "Kata Agent", "icon": "kata-agent.svg", "commands": ["kata-agents"] },
+    { "id": "kata-agent", "displayName": "Kata Agent", "icon": "kata-agent.svg", "commands": ["kata-agent"] },
     { "id": "git", "displayName": "Git", "icon": "git.ico", "commands": ["git"] },
     { "id": "github", "displayName": "GitHub", "icon": "github.png", "commands": ["gh"] },
     { "id": "npm", "displayName": "npm", "icon": "npm.png", "commands": ["npm", "npx"] },
