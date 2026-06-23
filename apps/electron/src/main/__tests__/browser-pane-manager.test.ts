@@ -551,10 +551,10 @@ describe('BrowserPaneManager', () => {
 
   it('navigate treats plain text as search query', async () => {
     manager.createInstance('nav-2')
-    await manager.navigate('nav-2', 'craft agents browser tools')
+    await manager.navigate('nav-2', 'kata agents browser tools')
     const instance = (manager as any).instances.get('nav-2')
     expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith(
-      'https://duckduckgo.com/?q=craft%20agents%20browser%20tools'
+      'https://duckduckgo.com/?q=kata%20agents%20browser%20tools'
     )
   })
 

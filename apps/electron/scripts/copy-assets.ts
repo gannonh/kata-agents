@@ -11,8 +11,11 @@
  * Run: bun scripts/copy-assets.ts
  */
 
-import { cpSync, copyFileSync, mkdirSync } from 'fs';
+import { cpSync, copyFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+
+// Clean stale files (e.g. renamed brand assets) so the destination mirrors the source exactly.
+rmSync('dist/resources', { recursive: true, force: true });
 
 // Copy all resources (icons, themes, docs, permissions, tool-icons, etc.)
 cpSync('resources', 'dist/resources', { recursive: true });

@@ -2,6 +2,8 @@
 
 ## 2026-06-23
 
+* **Verified**: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md) — Verify-phase UAT for the Complete Kata brand transition. First pass found 3 failing ACs (broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code) plus blocked AC 6 and minor AC 7. Fixed all, plus a `copy-assets.ts` stale-file hygiene bug, GitHub org refs, and mock/test data. Re-run: all 12 ACs pass. Packaged `Info.plist` = `sh.kata.agents` / `Kata Agents`. Updated [index.md](index.md) and [../index.md](../index.md) active/recent work; spec moved Implemented -> Completed.
+
 * **Quality review fixes**: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md) updated with quality review section documenting blockers fixed (broken server dist scopeDir, 2 failing tests), quoted-form conflation fixes (5 files), other residuals, and migration scripts moved to `scripts/migrations/`. Full `packages/shared` test suite now passes (2898 pass, 0 fail). Updated [index.md](index.md) active work note.
 
 ## 2026-06-22

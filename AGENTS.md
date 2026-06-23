@@ -40,5 +40,5 @@ Each package has its own agent context file — read it before modifying that pa
 
 ## Active context
 
-- **Complete Kata brand transition** is in progress on this branch. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/2026-06-22-complete-kata-brand-transition-design.md`. Quality review found and fixed migration residuals from boundary-blind substring replacement (broken server dist scopeDir, 2 failing tests, quoted-form pluralization of CLI binary name); full `packages/shared` test suite passes. Verify (packaged build UAT) still pending.
+- **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.
 - **Rebrand Phase 1** (user-facing copy only) is complete. See `./docs/specs/rebrand-kata-agents-phase-1.md`.

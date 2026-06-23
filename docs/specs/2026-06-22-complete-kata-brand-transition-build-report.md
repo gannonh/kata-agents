@@ -123,9 +123,10 @@ No active matches for: `@craft-agent`, `CRAFT_`, `.craft-agent`, `craftagents`, 
 
 ## Known follow-ups
 
-- Full `bun test` suite now passes after quality review fixes (2898 pass, 0 fail in `packages/shared`). Run Verify-phase UAT including Electron packaged build and deep-link manual check.
+- Full `bun test` suite now passes after quality review fixes (2898 pass, 0 fail in `packages/shared`).
+- Verify phase completed 2026-06-23 — see [verify report](2026-06-23-complete-kata-brand-transition-verify-report.md). All 12 ACs pass after fixing the broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene bug, GitHub org refs, and mock/test data.
 - `bun run typecheck:all` root script may still fail on missing root `tsconfig.base.json` (pre-existing per AGENTS.md).
 
 ## Transition
 
-Spec status updated to **Implemented**. Recommend Verify phase for packaged macOS metadata, `kataagents://` registration, and full test suite signoff.
+Spec status updated to **Completed** (Verify passed 2026-06-23; see [verify report](2026-06-23-complete-kata-brand-transition-verify-report.md)).

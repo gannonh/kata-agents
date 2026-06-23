@@ -12,7 +12,7 @@ timestamp: 2026-06-22T00:00:00Z
 
 - **Plan**: Approved 2026-06-22. User intent: one spec to complete the brand transition. If implementation is too large for one PR, split Build into smaller PRs under this spec. Adversarial review completed with no remaining blocker or major issues after revision.
 - **Build**: Implemented 2026-06-22. See [build report](2026-06-22-complete-kata-brand-transition-build-report.md).
-- **Verify**: UAT evidence 2026-06-23. See [uat-evidence/rebrand-2026-06-22/](../../uat-evidence/rebrand-2026-06-22/). Pending user sign-off; packaged Electron/deep-link manual checks not run.
+- **Verify**: Completed 2026-06-23. All 12 acceptance criteria pass after fixing a broken tool icon, Craft-named brand assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene bug, GitHub org refs, and mock/test data. See [verify report](2026-06-23-complete-kata-brand-transition-verify-report.md). Packaged `Info.plist` confirmed `sh.kata.agents` / `Kata Agents`; residual scans report only allowlisted Craft references.
 
 ## Goal
 

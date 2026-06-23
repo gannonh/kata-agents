@@ -2,6 +2,8 @@
 
 ## 2026-06-23
 
+* **Verified**: Complete Kata brand transition — Verify phase passed. New [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md). Fixed broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon`/`craft_logo_c.svg`, a `copy-assets.ts` stale-file hygiene bug, GitHub org refs (`lukilabs` -> `gannonh`), and mock/test data. All 12 ACs pass; packaged `Info.plist` = `sh.kata.agents`. Updated [specs/index.md](specs/index.md), [index.md](index.md), [specs/log.md](specs/log.md), build/verify/spec status, and root `AGENTS.md` active context.
+
 * **Quality review fixes**: Updated [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md) with quality review section (blockers, quoted-form conflation, other residuals, migration scripts moved). Updated [specs/index.md](specs/index.md) and [index.md](index.md) active work notes. Updated [specs/log.md](specs/log.md). Updated root `AGENTS.md` active context.
 
 ## 2026-06-22

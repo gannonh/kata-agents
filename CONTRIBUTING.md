@@ -14,8 +14,8 @@ Thank you for your interest in contributing to Kata Agents! This document provid
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/lukilabs/kata-agents-oss.git
-   cd kata-agents-oss
+   git clone https://github.com/gannonh/kata-agents.git
+   cd kata-agents
    ```
 
 2. Install dependencies:

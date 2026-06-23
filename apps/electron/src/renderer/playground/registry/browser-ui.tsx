@@ -579,7 +579,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mock-4',
-      url: 'https://github.com/lukilabs/kata-agents-oss',
+      url: 'https://github.com/gannonh/kata-agents',
       title: 'GitHub',
       favicon: null,
       isLoading: false,
@@ -611,7 +611,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
   'long-names': [
     {
       id: 'long-1',
-      url: 'https://www.notion.so/Craft-Agents-Multi-Session-Browser-Registry-Design-Review-Thread-2026-Q1',
+      url: 'https://www.notion.so/Kata-Agents-Multi-Session-Browser-Registry-Design-Review-Thread-2026-Q1',
       title: 'Kata Agents Multi-Session Browser Registry Design Review Thread (Q1 2026)',
       favicon: null,
       isLoading: false,
@@ -688,7 +688,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'run-3',
-      url: 'https://github.com/lukilabs/kata-agents-oss/pulls',
+      url: 'https://github.com/gannonh/kata-agents/pulls',
       title: 'GitHub PRs',
       favicon: null,
       isLoading: true,
@@ -780,7 +780,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mix-4',
-      url: 'https://github.com/lukilabs/kata-agents-oss',
+      url: 'https://github.com/gannonh/kata-agents',
       title: 'Kata Agents OSS Repo with a Surprisingly Long Branch and Compare View Name',
       favicon: null,
       isLoading: false,

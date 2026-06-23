@@ -13,6 +13,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **CLI tool-icon matching** — correct the CLI binary name in tool icon metadata from `kata-agents` (plural) to `kata-agent` (singular) so tool icons match against the actual binary.
 - **OAuth client identity** — fix the default OAuth `client_id` from `kata-agents` to `kata-agent`, matching the canonical CLI binary name.
 - **Bundled CLI reference** — rename the bundled docs file from `craft-cli.md` to `kata-cli.md` so the system prompt's Kata CLI guidance points at a file that exists in `~/.kata-agents/docs/`.
+- **Kata Agent tool icon** — ship `kata-agent.svg` (the `tool-icons.json` reference was broken because only the legacy `craft-agent.svg` existed) so the Kata Agent tool icon renders correctly.
+- **Brand asset cleanup** — rename `kata-logos` brand PNGs to `kata_*`, remove dead `CraftAppIcon` code, and make `copy-assets.ts` clean stale files so renamed assets no longer leave legacy Craft-named files in the bundle.
 
 ## Breaking Changes
 
