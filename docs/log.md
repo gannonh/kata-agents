@@ -1,5 +1,12 @@
 # Documentation Bundle Update Log
 
+## 2026-06-22
+
+* **Drafted**: Complete Kata brand transition spec.
+  * Spec: [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md)
+  * **Updated**: [specs/index.md](specs/index.md) consolidates the old Project A/C/D split into this active spec; [index.md](index.md) lists it under active work; [specs/log.md](specs/log.md) records the planning entry.
+  * Scope: hard-cutover rebrand across package scope, runtime env/config identity, Electron app identity, CLI/server/viewer/webui surfaces, bundled resources, docs, release metadata, and residual Craft scan verification.
+
 ## 2026-06-20
 
 * **Drafted**: Update UX parity spec.

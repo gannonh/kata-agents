@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-22
+
+* **Drafted**: [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md) — One hard-cutover spec to complete the Kata brand transition across packages, env/config identity, app ID, URL scheme, CLI/server/viewer/webui, bundled resources, docs, release metadata, and verification. Supersedes the old Project A/C/D roadmap split. Adversarial review found no remaining blocker or major issues after revision.
+
 ## 2026-06-20
 
 * **Implemented**: [2026-06-20-update-ux-parity-with-kata-code-design.md](2026-06-20-update-ux-parity-with-kata-code-design.md) — Ported Kata Code's desktop update UX to Kata Agents: stateful background checks with manual download/install, sidebar update pill, Stable/Nightly track selection, native up-to-date/error dialogs, production updater diagnostics, copyright metadata, and release/ops docs. Build report: [2026-06-20-update-ux-parity-with-kata-code-build-report.md](2026-06-20-update-ux-parity-with-kata-code-build-report.md). Independent subagent review unavailable (dispatch unstable); single-agent self-review recorded.
