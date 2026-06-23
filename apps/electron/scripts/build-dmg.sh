@@ -97,6 +97,10 @@ echo "Installing dependencies..."
 cd "$ROOT_DIR"
 bun install
 
+echo "Building and staging agent subprocesses..."
+bun run server:build:subprocess
+bun "$SCRIPT_DIR/stage-subprocesses.ts"
+
 # 3. Download Bun binary with checksum verification
 echo "Downloading Bun ${BUN_VERSION} for darwin-${ARCH}..."
 mkdir -p "$ELECTRON_DIR/vendor/bun"
