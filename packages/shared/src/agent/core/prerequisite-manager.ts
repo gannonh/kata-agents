@@ -46,10 +46,10 @@ export interface PrerequisiteManagerConfig {
 // ============================================================
 
 /** Slugs that are exempt from prerequisite checks (internal sources) */
-const EXEMPT_SLUGS = new Set(['session', 'craft-agents-docs']);
+const EXEMPT_SLUGS = new Set(['session', 'kata-agents-docs']);
 
 /** Global browser tools docs path required before browser tool usage. */
-const BROWSER_TOOLS_DOC_PATH = resolve(join(homedir(), '.craft-agent', 'docs', 'browser-tools.md'));
+const BROWSER_TOOLS_DOC_PATH = resolve(join(homedir(), '.kata-agents', 'docs', 'browser-tools.md'));
 
 // ============================================================
 // Rules

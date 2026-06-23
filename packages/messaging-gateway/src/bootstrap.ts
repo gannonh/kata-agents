@@ -15,9 +15,9 @@
  *   await handle.dispose()                                            // on shutdown
  */
 
-import type { PushTarget } from '@craft-agent/shared/protocol'
-import type { CredentialManager } from '@craft-agent/shared/credentials'
-import type { ISessionManager } from '@craft-agent/server-core/handlers'
+import type { PushTarget } from '@kata-sh/shared/protocol'
+import type { CredentialManager } from '@kata-sh/shared/credentials'
+import type { ISessionManager } from '@kata-sh/server-core/handlers'
 
 import { MessagingGatewayRegistry } from './registry'
 import { createFanOutSink, type EventSinkFn } from './event-fanout'

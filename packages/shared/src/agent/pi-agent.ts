@@ -15,7 +15,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
-import type { AgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent } from '@kata-sh/core/types';
 import type { FileAttachment } from '../utils/files.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 
@@ -43,7 +43,7 @@ import type { Workspace } from '../config/storage.ts';
 import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
-// System prompt for Craft Agent context
+// System prompt for Kata Agent context
 import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 
@@ -71,7 +71,7 @@ import {
   SESSION_BACKEND_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
   type ToolResult as SessionToolResult,
-} from '@craft-agent/session-tools-core';
+} from '@kata-sh/session-tools-core';
 import { createClaudeContext, type SessionToolContext } from './claude-context.ts';
 import { getPermissionModeDiagnostics } from './mode-manager.ts';
 
@@ -194,7 +194,7 @@ export class PiAgent extends BaseAgent {
     this.subprocessErrorRepeatCount = 0;
   }
 
-  // Ring buffer of recent subprocess stderr. Always on (independent of CRAFT_DEBUG)
+  // Ring buffer of recent subprocess stderr. Always on (independent of KATA_DEBUG)
   // so that connection-test and other failures can surface what the subprocess
   // actually said, instead of a bare "timed out" with no context.
   private stderrBuffer: string[] = [];
@@ -457,9 +457,9 @@ export class PiAgent extends BaseAgent {
         ...this.config.envOverrides,
         ...awsEnv,
         // Pass session dir for cross-process toolMetadataStore
-        ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
+        ...(sessionDir ? { KATA_SESSION_DIR: sessionDir } : {}),
         // Propagate debug mode
-        CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
+        KATA_DEBUG: (process.argv.includes('--debug') || process.env.KATA_DEBUG === '1') ? '1' : '0',
         // Kata embeds Pi as a JSONL subprocess — skip Pi CLI package installs on startup.
         PI_OFFLINE: '1',
       },
@@ -479,7 +479,7 @@ export class PiAgent extends BaseAgent {
 
     // Always capture stderr into a bounded ring buffer so callers (e.g. the
     // connection-test timeout path in factory.ts) can surface it on failure.
-    // Keep the CRAFT_DEBUG-gated log for interactive dev work.
+    // Keep the KATA_DEBUG-gated log for interactive dev work.
     child.stderr?.on('data', (data: Buffer) => {
       const text = data.toString();
       this.recordStderr(text);
@@ -1068,7 +1068,7 @@ export class PiAgent extends BaseAgent {
    */
   private handleSubprocessEvent(event: Record<string, unknown>): void {
     // The subprocess sends Pi SDK AgentSessionEvent objects serialized as JSON.
-    // Feed them through PiEventAdapter to convert to Craft AgentEvents.
+    // Feed them through PiEventAdapter to convert to Kata AgentEvents.
 
     // Detect session MCP tool completions (same pattern as in-process version)
     const eventType = event.type as string;
@@ -1108,7 +1108,7 @@ export class PiAgent extends BaseAgent {
       }
     }
 
-    // Adapt event to CraftAgentEvents
+    // Adapt event to KataAgentEvents
     // The event adapter expects typed PiAgentEvent/AgentSessionEvent objects,
     // but since we're receiving plain JSON, we cast through unknown.
     for (const agentEvent of this.adapter.adaptEvent(adaptedEvent as any)) {
@@ -1471,7 +1471,7 @@ export class PiAgent extends BaseAgent {
 
   /**
    * Execute a session-scoped tool by name.
-   * Uses the canonical registry from @craft-agent/session-tools-core.
+   * Uses the canonical registry from @kata-sh/session-tools-core.
    */
   private async executeSessionTool(
     toolName: string,

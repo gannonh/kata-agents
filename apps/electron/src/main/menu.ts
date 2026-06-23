@@ -1,10 +1,10 @@
 import { Menu, app, shell, BrowserWindow } from 'electron'
-import { i18n } from '@craft-agent/shared/i18n'
+import { i18n } from '@kata-sh/shared/i18n'
 import { RPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
 import type { MenuItem } from '../shared/menu-schema'
 import type { WindowManager } from './window-manager'
-import type { EventSink } from '@craft-agent/server-core/transport'
+import type { EventSink } from '@kata-sh/server-core/transport'
 import { mainLog, isDebugMode } from './logger'
 
 type ClientResolver = (webContentsId: number) => string | undefined
@@ -111,7 +111,7 @@ export async function rebuildMenu(): Promise<void> {
     ...(isMac ? [{
       label: 'Kata Agents',
       submenu: [
-        { role: 'about' as const, label: i18n.t('menu.aboutCraftAgents') },
+        { role: 'about' as const, label: i18n.t('menu.aboutKataAgents') },
         updateMenuItem,
         { type: 'separator' as const },
         {
@@ -121,11 +121,11 @@ export async function rebuildMenu(): Promise<void> {
           click: () => sendToRenderer(RPC_CHANNELS.menu.OPEN_SETTINGS)
         },
         { type: 'separator' as const },
-        { role: 'hide' as const, label: i18n.t('menu.hideCraftAgents') },
+        { role: 'hide' as const, label: i18n.t('menu.hideKataAgents') },
         { role: 'hideOthers' as const },
         { role: 'unhide' as const },
         { type: 'separator' as const },
-        { role: 'quit' as const, label: i18n.t('menu.quitCraftAgents') }
+        { role: 'quit' as const, label: i18n.t('menu.quitKataAgents') }
       ]
     }] : []),
 
@@ -264,7 +264,7 @@ export async function rebuildMenu(): Promise<void> {
       submenu: [
         {
           label: i18n.t("menu.helpAndDocs"),
-          click: () => shell.openExternal('https://agents.craft.do/docs')
+          click: () => shell.openExternal('https://agents.kata.sh/docs')
         },
         {
           label: i18n.t("menu.keyboardShortcuts"),

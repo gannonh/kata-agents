@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build script for standalone Craft Agent server.
+ * Build script for standalone Kata Agent server.
  *
  * Assembles a self-contained distribution directory with all runtime
  * dependencies, resources, and platform-specific binaries.
@@ -81,7 +81,7 @@ interface ServerBuildConfig {
 
 function showHelp(): void {
   console.log(`
-Standalone server build script for Craft Agent
+Standalone server build script for Kata Agent
 
 Usage:
   bun run scripts/build-server.ts [options]
@@ -309,7 +309,7 @@ function copyDependencyTree(
 /**
  * Scan all .ts files in a directory tree for import/require statements
  * and return the set of external npm package names (not relative paths,
- * not node: builtins, not workspace @craft-agent/* packages).
+ * not node: builtins, not workspace @kata-sh/* packages).
  */
 function scanImports(dir: string): Set<string> {
   const packages = new Set<string>();
@@ -328,7 +328,7 @@ function scanImports(dir: string): Set<string> {
         while ((match = importRe.exec(content)) !== null) {
           const spec = match[1]!;
           // Skip relative imports, node: builtins, workspace packages
-          if (spec.startsWith('.') || spec.startsWith('node:') || spec.startsWith('@craft-agent/')) continue;
+          if (spec.startsWith('.') || spec.startsWith('node:') || spec.startsWith('@kata-sh/')) continue;
           // Extract package name (handle scoped: @scope/name)
           const parts = spec.split('/');
           const pkgName = spec.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0]!;
@@ -452,7 +452,7 @@ function copyWorkspacePackages(config: ServerBuildConfig): void {
 
   // messaging-whatsapp-worker is included so dist/worker.cjs (built in step 4) ships.
   // The worker is spawned as a Node subprocess against that file at runtime; see
-  // CRAFT_MESSAGING_WA_WORKER env resolution in packages/server/src/index.ts.
+  // KATA_MESSAGING_WA_WORKER env resolution in packages/server/src/index.ts.
   const packages = [
     'server',
     'server-core',
@@ -505,9 +505,9 @@ function copyWorkspacePackages(config: ServerBuildConfig): void {
 function createRootConfig(config: ServerBuildConfig): void {
   const { outputDir, version } = config;
 
-  // Root package.json with workspaces (Bun resolves @craft-agent/* through this)
+  // Root package.json with workspaces (Bun resolves @kata-sh/* through this)
   const rootPkg = {
-    name: 'craft-server-dist',
+    name: 'kata-server-dist',
     version,
     private: true,
     workspaces: ['packages/*'],
@@ -521,18 +521,18 @@ function createRootConfig(config: ServerBuildConfig): void {
       module: 'ESNext',
       moduleResolution: 'bundler',
       paths: {
-        '@craft-agent/server-core/*': ['./packages/server-core/src/*'],
-        '@craft-agent/shared/*': ['./packages/shared/src/*'],
-        '@craft-agent/core/*': ['./packages/core/src/*'],
-        '@craft-agent/session-tools-core/*': ['./packages/session-tools-core/src/*'],
+        '@kata-sh/server-core/*': ['./packages/server-core/src/*'],
+        '@kata-sh/shared/*': ['./packages/shared/src/*'],
+        '@kata-sh/core/*': ['./packages/core/src/*'],
+        '@kata-sh/session-tools-core/*': ['./packages/session-tools-core/src/*'],
       },
     },
   };
   writeFileSync(join(outputDir, 'tsconfig.json'), JSON.stringify(rootTsconfig, null, 2) + '\n');
 
-  // Create workspace symlinks in node_modules/@craft-agent/
+  // Create workspace symlinks in node_modules/@kata-sh/
   // Bun needs these to resolve workspace package imports at runtime
-  const scopeDir = join(outputDir, 'node_modules', '@craft-agent');
+  const scopeDir = join(outputDir, 'node_modules', '@kata-sh');
   mkdirSync(scopeDir, { recursive: true });
 
   const packagesDir = join(outputDir, 'packages');
@@ -544,8 +544,8 @@ function createRootConfig(config: ServerBuildConfig): void {
       try {
         const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
         const name: string = pkgJson.name || '';
-        if (name.startsWith('@craft-agent/')) {
-          const shortName = name.replace('@craft-agent/', '');
+        if (name.startsWith('@kata-sh/')) {
+          const shortName = name.replace('@kata-sh/', '');
           const linkPath = join(scopeDir, shortName);
           const target = join('..', '..', 'packages', pkg);
           if (!existsSync(linkPath)) {
@@ -569,8 +569,8 @@ function createEntryScripts(config: ServerBuildConfig): void {
   const binDir = join(outputDir, 'bin');
   mkdirSync(binDir, { recursive: true });
 
-  // bin/craft-server — main entry wrapper
-  const craftServer = `#!/bin/sh
+  // bin/kata-server — main entry wrapper
+  const kataServer = `#!/bin/sh
 set -e
 
 # Resolve the distribution root
@@ -578,14 +578,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Set environment for resource resolution
-export CRAFT_BUNDLED_ASSETS_ROOT="$ROOT"
-export CRAFT_IS_PACKAGED=true
-export CRAFT_APP_ROOT="$ROOT"
-export CRAFT_RESOURCES_PATH="$ROOT/resources"
+export KATA_BUNDLED_ASSETS_ROOT="$ROOT"
+export KATA_IS_PACKAGED=true
+export KATA_APP_ROOT="$ROOT"
+export KATA_RESOURCES_PATH="$ROOT/resources"
 
 # CLI tools (doc tools use uv + Python scripts)
-export CRAFT_UV="$ROOT/resources/bin/uv"
-export CRAFT_SCRIPTS="$ROOT/resources/scripts"
+export KATA_UV="$ROOT/resources/bin/uv"
+export KATA_SCRIPTS="$ROOT/resources/scripts"
 
 # Prepend resource bin to PATH (makes doc tool wrappers available)
 export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
@@ -593,13 +593,13 @@ export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
 # Use bundled Bun runtime
 exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
 `;
-  writeFileSync(join(binDir, 'craft-server'), craftServer);
+  writeFileSync(join(binDir, 'kata-server'), kataServer);
 
   // start.sh — convenience entry
   const startSh = `#!/bin/sh
-# Craft Agent Server — convenience entry point
+# Kata Agent Server — convenience entry point
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/bin/craft-server" "$@"
+exec "$DIR/bin/kata-server" "$@"
 `;
   writeFileSync(join(outputDir, 'start.sh'), startSh);
 
@@ -609,11 +609,11 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== Craft Agent Server Setup ==="
+echo "=== Kata Agent Server Setup ==="
 echo ""
 
 # Make binaries executable
-chmod +x "$DIR/bin/craft-server" "$DIR/start.sh"
+chmod +x "$DIR/bin/kata-server" "$DIR/start.sh"
 [ -f "$DIR/vendor/bun/bun" ] && chmod +x "$DIR/vendor/bun/bun"
 [ -f "$DIR/resources/bin/uv" ] && chmod +x "$DIR/resources/bin/uv"
 
@@ -625,22 +625,22 @@ done
 echo "Binaries configured."
 
 # Generate token if not set
-if [ -z "\${CRAFT_SERVER_TOKEN:-}" ]; then
+if [ -z "\${KATA_SERVER_TOKEN:-}" ]; then
   TOKEN=\$(openssl rand -hex 32)
   cat > "$DIR/.env" <<ENVFILE
-CRAFT_SERVER_TOKEN=$TOKEN
+KATA_SERVER_TOKEN=$TOKEN
 
 # TLS — uncomment and set paths to enable wss://
-# CRAFT_RPC_TLS_CERT=/path/to/cert.pem
-# CRAFT_RPC_TLS_KEY=/path/to/key.pem
-# CRAFT_RPC_TLS_CA=/path/to/ca.pem
+# KATA_RPC_TLS_CERT=/path/to/cert.pem
+# KATA_RPC_TLS_KEY=/path/to/key.pem
+# KATA_RPC_TLS_CA=/path/to/ca.pem
 ENVFILE
   echo ""
   echo "Generated server token (saved to $DIR/.env)"
 else
-  TOKEN="\$CRAFT_SERVER_TOKEN"
+  TOKEN="\$KATA_SERVER_TOKEN"
   echo ""
-  echo "Using CRAFT_SERVER_TOKEN from environment."
+  echo "Using KATA_SERVER_TOKEN from environment."
 fi
 
 # Systemd installation
@@ -650,12 +650,12 @@ if [ "\${1:-}" = "--systemd" ]; then
     exit 1
   fi
 
-  SERVICE_USER="\${CRAFT_USER:-\$(logname 2>/dev/null || echo craft)}"
-  SERVICE_FILE="/etc/systemd/system/craft-server.service"
+  SERVICE_USER="\${KATA_USER:-\$(logname 2>/dev/null || echo kata)}"
+  SERVICE_FILE="/etc/systemd/system/kata-server.service"
 
   cat > "$SERVICE_FILE" <<UNIT
 [Unit]
-Description=Craft Agent Server
+Description=Kata Agent Server
 After=network.target
 
 [Service]
@@ -663,9 +663,9 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$DIR
 EnvironmentFile=$DIR/.env
-Environment=CRAFT_RPC_HOST=127.0.0.1
-Environment=CRAFT_RPC_PORT=9100
-ExecStart=$DIR/bin/craft-server
+Environment=KATA_RPC_HOST=127.0.0.1
+Environment=KATA_RPC_PORT=9100
+ExecStart=$DIR/bin/kata-server
 Restart=on-failure
 RestartSec=5
 
@@ -674,20 +674,20 @@ WantedBy=multi-user.target
 UNIT
 
   systemctl daemon-reload
-  systemctl enable craft-server
+  systemctl enable kata-server
 
   echo ""
   echo "Systemd service installed."
-  echo "  Start:   sudo systemctl start craft-server"
-  echo "  Status:  sudo systemctl status craft-server"
-  echo "  Logs:    journalctl -u craft-server -f"
+  echo "  Start:   sudo systemctl start kata-server"
+  echo "  Status:  sudo systemctl status kata-server"
+  echo "  Logs:    journalctl -u kata-server -f"
   echo ""
   exit 0
 fi
 
 echo ""
 echo "Quick start:"
-echo "  CRAFT_SERVER_TOKEN=$TOKEN $DIR/start.sh"
+echo "  KATA_SERVER_TOKEN=$TOKEN $DIR/start.sh"
 echo ""
 echo "Or with systemd:"
 echo "  sudo $DIR/install.sh --systemd"
@@ -697,7 +697,7 @@ echo ""
 
   // Make scripts executable at build time
   for (const script of [
-    join(binDir, 'craft-server'),
+    join(binDir, 'kata-server'),
     join(outputDir, 'start.sh'),
     join(outputDir, 'install.sh'),
   ]) {
@@ -720,45 +720,45 @@ WORKDIR /app
 COPY . .
 
 # Make binaries executable
-RUN chmod +x bin/craft-server vendor/bun/bun resources/bin/uv && \\
+RUN chmod +x bin/kata-server vendor/bun/bun resources/bin/uv && \\
     for f in resources/bin/*; do [ -f "$f" ] && chmod +x "$f"; done
 
-ENV CRAFT_IS_PACKAGED=true
-ENV CRAFT_BUNDLED_ASSETS_ROOT=/app
-ENV CRAFT_APP_ROOT=/app
-ENV CRAFT_RESOURCES_PATH=/app/resources
-ENV CRAFT_UV=/app/resources/bin/uv
-ENV CRAFT_SCRIPTS=/app/resources/scripts
-ENV CRAFT_RPC_HOST=0.0.0.0
-ENV CRAFT_RPC_PORT=9100
+ENV KATA_IS_PACKAGED=true
+ENV KATA_BUNDLED_ASSETS_ROOT=/app
+ENV KATA_APP_ROOT=/app
+ENV KATA_RESOURCES_PATH=/app/resources
+ENV KATA_UV=/app/resources/bin/uv
+ENV KATA_SCRIPTS=/app/resources/scripts
+ENV KATA_RPC_HOST=0.0.0.0
+ENV KATA_RPC_PORT=9100
 ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"
 
 EXPOSE 9100
 
-ENTRYPOINT ["/app/bin/craft-server"]
+ENTRYPOINT ["/app/bin/kata-server"]
 `;
   writeFileSync(join(outputDir, 'Dockerfile'), dockerfile);
 
   const dockerCompose = `version: "3.8"
 services:
-  craft-server:
+  kata-server:
     build: .
     ports:
       - "9100:9100"
     environment:
-      - CRAFT_SERVER_TOKEN=\${CRAFT_SERVER_TOKEN:?Set CRAFT_SERVER_TOKEN}
-      - CRAFT_RPC_PORT=9100
+      - KATA_SERVER_TOKEN=\${KATA_SERVER_TOKEN:?Set KATA_SERVER_TOKEN}
+      - KATA_RPC_PORT=9100
       # TLS — uncomment to enable wss://
-      # - CRAFT_RPC_TLS_CERT=/certs/cert.pem
-      # - CRAFT_RPC_TLS_KEY=/certs/key.pem
+      # - KATA_RPC_TLS_CERT=/certs/cert.pem
+      # - KATA_RPC_TLS_KEY=/certs/key.pem
     volumes:
-      - craft-data:/root/.craft-agent
+      - kata-data:/root/.kata-agents
       # TLS — mount cert directory
       # - ./certs:/certs:ro
     restart: unless-stopped
 
 volumes:
-  craft-data:
+  kata-data:
 `;
   writeFileSync(join(outputDir, 'docker-compose.yml'), dockerCompose);
 }
@@ -824,7 +824,7 @@ async function main(): Promise<void> {
     version,
   };
 
-  console.log(`=== Building Craft Agent Server ${version} for ${platform}-${arch} ===`);
+  console.log(`=== Building Kata Agent Server ${version} for ${platform}-${arch} ===`);
   console.log(`  Output: ${outputDir}`);
 
   // Step 1: Clean
@@ -885,7 +885,7 @@ async function main(): Promise<void> {
 
   // Compress if requested
   if (config.compress) {
-    const archiveName = `craft-server-${version}-${platform}-${arch}.tar.gz`;
+    const archiveName = `kata-server-${version}-${platform}-${arch}.tar.gz`;
     const archivePath = join(dirname(outputDir), archiveName);
     console.log(`\nCompressing to ${archiveName}...`);
     await $`tar -czf ${archivePath} -C ${outputDir} .`;
@@ -896,7 +896,7 @@ async function main(): Promise<void> {
 
   console.log('\n  Build completed successfully!');
   console.log(`\nQuick start:`);
-  console.log(`  CRAFT_SERVER_TOKEN=<secret> ${outputDir}/start.sh`);
+  console.log(`  KATA_SERVER_TOKEN=<secret> ${outputDir}/start.sh`);
 }
 
 main();

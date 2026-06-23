@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import type { LlmConnection } from '@craft-agent/shared/config'
-import type { FileAttachment } from '@craft-agent/shared/protocol'
+import type { LlmConnection } from '@kata-sh/shared/config'
+import type { FileAttachment } from '@kata-sh/shared/protocol'
 import { buildBackendRuntimeSignature, filterAttachmentsForModelInput } from './runtime-config'
 
 const baseCompat: LlmConnection = {

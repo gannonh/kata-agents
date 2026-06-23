@@ -14,9 +14,9 @@
  */
 
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import type { BrowserInstanceInfo } from '@craft-agent/shared/protocol'
+import type { BrowserInstanceInfo } from '@kata-sh/shared/protocol'
 
 mock.module('electron', () => ({
   ipcMain: { handle: () => {}, on: () => {} },

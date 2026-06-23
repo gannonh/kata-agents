@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 const registeredChannels: string[] = []
@@ -105,22 +105,22 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     resources,
     transfer,
   ] = await Promise.all([
-    import('@craft-agent/server-core/handlers/rpc/auth'),
-    import('@craft-agent/server-core/handlers/rpc/automations'),
-    import('@craft-agent/server-core/handlers/rpc/files'),
-    import('@craft-agent/server-core/handlers/rpc/labels'),
-    import('@craft-agent/server-core/handlers/rpc/llm-connections'),
-    import('@craft-agent/server-core/handlers/rpc/oauth'),
-    import('@craft-agent/server-core/handlers/rpc/sessions'),
-    import('@craft-agent/server-core/handlers/rpc/settings'),
-    import('@craft-agent/server-core/handlers/rpc/skills'),
-    import('@craft-agent/server-core/handlers/rpc/sources'),
-    import('@craft-agent/server-core/handlers/rpc/statuses'),
-    import('@craft-agent/server-core/handlers/rpc/system'),
-    import('@craft-agent/server-core/handlers/rpc/workspace'),
-    import('@craft-agent/server-core/handlers/rpc/onboarding'),
-    import('@craft-agent/server-core/handlers/rpc/resources'),
-    import('@craft-agent/server-core/handlers/rpc/transfer'),
+    import('@kata-sh/server-core/handlers/rpc/auth'),
+    import('@kata-sh/server-core/handlers/rpc/automations'),
+    import('@kata-sh/server-core/handlers/rpc/files'),
+    import('@kata-sh/server-core/handlers/rpc/labels'),
+    import('@kata-sh/server-core/handlers/rpc/llm-connections'),
+    import('@kata-sh/server-core/handlers/rpc/oauth'),
+    import('@kata-sh/server-core/handlers/rpc/sessions'),
+    import('@kata-sh/server-core/handlers/rpc/settings'),
+    import('@kata-sh/server-core/handlers/rpc/skills'),
+    import('@kata-sh/server-core/handlers/rpc/sources'),
+    import('@kata-sh/server-core/handlers/rpc/statuses'),
+    import('@kata-sh/server-core/handlers/rpc/system'),
+    import('@kata-sh/server-core/handlers/rpc/workspace'),
+    import('@kata-sh/server-core/handlers/rpc/onboarding'),
+    import('@kata-sh/server-core/handlers/rpc/resources'),
+    import('@kata-sh/server-core/handlers/rpc/transfer'),
   ])
 
   return new Set([

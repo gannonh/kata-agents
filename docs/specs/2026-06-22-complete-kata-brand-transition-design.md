@@ -11,8 +11,8 @@ timestamp: 2026-06-22T00:00:00Z
 ## Status
 
 - **Plan**: Approved 2026-06-22. User intent: one spec to complete the brand transition. If implementation is too large for one PR, split Build into smaller PRs under this spec. Adversarial review completed with no remaining blocker or major issues after revision.
-- **Build**: Not started.
-- **Verify**: Not started.
+- **Build**: Implemented 2026-06-22. See [build report](2026-06-22-complete-kata-brand-transition-build-report.md).
+- **Verify**: UAT evidence 2026-06-23. See [uat-evidence/rebrand-2026-06-22/](../../uat-evidence/rebrand-2026-06-22/). Pending user sign-off; packaged Electron/deep-link manual checks not run.
 
 ## Goal
 

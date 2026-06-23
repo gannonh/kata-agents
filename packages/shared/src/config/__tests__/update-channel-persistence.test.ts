@@ -15,7 +15,7 @@ const UPDATE_CHANNEL_MODULE_PATH = pathToFileURL(
  * Mirrors the setup in storage-update-llm-connection.test.ts.
  */
 function setup(extraConfig: Record<string, unknown> = {}) {
-  const configDir = mkdtempSync(join(tmpdir(), 'craft-agent-config-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'kata-agent-config-'))
   const workspaceRoot = join(configDir, 'workspaces', 'my-workspace')
   mkdirSync(workspaceRoot, { recursive: true })
 
@@ -53,7 +53,7 @@ function setup(extraConfig: Record<string, unknown> = {}) {
       '--eval',
       `import { ${fnBody.includes('loadStoredConfig') ? 'loadStoredConfig,' : ''} setUpdateChannel, getUpdateChannel } from '${STORAGE_MODULE_PATH}'; ${fnBody}`,
     ], {
-      env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
+      env: { ...process.env, KATA_CONFIG_DIR: configDir },
       stdout: 'pipe',
       stderr: 'pipe',
     })

@@ -20,9 +20,9 @@ kata-agents/
 │   ├── viewer/      # Shared session viewer app
 │   └── webui/       # Web UI
 └── packages/
-    ├── core/                    # @craft-agent/core — shared types (workspace, session, message, agent events)
-    ├── shared/                  # @craft-agent/shared — business logic (agent, auth, config, credentials, sessions, sources)
-    ├── ui/                      # @craft-agent/ui — React components
+    ├── core/                    # @kata-sh/core — shared types (workspace, session, message, agent events)
+    ├── shared/                  # @kata-sh/shared — business logic (agent, auth, config, credentials, sessions, sources)
+    ├── ui/                      # @kata-sh/ui — React components
     ├── server/                  # Headless server entry point
     ├── server-core/             # Headless server core logic
     ├── pi-agent-server/         # Pi SDK agent subprocess
@@ -56,16 +56,16 @@ The renderer communicates with the main process over a typed IPC bridge. The mai
 
 ## Remote / headless server
 
-The server (`packages/server/`) exposes a WebSocket RPC API (default port 9100). Desktop app and CLI both connect as thin clients. TLS is supported via `CRAFT_RPC_TLS_CERT` / `CRAFT_RPC_TLS_KEY`.
+The server (`packages/server/`) exposes a WebSocket RPC API (default port 9100). Desktop app and CLI both connect as thin clients. TLS is supported via `KATA_RPC_TLS_CERT` / `KATA_RPC_TLS_KEY`.
 
 See [CLI reference](/reference/cli.md) for the full command surface and connection flags.
 
 ## Configuration
 
-Runtime config lives at `~/.craft-agent/` (unchanged from Craft Agents upstream):
+Runtime config lives at `~/.kata-agents/` (unchanged from Kata Agents upstream):
 
 ```
-~/.craft-agent/
+~/.kata-agents/
 ├── config.json           # Workspaces, LLM connections
 ├── credentials.enc       # AES-256-GCM encrypted credentials
 ├── preferences.json      # UI preferences (language, theme, etc.)

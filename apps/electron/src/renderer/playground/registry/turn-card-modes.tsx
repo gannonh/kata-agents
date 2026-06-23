@@ -6,7 +6,7 @@ import {
   UserMessageBubble,
   type ActivityItem,
   type ResponseContent,
-} from '@craft-agent/ui'
+} from '@kata-sh/ui'
 
 // Import sample workflows
 import {

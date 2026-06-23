@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent } from '@kata-sh/core/types';
 import {
   SourceActivationDrainController,
   type PendingActivationRestart,

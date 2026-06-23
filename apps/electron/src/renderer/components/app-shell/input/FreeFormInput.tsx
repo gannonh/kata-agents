@@ -14,7 +14,7 @@ import {
   Image as ImageIcon,
   X,
 } from 'lucide-react'
-import { Icon_Home, Icon_Folder, Spinner } from '@craft-agent/ui'
+import { Icon_Home, Icon_Folder, Spinner } from '@kata-sh/ui'
 
 import * as storage from '@/lib/local-storage'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
@@ -35,10 +35,10 @@ import {
   InlineLabelMenu,
   useInlineLabelMenu,
 } from '@/components/ui/label-menu'
-import type { LabelConfig } from '@craft-agent/shared/labels'
+import type { LabelConfig } from '@kata-sh/shared/labels'
 import { parseMentions } from '@/lib/mentions'
 import { RichTextInput, type RichTextInputHandle } from '@/components/ui/rich-text-input'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kata-sh/ui'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -75,8 +75,8 @@ import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
-import type { PermissionMode } from '@craft-agent/shared/agent/modes'
-import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
+import type { PermissionMode } from '@kata-sh/shared/agent/modes'
+import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@kata-sh/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -1610,7 +1610,7 @@ export function FreeFormInput({
             `displayLabel`, and `displayLabelKey` reach the popover. The previous
             cherry-pick dropped `inlineExecution: true`, which made the popover
             fall back to the same-window deep-link path; that worked inside
-            Electron but launched the desktop app from the WebUI via `craftagents://`.
+            Electron but launched the desktop app from the WebUI via `kataagents://`.
             Match the AppShell pattern (which already uses spread). */}
         {addLabelEditConfig && (
           <EditPopover
@@ -1781,7 +1781,7 @@ export function FreeFormInput({
 
           {/* Compact mode: permission mode drawer + standard icon badges for attach/sources/working dir.
               Wrapper absorbs all squeeze so the model label truncates first and the send button stays
-              anchored to the right (craft-agents-oss#798). overflow-hidden is safe — Radix Drawer /
+              anchored to the right (kata-agents-oss#798). overflow-hidden is safe — Radix Drawer /
               dropdowns inside render via portals, so they aren't clipped. */}
           {compactMode && (
           <div className="flex items-center gap-1 min-w-0 shrink overflow-hidden">

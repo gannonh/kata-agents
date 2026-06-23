@@ -3,13 +3,13 @@
  *
  * Handles workspace setup and configuration persistence.
  */
-import { getAuthState, getSetupNeeds } from '@craft-agent/shared/auth'
-import { isSetupDeferred, setSetupDeferred } from '@craft-agent/shared/config/storage'
-import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@craft-agent/shared/auth'
-import { validateMcpConnection } from '@craft-agent/shared/mcp'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { getAuthState, getSetupNeeds } from '@kata-sh/shared/auth'
+import { isSetupDeferred, setSetupDeferred } from '@kata-sh/shared/config/storage'
+import { getCredentialManager } from '@kata-sh/shared/credentials'
+import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@kata-sh/shared/auth'
+import { validateMcpConnection } from '@kata-sh/shared/mcp'
+import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from './handlers/handler-deps'
 
 // ============================================

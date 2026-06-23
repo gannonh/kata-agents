@@ -13,7 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import type { AuthRequest } from '@craft-agent/session-tools-core';
+import type { AuthRequest } from '@kata-sh/session-tools-core';
 import { debug } from '../utils/debug.ts';
 
 /**
@@ -56,13 +56,13 @@ export interface SessionScopedToolCallbacks {
   /** Set status on a session (defaults to current). */
   setSessionStatusFn?: (sessionId: string | undefined, status: string) => void | Promise<void>;
   /** Get detailed info about a session (defaults to current). */
-  getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
+  getSessionInfoFn?: (sessionId?: string) => import('@kata-sh/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
-  listSessionsFn?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
+  listSessionsFn?: (options?: import('@kata-sh/session-tools-core').ListSessionsOptions) => import('@kata-sh/session-tools-core').ListSessionsResult;
   /** Resolve label display names to IDs. */
-  resolveLabelsFn?: (labels: string[]) => import('@craft-agent/session-tools-core').ResolvedLabelsResult;
+  resolveLabelsFn?: (labels: string[]) => import('@kata-sh/session-tools-core').ResolvedLabelsResult;
   /** Resolve a status display name to its ID. */
-  resolveStatusFn?: (status: string) => import('@craft-agent/session-tools-core').ResolvedStatusResult;
+  resolveStatusFn?: (status: string) => import('@kata-sh/session-tools-core').ResolvedStatusResult;
   /** Send a message to another session (inter-session messaging). */
   sendAgentMessageFn?: (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => Promise<void>;
   /**

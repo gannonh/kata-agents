@@ -1,4 +1,4 @@
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 import { registerAuthHandlers } from './auth'

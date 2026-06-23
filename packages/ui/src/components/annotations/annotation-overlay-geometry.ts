@@ -1,4 +1,4 @@
-import type { AnnotationV1 } from '@craft-agent/core'
+import type { AnnotationV1 } from '@kata-sh/core'
 import { resolveTextAnnotations } from '../markdown/annotation-resolver'
 import {
   annotationColorToCss,

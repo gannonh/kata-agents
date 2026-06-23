@@ -51,5 +51,5 @@ check is deferred; document the intended semantics before re-adding it.
 
 Manual `workflow_dispatch` only. 3-OS matrix (Ubuntu/macOS/Windows) running
 `apps/cli/src/index.ts --validate-server`. Uses the existing secrets
-`CRAFT_ANTHROPIC_API_KEY` and `STITCH_API_KEY` (kept as-is; secret-key renames
+`KATA_ANTHROPIC_API_KEY` and `STITCH_API_KEY` (kept as-is; secret-key renames
 are Project D, not B).

@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { EyeOff, X, XCircle } from 'lucide-react'
-import { BrowserControls } from '@craft-agent/ui'
+import { BrowserControls } from '@kata-sh/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import {
   DropdownMenu,

@@ -2,17 +2,17 @@
  * Backend Abstraction Types
  *
  * Defines the core interface that all AI backends (Claude, OpenAI, etc.) must implement.
- * The CraftAgent facade delegates to these backends, enabling provider switching while
+ * The KataAgent facade delegates to these backends, enabling provider switching while
  * maintaining a consistent API surface.
  *
  * Key design decisions:
  * - Provider-agnostic events: All backends emit the same AgentEvent types
  * - Capabilities-driven UI: Model/thinking selectors read from capabilities()
  * - Callback pattern: Facade sets callbacks after creating backend
- * - AsyncGenerator for streaming: Consistent with existing CraftAgent API
+ * - AsyncGenerator for streaming: Consistent with existing KataAgent API
  */
 
-import type { AgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent } from '@kata-sh/core/types';
 import type { FileAttachment } from '../../utils/files.ts';
 import type { ThinkingLevel } from '../thinking-levels.ts';
 import type { PermissionMode } from '../mode-manager.ts';
@@ -330,7 +330,7 @@ export type SdkMcpServerConfig =
  *
  * The interface is designed to:
  * 1. Abstract provider differences (Claude SDK vs OpenAI Responses API)
- * 2. Enable the facade pattern in CraftAgent
+ * 2. Enable the facade pattern in KataAgent
  * 3. Support streaming via AsyncGenerator
  * 4. Allow capability-based UI adaptation
  */
@@ -531,7 +531,7 @@ export interface AgentBackend {
    * event loop after the next tool_result, which yields `source_activated`
    * and `forceAbort`s the turn. SessionManager's `source_activated` handler
    * then schedules the server-side resend with a "[{slug} activated]" suffix
-   * (craft-agents-oss#804). Set by SessionManager after a successful mid-turn
+   * (kata-agents-oss#804). Set by SessionManager after a successful mid-turn
    * activation (source_test auto-enable).
    */
   setPendingSourceActivationRestart(pending: { sourceSlug: string; userMessage: string }): void;

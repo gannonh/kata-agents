@@ -1,27 +1,27 @@
 ---
 type: Reference
-title: craft-cli — CLI Reference
+title: kata-cli — CLI Reference
 description: Terminal client for the Kata Agent server; connects over WebSocket to a running headless server.
 tags: [cli, reference, websocket]
 timestamp: 2026-06-19T00:00:00Z
 ---
 
-# craft-cli — CLI Reference
+# kata-cli — CLI Reference
 
-Terminal client for Craft Agent server. Connects over WebSocket (`ws://` or `wss://`) to a running headless server.
+Terminal client for Kata Agent server. Connects over WebSocket (`ws://` or `wss://`) to a running headless server.
 
 ## Prerequisites
 
 - [Bun](https://bun.sh/) runtime installed
 - For `run` and `--validate-server`: an API key via `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`)
-- For all other commands: a running Craft Agent headless server with URL and token
+- For all other commands: a running Kata Agent headless server with URL and token
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/craft-agents.git
-cd craft-agents
+git clone https://github.com/anthropics/kata-agents.git
+cd kata-agents
 
 # Install dependencies
 bun install
@@ -29,9 +29,9 @@ bun install
 # Option A: Run directly
 bun run apps/cli/src/index.ts <command>
 
-# Option B: Link globally (adds craft-cli to PATH)
+# Option B: Link globally (adds kata-cli to PATH)
 cd apps/cli && bun link
-craft-cli <command>
+kata-cli <command>
 ```
 
 ### Quick Start
@@ -47,11 +47,11 @@ ANTHROPIC_API_KEY=sk-... bun run apps/cli/src/index.ts run "Hello, world!"
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--url <ws[s]://...>` | `CRAFT_SERVER_URL` | — | Server WebSocket URL |
-| `--token <secret>` | `CRAFT_SERVER_TOKEN` | — | Authentication token |
+| `--url <ws[s]://...>` | `KATA_SERVER_URL` | — | Server WebSocket URL |
+| `--token <secret>` | `KATA_SERVER_TOKEN` | — | Authentication token |
 | `--workspace <id>` | — | auto-detect | Workspace ID |
 | `--timeout <ms>` | — | `10000` | Request timeout |
-| `--tls-ca <path>` | `CRAFT_TLS_CA` | — | Custom CA cert for self-signed TLS |
+| `--tls-ca <path>` | `KATA_TLS_CA` | — | Custom CA cert for self-signed TLS |
 | `--json` | — | `false` | Raw JSON output for scripting |
 | `--send-timeout <ms>` | — | `300000` | Timeout for `send` command (5 min) |
 
@@ -62,40 +62,40 @@ Flags take precedence over environment variables. If `--workspace` is omitted, t
 ### Info & Health
 
 ```bash
-craft-cli ping              # Verify connectivity (clientId + latency)
-craft-cli health            # Check credential store health
-craft-cli versions          # Show server runtime versions
+kata-cli ping              # Verify connectivity (clientId + latency)
+kata-cli health            # Check credential store health
+kata-cli versions          # Show server runtime versions
 ```
 
 ### Resource Listing
 
 ```bash
-craft-cli workspaces        # List all workspaces
-craft-cli sessions          # List sessions in workspace
-craft-cli connections       # List LLM connections
-craft-cli sources           # List configured sources
+kata-cli workspaces        # List all workspaces
+kata-cli sessions          # List sessions in workspace
+kata-cli connections       # List LLM connections
+kata-cli sources           # List configured sources
 ```
 
 ### Session Operations
 
 ```bash
-craft-cli session create [--name <n>] [--mode <m>]  # Create session
-craft-cli session messages <id>                       # Print message history
-craft-cli session delete <id>                         # Delete session
-craft-cli cancel <id>                                 # Cancel processing
+kata-cli session create [--name <n>] [--mode <m>]  # Create session
+kata-cli session messages <id>                       # Print message history
+kata-cli session delete <id>                         # Delete session
+kata-cli cancel <id>                                 # Cancel processing
 ```
 
 ### Send Message (Streaming)
 
 ```bash
 # Send a message and stream the AI response in real time
-craft-cli send <session-id> <message>
+kata-cli send <session-id> <message>
 
 # Pipe text from stdin
-echo "Summarize this file" | craft-cli send <session-id>
+echo "Summarize this file" | kata-cli send <session-id>
 
 # Read from stdin explicitly
-cat document.txt | craft-cli send <session-id> --stdin
+cat document.txt | kata-cli send <session-id> --stdin
 ```
 
 The `send` command subscribes to session events and streams them to stdout:
@@ -110,24 +110,24 @@ The `send` command subscribes to session events and streams them to stdout:
 
 ```bash
 # Raw RPC call — send any channel with JSON args
-craft-cli invoke <channel> [json-args...]
+kata-cli invoke <channel> [json-args...]
 
 # Subscribe to push events (Ctrl+C to stop)
-craft-cli listen <channel>
+kata-cli listen <channel>
 ```
 
 Examples:
 ```bash
-craft-cli invoke system:homeDir
-craft-cli invoke sessions:get '"workspace-123"'
-craft-cli listen session:event
+kata-cli invoke system:homeDir
+kata-cli invoke sessions:get '"workspace-123"'
+kata-cli listen session:event
 ```
 
 ### Run (Self-Contained)
 
 ```bash
-craft-cli run <prompt>
-craft-cli run --workspace-dir ./project --source github "List open PRs"
+kata-cli run <prompt>
+kata-cli run --workspace-dir ./project --source github "List open PRs"
 ```
 
 The `run` command is fully self-contained — it spawns a headless server, creates a session, sends the prompt, streams the response, and exits. No separate server setup needed. An API key is resolved from `--api-key`, `$LLM_API_KEY`, or a provider-specific env var (e.g., `$ANTHROPIC_API_KEY`, `$OPENAI_API_KEY`).
@@ -152,25 +152,25 @@ The `run` command is fully self-contained — it spawns a headless server, creat
 
 ```bash
 # Multi-provider examples
-craft-cli run --provider openai --model gpt-4o "Summarize this repo"
-GOOGLE_API_KEY=... craft-cli run --provider google --model gemini-2.0-flash "Hello"
-craft-cli run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
+kata-cli run --provider openai --model gpt-4o "Summarize this repo"
+GOOGLE_API_KEY=... kata-cli run --provider google --model gemini-2.0-flash "Hello"
+kata-cli run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
 ```
 
 Prompt can also be piped via stdin:
 ```bash
-echo "Summarize this file" | craft-cli run
-cat error.log | craft-cli run "What's causing these errors?"
+echo "Summarize this file" | kata-cli run
+cat error.log | kata-cli run "What's causing these errors?"
 ```
 
 ### Validate Server
 
 ```bash
 # Against a running server
-craft-cli --validate-server --url ws://127.0.0.1:9100 --token <token>
+kata-cli --validate-server --url ws://127.0.0.1:9100 --token <token>
 
 # Self-contained (auto-spawns a server)
-craft-cli --validate-server
+kata-cli --validate-server
 ```
 
 When no `--url` is provided, `--validate-server` automatically spawns a local headless server (same as the `run` command), runs the validation, and shuts it down.
@@ -205,22 +205,22 @@ Runs a 21-step integration test covering the full server lifecycle including sou
 
 ```bash
 # Get workspace IDs
-WORKSPACES=$(craft-cli --json workspaces | jq -r '.[].id')
+WORKSPACES=$(kata-cli --json workspaces | jq -r '.[].id')
 
 # Count sessions per workspace
 for ws in $WORKSPACES; do
-  COUNT=$(craft-cli --json --workspace "$ws" sessions | jq length)
+  COUNT=$(kata-cli --json --workspace "$ws" sessions | jq length)
   echo "$ws: $COUNT sessions"
 done
 
 # Create a session and capture its ID
-SESSION_ID=$(craft-cli --json session create --name "CI Run" | jq -r '.id')
+SESSION_ID=$(kata-cli --json session create --name "CI Run" | jq -r '.id')
 
 # Send a message and wait for completion
-craft-cli send "$SESSION_ID" "Run the test suite and report results"
+kata-cli send "$SESSION_ID" "Run the test suite and report results"
 
 # Clean up
-craft-cli session delete "$SESSION_ID"
+kata-cli session delete "$SESSION_ID"
 ```
 
 ## TLS / wss://
@@ -229,20 +229,20 @@ For remote servers with TLS:
 
 ```bash
 # Trusted certificate (Let's Encrypt, etc.)
-craft-cli --url wss://server.example.com:9100 ping
+kata-cli --url wss://server.example.com:9100 ping
 
 # Self-signed certificate
-craft-cli --url wss://server.example.com:9100 --tls-ca /path/to/ca.pem ping
+kata-cli --url wss://server.example.com:9100 --tls-ca /path/to/ca.pem ping
 ```
 
-The `--tls-ca` flag sets `NODE_EXTRA_CA_CERTS` before connecting. You can also set `CRAFT_TLS_CA` in your environment.
+The `--tls-ca` flag sets `NODE_EXTRA_CA_CERTS` before connecting. You can also set `KATA_TLS_CA` in your environment.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `Connection timeout` | Server not running or unreachable | Check server is started, verify URL |
-| `AUTH_FAILED` | Wrong token | Check `CRAFT_SERVER_TOKEN` matches server |
+| `AUTH_FAILED` | Wrong token | Check `KATA_SERVER_TOKEN` matches server |
 | `PROTOCOL_VERSION_UNSUPPORTED` | Version mismatch | Update CLI and server to same version |
 | `WebSocket connection error` | Network issue or TLS problem | For self-signed certs, use `--tls-ca` |
 | `No workspace available` | Workspace not yet created | Create one via desktop app or API |

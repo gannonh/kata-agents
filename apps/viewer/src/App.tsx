@@ -1,7 +1,7 @@
 /**
- * Craft Agent Session Viewer
+ * Kata Agent Session Viewer
  *
- * A minimal web app for viewing Craft Agent session transcripts.
+ * A minimal web app for viewing Kata Agent session transcripts.
  * Users can upload session JSON files or view shared sessions via URL.
  *
  * Routes:
@@ -12,7 +12,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileText } from 'lucide-react'
-import type { StoredSession } from '@craft-agent/core'
+import type { StoredSession } from '@kata-sh/core'
 import {
   SessionViewer,
   GenericOverlay,
@@ -29,7 +29,7 @@ import {
   type ActivityItem,
   type OverlayData,
   type FileChange,
-} from '@craft-agent/ui'
+} from '@kata-sh/ui'
 import { SessionUpload } from './components/SessionUpload'
 import { Header } from './components/Header'
 

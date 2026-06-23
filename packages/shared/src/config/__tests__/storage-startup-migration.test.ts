@@ -18,7 +18,7 @@ const STORAGE_MODULE_PATH = pathToFileURL(join(import.meta.dir, '..', 'storage.t
 const PI_RESOLVER_SETUP_PATH = pathToFileURL(join(import.meta.dir, '..', '..', '..', 'tests', 'setup', 'register-pi-model-resolver.ts')).href
 
 function setupWorkspaceConfigDir() {
-  const configDir = mkdtempSync(join(tmpdir(), 'craft-agent-config-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'kata-agent-config-'))
   const workspaceRoot = join(configDir, 'workspaces', 'my-workspace')
   mkdirSync(workspaceRoot, { recursive: true })
 
@@ -75,7 +75,7 @@ function runMigration(configDir: string) {
   ], {
     env: {
       ...process.env,
-      CRAFT_CONFIG_DIR: configDir,
+      KATA_CONFIG_DIR: configDir,
     },
     stdout: 'pipe',
     stderr: 'pipe',

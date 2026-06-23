@@ -96,6 +96,11 @@ Write-Host "Installing dependencies..."
 Push-Location $RootDir
 try {
     bun install
+    Write-Host "Building and staging agent subprocesses..."
+    bun run server:build:subprocess
+    if ($LASTEXITCODE -ne 0) { throw "Agent subprocess build failed" }
+    bun "apps/electron/scripts/stage-subprocesses.ts"
+    if ($LASTEXITCODE -ne 0) { throw "Agent subprocess staging failed" }
 } finally {
     Pop-Location
 }

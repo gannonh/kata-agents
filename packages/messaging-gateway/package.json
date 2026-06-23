@@ -1,8 +1,8 @@
 {
-  "name": "@craft-agent/messaging-gateway",
+  "name": "@kata-sh/messaging-gateway",
   "version": "0.10.3",
   "license": "Apache-2.0",
-  "description": "Messaging gateway for Craft Agent — Telegram & WhatsApp",
+  "description": "Messaging gateway for Kata Agent — Telegram & WhatsApp",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -13,10 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/messaging-whatsapp-worker": "workspace:*",
-    "@craft-agent/server-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*",
+    "@kata-sh/core": "workspace:*",
+    "@kata-sh/messaging-whatsapp-worker": "workspace:*",
+    "@kata-sh/server-core": "workspace:*",
+    "@kata-sh/shared": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.62.1",
     "grammy": "^1.35.0"
   },

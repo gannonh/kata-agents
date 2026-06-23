@@ -5,7 +5,7 @@
  * Derives control state from BrowserInstanceInfo.
  */
 
-import { BrowserControls } from '@craft-agent/ui'
+import { BrowserControls } from '@kata-sh/ui'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 
 interface BrowserToolbarProps {

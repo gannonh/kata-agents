@@ -2,6 +2,6 @@ export type {
   Logger,
   ImageProcessor,
   PlatformServices,
-} from '@craft-agent/server-core/runtime'
+} from '@kata-sh/server-core/runtime'
 
-export { createScopedLogger, CONSOLE_LOGGER } from '@craft-agent/server-core/runtime'
+export { createScopedLogger, CONSOLE_LOGGER } from '@kata-sh/server-core/runtime'

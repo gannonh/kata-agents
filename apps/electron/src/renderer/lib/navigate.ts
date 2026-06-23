@@ -19,7 +19,7 @@ export { routes }
 export type { Route }
 
 // Event name for internal navigation
-export const NAVIGATE_EVENT = 'craft-agent-navigate'
+export const NAVIGATE_EVENT = 'kata-agent-navigate'
 
 export interface NavigateOptions {
   /** Open the target in a new panel instead of navigating the current one */

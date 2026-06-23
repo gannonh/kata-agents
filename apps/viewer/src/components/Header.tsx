@@ -6,9 +6,9 @@ import { Sun, Moon, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 /**
- * CraftAgentLogo - The Craft Agent "C" logo
+ * KataAgentLogo - The Kata Agent "C" logo
  */
-function CraftAgentLogo({ className }: { className?: string }) {
+function KataAgentLogo({ className }: { className?: string }) {
   return (
     <svg
       className={className}
@@ -40,11 +40,11 @@ export function Header({ hasSession, sessionTitle, isDark, onToggleTheme, onClea
     <header className="shrink-0 grid grid-cols-[auto_1fr_auto] items-center px-4 py-3">
       {/* Logo - links to main site */}
       <a
-        href="https://agents.craft.do"
+        href="https://agents.kata.sh"
         className="hover:opacity-80 transition-opacity"
-        title="Craft Agent"
+        title="Kata Agent"
       >
-        <CraftAgentLogo className="w-6 h-6 text-[#9570BE]" />
+        <KataAgentLogo className="w-6 h-6 text-[#9570BE]" />
       </a>
 
       {/* Session title - centered */}

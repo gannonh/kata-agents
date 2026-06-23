@@ -67,9 +67,9 @@ describe('resolveProductName', () => {
 
 describe('generateConfig', () => {
   const base = {
-    appId: 'com.lukilabs.craft-agent',
+    appId: 'sh.kata.agents',
     productName: 'Kata Agents',
-    publish: { provider: 'generic', url: 'https://agents.craft.do/electron/latest' },
+    publish: { provider: 'generic', url: 'https://agents.kata.sh/electron/latest' },
     mac: { hardenedRuntime: true },
   }
 
@@ -84,7 +84,7 @@ describe('generateConfig', () => {
     ])
     expect(out.productName).toBe('Kata Agents')
     // Untouched fields survive (AC12: no identity-infra changes beyond the feed).
-    expect(out.appId).toBe('com.lukilabs.craft-agent')
+    expect(out.appId).toBe('sh.kata.agents')
     expect(out.mac).toEqual({ hardenedRuntime: true })
   })
 
@@ -104,7 +104,7 @@ describe('generateConfig', () => {
       },
     ])
     expect(out.productName).toBe('Kata Agents (Nightly)')
-    expect(out.appId).toBe('com.lukilabs.craft-agent')
+    expect(out.appId).toBe('sh.kata.agents')
   })
 
   test('explicit channel override wins over version inference', () => {

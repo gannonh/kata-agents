@@ -1,6 +1,6 @@
 /**
  * MessagingGateway — `perm:` button-press behavior. Regression for issue
- * [#726](https://github.com/craft-ai-agents/craft-agents-oss/issues/726):
+ * [#726](https://github.com/craft-ai-agents/kata-agents-oss/issues/726):
  * "Approve/Deny buttons in Telegram are unresponsive, fire in batch after
  * desktop action".
  *
@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { ISessionManager } from '@craft-agent/server-core/handlers'
+import type { ISessionManager } from '@kata-sh/server-core/handlers'
 import { MessagingGateway } from '../gateway'
 import type { SessionEvent } from '../renderer'
 import type {

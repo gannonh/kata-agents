@@ -2,8 +2,8 @@
 
 set -e
 
-VERSIONS_URL="https://agents.craft.do/electron"
-DOWNLOAD_DIR="$HOME/.craft-agent/downloads"
+VERSIONS_URL="https://agents.kata.sh/electron"
+DOWNLOAD_DIR="$HOME/.kata-agents/downloads"
 
 # Colors for output
 RED='\033[0;31m'
@@ -241,7 +241,7 @@ if [ "$OS_TYPE" = "darwin" ]; then
     zip_path="$installer_path"
 
     # Quit the app if it's running (use bundle ID for reliability)
-    APP_BUNDLE_ID="com.lukilabs.craft-agent"
+    APP_BUNDLE_ID="sh.kata.agents"
     if pgrep -x "Kata Agents" >/dev/null 2>&1; then
         info "Quitting Kata Agents..."
         osascript -e "tell application id \"$APP_BUNDLE_ID\" to quit" 2>/dev/null || true
@@ -315,8 +315,8 @@ else
     appimage_path="$installer_path"
 
     # New paths
-    APP_DIR="$HOME/.craft-agent/app"
-    WRAPPER_PATH="$INSTALL_DIR/craft-agents"
+    APP_DIR="$HOME/.kata-agents/app"
+    WRAPPER_PATH="$INSTALL_DIR/kata-agents"
     APPIMAGE_INSTALL_PATH="$APP_DIR/Kata-Agents-x64.AppImage"
 
     # Kill the app if it's running
@@ -344,14 +344,14 @@ else
 #!/bin/bash
 # Kata Agent launcher - handles Linux-specific AppImage issues
 
-APPIMAGE_PATH="$HOME/.craft-agent/app/Kata-Agents-x64.AppImage"
-ELECTRON_CACHE="$HOME/.config/@craft-agent"
-ELECTRON_CACHE_ALT="$HOME/.cache/@craft-agent"
+APPIMAGE_PATH="$HOME/.kata-agents/app/Kata-Agents-x64.AppImage"
+ELECTRON_CACHE="$HOME/.config/@kata-sh"
+ELECTRON_CACHE_ALT="$HOME/.cache/@kata-sh"
 
 # Verify AppImage exists
 if [ ! -f "$APPIMAGE_PATH" ]; then
     echo "Error: Kata Agent not found at $APPIMAGE_PATH"
-    echo "Reinstall: curl -fsSL https://agents.craft.do/install-app.sh | bash"
+    echo "Reinstall: curl -fsSL https://agents.kata.sh/install-app.sh | bash"
     exit 1
 fi
 
@@ -389,7 +389,7 @@ WRAPPER_EOF
     printf "%b\n" "  AppImage: ${BOLD}$APPIMAGE_INSTALL_PATH${NC}"
     printf "%b\n" "  Launcher: ${BOLD}$WRAPPER_PATH${NC}"
     echo ""
-    printf "%b\n" "  Run with: ${BOLD}craft-agents${NC}"
+    printf "%b\n" "  Run with: ${BOLD}kata-agents${NC}"
     echo ""
     printf "%b\n" "  Add to PATH if needed:"
     printf "%b\n" "    ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"

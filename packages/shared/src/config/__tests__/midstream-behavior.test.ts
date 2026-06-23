@@ -59,7 +59,7 @@ describe('resolveMidStreamBehavior', () => {
 const STORAGE_MODULE_PATH = pathToFileURL(join(import.meta.dir, '..', 'storage.ts')).href
 
 function setupConfig(llmConnections: LlmConnection[]) {
-  const configDir = mkdtempSync(join(tmpdir(), 'craft-agent-midstream-'))
+  const configDir = mkdtempSync(join(tmpdir(), 'kata-agent-midstream-'))
   const workspaceRoot = join(configDir, 'workspaces', 'my-workspace')
   mkdirSync(workspaceRoot, { recursive: true })
 
@@ -95,7 +95,7 @@ function setupConfig(llmConnections: LlmConnection[]) {
       '--eval',
       `import { updateLlmConnection } from '${STORAGE_MODULE_PATH}'; const ok = updateLlmConnection(${JSON.stringify(slug)}, ${updatesJson}); process.exit(ok ? 0 : 1);`,
     ], {
-      env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
+      env: { ...process.env, KATA_CONFIG_DIR: configDir },
       stdout: 'pipe',
       stderr: 'pipe',
     })

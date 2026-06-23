@@ -24,19 +24,19 @@ export const IS_PACKAGED = process.argv.some(arg => arg.includes('app.asar'));
 export const INTERCEPTOR_LOGGING_ENABLED = !IS_PACKAGED;
 
 export const DEBUG = INTERCEPTOR_LOGGING_ENABLED &&
-  (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1');
+  (process.argv.includes('--debug') || process.env.KATA_DEBUG === '1');
 
 /** Config file path for reading settings in the SDK subprocess */
-export const CONFIG_FILE = join(homedir(), '.craft-agent', 'config.json');
+export const CONFIG_FILE = join(homedir(), '.kata-agents', 'config.json');
 
 /** Session directory — set by env var (subprocess) or setSessionDir() (main process) */
-let _sessionDir: string | null = process.env.CRAFT_SESSION_DIR || null;
+let _sessionDir: string | null = process.env.KATA_SESSION_DIR || null;
 
 // ============================================================================
 // LOGGING
 // ============================================================================
 
-export const LOG_DIR = join(homedir(), '.craft-agent', 'logs');
+export const LOG_DIR = join(homedir(), '.kata-agents', 'logs');
 export const LOG_FILE = join(LOG_DIR, 'interceptor.log');
 
 // Ensure log directory exists at module load
@@ -171,7 +171,7 @@ function getErrorFilePath(): string {
   // Prefer session-scoped file to avoid cross-session error consumption.
   if (_sessionDir) return join(_sessionDir, 'api-error.json');
   // Fallback for legacy/non-session contexts.
-  return join(homedir(), '.craft-agent', 'api-error.json');
+  return join(homedir(), '.kata-agents', 'api-error.json');
 }
 
 function getStoredError(sessionDir?: string): LastApiError | null {
@@ -255,7 +255,7 @@ export interface ToolMetadata {
  * - Survives subprocess restarts (session resume) via file persistence
  *
  * The session directory is determined by:
- * - SDK subprocess: CRAFT_SESSION_DIR env var (set by main process before spawn)
+ * - SDK subprocess: KATA_SESSION_DIR env var (set by main process before spawn)
  * - Main process: toolMetadataStore.setSessionDir(path) called during agent creation
  *
  * IMPORTANT: Multiple sessions can run concurrently in the main process (parallel chats,

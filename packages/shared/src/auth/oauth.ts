@@ -264,7 +264,7 @@ export class CraftOAuth {
       }
     } else {
       // Use a default client ID for public clients
-      clientId = 'craft-agent';
+      clientId = 'kata-agent';
       this.callbacks.onStatus(`Using default client ID: ${clientId}`);
     }
 
@@ -574,10 +574,10 @@ export async function prepareMcpOAuth(
       // Dynamic client registration can be intentionally gated by providers
       // (for example returning 403 for unapproved clients). In that case,
       // fall back to a default client ID and proceed with the flow.
-      clientId = 'craft-agent';
+      clientId = 'kata-agent';
     }
   } else {
-    clientId = 'craft-agent';
+    clientId = 'kata-agent';
   }
 
   const authUrl = new URL(metadata.authorization_endpoint);

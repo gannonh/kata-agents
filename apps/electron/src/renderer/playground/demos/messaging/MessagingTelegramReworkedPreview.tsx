@@ -70,7 +70,7 @@ const DIRECT_SESSIONS: DirectSession[] = [
 const TOPIC_BINDINGS: TopicBinding[] = [
   {
     id: 't1',
-    sessionTitle: 'GitHub Issue Triage (craft-agents-oss)',
+    sessionTitle: 'GitHub Issue Triage (kata-agents-oss)',
     topicName: 'GithubIssues',
     threadId: 16,
   },
@@ -149,7 +149,7 @@ function BotHeader({ connected }: { connected: boolean }) {
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">Telegram</div>
         <div className="mt-0.5 truncate text-xs text-foreground/50">
-          Bot API · {connected ? 'Valid bot: @CraftAgentsBot' : 'Not connected'}
+          Bot API · {connected ? 'Valid bot: @KataAgentsBot' : 'Not connected'}
         </div>
       </div>
       {connected ? (
@@ -288,7 +288,7 @@ function PairedSupergroupSection({ topics }: { topics: TopicBinding[] }) {
         <SubRowIcon icon={MessagesSquare} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <div className="truncate text-sm font-medium">Craft Agents</div>
+            <div className="truncate text-sm font-medium">Kata Agents</div>
             <div className="truncate text-xs text-foreground/50">(-1003783993623)</div>
           </div>
           <div className="mt-0.5 truncate text-xs text-foreground/50">

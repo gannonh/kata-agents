@@ -3,7 +3,7 @@
  * Used by OAuth callback pages
  */
 
-export const CRAFT_LOGO = [
+export const KATA_LOGO = [
   '███  ████  █████  █████  ████  █████ █████',
   ' ██   ██  ██   ██ ██   ██  ██  ██    ██   ',
   ' ██   ██  ██████ ███████  ██  ████  █████',
@@ -12,7 +12,7 @@ export const CRAFT_LOGO = [
 ] as const;
 
 /** Logo as a single string for HTML templates */
-export const CRAFT_LOGO_HTML = CRAFT_LOGO.map((line) => line.trimEnd()).join('\n');
+export const KATA_LOGO_HTML = KATA_LOGO.map((line) => line.trimEnd()).join('\n');
 
 /** Kata app icon SVG mark (tan kanji on dark rounded square) */
 export const KATA_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
@@ -27,4 +27,4 @@ export const KATA_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0
 </svg>`;
 
 /** Session viewer base URL */
-export const VIEWER_URL = 'https://agents.craft.do';
+export const VIEWER_URL = 'https://agents.kata.sh';

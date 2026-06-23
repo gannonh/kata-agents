@@ -13,7 +13,7 @@
  */
 
 import { RPC_CHANNELS } from './types'
-import { FEATURE_FLAGS } from '@craft-agent/shared/feature-flags'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -276,7 +276,7 @@ export const ROOT_MENU = {
     type: 'action',
     id: 'quit',
     actionId: 'app.quit',
-    labelKey: 'menu.quitCraftAgents',
+    labelKey: 'menu.quitKataAgents',
     shortcut: 'CmdOrCtrl+Q',
     shortcutDisplayMac: '⌘Q',
     shortcutDisplayOther: 'Ctrl+Q',
@@ -299,7 +299,7 @@ export const HELP_LINKS: MenuItemUrl[] = [
     type: 'url',
     id: 'helpAndDocs',
     labelKey: 'menu.helpAndDocs',
-    url: 'https://agents.craft.do/docs',
+    url: 'https://agents.kata.sh/docs',
     icon: 'HelpCircle',
   },
 ]

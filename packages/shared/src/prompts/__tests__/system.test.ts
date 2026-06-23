@@ -12,7 +12,7 @@ mock.module('../../config/preferences.ts', () => ({
 import { getSystemPrompt } from '../system'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
-const CO_AUTHOR_TRAILER = 'Co-Authored-By: Kata Agent <agents-noreply@craft.do>'
+const CO_AUTHOR_TRAILER = 'Co-Authored-By: Kata Agent <agents-noreply@kata.sh>'
 
 describe('system prompt guidance', () => {
   it('uses backend-neutral debug log querying guidance (rg/grep via Bash)', () => {

@@ -1,7 +1,7 @@
 /**
- * @craft-agent/messaging-gateway
+ * @kata-sh/messaging-gateway
  *
- * Messaging gateway for Craft Agent — Telegram & WhatsApp.
+ * Messaging gateway for Kata Agent — Telegram & WhatsApp.
  */
 
 export { MessagingGateway, type GatewayOptions } from './gateway'

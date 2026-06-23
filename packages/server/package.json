@@ -1,11 +1,11 @@
 {
-  "name": "@craft-agent/server",
+  "name": "@kata-sh/server",
   "version": "0.10.3",
-  "description": "Standalone headless Craft Agent server (Bun runtime)",
+  "description": "Standalone headless Kata Agent server (Bun runtime)",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "craft-server": "src/index.ts"
+    "kata-server": "src/index.ts"
   },
   "files": [
     "src/"
@@ -14,21 +14,21 @@
     "bun": ">=1.0.0"
   },
   "author": {
-    "name": "Craft Docs Ltd.",
-    "email": "support@craft.do"
+    "name": "Gannon Hall",
+    "email": "support@kata.sh"
   },
   "license": "Apache-2.0",
-  "homepage": "https://agents.craft.do",
+  "homepage": "https://agents.kata.sh",
   "scripts": {
     "start": "bun run src/index.ts",
     "generate-token": "bun run src/index.ts --generate-token",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/messaging-gateway": "workspace:*",
-    "@craft-agent/server-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*"
+    "@kata-sh/core": "workspace:*",
+    "@kata-sh/messaging-gateway": "workspace:*",
+    "@kata-sh/server-core": "workspace:*",
+    "@kata-sh/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

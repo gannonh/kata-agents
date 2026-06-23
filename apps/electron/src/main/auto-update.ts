@@ -24,14 +24,14 @@ import { app, BrowserWindow } from 'electron'
 import log from 'electron-log/main'
 import { mainLog } from './logger'
 import { resolveSelectedChannel, resolveUpdateChannel, type UpdateChannel } from './update-channel'
-import { getUpdateChannel, setUpdateChannel as persistUpdateChannel } from '@craft-agent/shared/config'
+import { getUpdateChannel, setUpdateChannel as persistUpdateChannel } from '@kata-sh/shared/config'
 import { RPC_CHANNELS } from '../shared/types'
 import type {
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from '../shared/types'
-import type { EventSink } from '@craft-agent/server-core/transport'
+import type { EventSink } from '@kata-sh/server-core/transport'
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnChannelReset,

@@ -4,7 +4,7 @@ okf_version: "0.1"
 
 # Kata Agents — Documentation
 
-Kata Agents is an open-source Electron desktop app, headless server, and CLI client for AI agent sessions. It is a fork of Craft Agents being rebranded to Kata Agents.
+Kata Agents is an open-source Electron desktop app, headless server, and CLI client for AI agent sessions. It is a fork of Kata Agents being rebranded to Kata Agents.
 
 ## Sections
 
@@ -15,7 +15,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — hard-cutover plan to finish the rebrand across packages, runtime identity, app surfaces, resources, docs, and release metadata
+* **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — implemented; quality review found and fixed migration residuals (broken server dist scopeDir, 2 failing tests, quoted-form pluralization); build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify (packaged build UAT) pending.
 * **ADRs** — [adrs/](adrs/) — no ADRs recorded yet; seed is in place for future decisions
 
 ## Recent work
@@ -31,12 +31,12 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 | [README.md](../README.md) | Full product overview, setup, architecture, and feature reference |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Branch naming, PR process, code style |
 | [SECURITY.md](../SECURITY.md) | Security policy and vulnerability disclosure |
-| [TRADEMARK.md](../TRADEMARK.md) | Craft Docs Ltd. trademark usage guidelines |
+| [TRADEMARK.md](../TRADEMARK.md) | Gannon Hall trademark usage guidelines |
 
 ## Package-level agent context
 
 | Package | File |
 |---------|------|
-| `@craft-agent/shared` | [packages/shared/CLAUDE.md](../packages/shared/CLAUDE.md) |
-| `@craft-agent/core` | [packages/core/CLAUDE.md](../packages/core/CLAUDE.md) |
+| `@kata-sh/shared` | [packages/shared/CLAUDE.md](../packages/shared/CLAUDE.md) |
+| `@kata-sh/core` | [packages/core/CLAUDE.md](../packages/core/CLAUDE.md) |
 | Electron resources | [apps/electron/resources/AGENTS.md](../apps/electron/resources/AGENTS.md) |

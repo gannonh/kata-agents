@@ -131,7 +131,7 @@ describe('preprocessLinks — placeholder URL stripping', () => {
   })
 
   it('preserves valid GitHub URLs that do not contain /...', () => {
-    const input = '[PR #42](https://github.com/lukilabs/craft-agents/pull/42)'
+    const input = '[PR #42](https://github.com/lukilabs/kata-agents/pull/42)'
     expect(preprocessLinks(input)).toBe(input)
   })
 
@@ -251,7 +251,7 @@ describe('detectLinks', () => {
 
 describe('isFilePathTarget', () => {
   it('accepts absolute unix image paths', () => {
-    expect(isFilePathTarget('/Users/balintorosz/.craft-agent/sessions/abc/image.jpg')).toBe(true)
+    expect(isFilePathTarget('/Users/balintorosz/.kata-agents/sessions/abc/image.jpg')).toBe(true)
   })
 
   it('accepts parent-relative image paths', () => {
