@@ -9,6 +9,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Bug Fixes
 
 - **Nightly agent sessions** — package the Pi agent subprocess in desktop release artifacts so new chats can start successfully.
+- **Standalone server dist** — fix workspace package scope directory (`@kata-sh` instead of `@kata-agent`) so `@kata-sh/*` imports resolve correctly in the assembled server distribution.
+- **CLI tool-icon matching** — correct the CLI binary name in tool icon metadata from `kata-agents` (plural) to `kata-agent` (singular) so tool icons match against the actual binary.
+- **OAuth client identity** — fix the default OAuth `client_id` from `kata-agents` to `kata-agent`, matching the canonical CLI binary name.
+- **Bundled CLI reference** — rename the bundled docs file from `craft-cli.md` to `kata-cli.md` so the system prompt's Kata CLI guidance points at a file that exists in `~/.kata-agents/docs/`.
 
 ## Breaking Changes
 
