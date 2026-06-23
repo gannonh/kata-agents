@@ -15,7 +15,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — implemented; build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify pending.
+* **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — implemented; quality review found and fixed migration residuals (broken server dist scopeDir, 2 failing tests, quoted-form pluralization); build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify (packaged build UAT) pending.
 * **ADRs** — [adrs/](adrs/) — no ADRs recorded yet; seed is in place for future decisions
 
 ## Recent work

@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-*(none — brand transition Build complete; Verify pending)*
+*(none — brand transition Build complete; quality review fixes applied; Verify pending)*
 
 ## Planned implementation phases
 

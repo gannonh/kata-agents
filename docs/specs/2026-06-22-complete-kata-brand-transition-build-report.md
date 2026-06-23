@@ -18,6 +18,7 @@ timestamp: 2026-06-22T00:00:00Z
 |---|-----|
 | Base | `09b0c75b56205caa12b9d491b91f02ae1cc4ea43` |
 | Final | `2df966ff` |
+| Quality review fixes | `7bef7cd7` |
 
 ## Tasks completed
 
@@ -55,6 +56,47 @@ timestamp: 2026-06-22T00:00:00Z
 | `bun test tests/permissions-kata-agent-sync.test.ts` | Pass |
 | `storage-startup-migration.test.ts` (subset) | **Pre-existing flaky/timeouts** on base branch — subprocess migration integration tests time out at 5s; not introduced by identity rename |
 
+## Quality review fixes (`7bef7cd7`)
+
+A strict quality review with parallel adversarial subagents found that the migration's boundary-blind global substring replacement (`split/join`) produced wrong values in several locations where slash-suffixed scope rules missed bare-scope tokens and quoted CLI-binary literals were pluralized.
+
+### Blockers fixed
+
+- **`scripts/build-server.ts`**: scopeDir was `@kata-agent` instead of `@kata-sh`, breaking workspace import resolution in the standalone server dist.
+- **`url-safety.test.ts`**: `CRAFTAGENTS://` should be `KATAAGENTS://` (failing test).
+- **`shellguard-corpus.test.ts`**: `kata-agents` (plural) should be `kata-agent` (singular CLI binary) (failing test).
+
+### Quoted-form conflation fixed
+
+The migration rule mapping quoted `'craft-agent'`/`"craft-agent"` to `kata-agents` (plural package name) clobbered quoted CLI-binary literals that should be `kata-agent` (singular):
+
+- `tool-icons.json`: `id` and `commands` arrays
+- `mcp/client.ts`: MCP client name
+- `oauth.ts`: default `client_id` (3 occurrences)
+- `oauth.test.ts`: `client_id` assertion
+- `playground/markdown.tsx`: sample package name
+
+### Other residuals fixed
+
+- `install-app.sh`: `@kata-agent` cache paths → `@kata-sh`
+- `build-server.ts`: `craft-data` docker volume → `kata-data`, `echo craft` service user → `echo kata`, `craftServer` var → `kataServer`
+- `docs/index.ts`: `DOC_REFS.craftCli` → `kataCli`
+- `system.ts`: `getCraftAssistantPrompt` → `getKataAssistantPrompt`
+- `paths.ts`, `index.ts`: Craft-era comment residuals
+
+### Structural fix
+
+Migration scripts moved from `scripts/` to `scripts/migrations/` with a README marking them as one-shot historical artifacts.
+
+### Verification after fixes
+
+| Command | Result |
+|---------|--------|
+| `cd packages/shared && bun run tsc --noEmit` | Pass |
+| `cd packages/shared && bun test` | 2898 pass, 0 fail |
+| Build/staging tests | 18 pass, 0 fail |
+| All 3 previously-failing test files | Pass |
+
 ## Review gates
 
 - **TDD**: Mechanical identity rename; existing tests updated for `KATA_*` / `kataagents` / `@kata-sh` symbols. `feature-flags` and `permissions-kata-agent-sync` exercised after renames.
@@ -63,7 +105,7 @@ timestamp: 2026-06-22T00:00:00Z
 
 ## Approved deviations
 
-- **Migration scripts retained**: `scripts/brand-transition-migrate.ts` and `scripts/brand-transition-pass2.ts` intentionally contain Craft-era strings as replacement maps (excluded from residual scan).
+- **Migration scripts retained**: `scripts/migrations/brand-transition-migrate.ts` and `scripts/migrations/brand-transition-pass2.ts` intentionally contain Craft-era strings as replacement maps (excluded from residual scan). Moved to `scripts/migrations/` with README marking them as one-shot historical artifacts.
 - **Internal code names**: Comments and debug labels may still say `KataAgent` when referring to the `ClaudeAgent` class facade (product name, not Craft legacy).
 - **Craft document integration**: `apps/electron/resources/docs/sources.md` retains Craft document product examples (`Craft iOS`, `Craft Connect`, `{source:Craft}`).
 
@@ -75,13 +117,13 @@ timestamp: 2026-06-22T00:00:00Z
 | Historical completed specs | `docs/specs/rebrand-kata-agents-phase-1*.md`, `2026-06-19-ci-release-pipeline*.md`, etc. | Historical accuracy per allowlist |
 | Craft document/source integration | `sources.md` Craft workspace examples, `craft-public` source slug in CLI E2E prompt | Separate Craft document product |
 | Third-party / smoke fixtures | `test_markitdown_smoke.py` "hello craft" text | Unrelated prose in test data |
-| Migration tooling | `scripts/brand-transition-*.ts` | One-shot migration maps |
+| Migration tooling | `scripts/migrations/brand-transition-*.ts` | One-shot migration maps |
 
 No active matches for: `@craft-agent`, `CRAFT_`, `.craft-agent`, `craftagents`, `agents.craft.do`, `craft-cli`, `craft-server`, `com.lukilabs.craft-agent`, `Craft Agent`, `Craft Agents` (outside allowlist above).
 
 ## Known follow-ups
 
-- Full `bun test` suite not run to completion; run Verify-phase UAT including Electron packaged build and deep-link manual check.
+- Full `bun test` suite now passes after quality review fixes (2898 pass, 0 fail in `packages/shared`). Run Verify-phase UAT including Electron packaged build and deep-link manual check.
 - `bun run typecheck:all` root script may still fail on missing root `tsconfig.base.json` (pre-existing per AGENTS.md).
 
 ## Transition

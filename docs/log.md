@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-06-23
+
+* **Quality review fixes**: Updated [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md) with quality review section (blockers, quoted-form conflation, other residuals, migration scripts moved). Updated [specs/index.md](specs/index.md) and [index.md](index.md) active work notes. Updated [specs/log.md](specs/log.md). Updated root `AGENTS.md` active context.
+
 ## 2026-06-22
 
 * **Implemented**: Complete Kata brand transition.

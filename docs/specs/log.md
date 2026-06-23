@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-23
+
+* **Quality review fixes**: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md) updated with quality review section documenting blockers fixed (broken server dist scopeDir, 2 failing tests), quoted-form conflation fixes (5 files), other residuals, and migration scripts moved to `scripts/migrations/`. Full `packages/shared` test suite now passes (2898 pass, 0 fail). Updated [index.md](index.md) active work note.
+
 ## 2026-06-22
 
 * **Implemented**: [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md) — Hard-cutover Kata identity across `@kata-sh/*`, `KATA_*`, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, `agents.kata.sh`, CLI/server binaries, bundled resources, i18n, and docs. Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). ADR: [../adrs/2026-06-22-kata-identity-hard-cutover.md](../adrs/2026-06-22-kata-identity-hard-cutover.md). Moved Active → Completed in [index.md](index.md).
