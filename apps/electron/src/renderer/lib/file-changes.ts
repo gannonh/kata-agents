@@ -1,4 +1,4 @@
-import type { ActivityItem, FileChange } from '@craft-agent/ui'
+import type { ActivityItem, FileChange } from '@kata-sh/ui'
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined

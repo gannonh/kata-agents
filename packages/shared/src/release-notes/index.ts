@@ -1,7 +1,7 @@
 /**
  * Release Notes Utilities
  *
- * Loads release notes from bundled assets and syncs them to ~/.craft-agent/release-notes/.
+ * Loads release notes from bundled assets and syncs them to ~/.kata-agents/release-notes/.
  * Follows the same pattern as docs/index.ts.
  *
  * Source content lives in apps/electron/resources/release-notes/*.md.
@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 
 import { getBundledAssetsDir } from '../utils/paths.ts';
 import { debug } from '../utils/debug.ts';
 
-const CONFIG_DIR = join(homedir(), '.craft-agent');
+const CONFIG_DIR = join(homedir(), '.kata-agents');
 const RELEASE_NOTES_DIR = join(CONFIG_DIR, 'release-notes');
 
 let releaseNotesInitialized = false;
@@ -31,8 +31,8 @@ function loadBundledReleaseNotes(): Record<string, string> {
   const assetsDir = getAssetsDir();
   const notes: Record<string, string> = {};
 
-  // Try bundled assets first, fall back to ~/.craft-agent/release-notes/
-  // (Docker/remote server may not have CRAFT_BUNDLED_ASSETS_ROOT set,
+  // Try bundled assets first, fall back to ~/.kata-agents/release-notes/
+  // (Docker/remote server may not have KATA_BUNDLED_ASSETS_ROOT set,
   // but initializeReleaseNotes() copies files to the config dir at startup)
   let dir = assetsDir;
   if (!existsSync(dir)) {

@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { CraftAgentsSymbol } from './icons/CraftAgentsSymbol'
+import { KataAgentsSymbol } from './icons/KataAgentsSymbol'
 
 interface SplashScreenProps {
   isExiting: boolean
@@ -36,7 +36,7 @@ export function SplashScreen({ isExiting, onExitComplete }: SplashScreenProps) {
           ease: [0.16, 1, 0.3, 1] // Exponential out curve
         }}
       >
-        <CraftAgentsSymbol className="h-8 text-accent" />
+        <KataAgentsSymbol className="h-8 text-accent" />
       </motion.div>
     </motion.div>
   )

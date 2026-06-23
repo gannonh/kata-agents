@@ -3,8 +3,8 @@ import { CliRpcClient } from './client.ts'
 import {
   serializeEnvelope,
   deserializeEnvelope,
-} from '@craft-agent/server-core/transport'
-import type { MessageEnvelope } from '@craft-agent/shared/protocol'
+} from '@kata-sh/server-core/transport'
+import type { MessageEnvelope } from '@kata-sh/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Mock WS server helpers

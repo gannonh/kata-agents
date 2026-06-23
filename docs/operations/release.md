@@ -106,7 +106,7 @@ signing values are exported from the kata-code `.env`
 | `APPLE_TEAM_ID` | Apple Developer team ID (`ZBZKKWF95G`). | kata-code `.env` / Apple Developer membership page. |
 | `APPLE_SIGNING_IDENTITY` | Developer ID Application identity name (`Developer ID Application: …`). Used to pick the signing identity. | kata-code `.env`. |
 | `GITHUB_TOKEN` | Create the release + upload assets (`release` job) and push the post-stable version bump to `main` (`finalize` job). Both jobs grant `contents: write`. | Provided automatically by GitHub Actions. **Repo requirement:** Settings → Actions → General → Workflow permissions must be **Read and write** (`default_workflow_permissions: write`), or release creation and the finalize push 403. |
-| `CRAFT_ANTHROPIC_API_KEY` *(optional)* | `validate-server.yml` integration run. | Existing Anthropic API key. |
+| `KATA_ANTHROPIC_API_KEY` *(optional)* | `validate-server.yml` integration run. | Existing Anthropic API key. |
 | `STITCH_API_KEY` *(optional)* | `validate-server.yml` integration run. | Existing. |
 | `NPM_TOKEN` *(future, Project C)* | npm publish (the `publish_cli` job, disabled in B). | Add when enabling npm publishing. |
 

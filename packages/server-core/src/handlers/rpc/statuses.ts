@@ -1,6 +1,6 @@
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
+import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 export const HANDLED_CHANNELS = [
@@ -14,7 +14,7 @@ export function registerStatusesHandlers(server: RpcServer, _deps: HandlerDeps):
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { listStatuses } = await import('@craft-agent/shared/statuses')
+    const { listStatuses } = await import('@kata-sh/shared/statuses')
     return listStatuses(workspace.rootPath)
   })
 
@@ -24,7 +24,7 @@ export function registerStatusesHandlers(server: RpcServer, _deps: HandlerDeps):
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { reorderStatuses } = await import('@craft-agent/shared/statuses')
+    const { reorderStatuses } = await import('@kata-sh/shared/statuses')
     reorderStatuses(workspace.rootPath, orderedIds)
   })
 }

@@ -5,9 +5,9 @@
  * renderer, and binding store together. One instance per workspace.
  */
 
-import type { ISessionManager } from '@craft-agent/server-core/handlers'
-import type { PushTarget } from '@craft-agent/shared/protocol'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import type { ISessionManager } from '@kata-sh/server-core/handlers'
+import type { PushTarget } from '@kata-sh/shared/protocol'
+import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import {
   evaluateBindingAccess,
   evaluatePreBindingAccess,

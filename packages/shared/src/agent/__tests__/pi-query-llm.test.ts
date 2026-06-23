@@ -18,11 +18,11 @@ function createConfig(overrides: Partial<BackendConfig> = {}): BackendConfig {
     workspace: {
       id: 'ws-test',
       name: 'Test Workspace',
-      rootPath: '/tmp/craft-agent-test',
+      rootPath: '/tmp/kata-agent-test',
     } as any,
     session: {
       id: 'session-test',
-      workspaceRootPath: '/tmp/craft-agent-test',
+      workspaceRootPath: '/tmp/kata-agent-test',
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
     } as any,

@@ -71,7 +71,7 @@ export class AutomationEventLogger {
     const entry: LoggedAutomationEvent = {
       id: randomUUID(),
       time: new Date().toISOString(),
-      source: 'craft-agent/automations',
+      source: 'kata-agent/automations',
       ...event,
     };
     this.buffer.push(JSON.stringify(entry));

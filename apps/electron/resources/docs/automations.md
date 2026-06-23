@@ -1,14 +1,14 @@
 # Automations Configuration Guide
 
-This guide explains how to configure automations in Craft Agent to automate workflows based on events.
+This guide explains how to configure automations in Kata Agent to automate workflows based on events.
 
-> **CLI-first workflow (recommended):** Use `craft-agent automation ...` commands instead of editing JSON directly.
-> - `craft-agent automation --help`
-> - Canonical command reference: [craft-cli.md](./craft-cli.md)
+> **CLI-first workflow (recommended):** Use `kata-agent automation ...` commands instead of editing JSON directly.
+> - `kata-agent automation --help`
+> - Canonical command reference: [kata-cli.md](./kata-cli.md)
 
 ## What Are Automations?
 
-Automations allow you to trigger actions automatically when specific events occur in Craft Agent. You can:
+Automations allow you to trigger actions automatically when specific events occur in Kata Agent. You can:
 - Send prompts to create agent sessions based on events
 - Send webhook HTTP requests to external services (Slack, Discord, custom APIs, etc.)
 - Execute actions on a schedule using cron expressions
@@ -19,24 +19,24 @@ Automations allow you to trigger actions automatically when specific events occu
 Automations are configured in `automations.json` at the root of your workspace:
 
 ```
-~/.craft-agent/workspaces/{workspaceId}/automations.json
+~/.kata-agents/workspaces/{workspaceId}/automations.json
 ```
 
 ## Recommended CLI Commands
 
 ```bash
-craft-agent automation list
-craft-agent automation get <id>
-craft-agent automation create --event UserPromptSubmit --prompt "..."
-craft-agent automation update <id> --json '{...}'
-craft-agent automation enable <id>
-craft-agent automation disable <id>
-craft-agent automation duplicate <id>
-craft-agent automation history [<id>] --limit 20
-craft-agent automation last-executed <id>
-craft-agent automation test <id> --match "..."
-craft-agent automation lint
-craft-agent automation validate
+kata-agent automation list
+kata-agent automation get <id>
+kata-agent automation create --event UserPromptSubmit --prompt "..."
+kata-agent automation update <id> --json '{...}'
+kata-agent automation enable <id>
+kata-agent automation disable <id>
+kata-agent automation duplicate <id>
+kata-agent automation history [<id>] --limit 20
+kata-agent automation last-executed <id>
+kata-agent automation test <id> --match "..."
+kata-agent automation lint
+kata-agent automation validate
 ```
 
 ## Basic Structure
@@ -60,7 +60,7 @@ craft-agent automation validate
 
 ## Supported Events
 
-### App Events (triggered by Craft Agent)
+### App Events (triggered by Kata Agent)
 
 | Event | Trigger | Match Value |
 |-------|---------|-------------|
@@ -96,7 +96,7 @@ craft-agent automation validate
 
 ### Prompt Actions
 
-Send a prompt to Craft Agent (creates a new session for scheduled prompts).
+Send a prompt to Kata Agent (creates a new session for scheduled prompts).
 
 ```json
 {
@@ -114,7 +114,7 @@ Send a prompt to Craft Agent (creates a new session for scheduled prompts).
 
 **Features:**
 - Use `@mentions` to reference sources or skills
-- Environment variables are expanded (e.g., `$CRAFT_LABEL`)
+- Environment variables are expanded (e.g., `$KATA_LABEL`)
 
 **LLM Connection & Model:** Optionally specify which AI provider and model to use for the created session. If omitted, the workspace default connection and model are used.
 
@@ -136,10 +136,10 @@ Send an HTTP request to an external endpoint when an event fires. Useful for not
 ```json
 {
   "type": "webhook",
-  "url": "https://hooks.slack.com/services/${CRAFT_WH_SLACK_PATH}",
+  "url": "https://hooks.slack.com/services/${KATA_WH_SLACK_PATH}",
   "method": "POST",
   "body": {
-    "text": "Session ${CRAFT_SESSION_NAME} status changed to ${CRAFT_NEW_STATE}"
+    "text": "Session ${KATA_SESSION_NAME} status changed to ${KATA_NEW_STATE}"
   }
 }
 ```
@@ -173,9 +173,9 @@ Instead of manually constructing `Authorization` headers, you can use the `auth`
   "url": "https://api.example.com/events",
   "auth": {
     "type": "bearer",
-    "token": "${CRAFT_WH_API_TOKEN}"
+    "token": "${KATA_WH_API_TOKEN}"
   },
-  "body": { "event": "$CRAFT_EVENT" }
+  "body": { "event": "$KATA_EVENT" }
 }
 ```
 
@@ -186,8 +186,8 @@ Instead of manually constructing `Authorization` headers, you can use the `auth`
   "url": "https://legacy.example.com/webhook",
   "auth": {
     "type": "basic",
-    "username": "${CRAFT_WH_USER}",
-    "password": "${CRAFT_WH_PASS}"
+    "username": "${KATA_WH_USER}",
+    "password": "${KATA_WH_PASS}"
   }
 }
 ```
@@ -209,43 +209,43 @@ The `auth` field is applied before custom `headers`, so you can override the gen
 
 **Variable expansion:** The `url`, `headers` values, `body`, and `auth` fields all support `$VAR` and `${VAR}` syntax for environment variable expansion. See [Environment Variables](#environment-variables) below.
 
-**Security:** Webhook actions only have access to `CRAFT_*` system variables and `CRAFT_WH_*` user-defined secrets. They do **not** have access to your full system environment (e.g., `$HOME`, `$PATH`, or other process variables).
+**Security:** Webhook actions only have access to `KATA_*` system variables and `KATA_WH_*` user-defined secrets. They do **not** have access to your full system environment (e.g., `$HOME`, `$PATH`, or other process variables).
 
 ## Environment Variables
 
 Both prompt and webhook actions support variable expansion using `$VAR` or `${VAR}` syntax.
 
-### System Variables (CRAFT_*)
+### System Variables (KATA_*)
 
 These are automatically set by the automation system based on the triggering event:
 
 | Variable | Description | Available For |
 |----------|-------------|---------------|
-| `$CRAFT_EVENT` | Event name (e.g., `LabelAdd`) | All events |
-| `$CRAFT_EVENT_DATA` | Full event payload as JSON | All events |
-| `$CRAFT_SESSION_ID` | Session ID | Events with session context |
-| `$CRAFT_SESSION_NAME` | Session name | Events with session context |
-| `$CRAFT_WORKSPACE_ID` | Workspace ID | All events |
+| `$KATA_EVENT` | Event name (e.g., `LabelAdd`) | All events |
+| `$KATA_EVENT_DATA` | Full event payload as JSON | All events |
+| `$KATA_SESSION_ID` | Session ID | Events with session context |
+| `$KATA_SESSION_NAME` | Session name | Events with session context |
+| `$KATA_WORKSPACE_ID` | Workspace ID | All events |
 
 **Per-event variables:**
 
 | Event | Variable | Description |
 |-------|----------|-------------|
-| `LabelAdd` / `LabelRemove` | `$CRAFT_LABEL` | The label that was added/removed |
-| `PermissionModeChange` | `$CRAFT_OLD_MODE`, `$CRAFT_NEW_MODE` | Previous and new permission mode |
-| `FlagChange` | `$CRAFT_IS_FLAGGED` | `true` or `false` |
-| `SessionStatusChange` | `$CRAFT_OLD_STATE`, `$CRAFT_NEW_STATE` | Previous and new status |
-| `SchedulerTick` | `$CRAFT_LOCAL_TIME`, `$CRAFT_LOCAL_DATE` | Current time (`14:30`) and date (`2026-03-09`) |
+| `LabelAdd` / `LabelRemove` | `$KATA_LABEL` | The label that was added/removed |
+| `PermissionModeChange` | `$KATA_OLD_MODE`, `$KATA_NEW_MODE` | Previous and new permission mode |
+| `FlagChange` | `$KATA_IS_FLAGGED` | `true` or `false` |
+| `SessionStatusChange` | `$KATA_OLD_STATE`, `$KATA_NEW_STATE` | Previous and new status |
+| `SchedulerTick` | `$KATA_LOCAL_TIME`, `$KATA_LOCAL_DATE` | Current time (`14:30`) and date (`2026-03-09`) |
 
-### User-Defined Webhook Secrets (CRAFT_WH_*)
+### User-Defined Webhook Secrets (KATA_WH_*)
 
-For webhook actions, you can define your own secrets by setting environment variables with the `CRAFT_WH_` prefix in your shell profile (e.g., `~/.zshrc`, `~/.bashrc`):
+For webhook actions, you can define your own secrets by setting environment variables with the `KATA_WH_` prefix in your shell profile (e.g., `~/.zshrc`, `~/.bashrc`):
 
 ```bash
 # In your shell profile
-export CRAFT_WH_SLACK_URL="https://hooks.slack.com/services/T.../B.../xxx"
-export CRAFT_WH_DISCORD_URL="https://discord.com/api/webhooks/123/abc"
-export CRAFT_WH_API_TOKEN="your-secret-token"
+export KATA_WH_SLACK_URL="https://hooks.slack.com/services/T.../B.../xxx"
+export KATA_WH_DISCORD_URL="https://discord.com/api/webhooks/123/abc"
+export KATA_WH_API_TOKEN="your-secret-token"
 ```
 
 Then reference them in `automations.json`:
@@ -253,9 +253,9 @@ Then reference them in `automations.json`:
 ```json
 {
   "type": "webhook",
-  "url": "${CRAFT_WH_SLACK_URL}",
+  "url": "${KATA_WH_SLACK_URL}",
   "method": "POST",
-  "body": { "text": "Hello from Craft Agent!" }
+  "body": { "text": "Hello from Kata Agent!" }
 }
 ```
 
@@ -263,14 +263,14 @@ Then reference them in `automations.json`:
 {
   "type": "webhook",
   "url": "https://api.example.com/events",
-  "headers": { "Authorization": "Bearer ${CRAFT_WH_API_TOKEN}" },
-  "body": { "event": "${CRAFT_EVENT}", "session": "${CRAFT_SESSION_NAME}" }
+  "headers": { "Authorization": "Bearer ${KATA_WH_API_TOKEN}" },
+  "body": { "event": "${KATA_EVENT}", "session": "${KATA_SESSION_NAME}" }
 }
 ```
 
 This keeps secrets out of `automations.json` (which may be shared or committed to version control).
 
-> **Note:** Only variables prefixed with `CRAFT_WH_` are injected into webhook actions. Other environment variables (like `$HOME` or `$DATABASE_URL`) are not accessible to webhooks.
+> **Note:** Only variables prefixed with `KATA_WH_` are injected into webhook actions. Other environment variables (like `$HOME` or `$DATABASE_URL`) are not accessible to webhooks.
 
 > **Note:** Environment variables are not expanded during test runs (the "Test" button in the UI). Tests send the raw URL/body as configured.
 
@@ -515,9 +515,9 @@ If you haven't paired a supergroup yet:
 1. **Create / convert a supergroup with Topics enabled.** In Telegram, open the group → tap the group name → Edit (pencil icon) → toggle **Topics** on → Save. The group must be a forum supergroup; regular groups can't host topics.
 2. **Add the bot to the supergroup.** Group name → Add members → search for your bot's username → add.
 3. **Promote the bot to admin with "Manage Topics".** Group name → Edit → Administrators → Add Administrator → pick the bot → toggle on **Manage Topics** → Save. This is the step most people miss; without it, topic creation fails with `400: not enough rights to create a topic`.
-4. **Pair the supergroup.** In Craft Agent: Settings → Messaging → Telegram → **Pair Supergroup**. Copy the 6-digit code, then in any topic of the supergroup type `/pair <code>`. The bot confirms and the Settings row updates with the group's title.
+4. **Pair the supergroup.** In Kata Agent: Settings → Messaging → Telegram → **Pair Supergroup**. Copy the 6-digit code, then in any topic of the supergroup type `/pair <code>`. The bot confirms and the Settings row updates with the group's title.
 
-Verify by checking the supergroup row in Settings shows the group title. If automation runs fail later, `~/.craft-agent/logs/messaging-gateway.log` will show `automation_topic_bind_failed` with the underlying Telegram error.
+Verify by checking the supergroup row in Settings shows the group title. If automation runs fail later, `~/.kata-agents/logs/messaging-gateway.log` will show `automation_topic_bind_failed` with the underlying Telegram error.
 
 ## Complete Examples
 
@@ -593,9 +593,9 @@ Only notify when permission mode changes specifically from `safe` to `allow-all`
         "actions": [
           {
             "type": "webhook",
-            "url": "${CRAFT_WH_SLACK_URL}",
+            "url": "${KATA_WH_SLACK_URL}",
             "method": "POST",
-            "body": { "text": ":warning: Permission escalated from safe to allow-all in *${CRAFT_SESSION_NAME}*" }
+            "body": { "text": ":warning: Permission escalated from safe to allow-all in *${KATA_SESSION_NAME}*" }
           }
         ]
       }
@@ -613,14 +613,14 @@ Only notify when permission mode changes specifically from `safe` to `allow-all`
     "LabelAdd": [
       {
         "actions": [
-          { "type": "prompt", "prompt": "The label $CRAFT_LABEL was added. Log this change with a timestamp." }
+          { "type": "prompt", "prompt": "The label $KATA_LABEL was added. Log this change with a timestamp." }
         ]
       }
     ],
     "LabelRemove": [
       {
         "actions": [
-          { "type": "prompt", "prompt": "The label $CRAFT_LABEL was removed. Log this change with a timestamp." }
+          { "type": "prompt", "prompt": "The label $KATA_LABEL was removed. Log this change with a timestamp." }
         ]
       }
     ]
@@ -666,7 +666,7 @@ Only notify when permission mode changes specifically from `safe` to `allow-all`
 
 ### Slack Notification on Status Change
 
-Sends a Slack message when a session is marked as done. Requires `CRAFT_WH_SLACK_URL` in your shell profile.
+Sends a Slack message when a session is marked as done. Requires `KATA_WH_SLACK_URL` in your shell profile.
 
 ```json
 {
@@ -679,10 +679,10 @@ Sends a Slack message when a session is marked as done. Requires `CRAFT_WH_SLACK
         "actions": [
           {
             "type": "webhook",
-            "url": "${CRAFT_WH_SLACK_URL}",
+            "url": "${KATA_WH_SLACK_URL}",
             "method": "POST",
             "body": {
-              "text": ":white_check_mark: Session *${CRAFT_SESSION_NAME}* marked as done"
+              "text": ":white_check_mark: Session *${KATA_SESSION_NAME}* marked as done"
             }
           }
         ]
@@ -707,9 +707,9 @@ A single automation can have both prompt and webhook actions. They execute in or
         "actions": [
           {
             "type": "webhook",
-            "url": "${CRAFT_WH_SLACK_URL}",
+            "url": "${KATA_WH_SLACK_URL}",
             "method": "POST",
-            "body": { "text": ":rotating_light: Urgent label added to *${CRAFT_SESSION_NAME}*" }
+            "body": { "text": ":rotating_light: Urgent label added to *${KATA_SESSION_NAME}*" }
           },
           {
             "type": "prompt",
@@ -740,8 +740,8 @@ A single automation can have both prompt and webhook actions. They execute in or
             "bodyFormat": "form",
             "body": {
               "grant_type": "client_credentials",
-              "client_id": "${CRAFT_WH_CLIENT_ID}",
-              "client_secret": "${CRAFT_WH_CLIENT_SECRET}"
+              "client_id": "${KATA_WH_CLIENT_ID}",
+              "client_secret": "${KATA_WH_CLIENT_SECRET}"
             }
           }
         ]
@@ -766,14 +766,14 @@ A single automation can have both prompt and webhook actions. They execute in or
             "url": "https://api.example.com/craft-events",
             "method": "POST",
             "headers": {
-              "Authorization": "Bearer ${CRAFT_WH_API_TOKEN}",
-              "X-Source": "craft-agent"
+              "Authorization": "Bearer ${KATA_WH_API_TOKEN}",
+              "X-Source": "kata-agents"
             },
             "body": {
-              "event": "${CRAFT_EVENT}",
-              "session_id": "${CRAFT_SESSION_ID}",
-              "old_status": "${CRAFT_OLD_STATE}",
-              "new_status": "${CRAFT_NEW_STATE}"
+              "event": "${KATA_EVENT}",
+              "session_id": "${KATA_SESSION_ID}",
+              "old_status": "${KATA_OLD_STATE}",
+              "new_status": "${KATA_NEW_STATE}"
             }
           }
         ]
@@ -792,7 +792,7 @@ Automations are validated when:
 
 **Using config_validate:**
 
-Ask Craft Agent to validate your automations configuration:
+Ask Kata Agent to validate your automations configuration:
 
 ```
 Validate my automations configuration
@@ -870,7 +870,7 @@ When a limit is hit, further events of that type are **silently dropped** for th
 ### Webhook not working
 
 1. **Check URL** — Must be a valid `http://` or `https://` URL. Other protocols (ftp, ws, etc.) are rejected at runtime with a clear error.
-2. **Check env vars** — Ensure `CRAFT_WH_*` variables are set in your shell profile and Craft Agent was restarted after adding them. URLs using `$VAR` templates are validated after variable expansion — if the variable is empty or unset, the URL will be invalid.
+2. **Check env vars** — Ensure `KATA_WH_*` variables are set in your shell profile and Kata Agent was restarted after adding them. URLs using `$VAR` templates are validated after variable expansion — if the variable is empty or unset, the URL will be invalid.
 3. **Use the Test button** — Tests connectivity to the URL (note: env vars are not expanded during test)
 4. **Check method** — Some endpoints require specific HTTP methods (POST, PUT, etc.)
 5. **Check response** — The automation history shows HTTP status codes for webhook executions
@@ -892,5 +892,5 @@ When a webhook execution fails (shown with a red indicator in the timeline), you
 2. **Use labels** - Tag scheduled sessions for easy filtering
 3. **Be specific** - Use matchers to avoid triggering on every event
 4. **Test cron** - Use [crontab.guru](https://crontab.guru/) to verify expressions
-5. **Keep secrets out of config** - Use `CRAFT_WH_*` env vars for webhook URLs and tokens instead of hardcoding them in automations.json
+5. **Keep secrets out of config** - Use `KATA_WH_*` env vars for webhook URLs and tokens instead of hardcoding them in automations.json
 6. **Combine actions** - Use both webhook and prompt actions in a single automation for notification + AI response workflows

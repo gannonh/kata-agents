@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Buggy MCP server that uses LSP-style Content-Length framing instead of MCP's
 // newline-delimited JSON-RPC. Reproduces the reporter's failure mode from
-// craft-agents-oss#787. The MCP client should fail fast with a framing hint.
+// kata-agents-oss#787. The MCP client should fail fast with a framing hint.
 
 import readline from 'node:readline'
 

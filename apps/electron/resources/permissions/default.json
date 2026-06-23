@@ -102,44 +102,44 @@
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {
-      "pattern": "^craft-agent\\s+label\\s+(list|get|auto-rule-list|auto-rule-validate)\\b",
-      "comment": "craft-agent label read-only operations"
+      "pattern": "^kata-agent\\s+label\\s+(list|get|auto-rule-list|auto-rule-validate)\\b",
+      "comment": "kata-agent label read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+source\\s+(list|get|validate|test|auth-help)\\b",
-      "comment": "craft-agent source read-only operations"
+      "pattern": "^kata-agent\\s+source\\s+(list|get|validate|test|auth-help)\\b",
+      "comment": "kata-agent source read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+skill\\s+(list|get|validate|where)\\b",
-      "comment": "craft-agent skill read-only operations"
+      "pattern": "^kata-agent\\s+skill\\s+(list|get|validate|where)\\b",
+      "comment": "kata-agent skill read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b",
-      "comment": "craft-agent automation read-only operations"
+      "pattern": "^kata-agent\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b",
+      "comment": "kata-agent automation read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+permission\\s+(list|get|validate)\\b",
-      "comment": "craft-agent permission read-only operations"
+      "pattern": "^kata-agent\\s+permission\\s+(list|get|validate)\\b",
+      "comment": "kata-agent permission read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s+theme\\s+(get|validate|list-presets|get-preset)\\b",
-      "comment": "craft-agent theme read-only operations"
+      "pattern": "^kata-agent\\s+theme\\s+(get|validate|list-presets|get-preset)\\b",
+      "comment": "kata-agent theme read-only operations"
     },
     {
-      "pattern": "^craft-agent\\s*$",
-      "comment": "craft-agent bare invocation (prints help)"
+      "pattern": "^kata-agent\\s*$",
+      "comment": "kata-agent bare invocation (prints help)"
     },
     {
-      "pattern": "^craft-agent\\s+(label|source|skill|automation|permission|theme)\\s*$",
-      "comment": "craft-agent entity help"
+      "pattern": "^kata-agent\\s+(label|source|skill|automation|permission|theme)\\s*$",
+      "comment": "kata-agent entity help"
     },
     {
-      "pattern": "^craft-agent\\s+(label|source|skill|automation|permission|theme)\\s+--help\\b",
-      "comment": "craft-agent entity help flags"
+      "pattern": "^kata-agent\\s+(label|source|skill|automation|permission|theme)\\s+--help\\b",
+      "comment": "kata-agent entity help flags"
     },
     {
-      "pattern": "^craft-agent\\s+--(help|version|discover)\\b",
-      "comment": "craft-agent global flags"
+      "pattern": "^kata-agent\\s+--(help|version|discover)\\b",
+      "comment": "kata-agent global flags"
     },
     {
       "pattern": "^find\\b",

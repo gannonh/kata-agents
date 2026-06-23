@@ -2,9 +2,9 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
-import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
-import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
+import type { ToolDisplayMeta, AnnotationV1 } from '@kata-sh/core'
+import { normalizePath, pathStartsWith, stripPathPrefix } from '@kata-sh/core/utils'
+import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   ChevronRight,

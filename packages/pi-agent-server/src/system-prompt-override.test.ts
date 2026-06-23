@@ -3,7 +3,7 @@ import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 
 /**
- * Regression contract for craft-agents-oss#648.
+ * Regression contract for kata-agents-oss#648.
  *
  * Pi SDK 0.72.1's `session.prompt()` resets `agent.state.systemPrompt` to
  * `_baseSystemPrompt` on every turn (agent-session.js ~L796), and
@@ -33,23 +33,23 @@ function makeFakeSession(): StampedSession {
 describe('applySystemPromptOverride', () => {
   it('stamps state.systemPrompt', () => {
     const session = makeFakeSession();
-    applySystemPromptOverride(session as unknown as AgentSession, 'CRAFT_PROMPT');
-    expect(session.agent.state.systemPrompt).toBe('CRAFT_PROMPT');
+    applySystemPromptOverride(session as unknown as AgentSession, 'KATA_PROMPT');
+    expect(session.agent.state.systemPrompt).toBe('KATA_PROMPT');
   });
 
   it('stamps the private _baseSystemPrompt field so session.prompt() reset survives', () => {
     const session = makeFakeSession();
-    applySystemPromptOverride(session as unknown as AgentSession, 'CRAFT_PROMPT');
-    expect(session._baseSystemPrompt).toBe('CRAFT_PROMPT');
+    applySystemPromptOverride(session as unknown as AgentSession, 'KATA_PROMPT');
+    expect(session._baseSystemPrompt).toBe('KATA_PROMPT');
   });
 
   it('replaces _rebuildSystemPrompt with a constant function so tool-change rebuilds survive', () => {
     const session = makeFakeSession();
-    applySystemPromptOverride(session as unknown as AgentSession, 'CRAFT_PROMPT');
+    applySystemPromptOverride(session as unknown as AgentSession, 'KATA_PROMPT');
     expect(typeof session._rebuildSystemPrompt).toBe('function');
     // Must return our prompt regardless of which tool names the SDK passes in.
-    expect(session._rebuildSystemPrompt!(['read', 'bash'])).toBe('CRAFT_PROMPT');
-    expect(session._rebuildSystemPrompt!([])).toBe('CRAFT_PROMPT');
+    expect(session._rebuildSystemPrompt!(['read', 'bash'])).toBe('KATA_PROMPT');
+    expect(session._rebuildSystemPrompt!([])).toBe('KATA_PROMPT');
   });
 
   it('overwrites previously stamped values on a re-application', () => {

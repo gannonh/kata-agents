@@ -24,7 +24,7 @@ function createConsoleLogger(): Logger {
     warn: (...args) => console.warn(fmt('warn', args)),
     error: (...args) => console.error(fmt('error', args)),
     debug: (...args) => {
-      if (process.env.CRAFT_DEBUG === 'true' || process.env.CRAFT_IS_PACKAGED !== 'true') {
+      if (process.env.KATA_DEBUG === 'true' || process.env.KATA_IS_PACKAGED !== 'true') {
         console.debug(fmt('debug', args))
       }
     },
@@ -35,21 +35,21 @@ function createConsoleLogger(): Logger {
  * Create PlatformServices for headless (Bun) mode.
  *
  * Environment variables:
- * - CRAFT_APP_ROOT — override appRootPath (default: cwd)
- * - CRAFT_RESOURCES_PATH — override resourcesPath (default: cwd/resources)
- * - CRAFT_IS_PACKAGED — 'true' for production (default: false)
- * - CRAFT_VERSION — app version string (default: '0.0.0-dev')
- * - CRAFT_DEBUG — 'true' to enable debug logging
+ * - KATA_APP_ROOT — override appRootPath (default: cwd)
+ * - KATA_RESOURCES_PATH — override resourcesPath (default: cwd/resources)
+ * - KATA_IS_PACKAGED — 'true' for production (default: false)
+ * - KATA_VERSION — app version string (default: '0.0.0-dev')
+ * - KATA_DEBUG — 'true' to enable debug logging
  */
 export function createHeadlessPlatform(options?: { appVersion?: string }): PlatformServices {
   const logger = createConsoleLogger()
-  const isDebugMode = process.env.CRAFT_DEBUG === 'true' || process.env.CRAFT_IS_PACKAGED !== 'true'
+  const isDebugMode = process.env.KATA_DEBUG === 'true' || process.env.KATA_IS_PACKAGED !== 'true'
 
   return {
-    appRootPath: process.env.CRAFT_APP_ROOT || process.cwd(),
-    resourcesPath: process.env.CRAFT_RESOURCES_PATH || join(process.cwd(), 'resources'),
-    isPackaged: process.env.CRAFT_IS_PACKAGED === 'true',
-    appVersion: process.env.CRAFT_VERSION || options?.appVersion || '0.0.0-dev',
+    appRootPath: process.env.KATA_APP_ROOT || process.cwd(),
+    resourcesPath: process.env.KATA_RESOURCES_PATH || join(process.cwd(), 'resources'),
+    isPackaged: process.env.KATA_IS_PACKAGED === 'true',
+    appVersion: process.env.KATA_VERSION || options?.appVersion || '0.0.0-dev',
 
     imageProcessor: {
       async getMetadata(buffer) {

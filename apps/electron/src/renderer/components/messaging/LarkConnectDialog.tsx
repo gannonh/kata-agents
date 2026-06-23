@@ -20,7 +20,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@craft-agent/ui'
+import { Spinner } from '@kata-sh/ui'
 import { SettingsSecretInput } from '@/components/settings'
 
 interface LarkConnectDialogProps {

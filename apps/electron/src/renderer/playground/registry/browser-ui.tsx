@@ -7,7 +7,7 @@ import {
   TurnCard,
   type ActivityItem,
   type ResponseContent,
-} from '@craft-agent/ui'
+} from '@kata-sh/ui'
 import { AnimatePresence, motion } from 'motion/react'
 import { BrowserTabStrip } from '@/components/browser/BrowserTabStrip'
 import { EMPTY_STATE_PROMPT_SAMPLES } from '@/components/browser/empty-state-prompts'
@@ -183,7 +183,7 @@ function getLiveFxPayload(scenario: Scenario, runState: RunState): { active: boo
 
     return {
       active: true,
-      label: 'Craft Agents are working…',
+      label: 'Kata Agents are working…',
       cursor: cursorByScenario[scenario],
     }
   }
@@ -223,7 +223,7 @@ function BrowserAgentEmptyState({
 }) {
   const handlePromptSelect = useCallback(async (prompt: string) => {
     const deepLinkRoute = routes.action.newSession({ input: prompt, send: true })
-    const deepLinkUrl = `craftagents://${deepLinkRoute}`
+    const deepLinkUrl = `kataagents://${deepLinkRoute}`
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI?.openUrl) {
@@ -579,7 +579,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mock-4',
-      url: 'https://github.com/lukilabs/craft-agents-oss',
+      url: 'https://github.com/lukilabs/kata-agents-oss',
       title: 'GitHub',
       favicon: null,
       isLoading: false,
@@ -612,7 +612,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     {
       id: 'long-1',
       url: 'https://www.notion.so/Craft-Agents-Multi-Session-Browser-Registry-Design-Review-Thread-2026-Q1',
-      title: 'Craft Agents Multi-Session Browser Registry Design Review Thread (Q1 2026)',
+      title: 'Kata Agents Multi-Session Browser Registry Design Review Thread (Q1 2026)',
       favicon: null,
       isLoading: false,
       canGoBack: true,
@@ -688,7 +688,7 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'run-3',
-      url: 'https://github.com/lukilabs/craft-agents-oss/pulls',
+      url: 'https://github.com/lukilabs/kata-agents-oss/pulls',
       title: 'GitHub PRs',
       favicon: null,
       isLoading: true,
@@ -780,8 +780,8 @@ const MOCK_BROWSER_PRESETS: Record<BrowserTabStripMockPreset, BrowserInstanceInf
     },
     {
       id: 'mix-4',
-      url: 'https://github.com/lukilabs/craft-agents-oss',
-      title: 'Craft Agents OSS Repo with a Surprisingly Long Branch and Compare View Name',
+      url: 'https://github.com/lukilabs/kata-agents-oss',
+      title: 'Kata Agents OSS Repo with a Surprisingly Long Branch and Compare View Name',
       favicon: null,
       isLoading: false,
       canGoBack: true,

@@ -24,7 +24,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'NotebookEdit': 'Editing Notebook',
 
   // Documentation tools
-  'SearchCraftAgents': 'Search Documentation',
+  'SearchKataAgents': 'Search Documentation',
 };
 
 /**

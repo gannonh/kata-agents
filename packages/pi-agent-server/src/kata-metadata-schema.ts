@@ -1,12 +1,12 @@
-const CRAFT_DISPLAY_NAME_KEY = '_displayName';
-const CRAFT_INTENT_KEY = '_intent';
+const KATA_DISPLAY_NAME_KEY = '_displayName';
+const KATA_INTENT_KEY = '_intent';
 
-const CRAFT_DISPLAY_NAME_SCHEMA = {
+const KATA_DISPLAY_NAME_SCHEMA = {
   type: 'string',
   description: 'Craft UI metadata: human-friendly action name for display only.',
 };
 
-const CRAFT_INTENT_SCHEMA = {
+const KATA_INTENT_SCHEMA = {
   type: 'string',
   description: 'Craft UI metadata: concise tool-call intent for display only.',
 };
@@ -30,7 +30,7 @@ function cloneWithDescriptors<T extends object>(value: T): T {
  * properties at the adapter boundary. Unknown schema shapes are returned
  * unchanged, and upstream-defined metadata properties win if Pi adds them later.
  */
-export function allowCraftMetadataProperties<T>(schema: T): T {
+export function allowKataMetadataProperties<T>(schema: T): T {
   if (!isRecord(schema)) return schema;
 
   const properties = schema.properties;
@@ -39,11 +39,11 @@ export function allowCraftMetadataProperties<T>(schema: T): T {
   const nextSchema = cloneWithDescriptors(schema);
   const nextProperties = cloneWithDescriptors(properties);
 
-  if (!(CRAFT_DISPLAY_NAME_KEY in nextProperties)) {
-    nextProperties[CRAFT_DISPLAY_NAME_KEY] = CRAFT_DISPLAY_NAME_SCHEMA;
+  if (!(KATA_DISPLAY_NAME_KEY in nextProperties)) {
+    nextProperties[KATA_DISPLAY_NAME_KEY] = KATA_DISPLAY_NAME_SCHEMA;
   }
-  if (!(CRAFT_INTENT_KEY in nextProperties)) {
-    nextProperties[CRAFT_INTENT_KEY] = CRAFT_INTENT_SCHEMA;
+  if (!(KATA_INTENT_KEY in nextProperties)) {
+    nextProperties[KATA_INTENT_KEY] = KATA_INTENT_SCHEMA;
   }
 
   Object.defineProperty(nextSchema, 'properties', {
@@ -56,13 +56,13 @@ export function allowCraftMetadataProperties<T>(schema: T): T {
 }
 
 /** Strip Craft-only metadata before invoking the upstream Pi tool implementation. */
-export function stripCraftMetadata<T>(input: T): T {
+export function stripKataMetadata<T>(input: T): T {
   if (!isRecord(input)) return input;
-  if (!(CRAFT_DISPLAY_NAME_KEY in input) && !(CRAFT_INTENT_KEY in input)) return input;
+  if (!(KATA_DISPLAY_NAME_KEY in input) && !(KATA_INTENT_KEY in input)) return input;
 
   const cleanInput = { ...input };
-  delete cleanInput[CRAFT_DISPLAY_NAME_KEY];
-  delete cleanInput[CRAFT_INTENT_KEY];
+  delete cleanInput[KATA_DISPLAY_NAME_KEY];
+  delete cleanInput[KATA_INTENT_KEY];
 
   return cleanInput as T;
 }

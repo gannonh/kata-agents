@@ -1,5 +1,5 @@
 {
-  "name": "@craft-agent/session-tools-core",
+  "name": "@kata-sh/session-tools-core",
   "version": "0.10.3",
   "license": "Apache-2.0",
   "description": "Shared utilities for session-scoped tools (Claude and Codex)",

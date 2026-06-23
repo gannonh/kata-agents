@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { AnnotationV1 } from '@craft-agent/core'
+import type { AnnotationV1 } from '@kata-sh/core'
 import {
   annotationInteractionActions,
   annotationInteractionReducer,

@@ -2,6 +2,13 @@
 
 ## 2026-06-22
 
+* **Implemented**: Complete Kata brand transition.
+  * Spec: [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md)
+  * Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md)
+  * ADR: [adrs/2026-06-22-kata-identity-hard-cutover.md](adrs/2026-06-22-kata-identity-hard-cutover.md)
+  * **Updated**: [specs/index.md](specs/index.md), [index.md](index.md), [specs/log.md](specs/log.md), [adrs/index.md](adrs/index.md), [adrs/log.md](adrs/log.md)
+  * Scope: hard-cutover rebrand with zero Craft-era compatibility shims.
+
 * **Drafted**: Complete Kata brand transition spec.
   * Spec: [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md)
   * **Updated**: [specs/index.md](specs/index.md) consolidates the old Project A/C/D split into this active spec; [index.md](index.md) lists it under active work; [specs/log.md](specs/log.md) records the planning entry.
@@ -26,7 +33,7 @@
   * Build report: [specs/2026-06-19-ci-release-pipeline-build-report.md](specs/2026-06-19-ci-release-pipeline-build-report.md)
   * **New section**: [operations/](operations/) with [ci.md](operations/ci.md) and [release.md](operations/release.md) (CI gate, release pipeline, auto-update shape, required secrets).
   * **Updated**: [index.md](index.md) (added operations section + recent work), [specs/index.md](specs/index.md) moved Project B from Active to Completed.
-* **Completed**: Phase 1 user-facing rebrand from Craft Agents to Kata Agents.
+* **Completed**: Phase 1 user-facing rebrand from Kata Agents to Kata Agents.
   * Spec: [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md)
   * Build report: [specs/rebrand-kata-agents-phase-1-build-report.md](specs/rebrand-kata-agents-phase-1-build-report.md)
   * Changes include i18n rebranding for all 7 locales, Electron app identity strings and icon assets, React component symbol and splash, shared package agent identity prompts, OAuth consent label, README/CONTRIBUTING, and OKF spec status.

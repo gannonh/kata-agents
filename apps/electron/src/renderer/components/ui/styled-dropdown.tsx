@@ -1,7 +1,7 @@
 /**
  * Styled Dropdown Components
  *
- * Re-exports from @craft-agent/ui for shared styling across packages.
+ * Re-exports from @kata-sh/ui for shared styling across packages.
  */
 
 export {
@@ -14,4 +14,4 @@ export {
   StyledDropdownMenuSeparator,
   StyledDropdownMenuSubTrigger,
   StyledDropdownMenuSubContent,
-} from '@craft-agent/ui'
+} from '@kata-sh/ui'

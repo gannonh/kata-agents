@@ -1,17 +1,17 @@
-# Craft Agent CLI Guide
+# Kata Agent CLI Guide
 
-`craft-agent` is the preferred interface for managing workspace config domains such as labels, sources, skills, and automations.
+`kata-agent` is the preferred interface for managing workspace config domains such as labels, sources, skills, and automations.
 
 ## Usage
 
 ```bash
-craft-agent <entity> <action> [args] [--flags] [--json '<json>'] [--stdin]
+kata-agent <entity> <action> [args] [--flags] [--json '<json>'] [--stdin]
 ```
 
 ### Global flags
-- `craft-agent --help`
-- `craft-agent --version`
-- `craft-agent --discover`
+- `kata-agent --help`
+- `kata-agent --version`
+- `kata-agent --discover`
 
 ### Input modes
 - Flat flags for simple values
@@ -26,33 +26,33 @@ craft-agent <entity> <action> [args] [--flags] [--json '<json>'] [--stdin]
 Manage workspace labels stored under `labels/`.
 
 ### Commands
-- `craft-agent label list`
-- `craft-agent label get <id>`
-- `craft-agent label create --name "<name>" [--color "<color>"] [--parent-id <id|root>] [--value-type string|number|date]`
-- `craft-agent label update <id> [--name "<name>"] [--color "<color>"] [--value-type string|number|date|none] [--clear-value-type]`
-- `craft-agent label delete <id>`
-- `craft-agent label move <id> --parent <id|root>`
-- `craft-agent label reorder [--parent <id|root>] <ordered-id-1> <ordered-id-2> ...`
-- `craft-agent label auto-rule-list <id>`
-- `craft-agent label auto-rule-add <id> --pattern "<regex>" [--flags "gi"] [--value-template "$1"] [--description "..."]`
-- `craft-agent label auto-rule-remove <id> --index <n>`
-- `craft-agent label auto-rule-clear <id>`
-- `craft-agent label auto-rule-validate <id>`
+- `kata-agent label list`
+- `kata-agent label get <id>`
+- `kata-agent label create --name "<name>" [--color "<color>"] [--parent-id <id|root>] [--value-type string|number|date]`
+- `kata-agent label update <id> [--name "<name>"] [--color "<color>"] [--value-type string|number|date|none] [--clear-value-type]`
+- `kata-agent label delete <id>`
+- `kata-agent label move <id> --parent <id|root>`
+- `kata-agent label reorder [--parent <id|root>] <ordered-id-1> <ordered-id-2> ...`
+- `kata-agent label auto-rule-list <id>`
+- `kata-agent label auto-rule-add <id> --pattern "<regex>" [--flags "gi"] [--value-template "$1"] [--description "..."]`
+- `kata-agent label auto-rule-remove <id> --index <n>`
+- `kata-agent label auto-rule-clear <id>`
+- `kata-agent label auto-rule-validate <id>`
 
 ### Examples
 
 ```bash
-craft-agent label list
-craft-agent label get bug
-craft-agent label create --name "Bug" --color "accent"
-craft-agent label create --name "Priority" --value-type number
-craft-agent label update bug --json '{"name":"Bug Report","color":"destructive"}'
-craft-agent label update priority --value-type none
-craft-agent label move bug --parent root
-craft-agent label reorder --parent root development content bug
-craft-agent label auto-rule-add linear-issue --pattern "\\b([A-Z]{2,5}-\\d+)\\b" --value-template "$1"
-craft-agent label auto-rule-list linear-issue
-craft-agent label auto-rule-validate linear-issue
+kata-agent label list
+kata-agent label get bug
+kata-agent label create --name "Bug" --color "accent"
+kata-agent label create --name "Priority" --value-type number
+kata-agent label update bug --json '{"name":"Bug Report","color":"destructive"}'
+kata-agent label update priority --value-type none
+kata-agent label move bug --parent root
+kata-agent label reorder --parent root development content bug
+kata-agent label auto-rule-add linear-issue --pattern "\\b([A-Z]{2,5}-\\d+)\\b" --value-template "$1"
+kata-agent label auto-rule-list linear-issue
+kata-agent label auto-rule-validate linear-issue
 ```
 
 ### Notes
@@ -69,16 +69,16 @@ craft-agent label auto-rule-validate linear-issue
 Manage workspace sources stored under `sources/{slug}/`.
 
 ### Commands
-- `craft-agent source list [--include-builtins true|false]`
-- `craft-agent source get <slug>`
-- `craft-agent source create` (see flags below)
-- `craft-agent source update <slug> --json '{...}'`
-- `craft-agent source delete <slug>`
-- `craft-agent source validate <slug>`
-- `craft-agent source test <slug>`
-- `craft-agent source init-guide <slug> [--template generic|mcp|api|local]`
-- `craft-agent source init-permissions <slug> [--mode read-only]`
-- `craft-agent source auth-help <slug>`
+- `kata-agent source list [--include-builtins true|false]`
+- `kata-agent source get <slug>`
+- `kata-agent source create` (see flags below)
+- `kata-agent source update <slug> --json '{...}'`
+- `kata-agent source delete <slug>`
+- `kata-agent source validate <slug>`
+- `kata-agent source test <slug>`
+- `kata-agent source init-guide <slug> [--template generic|mcp|api|local]`
+- `kata-agent source init-permissions <slug> [--mode read-only]`
+- `kata-agent source auth-help <slug>`
 
 ### Flags for `source create`
 
@@ -102,22 +102,22 @@ Manage workspace sources stored under `sources/{slug}/`.
 ### Examples
 
 ```bash
-craft-agent source list
-craft-agent source get linear
+kata-agent source list
+kata-agent source get linear
 # MCP source with flat flags
-craft-agent source create --name "Linear" --provider "linear" --type mcp --url "https://mcp.linear.app/sse" --auth-type oauth
+kata-agent source create --name "Linear" --provider "linear" --type mcp --url "https://mcp.linear.app/sse" --auth-type oauth
 # MCP source with --json for nested config
-craft-agent source create --name "Linear" --provider "linear" --type mcp --json '{"mcp":{"transport":"http","url":"https://mcp.linear.app/sse","authType":"oauth"}}'
+kata-agent source create --name "Linear" --provider "linear" --type mcp --json '{"mcp":{"transport":"http","url":"https://mcp.linear.app/sse","authType":"oauth"}}'
 # API source
-craft-agent source create --name "Exa" --provider "exa" --type api --base-url "https://api.exa.ai/" --auth-type header
+kata-agent source create --name "Exa" --provider "exa" --type api --base-url "https://api.exa.ai/" --auth-type header
 # Local source
-craft-agent source create --name "Docs Folder" --provider "filesystem" --type local --path "~/Documents"
-craft-agent source update linear --json '{"enabled":false}'
-craft-agent source validate linear
-craft-agent source test linear
-craft-agent source init-guide linear --template mcp
-craft-agent source init-permissions linear --mode read-only
-craft-agent source auth-help linear
+kata-agent source create --name "Docs Folder" --provider "filesystem" --type local --path "~/Documents"
+kata-agent source update linear --json '{"enabled":false}'
+kata-agent source validate linear
+kata-agent source test linear
+kata-agent source init-guide linear --template mcp
+kata-agent source init-permissions linear --mode read-only
+kata-agent source auth-help linear
 ```
 
 ### Notes
@@ -136,13 +136,13 @@ craft-agent source auth-help linear
 Manage workspace skills stored under `skills/{slug}/SKILL.md`.
 
 ### Commands
-- `craft-agent skill list [--workspace-only] [--project-root <path>]`
-- `craft-agent skill get <slug> [--project-root <path>]`
-- `craft-agent skill where <slug> [--project-root <path>]`
-- `craft-agent skill create` (see flags below)
-- `craft-agent skill update <slug> --json '{...}' [--project-root <path>]`
-- `craft-agent skill delete <slug>`
-- `craft-agent skill validate <slug> [--source workspace|project|global] [--project-root <path>]`
+- `kata-agent skill list [--workspace-only] [--project-root <path>]`
+- `kata-agent skill get <slug> [--project-root <path>]`
+- `kata-agent skill where <slug> [--project-root <path>]`
+- `kata-agent skill create` (see flags below)
+- `kata-agent skill update <slug> --json '{...}' [--project-root <path>]`
+- `kata-agent skill delete <slug>`
+- `kata-agent skill validate <slug> [--source workspace|project|global] [--project-root <path>]`
 
 ### Flags for `skill create`
 
@@ -160,15 +160,15 @@ Manage workspace skills stored under `skills/{slug}/SKILL.md`.
 ### Examples
 
 ```bash
-craft-agent skill list
-craft-agent skill list --workspace-only
-craft-agent skill where commit-helper
-craft-agent skill create --name "Commit Helper" --description "Generate conventional commits" --slug commit-helper
-craft-agent skill create --name "Code Review" --description "Review PRs" --globs "*.ts,*.tsx" --always-allow "Bash" --required-sources "github"
-craft-agent skill update commit-helper --json '{"requiredSources":["github"],"body":"Use concise, imperative commit messages."}'
-craft-agent skill validate commit-helper
-craft-agent skill validate commit-helper --source global
-craft-agent skill delete commit-helper
+kata-agent skill list
+kata-agent skill list --workspace-only
+kata-agent skill where commit-helper
+kata-agent skill create --name "Commit Helper" --description "Generate conventional commits" --slug commit-helper
+kata-agent skill create --name "Code Review" --description "Review PRs" --globs "*.ts,*.tsx" --always-allow "Bash" --required-sources "github"
+kata-agent skill update commit-helper --json '{"requiredSources":["github"],"body":"Use concise, imperative commit messages."}'
+kata-agent skill validate commit-helper
+kata-agent skill validate commit-helper --source global
+kata-agent skill delete commit-helper
 ```
 
 ### Notes
@@ -185,19 +185,19 @@ craft-agent skill delete commit-helper
 Manage workspace automations stored in `automations.json`.
 
 ### Commands
-- `craft-agent automation list`
-- `craft-agent automation get <id>`
-- `craft-agent automation create` (see flags below)
-- `craft-agent automation update <id>` (same flags as create, all optional)
-- `craft-agent automation delete <id>`
-- `craft-agent automation enable <id>`
-- `craft-agent automation disable <id>`
-- `craft-agent automation duplicate <id>`
-- `craft-agent automation history [<id>] [--limit <n>]`
-- `craft-agent automation last-executed <id>`
-- `craft-agent automation test <id> [--match "..."]`
-- `craft-agent automation lint`
-- `craft-agent automation validate`
+- `kata-agent automation list`
+- `kata-agent automation get <id>`
+- `kata-agent automation create` (see flags below)
+- `kata-agent automation update <id>` (same flags as create, all optional)
+- `kata-agent automation delete <id>`
+- `kata-agent automation enable <id>`
+- `kata-agent automation disable <id>`
+- `kata-agent automation duplicate <id>`
+- `kata-agent automation history [<id>] [--limit <n>]`
+- `kata-agent automation last-executed <id>`
+- `kata-agent automation test <id> [--match "..."]`
+- `kata-agent automation lint`
+- `kata-agent automation validate`
 
 ### Flags for `automation create` / `update`
 
@@ -218,23 +218,23 @@ Manage workspace automations stored in `automations.json`.
 ### Examples
 
 ```bash
-craft-agent automation list
-craft-agent automation validate
+kata-agent automation list
+kata-agent automation validate
 # Simple prompt automation with flat flags
-craft-agent automation create --event UserPromptSubmit --prompt "Summarize this prompt"
+kata-agent automation create --event UserPromptSubmit --prompt "Summarize this prompt"
 # Scheduled automation with flat flags
-craft-agent automation create --event SchedulerTick --cron "0 9 * * 1-5" --timezone "Europe/Budapest" --prompt "Give me a morning briefing" --labels "Scheduled" --permission-mode safe
+kata-agent automation create --event SchedulerTick --cron "0 9 * * 1-5" --timezone "Europe/Budapest" --prompt "Give me a morning briefing" --labels "Scheduled" --permission-mode safe
 # Complex automation with --json
-craft-agent automation create --event SchedulerTick --json '{"cron":"0 9 * * 1-5","actions":[{"type":"prompt","prompt":"Daily summary"}]}'
-craft-agent automation update abc123 --name "Morning Report" --prompt "Updated prompt"
-craft-agent automation update abc123 --enabled false
-craft-agent automation enable abc123
-craft-agent automation duplicate abc123
-craft-agent automation history abc123 --limit 10
-craft-agent automation last-executed abc123
-craft-agent automation test abc123 --match "UserPromptSubmit"
-craft-agent automation lint
-craft-agent automation delete abc123
+kata-agent automation create --event SchedulerTick --json '{"cron":"0 9 * * 1-5","actions":[{"type":"prompt","prompt":"Daily summary"}]}'
+kata-agent automation update abc123 --name "Morning Report" --prompt "Updated prompt"
+kata-agent automation update abc123 --enabled false
+kata-agent automation enable abc123
+kata-agent automation duplicate abc123
+kata-agent automation history abc123 --limit 10
+kata-agent automation last-executed abc123
+kata-agent automation test abc123 --match "UserPromptSubmit"
+kata-agent automation lint
+kata-agent automation delete abc123
 ```
 
 ### Notes
@@ -253,16 +253,16 @@ craft-agent automation delete abc123
 Manage Explore mode permissions stored in `permissions.json` (workspace-level and per-source).
 
 ### Commands
-- `craft-agent permission list`
-- `craft-agent permission get [--source <slug>]`
-- `craft-agent permission set [--source <slug>] --json '{...}'`
-- `craft-agent permission add-mcp-pattern "<pattern>" [--comment "..."] [--source <slug>]`
-- `craft-agent permission add-api-endpoint --method GET|POST|... --path "<regex>" [--comment "..."] [--source <slug>]`
-- `craft-agent permission add-bash-pattern "<pattern>" [--comment "..."] [--source <slug>]`
-- `craft-agent permission add-write-path "<glob>" [--source <slug>]`
-- `craft-agent permission remove <index> --type mcp|api|bash|write-path|blocked [--source <slug>]`
-- `craft-agent permission validate [--source <slug>]`
-- `craft-agent permission reset [--source <slug>]`
+- `kata-agent permission list`
+- `kata-agent permission get [--source <slug>]`
+- `kata-agent permission set [--source <slug>] --json '{...}'`
+- `kata-agent permission add-mcp-pattern "<pattern>" [--comment "..."] [--source <slug>]`
+- `kata-agent permission add-api-endpoint --method GET|POST|... --path "<regex>" [--comment "..."] [--source <slug>]`
+- `kata-agent permission add-bash-pattern "<pattern>" [--comment "..."] [--source <slug>]`
+- `kata-agent permission add-write-path "<glob>" [--source <slug>]`
+- `kata-agent permission remove <index> --type mcp|api|bash|write-path|blocked [--source <slug>]`
+- `kata-agent permission validate [--source <slug>]`
+- `kata-agent permission reset [--source <slug>]`
 
 ### Scope
 
@@ -273,31 +273,31 @@ With `--source <slug>`: operates on that source's `permissions.json` (auto-scope
 
 ```bash
 # List all permissions files (workspace + sources)
-craft-agent permission list
+kata-agent permission list
 # Get workspace permissions
-craft-agent permission get
+kata-agent permission get
 # Get source-specific permissions
-craft-agent permission get --source linear
+kata-agent permission get --source linear
 # Add read-only MCP patterns for a source
-craft-agent permission add-mcp-pattern "list" --comment "List operations" --source linear
-craft-agent permission add-mcp-pattern "get" --comment "Get operations" --source linear
-craft-agent permission add-mcp-pattern "search" --comment "Search operations" --source linear
+kata-agent permission add-mcp-pattern "list" --comment "List operations" --source linear
+kata-agent permission add-mcp-pattern "get" --comment "Get operations" --source linear
+kata-agent permission add-mcp-pattern "search" --comment "Search operations" --source linear
 # Add API endpoint rules
-craft-agent permission add-api-endpoint --method GET --path ".*" --comment "All GET requests" --source stripe
+kata-agent permission add-api-endpoint --method GET --path ".*" --comment "All GET requests" --source stripe
 # Add bash patterns
-craft-agent permission add-bash-pattern "^ls\\s" --comment "Allow ls"
+kata-agent permission add-bash-pattern "^ls\\s" --comment "Allow ls"
 # Add write path globs
-craft-agent permission add-write-path "/tmp/**"
+kata-agent permission add-write-path "/tmp/**"
 # Remove a rule by index and type
-craft-agent permission remove 1 --type mcp --source linear
+kata-agent permission remove 1 --type mcp --source linear
 # Replace entire config
-craft-agent permission set --source github --json '{"allowedMcpPatterns":[{"pattern":"list","comment":"List ops"}]}'
+kata-agent permission set --source github --json '{"allowedMcpPatterns":[{"pattern":"list","comment":"List ops"}]}'
 # Validate all permissions
-craft-agent permission validate
+kata-agent permission validate
 # Validate source-specific
-craft-agent permission validate --source linear
+kata-agent permission validate --source linear
 # Delete permissions file (revert to defaults)
-craft-agent permission reset --source linear
+kata-agent permission reset --source linear
 ```
 
 ### Notes
@@ -315,54 +315,54 @@ craft-agent permission reset --source linear
 Manage app-level and workspace-level theme settings.
 
 ### Commands
-- `craft-agent theme get`
-- `craft-agent theme validate [--preset <id>]`
-- `craft-agent theme list-presets`
-- `craft-agent theme get-preset <id>`
-- `craft-agent theme set-color-theme <id>`
-- `craft-agent theme set-workspace-color-theme <id|default>`
-- `craft-agent theme set-override --json '{...}'`
-- `craft-agent theme reset-override`
+- `kata-agent theme get`
+- `kata-agent theme validate [--preset <id>]`
+- `kata-agent theme list-presets`
+- `kata-agent theme get-preset <id>`
+- `kata-agent theme set-color-theme <id>`
+- `kata-agent theme set-workspace-color-theme <id|default>`
+- `kata-agent theme set-override --json '{...}'`
+- `kata-agent theme reset-override`
 
 ### Examples
 
 ```bash
 # Inspect current theme state
-craft-agent theme get
+kata-agent theme get
 
 # Validate app override file
-craft-agent theme validate
+kata-agent theme validate
 
 # Validate one preset file
-craft-agent theme validate --preset nord
+kata-agent theme validate --preset nord
 
 # List available presets
-craft-agent theme list-presets
+kata-agent theme list-presets
 
 # Inspect a specific preset
-craft-agent theme get-preset dracula
+kata-agent theme get-preset dracula
 
 # Set app default preset
-craft-agent theme set-color-theme nord
+kata-agent theme set-color-theme nord
 
 # Set workspace override
-craft-agent theme set-workspace-color-theme dracula
+kata-agent theme set-workspace-color-theme dracula
 
 # Clear workspace override (inherit app default)
-craft-agent theme set-workspace-color-theme default
+kata-agent theme set-workspace-color-theme default
 
 # Replace app-level theme.json override
-craft-agent theme set-override --json '{"accent":"oklch(0.62 0.21 293)","dark":{"accent":"oklch(0.68 0.21 293)"}}'
+kata-agent theme set-override --json '{"accent":"oklch(0.62 0.21 293)","dark":{"accent":"oklch(0.68 0.21 293)"}}'
 
 # Remove app-level override file
-craft-agent theme reset-override
+kata-agent theme reset-override
 ```
 
 ### Notes
 - `set-color-theme` and `set-workspace-color-theme` require an existing preset ID (`default` is always valid).
 - `set-override` validates `theme.json` shape before writing.
 - Workspace override is stored in `workspace/config.json` under `defaults.colorTheme`.
-- App override is stored in `~/.craft-agent/theme.json`.
+- App override is stored in `~/.kata-agents/theme.json`.
 <!-- cli:theme:end -->
 
 ---

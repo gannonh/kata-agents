@@ -1,12 +1,12 @@
 {
-  "name": "@craft-agent/cli",
+  "name": "@kata-sh/cli",
   "version": "0.10.3",
   "license": "Apache-2.0",
-  "description": "Terminal client for Craft Agent server",
+  "description": "Terminal client for Kata Agent server",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "craft-cli": "src/index.ts"
+    "kata-cli": "src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",
@@ -14,8 +14,8 @@
     "test": "bun test src/"
   },
   "dependencies": {
-    "@craft-agent/shared": "workspace:*",
-    "@craft-agent/server-core": "workspace:*"
+    "@kata-sh/shared": "workspace:*",
+    "@kata-sh/server-core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

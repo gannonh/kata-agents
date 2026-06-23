@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url'
 const STORAGE_MODULE_PATH = pathToFileURL(join(import.meta.dir, '..', 'storage.ts')).href
 
 function makeConfigDir(): string {
-  return mkdtempSync(join(tmpdir(), 'craft-agent-drafts-'))
+  return mkdtempSync(join(tmpdir(), 'kata-agent-drafts-'))
 }
 
 function runEval(configDir: string, code: string): string {
@@ -16,7 +16,7 @@ function runEval(configDir: string, code: string): string {
     '--eval',
     `import { getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts } from '${STORAGE_MODULE_PATH}'; ${code}`,
   ], {
-    env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
+    env: { ...process.env, KATA_CONFIG_DIR: configDir },
     stdout: 'pipe',
     stderr: 'pipe',
   })

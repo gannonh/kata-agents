@@ -1,14 +1,14 @@
 {
-  "name": "@craft-agent/electron",
+  "name": "@kata-sh/electron",
   "version": "0.10.6",
-  "description": "Electron desktop app for Craft Agents",
+  "description": "Electron desktop app for Kata Agents",
   "main": "dist/main.cjs",
   "private": true,
   "author": {
-    "name": "Craft Docs Ltd.",
-    "email": "support@craft.do"
+    "name": "Gannon Hall",
+    "email": "support@kata.sh"
   },
-  "homepage": "https://agents.craft.do",
+  "homepage": "https://agents.kata.sh",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -36,11 +36,11 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/messaging-gateway": "workspace:*",
-    "@craft-agent/server-core": "workspace:*",
-    "@craft-agent/shared": "workspace:*",
-    "@craft-agent/ui": "workspace:*",
+    "@kata-sh/core": "workspace:*",
+    "@kata-sh/messaging-gateway": "workspace:*",
+    "@kata-sh/server-core": "workspace:*",
+    "@kata-sh/shared": "workspace:*",
+    "@kata-sh/ui": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

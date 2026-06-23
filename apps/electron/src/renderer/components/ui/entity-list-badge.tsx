@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import { cn } from '@/lib/utils'
 
 export interface EntityListBadgeProps {

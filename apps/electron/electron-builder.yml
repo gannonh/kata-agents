@@ -1,4 +1,4 @@
-appId: com.lukilabs.craft-agent
+appId: sh.kata.agents
 productName: Kata Agents
 copyright: Copyright © 2026 Gannon Hall
 
@@ -200,7 +200,7 @@ nsis:
 linux:
   icon: resources/icon.png
   category: Utility
-  maintainer: "Craft Docs Ltd. <support@craft.do>"
+  maintainer: "Gannon Hall <support@kata.sh>"
   target:
     - target: AppImage
       arch:

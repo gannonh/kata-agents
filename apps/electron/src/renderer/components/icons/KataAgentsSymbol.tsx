@@ -1,4 +1,4 @@
-interface CraftAgentsSymbolProps {
+interface KataAgentsSymbolProps {
   className?: string
 }
 
@@ -6,7 +6,7 @@ interface CraftAgentsSymbolProps {
  * Kata Agents app icon symbol - matches resources/icon.svg.
  * Tan (#d4a574) kanji mark on a dark (#18181b) rounded square.
  */
-export function CraftAgentsSymbol({ className }: CraftAgentsSymbolProps) {
+export function KataAgentsSymbol({ className }: KataAgentsSymbolProps) {
   return (
     <svg
       viewBox="0 0 64 64"

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { InitGate } from '@craft-agent/server-core/domain'
+import { InitGate } from '@kata-sh/server-core/domain'
 
 describe('InitGate', () => {
   it('resolves waiters when marked ready', async () => {

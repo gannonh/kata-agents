@@ -1,5 +1,5 @@
 /**
- * Utility functions for @craft-agent/ui
+ * Utility functions for @kata-sh/ui
  */
 
 import { type ClassValue, clsx } from 'clsx'

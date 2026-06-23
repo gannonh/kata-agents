@@ -1,8 +1,8 @@
 {
-  "name": "@craft-agent/server-core",
+  "name": "@kata-sh/server-core",
   "version": "0.10.3",
   "license": "Apache-2.0",
-  "description": "Reusable headless server infrastructure for Craft Agent",
+  "description": "Reusable headless server infrastructure for Kata Agent",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -24,8 +24,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@craft-agent/core": "workspace:*",
-    "@craft-agent/shared": "workspace:*",
+    "@kata-sh/core": "workspace:*",
+    "@kata-sh/shared": "workspace:*",
     "jose": "^6.0.0",
     "ws": "^8.19.0",
     "sharp": "0.34.5",

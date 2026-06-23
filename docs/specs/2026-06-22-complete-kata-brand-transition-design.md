@@ -11,7 +11,7 @@ timestamp: 2026-06-22T00:00:00Z
 ## Status
 
 - **Plan**: Approved 2026-06-22. User intent: one spec to complete the brand transition. If implementation is too large for one PR, split Build into smaller PRs under this spec. Adversarial review completed with no remaining blocker or major issues after revision.
-- **Build**: Not started.
+- **Build**: Implemented 2026-06-22. See [build report](2026-06-22-complete-kata-brand-transition-build-report.md).
 - **Verify**: Not started.
 
 ## Goal

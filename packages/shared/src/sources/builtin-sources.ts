@@ -5,8 +5,8 @@
  * These sources are not shown in the sources list UI but are available
  * for the agent to use.
  *
- * NOTE: craft-agents-docs is now an always-available MCP server configured
- * directly in craft-agent.ts, not a source. This file is kept for backwards
+ * NOTE: kata-agents-docs is now an always-available MCP server configured
+ * directly in kata-agent.ts, not a source. This file is kept for backwards
  * compatibility but returns empty results.
  */
 
@@ -15,8 +15,8 @@ import type { LoadedSource, FolderSourceConfig } from './types.ts';
 /**
  * Get all built-in sources for a workspace.
  *
- * Currently returns empty array - craft-agents-docs has been moved to
- * an always-available MCP server in craft-agent.ts.
+ * Currently returns empty array - kata-agents-docs has been moved to
+ * an always-available MCP server in kata-agent.ts.
  *
  * @param _workspaceId - The workspace ID (unused)
  * @param _workspaceRootPath - Absolute path to workspace root folder (unused)
@@ -27,24 +27,24 @@ export function getBuiltinSources(_workspaceId: string, _workspaceRootPath: stri
 }
 
 /**
- * Get the built-in Craft Agents docs source.
+ * Get the built-in Kata Agents docs source.
  *
- * @deprecated craft-agents-docs is now an always-available MCP server
- * configured directly in craft-agent.ts. This function is kept for
+ * @deprecated kata-agents-docs is now an always-available MCP server
+ * configured directly in kata-agent.ts. This function is kept for
  * backwards compatibility but returns a placeholder.
  */
 export function getDocsSource(workspaceId: string, workspaceRootPath: string): LoadedSource {
   // Return a placeholder - this shouldn't be called anymore
   const placeholderConfig: FolderSourceConfig = {
-    id: 'builtin-craft-agents-docs',
+    id: 'builtin-kata-agents-docs',
     name: 'Kata Agents Docs',
-    slug: 'craft-agents-docs',
+    slug: 'kata-agents-docs',
     enabled: false,
     provider: 'mintlify',
     type: 'mcp',
     mcp: {
       transport: 'http',
-      url: 'https://agents.craft.do/docs/mcp',
+      url: 'https://agents.kata.sh/docs/mcp',
       authType: 'none',
     },
     tagline: 'Search Kata Agents documentation and source setup guides',
@@ -66,7 +66,7 @@ export function getDocsSource(workspaceId: string, workspaceRootPath: string): L
 /**
  * Check if a source slug is a built-in source.
  *
- * Returns false - craft-agents-docs is now an always-available MCP server,
+ * Returns false - kata-agents-docs is now an always-available MCP server,
  * not a source in the sources system.
  *
  * @param _slug - Source slug to check (unused)

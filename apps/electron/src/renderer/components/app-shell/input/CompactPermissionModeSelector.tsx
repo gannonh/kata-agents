@@ -13,7 +13,7 @@ import {
   PERMISSION_MODE_CONFIG,
   PERMISSION_MODE_ORDER,
   type PermissionMode,
-} from '@craft-agent/shared/agent/modes'
+} from '@kata-sh/shared/agent/modes'
 
 // ============================================================================
 // Mode Icon (same SVG pattern as ActiveOptionBadges.PermissionModeIcon)

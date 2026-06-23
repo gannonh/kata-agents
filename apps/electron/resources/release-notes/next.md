@@ -9,3 +9,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Bug Fixes
 
 ## Breaking Changes
+
+- **Complete brand identity cutover** — package scope is now `@kata-sh/*`, config directory is `~/.kata-agents`, environment variables use the `KATA_*` prefix, CLI binaries are `kata-cli` / `kata-server`, deep links use `kataagents://`, and app ID is `sh.kata.agents`. No migration from Craft-era names is provided.

@@ -1,2 +1,2 @@
 @echo off
-"%CRAFT_UV%" run --python 3.12 "%CRAFT_SCRIPTS%\xlsx_tool.py" %*
+"%KATA_UV%" run --python 3.12 "%KATA_SCRIPTS%\xlsx_tool.py" %*
