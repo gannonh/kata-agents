@@ -79,7 +79,14 @@ let __isUpdating = false
 // exist. electron-updater destroys windows between quitAndInstall and
 // before-quit firing, so the regular before-quit save site would see an empty
 // array (AC4: multi-window state preservation).
-let beforeUpdateQuitHook: (() => void) | null = null
+//
+// The hook is async so it can flush sessions and dispose resources BEFORE
+// quitAndInstall triggers the OS-level termination. This allows before-quit
+// to skip preventDefault during updates (Squirrel.Mac's install hook only
+// fires on the native termination from quitAndInstall; a preventDefault
+// cancels that termination and a subsequent app.quit() does not re-trigger
+// the install).
+let beforeUpdateQuitHook: (() => void | Promise<void>) | null = null
 
 // Poll timer handle, cleared on quit.
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -111,7 +118,7 @@ export function setAutoUpdateEventSink(sink: EventSink): void {
   eventSink = sink
 }
 
-export function setBeforeUpdateQuitHook(fn: () => void): void {
+export function setBeforeUpdateQuitHook(fn: () => void | Promise<void>): void {
   beforeUpdateQuitHook = fn
 }
 
@@ -440,7 +447,13 @@ export async function installUpdate(): Promise<DesktopUpdateActionResult> {
   })
 
   try {
-    beforeUpdateQuitHook?.()
+    // Run the pre-quit hook BEFORE quitAndInstall. The hook flushes sessions,
+    // saves window state, and disposes resources while BrowserWindows still
+    // exist and the app is fully functional. This allows the before-quit
+    // handler to skip preventDefault during updates so Squirrel.Mac's native
+    // termination (which performs the actual bundle swap) proceeds without
+    // being cancelled.
+    await beforeUpdateQuitHook?.()
   } catch (err) {
     mainLog.error('[auto-update] beforeUpdateQuit hook failed:', err)
   }

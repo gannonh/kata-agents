@@ -1085,11 +1085,39 @@ app.whenReady().then(async () => {
     // Initialize auto-update (check immediately on launch)
     // Skip in dev mode to avoid replacing /Applications app and launching it instead
     if (moduleSink) setAutoUpdateEventSink(moduleSink)
-    // Snapshot multi-window state BEFORE quitAndInstall. electron-updater
-    // (Squirrel.Mac) destroys BrowserWindows between quitAndInstall and
-    // before-quit firing; saving from before-quit alone would overwrite
-    // window-state.json with an empty array.
-    setBeforeUpdateQuitHook(() => captureAndSaveWindowState('pre-update'))
+    // Pre-update hook: save window state AND flush sessions / dispose resources
+    // BEFORE quitAndInstall. This runs while BrowserWindows still exist and the
+    // app is fully functional, so the before-quit handler can skip
+    // preventDefault during updates and let Squirrel.Mac's native termination
+    // (which performs the bundle swap + relaunch) proceed without being
+    // cancelled. If before-quit preventDefault fires during an update,
+    // Squirrel.Mac's install hook is cancelled and a subsequent app.quit()
+    // does not re-trigger it, so the app quits without installing.
+    setBeforeUpdateQuitHook(async () => {
+      captureAndSaveWindowState('pre-update')
+      if (sessionManager) {
+        try {
+          await sessionManager.flushAllSessions()
+          mainLog.info('Flushed all pending session writes (pre-update)')
+        } catch (error) {
+          mainLog.error('Failed to flush sessions (pre-update):', error)
+        }
+        sessionManager.cleanup()
+        if (browserPaneManager) browserPaneManager.destroyAll()
+        if (oauthFlowStore) oauthFlowStore.dispose()
+        getModelRefreshService().stopAll()
+        if (messagingHandle) {
+          try {
+            await messagingHandle.dispose()
+          } catch (err) {
+            mainLog.error('[messaging] dispose failed (pre-update):', err)
+          }
+        }
+        const { cleanup: cleanupPowerManager } = await import('./power-manager')
+        cleanupPowerManager()
+        releaseServerLock()
+      }
+    })
     if (app.isPackaged) {
       configureUpdates().catch(err => {
         mainLog.error('[auto-update] Launch check failed:', err)
@@ -1179,23 +1207,35 @@ app.on('before-quit', async (event) => {
   // Stop background update polling so a check never fires mid-shutdown.
   stopUpdates()
 
-  if (windowManager) {
-    const windows = windowManager.getWindowStates()
-    // Empty-snapshot guard: during update-quit, electron-updater has already
-    // destroyed all BrowserWindows by the time before-quit fires. The pre-update
-    // hook already saved the real state — don't let this late save overwrite it.
-    if (windows.length === 0 && isUpdating()) {
-      mainLog.warn('[window-state] skip save: empty snapshot during update-quit (pre-update snapshot wins)')
-    } else {
-      captureAndSaveWindowState('before-quit')
+  // When an update is in progress, the pre-update hook (run from
+  // installUpdate before quitAndInstall) already flushed sessions, saved
+  // window state, and disposed all resources. Do NOT call preventDefault —
+  // Squirrel.Mac's native termination (triggered by quitAndInstall) performs
+  // the bundle swap + relaunch, and preventDefault cancels that termination.
+  // A subsequent app.quit() starts a fresh quit cycle that Squirrel.Mac's
+  // install hook does not re-attach to, so the app quits without installing.
+  if (isUpdating()) {
+    if (windowManager) {
+      const windows = windowManager.getWindowStates()
+      // Pre-update hook already saved the real state. Only save if windows
+      // are still open (autoUpdater.quitAndInstall closes them before
+      // before-quit on some platforms).
+      if (windows.length > 0) {
+        captureAndSaveWindowState('before-quit')
+      }
+      mainLog.info('[update-flow] before-quit (update path)', {
+        windowCount: windows.length,
+        electronWindowCount: BrowserWindow.getAllWindows().length,
+      })
     }
-    // Diagnostic correlation with installUpdate's [update-flow] log.
-    mainLog.info('[update-flow] before-quit save', {
-      windowCount: windows.length,
-      electronWindowCount: BrowserWindow.getAllWindows().length,
-      isUpdating: isUpdating(),
-      reason: isUpdating() ? 'update-quit' : 'user-quit',
-    })
+    mainLog.info('Update in progress, letting electron-updater handle quit')
+    // No preventDefault — let the native quit proceed so Squirrel installs.
+    return
+  }
+
+  // Normal quit path: save window state, flush sessions, then exit.
+  if (windowManager) {
+    captureAndSaveWindowState('before-quit')
   }
 
   // Flush all pending session writes before quitting
@@ -1238,16 +1278,7 @@ app.on('before-quit', async (event) => {
     cleanupPowerManager()
 
     // Release the server lock file so the next launch doesn't see a stale PID.
-    // This must happen regardless of the exit path (normal quit or update quit).
     releaseServerLock()
-
-    // If update is in progress, let electron-updater handle the quit flow
-    // Force exit breaks the NSIS installer on Windows
-    if (isUpdating()) {
-      mainLog.info('Update in progress, letting electron-updater handle quit')
-      app.quit()
-      return
-    }
 
     // Now actually quit
     app.exit(0)
