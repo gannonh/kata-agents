@@ -38,17 +38,6 @@ export function isDeveloperFeedbackEnabled(): boolean {
 }
 
 /**
- * Runtime-evaluated check for kata-agents-cli integration.
- *
- * Defaults to disabled. Override with KATA_FEATURE_KATA_AGENTS_CLI=1|0.
- */
-export function isKataAgentsCliEnabled(): boolean {
-  const override = parseBooleanEnv(getEnv('KATA_FEATURE_KATA_AGENTS_CLI'));
-  if (override !== undefined) return override;
-  return false;
-}
-
-/**
  * Runtime-evaluated check for embedded server settings page.
  *
  * Defaults to disabled. Override with KATA_FEATURE_EMBEDDED_SERVER=1|0.
@@ -70,14 +59,6 @@ export const FEATURE_FLAGS = {
    */
   get developerFeedback(): boolean {
     return isDeveloperFeedbackEnabled();
-  },
-  /**
-   * Enable kata-agent CLI guidance and guardrails.
-   *
-   * Defaults to disabled. Override with KATA_FEATURE_KATA_AGENTS_CLI=1|0.
-   */
-  get kataAgentsCli(): boolean {
-    return isKataAgentsCliEnabled();
   },
   /**
    * Enable embedded server settings page.

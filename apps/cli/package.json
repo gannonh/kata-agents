@@ -1,12 +1,12 @@
 {
-  "name": "@kata-sh/cli",
+  "name": "@kata-sh/agents-cli",
   "version": "0.10.3",
   "license": "Apache-2.0",
   "description": "Terminal client for Kata Agent server",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "kata-cli": "src/index.ts"
+    "kata-agents-cli": "src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",

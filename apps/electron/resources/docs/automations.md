@@ -2,9 +2,7 @@
 
 This guide explains how to configure automations in Kata Agent to automate workflows based on events.
 
-> **CLI-first workflow (recommended):** Use `kata-agent automation ...` commands instead of editing JSON directly.
-> - `kata-agent automation --help`
-> - Canonical command reference: [kata-cli.md](./kata-cli.md)
+> **Terminal client:** Use `kata-agents-cli invoke <channel>` for config-domain operations. See [kata-agents-cli.md](./kata-agents-cli.md) for connection flags and invoke examples.
 
 ## What Are Automations?
 
@@ -22,22 +20,15 @@ Automations are configured in `automations.json` at the root of your workspace:
 ~/.kata-agents/workspaces/{workspaceId}/automations.json
 ```
 
-## Recommended CLI Commands
+## Recommended invoke commands
 
 ```bash
-kata-agent automation list
-kata-agent automation get <id>
-kata-agent automation create --event UserPromptSubmit --prompt "..."
-kata-agent automation update <id> --json '{...}'
-kata-agent automation enable <id>
-kata-agent automation disable <id>
-kata-agent automation duplicate <id>
-kata-agent automation history [<id>] --limit 20
-kata-agent automation last-executed <id>
-kata-agent automation test <id> --match "..."
-kata-agent automation lint
-kata-agent automation validate
+kata-agents-cli invoke automations:get
+kata-agents-cli invoke automations:getHistory '"<id>"'
+kata-agents-cli invoke automations:getLastExecuted '"<id>"'
 ```
+
+For create/update/delete operations, use the desktop UI or `kata-agents-cli invoke` with the appropriate mutation channel and JSON payload. See [kata-agents-cli.md](./kata-agents-cli.md).
 
 ## Basic Structure
 

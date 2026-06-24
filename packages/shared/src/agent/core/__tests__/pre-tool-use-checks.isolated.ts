@@ -82,12 +82,8 @@ mock.module('../../../skills/storage.ts', () => ({
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
 }));
 
-let mockKataAgentsCliFlag = false;
 mock.module('../../../feature-flags.ts', () => ({
   FEATURE_FLAGS: {
-    get kataAgentsCli() {
-      return mockKataAgentsCliFlag;
-    },
     get developerFeedback() {
       return false;
     },
@@ -166,7 +162,6 @@ describe('runPreToolUseChecks', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockKataAgentsCliFlag = false;
   });
 
   // ============================================================
@@ -413,10 +408,6 @@ describe('runPreToolUseChecks', () => {
   // ============================================================
 
   describe('step 5: input transforms', () => {
-    beforeEach(() => {
-      mockKataAgentsCliFlag = true;
-    });
-
     it('expands tilde paths and returns modify', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'Read',
@@ -465,206 +456,6 @@ describe('runPreToolUseChecks', () => {
         expect(result.input.file_path).toBe('/Users/test/test.ts');
         expect(result.input._intent).toBeUndefined();
       }
-    });
-
-    it('blocks direct label folder reads and suggests kata-agent label help when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Read',
-        input: { file_path: '/test/workspace/labels/config.json' },
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent label');
-        expect(result.reason).toContain('kata-agent label --help');
-        expect(result.reason).toContain('labels/');
-      }
-    });
-
-    it('blocks direct label config writes and suggests kata-agent label help when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-      mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/labels/config.json', content: '{}' },
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent label');
-        expect(result.reason).toContain('kata-agent label --help');
-      }
-    });
-
-    it('does not apply config-file CLI redirect when feature is disabled', () => {
-      mockKataAgentsCliFlag = false;
-      mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/labels/config.json', content: '{}' },
-      }));
-
-      expect(result.type).toBe('allow');
-    });
-
-    it('does not block label config writes when feature is disabled', () => {
-      mockKataAgentsCliFlag = false;
-      mockDetectConfigFileType.mockImplementation(() => ({ type: 'labels', displayFile: 'labels/config.json' }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/labels/config.json', content: '{}' },
-      }));
-
-      expect(result.type).toBe('allow');
-    });
-
-    it('does not block bash commands touching automations files when feature is disabled', () => {
-      mockKataAgentsCliFlag = false;
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'python3 scripts/update.py automations.json' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('allow');
-    });
-
-    it('blocks direct automations config edits and suggests kata-agent automation commands when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-      mockDetectConfigFileType.mockImplementation(() => ({ type: 'automations', displayFile: 'automations.json' }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Edit',
-        input: {
-          file_path: '/test/workspace/automations.json',
-          old_string: 'A',
-          new_string: 'B',
-        },
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent automation');
-        expect(result.reason).toContain('automations.json');
-      }
-    });
-
-    it('blocks direct source config edits and suggests kata-agent source commands when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-      mockDetectConfigFileType.mockImplementation(() => ({
-        type: 'source',
-        slug: 'linear',
-        displayFile: 'sources/linear/config.json',
-      }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Edit',
-        input: {
-          file_path: '/test/workspace/sources/linear/config.json',
-          old_string: 'A',
-          new_string: 'B',
-        },
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent source');
-        expect(result.reason).toContain('sources/linear/config.json');
-      }
-    });
-
-    it('blocks direct skill file edits and suggests kata-agent skill commands when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-      mockDetectConfigFileType.mockImplementation(() => ({
-        type: 'skill',
-        slug: 'commit-helper',
-        displayFile: 'skills/commit-helper/SKILL.md',
-      }));
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Edit',
-        input: {
-          file_path: '/test/workspace/skills/commit-helper/SKILL.md',
-          old_string: 'A',
-          new_string: 'B',
-        },
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent skill');
-        expect(result.reason).toContain('skills/commit-helper/SKILL.md');
-      }
-    });
-
-    it('blocks bash commands touching labels paths and points to kata-agent label --help when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'python3 scripts/update.py labels/config.json' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent label --help');
-        expect(result.reason).toContain('kata-agent label');
-      }
-    });
-
-    it('allows bash kata-agent label commands through labels guard', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'kata-agent label list' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('allow');
-    });
-
-    it('blocks bash commands touching automations files and points to kata-agent automation --help when feature is enabled', () => {
-      mockKataAgentsCliFlag = true;
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'python3 scripts/update.py automations.json' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('kata-agent automation --help');
-        expect(result.reason).toContain('kata-agent automation');
-      }
-    });
-
-    it('allows bash kata-agent automation commands through config-domain bash guard', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'kata-agent automation list' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('allow');
-    });
-
-    it('does not apply config-domain bash guard when feature is disabled', () => {
-      mockKataAgentsCliFlag = false;
-
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Bash',
-        input: { command: 'python3 scripts/update.py automations.json' },
-        permissionMode: 'allow-all',
-      }));
-
-      expect(result.type).toBe('allow');
     });
 
     it('does not block unrelated non-workspace labels paths in bash commands', () => {
@@ -930,7 +721,6 @@ describe('shouldPromptInAskMode', () => {
     mockValidateConfigFileContent.mockReset();
     mockValidateConfigFileContent.mockImplementation(() => null);
     mockReadOnlyBashPatterns = [];
-    mockKataAgentsCliFlag = false;
   });
 
   // --- File writes ---

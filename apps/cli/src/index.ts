@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * kata-cli — Terminal client for Kata Agent server.
+ * kata-agents-cli — Terminal client for Kata Agent server.
  *
  * Connects over WebSocket (ws:// or wss://) to a running Kata Agent server
  * and provides commands for listing resources, managing sessions, sending
@@ -1329,17 +1329,17 @@ export function getValidateSteps(): ValidateStep[] {
     },
     // ----- MCP source validation (pre-committed in .github/agents/sources/) -----
     {
-      name: 'mcp:craft-public (auth:none)',
+      name: 'mcp:kata-docs (auth:none)',
       fn: async (client, ctx) => {
         if (!ctx.createdSessionId) return 'skipped (no session)'
-        // Enable the pre-committed craft-public MCP source on the session
-        const enableSlugs = [ctx.createdSourceSlug, 'craft-public'].filter(Boolean) as string[]
+        // Enable the pre-committed kata-docs MCP source on the session
+        const enableSlugs = [ctx.createdSourceSlug, 'kata-docs'].filter(Boolean) as string[]
         await client.invoke('sessions:command', ctx.createdSessionId, {
           type: 'setSources',
           sourceSlugs: enableSlugs,
         })
         return await waitForSendEvents(client, ctx.createdSessionId,
-          `[source:craft-public] List the documents under the "KataAgents E2E Test" folder inside the "KataAgents" folder. Just list their names.`,
+          `[source:kata-docs] List the documents under the "KataAgents E2E Test" folder inside the "KataAgents" folder. Just list their names.`,
           180_000, false, undefined, ctx.onEvent)
       },
     },
@@ -1352,7 +1352,7 @@ export function getValidateSteps(): ValidateStep[] {
         // Inject credential into store (multi-header JSON format, same as API headerNames)
         await client.invoke('sources:saveCredentials', ctx.workspaceId, 'stitch-mcp', JSON.stringify({ 'X-Goog-Api-Key': apiKey }))
         // Enable stitch-mcp + existing sources on session
-        const enableSlugs = [ctx.createdSourceSlug, 'craft-public', 'stitch-mcp'].filter(Boolean) as string[]
+        const enableSlugs = [ctx.createdSourceSlug, 'kata-docs', 'stitch-mcp'].filter(Boolean) as string[]
         await client.invoke('sessions:command', ctx.createdSessionId, {
           type: 'setSources',
           sourceSlugs: enableSlugs,
@@ -1376,7 +1376,7 @@ export function getValidateSteps(): ValidateStep[] {
 mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF'
 ---
 name: "CLI Validate Skill"
-description: "Validation skill created by kata-cli"
+description: "Validation skill created by kata-agents-cli"
 requiredSources:
   - "${sourceSlug}"
 ---
@@ -1891,9 +1891,9 @@ export async function runValidation(
 // ---------------------------------------------------------------------------
 
 function printHelp(): void {
-  process.stdout.write(`kata-cli — Terminal client for Kata Agent server
+  process.stdout.write(`kata-agents-cli — Terminal client for Kata Agent server
 
-Usage: kata-cli [options] <command> [args...]
+Usage: kata-agents-cli [options] <command> [args...]
 
 Connection:
   --url <ws[s]://...>    Server URL (default: $KATA_SERVER_URL)
@@ -1936,21 +1936,21 @@ Commands:
                          --verbose, -v       Show server stderr output
 
 Examples:
-  kata-cli run "What files are in the current directory?"
-  kata-cli run --source craft-kb "Summarize today's daily note"
-  kata-cli run --workspace-dir .github/agents --source craft-public "Read the doc"
-  kata-cli run --provider openai --model gpt-4o "Summarize this repo"
-  OPENAI_API_KEY=sk-... kata-cli run --provider openai "Hello"
-  GOOGLE_API_KEY=... kata-cli run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... kata-cli run --provider deepseek --model deepseek-v4-flash "Hello"
-  echo "Analyze this code" | kata-cli run
-  kata-cli ping
-  kata-cli sessions
-  kata-cli send abc-123 "What files are in the current directory?"
-  echo "Summarize this" | kata-cli send abc-123
-  kata-cli --validate-server
-  kata-cli invoke system:homeDir
-  kata-cli --json workspaces | jq '.[].name'
+  kata-agents-cli run "What files are in the current directory?"
+  kata-agents-cli run --source kata-kb "Summarize today's daily note"
+  kata-agents-cli run --workspace-dir .github/agents --source kata-docs "Read the doc"
+  kata-agents-cli run --provider openai --model gpt-4o "Summarize this repo"
+  OPENAI_API_KEY=sk-... kata-agents-cli run --provider openai "Hello"
+  GOOGLE_API_KEY=... kata-agents-cli run --provider google --model gemini-2.0-flash "Hello"
+  DEEPSEEK_API_KEY=sk-... kata-agents-cli run --provider deepseek --model deepseek-v4-flash "Hello"
+  echo "Analyze this code" | kata-agents-cli run
+  kata-agents-cli ping
+  kata-agents-cli sessions
+  kata-agents-cli send abc-123 "What files are in the current directory?"
+  echo "Summarize this" | kata-agents-cli send abc-123
+  kata-agents-cli --validate-server
+  kata-agents-cli invoke system:homeDir
+  kata-agents-cli --json workspaces | jq '.[].name'
 `)
 }
 

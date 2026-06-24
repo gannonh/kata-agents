@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-24
+
+* **Implemented**: [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md) — Renamed `@kata-sh/cli` / `kata-cli` to `@kata-sh/agents-cli` / `kata-agents-cli`; removed `kataAgentsCli` feature flag, pre-tool-use redirects, phantom bundled docs, orphaned env vars, and `kata-agent` bash allowlist patterns (replaced with `kata-agents-cli invoke` allowlist). Build report: [2026-06-24-cli-rename-and-phantom-removal-build-report.md](2026-06-24-cli-rename-and-phantom-removal-build-report.md). Moved Active → Completed in [index.md](index.md).
+
 ## 2026-06-23
 
 * **Verified**: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md) — Verify-phase UAT for the Complete Kata brand transition. First pass found 3 failing ACs (broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code) plus blocked AC 6 and minor AC 7. Fixed all, plus a `copy-assets.ts` stale-file hygiene bug, GitHub org refs, and mock/test data. Re-run: all 12 ACs pass. Packaged `Info.plist` = `sh.kata.agents` / `Kata Agents`. Updated [index.md](index.md) and [../index.md](../index.md) active/recent work; spec moved Implemented -> Completed.

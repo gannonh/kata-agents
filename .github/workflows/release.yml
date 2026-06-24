@@ -437,11 +437,9 @@ jobs:
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
 
-  # ── npm CLI publish — SCAFFOLDED BUT DISABLED in Project B ────────────────────
-  # `if: false` keeps this job permanently skipped so nothing is published to npm
-  # under the soon-to-be-renamed @kata-sh/* scope. Project C enables npm
-  # publishing (after the scope/env rename); flip the guard there and wire
-  # NPM_TOKEN. Until then this job documents the intended shape only.
+  # ── npm CLI publish — deferred pending product decision ───────────────────────
+  # `if: false` keeps this job permanently skipped until npm publishing is enabled.
+  # Wire NPM_TOKEN and flip the guard when publishing `@kata-sh/agents-cli`.
   publish_cli:
     needs: [release_meta, release]
     if: false
@@ -464,5 +462,5 @@ jobs:
           if [ "${{ needs.release_meta.outputs.channel }}" = "nightly" ]; then
             dist_tag="nightly"
           fi
-          echo "Would publish apps/cli with --tag $dist_tag (disabled in Project B)"
+          echo "Would publish @kata-sh/agents-cli with --tag $dist_tag (disabled pending product decision)"
           # cd apps/cli && npm publish --tag "$dist_tag" --access public

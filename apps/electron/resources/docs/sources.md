@@ -2,9 +2,7 @@
 
 This guide explains how to configure sources (MCP servers, APIs, local filesystems) in Kata Agent.
 
-> **CLI-first workflow (recommended):** Use `kata-agent source ...` commands instead of editing source config files directly.
-> - `kata-agent source --help`
-> - Canonical command reference: [kata-cli.md](./kata-cli.md)
+> **Terminal client:** Use `kata-agents-cli invoke <channel>` for config-domain operations. See [kata-agents-cli.md](./kata-agents-cli.md) for connection flags and invoke examples.
 
 ## Source Setup Process
 

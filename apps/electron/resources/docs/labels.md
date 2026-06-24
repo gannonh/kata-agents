@@ -2,9 +2,7 @@
 
 Labels are additive tags that can be applied to sessions. Unlike statuses (which are exclusive — one per session), labels are multi-select (many per session). They support hierarchical organization via nested JSON trees.
 
-> **CLI-first workflow (recommended):** Use `kata-agent label ...` commands instead of editing JSON directly.
-> - `kata-agent label --help`
-> - Canonical command reference: [kata-cli.md](./kata-cli.md)
+> **Terminal client:** Use `kata-agents-cli invoke <channel>` for config-domain operations. See [kata-agents-cli.md](./kata-agents-cli.md) for connection flags and invoke examples.
 
 ## Storage Locations
 
@@ -140,19 +138,20 @@ The optional `valueType` in config is a hint only — the parser always infers f
 
 ## Adding Labels
 
-Prefer `kata-agent` commands:
+Prefer `kata-agents-cli invoke` for scripted label operations:
 
 ```bash
-kata-agent label create --name "Bug" --color "destructive"
-kata-agent label create --name "Priority" --color "accent" --value-type number
-kata-agent label create --name "Due Date" --color "info" --value-type date
-kata-agent label create --name "Docs" --color "info" --value-type link
-kata-agent label create --name "Project" --color "foreground/60"
-kata-agent label create --name "Alpha" --color "info" --parent-id project
-kata-agent label create --name "Beta" --color "success" --parent-id project
+kata-agents-cli invoke labels:list
+kata-agents-cli invoke labels:create '{"name":"Bug","color":"destructive"}'
+kata-agents-cli invoke labels:create '{"name":"Priority","color":"accent","valueType":"number"}'
+kata-agents-cli invoke labels:create '{"name":"Due Date","color":"info","valueType":"date"}'
+kata-agents-cli invoke labels:create '{"name":"Docs","color":"info","valueType":"link"}'
+kata-agents-cli invoke labels:create '{"name":"Project","color":"foreground/60"}'
+kata-agents-cli invoke labels:create '{"name":"Alpha","color":"info","parentId":"project"}'
+kata-agents-cli invoke labels:create '{"name":"Beta","color":"success","parentId":"project"}'
 ```
 
-Use direct JSON edits only for bulk/manual operations where CLI is not sufficient.
+Use direct JSON edits only for bulk/manual operations where invoke is not sufficient.
 
 ## Color Conventions
 

@@ -15,13 +15,15 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-*(none — Complete Kata brand transition is **Completed**; Verify passed 2026-06-23.)*
+*(none — CLI rename and phantom removal completed 2026-06-24.)*
 
+* **CLI rename and phantom removal** — [specs/2026-06-24-cli-rename-and-phantom-removal-design.md](specs/2026-06-24-cli-rename-and-phantom-removal-design.md) — completed. Build report: [specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md](specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md).
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — completed. Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
 * **ADRs** — [adrs/](adrs/) — one accepted (kata-identity hard-cutover); seed is in place for future decisions
 
 ## Recent work
 
+* **CLI rename and phantom removal** — [specs/2026-06-24-cli-rename-and-phantom-removal-design.md](specs/2026-06-24-cli-rename-and-phantom-removal-design.md) — renamed terminal client to `kata-agents-cli`, removed phantom `kata-agent` commands-CLI references and feature flag. Build report: [specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md](specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md).
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — hard-cutover Kata identity across packages, runtime, desktop, CLI/server, resources, docs. Verify passed 2026-06-23 (all 12 ACs). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
 * **Update UX parity** — [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md) — Kata Code-style desktop update UX. Status: implemented. Build report: [specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md](specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md)
 * **Project B — CI/release pipeline** — [specs/2026-06-19-ci-release-pipeline.md](specs/2026-06-19-ci-release-pipeline.md) — GitHub Actions CI + nightly/stable desktop release pipeline (Bun) publishing to GitHub Releases. Status: implemented. Ops docs: [operations/ci.md](operations/ci.md), [operations/release.md](operations/release.md)

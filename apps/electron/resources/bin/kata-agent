@@ -1,4 +1,0 @@
-#!/bin/sh
-ENTRY="${KATA_COMMANDS_ENTRY:-$KATA_CLI_ENTRY}"
-export KATA_CLI_JSON_ONLY="${KATA_CLI_JSON_ONLY:-1}"
-exec "${KATA_BUN:-bun}" run "$ENTRY" "$@"
