@@ -8,6 +8,8 @@ timestamp: 2026-06-24T00:00:00Z
 
 # Rename CLI and remove phantom kata-agent commands references
 
+- **Plan**: Approved 2026-06-24. Adversarial review completed with 6 valid findings, all addressed in revision. Deferred-work backlog issue: [#4](https://github.com/gannonh/kata-agents/issues/4).
+
 ## Goal
 
 Rename the WebSocket terminal client (`apps/cli`) from package `@kata-sh/cli` / binary `kata-cli` to package `@kata-sh/agents-cli` / binary `kata-agents-cli`, and remove every phantom reference to the never-implemented `kata-agent` workspace-commands binary across the system prompt, permission policies, bundled docs, and orphaned environment variables.

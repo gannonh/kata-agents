@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-*(none — Complete Kata brand transition is **Completed**; Verify passed 2026-06-23. See [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md).)*
+* [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md): Rename `apps/cli` to `@kata-sh/agents-cli` / bin `kata-agents-cli` and remove all phantom `kata-agent` commands-CLI references (system prompt, permission policies, feature flag, bundled docs, orphaned env vars). Plan approved 2026-06-24. Deferred-work backlog: [#4](https://github.com/gannonh/kata-agents/issues/4).
 
 ## Planned implementation phases
 
