@@ -43,11 +43,11 @@ Full `packages/shared` suite: 8 pre-existing failures unrelated to this change (
 
 ## UAT (AC 11)
 
-End-to-end demo completed 2026-06-24. Evidence in [`uat-evidence/`](../../uat-evidence/):
+End-to-end demo completed 2026-06-24 (local `uat-evidence/` transcript and logs; directory is gitignored and not committed).
 
-- Non-headless `bun run electron:dev` — window created (`window-boot.log`)
-- Headless `KATA_HEADLESS=1 bun run electron:dev` — URL/token captured (`headless-server.log`)
-- `kata-agents-cli` ping, workspaces, session create/messages, `invoke labels:list`, `invoke system:homeDir` — all pass (`cli-transcript.txt`)
+- Non-headless `bun run electron:dev` — window created
+- Headless `KATA_HEADLESS=1 bun run electron:dev` — URL/token captured
+- `kata-agents-cli` ping, workspaces, session create/messages, `invoke labels:list`, `invoke system:homeDir` — all pass
 
 ## Deferred
 
