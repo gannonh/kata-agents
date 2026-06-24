@@ -41,7 +41,14 @@ Renamed the WebSocket terminal client to `@kata-sh/agents-cli` / `kata-agents-cl
 
 Full `packages/shared` suite: 8 pre-existing failures unrelated to this change (`config-defaults.json` missing in test env, system-prompt co-author tests). Targeted tests for all touched behavior pass.
 
+## UAT (AC 11)
+
+End-to-end demo completed 2026-06-24. Evidence in [`uat-evidence/`](../../uat-evidence/):
+
+- Non-headless `bun run electron:dev` — window created (`window-boot.log`)
+- Headless `KATA_HEADLESS=1 bun run electron:dev` — URL/token captured (`headless-server.log`)
+- `kata-agents-cli` ping, workspaces, session create/messages, `invoke labels:list`, `invoke system:homeDir` — all pass (`cli-transcript.txt`)
+
 ## Deferred
 
-- Full desktop UAT demo (AC 11) requires interactive Electron; not run in this cloud build environment.
 - Building the `kata-agent` workspace-commands CLI — tracked in [#4](https://github.com/gannonh/kata-agents/issues/4).

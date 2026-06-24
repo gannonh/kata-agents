@@ -1,0 +1,144 @@
+$ bun run scripts/electron-dev.ts
+🚀 Starting Electron dev environment...
+
+🧹 Cleaned Vite cache
+✅ Bundled uv present: /workspace/apps/electron/resources/bin/linux-x64/uv
+📦 Copied resources to dist
+🌉 Building MCP servers and Pi agent server...
+✅ Session MCP server built
+✅ Pi agent server built
+📨 Building WhatsApp worker...
+📨 Building WhatsApp worker (bundling Baileys) — build 2026-06-24T17:18:13.262Z (de71768+dirty)...
+
+  packages/messaging-whatsapp-worker/dist/worker.cjs  6.0mb ⚠️
+
+⚡ Done in 149ms
+🔍 Verifying worker output...
+✅ WhatsApp worker built (6.01 MB) → /workspace/packages/messaging-whatsapp-worker/dist/worker.cjs
+🔨 Building main process...
+⏳ Waiting for build files to stabilize...
+🔍 Verifying build output...
+✅ Initial build complete and verified
+
+📡 Starting dev servers...
+
+👀 Watching main process...
+👀 Watching preload...
+👀 Watching browser toolbar preload...
+🚀 Starting Electron...
+
+[watch] build finished, watching for changes...
+[watch] build finished, watching for changes...
+
+  VITE v6.4.1  ready in 339 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+[watch] build finished, watching for changes...
+2026-06-24T17:18:18.476Z INFO  [main] [i18n] startup hydration {"persistedUiLanguage":null,"resolvedLanguageAfterHydration":"en"}
+2026-06-24T17:18:18.478Z INFO  [main] CLI tools configured: {"uvBinary":"/workspace/apps/electron/resources/bin/linux-x64/uv","binDir":"/workspace/apps/electron/resources/bin","scriptsDir":"/workspace/apps/electron/resources/scripts","bundledUvExists":true}
+xdg-settings: invalid application name
+Try 'xdg-settings --help' for more information.
+2026-06-24T17:18:18.491Z INFO   [proxy] Applying proxy settings: {"enabled":false,"hasHttpProxy":false,"hasHttpsProxy":false,"hasNoProxy":false}
+[23029:0624/171818.565754:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+2026-06-24T17:18:18.606Z INFO   2026-06-24T17:18:18.606Z [PowerShellValidator] Root set to: /workspace/apps/electron/dist/resources
+2026-06-24T17:18:18.606Z [PowerShellValidator] Root set to: /workspace/apps/electron/dist/resources
+2026-06-24T17:18:18.608Z INFO   2026-06-24T17:18:18.608Z [docs] Synced 17 docs
+2026-06-24T17:18:18.608Z [docs] Synced 17 docs
+2026-06-24T17:18:18.608Z INFO   2026-06-24T17:18:18.608Z [release-notes] Synced 3 release notes
+2026-06-24T17:18:18.608Z [release-notes] Synced 3 release notes
+2026-06-24T17:18:18.611Z INFO   2026-06-24T17:18:18.611Z [Permissions] Already up to date: 2026-03-07
+2026-06-24T17:18:18.611Z [Permissions] Already up to date: 2026-03-07
+2026-06-24T17:18:18.613Z INFO  [main] Registered thumbnail:// protocol handler
+2026-06-24T17:18:18.614Z INFO   [proxy] Applying proxy settings: {"enabled":false,"hasHttpProxy":false,"hasHttpsProxy":false,"hasNoProxy":false}
+[23029:0624/171818.617222:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[23029:0624/171818.617303:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[23029:0624/171818.617323:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[23029:0624/171818.617329:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[23029:0624/171818.617334:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[23029:0624/171818.617351:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+2026-06-24T17:18:18.620Z INFO  [main] Client-only mode: KATA_SERVER_URL=ws://127.0.0.1:34403 (server initialization skipped)
+2026-06-24T17:18:18.620Z INFO  [main] [browser-pane] Toolbar IPC handlers registered
+2026-06-24T17:18:18.621Z INFO  [main] [browser-pane] Capability IPC handler registered
+2026-06-24T17:18:18.621Z INFO  [main] [WindowState] Loaded window state: 0 windows
+[23086:0624/171818.639084:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+2026-06-24T17:18:18.657Z INFO  [window] Created window for workspace 63d3332c-7621-5a0f-720e-b776886823d0 (focused: false)
+2026-06-24T17:18:18.658Z INFO  [main] Created window for first workspace: uat-demo
+2026-06-24T17:18:18.658Z INFO  [main] [power] Power manager initialized {"settingEnabled":false}
+2026-06-24T17:18:18.658Z INFO  [main] [auto-update] Skipping auto-update in dev mode
+2026-06-24T17:18:18.659Z INFO  [main] App initialized successfully
+2026-06-24T17:18:18.659Z INFO  [main] Debug mode enabled - logs at: /home/ubuntu/.config/@kata-sh/electron/logs/main.log
+2026-06-24T17:18:18.659Z INFO  [main] Messaging gateway log path: /home/ubuntu/.kata-agents/logs/messaging-gateway.log
+[23120:0624/171818.729158:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+2026-06-24T17:18:18.880Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":0,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:18.881Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":0,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:18.881Z WARN  [main] [transport] reconnecting (attempt 1) retry in 1000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":1,"nextRetryInMs":1000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:19.880Z WARN  [main] [transport] reconnecting (attempt 1) — close 1006 {"status":"reconnecting","attempt":1,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:19.885Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":1,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:19.886Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":1,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:19.886Z WARN  [main] [transport] reconnecting (attempt 2) retry in 2000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":2,"nextRetryInMs":2000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:21.885Z WARN  [main] [transport] reconnecting (attempt 2) — close 1006 {"status":"reconnecting","attempt":2,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:21.887Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":2,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:21.888Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":2,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:21.888Z WARN  [main] [transport] reconnecting (attempt 3) retry in 4000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":3,"nextRetryInMs":4000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+5:18:25 PM [vite] (client) ✨ new dependencies optimized: @radix-ui/react-tooltip, vaul, linkify-it, shiki, react-markdown, rehype-katex, rehype-raw, remark-gfm, remark-math, @tiptap/react, @tiptap/starter-kit, @tiptap/extension-placeholder, @tiptap/extension-task-list, @tiptap/extension-mathematics, @tiptap/extension-image, @tiptap/extension-file-handler, @tiptap/markdown, tiptap-markdown, nice-ticks, @uiw/react-json-view, @uiw/react-json-view/vscode, @uiw/react-json-view/githubLight, @pierre/diffs/react, @pierre/diffs, react-pdf, beautiful-mermaid, unist-util-visit, tiptap-extension-code-block-shiki, @tiptap/core, @tiptap/suggestion, @tiptap/pm/state, katex, @tiptap/react/menus, @tiptap/extension-task-item, @tiptap/pm/view, fflate
+5:18:25 PM [vite] (client) ✨ optimized dependencies changed. reloading
+2026-06-24T17:18:25.631Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":0,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:25.632Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":0,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:25.633Z WARN  [main] [transport] reconnecting (attempt 1) retry in 1000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":1,"nextRetryInMs":1000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:26.632Z WARN  [main] [transport] reconnecting (attempt 1) — close 1006 {"status":"reconnecting","attempt":1,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:26.634Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":1,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:26.638Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":1,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:26.638Z WARN  [main] [transport] reconnecting (attempt 2) retry in 2000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":2,"nextRetryInMs":2000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:28.635Z WARN  [main] [transport] reconnecting (attempt 2) — close 1006 {"status":"reconnecting","attempt":2,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:28.637Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":2,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:28.637Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":2,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:28.638Z WARN  [main] [transport] reconnecting (attempt 3) retry in 4000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":3,"nextRetryInMs":4000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:32.638Z WARN  [main] [transport] reconnecting (attempt 3) — close 1006 {"status":"reconnecting","attempt":3,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:32.640Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":3,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:32.640Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":3,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:32.640Z WARN  [main] [transport] reconnecting (attempt 4) retry in 8000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":4,"nextRetryInMs":8000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:40.640Z WARN  [main] [transport] reconnecting (attempt 4) — close 1006 {"status":"reconnecting","attempt":4,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:40.642Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":4,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:40.643Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":4,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:40.643Z WARN  [main] [transport] reconnecting (attempt 5) retry in 16000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":5,"nextRetryInMs":16000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:56.644Z WARN  [main] [transport] reconnecting (attempt 5) — close 1006 {"status":"reconnecting","attempt":5,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:56.649Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":5,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:56.649Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":5,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:18:56.649Z WARN  [main] [transport] reconnecting (attempt 6) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":6,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:26.650Z WARN  [main] [transport] reconnecting (attempt 6) — close 1006 {"status":"reconnecting","attempt":6,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:26.653Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":6,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:26.654Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":6,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:26.654Z WARN  [main] [transport] reconnecting (attempt 7) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":7,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:56.654Z WARN  [main] [transport] reconnecting (attempt 7) — close 1006 {"status":"reconnecting","attempt":7,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:56.658Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":7,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:56.659Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":7,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:19:56.659Z WARN  [main] [transport] reconnecting (attempt 8) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":8,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:26.659Z WARN  [main] [transport] reconnecting (attempt 8) — close 1006 {"status":"reconnecting","attempt":8,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:26.667Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":8,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:26.667Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":8,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:26.668Z WARN  [main] [transport] reconnecting (attempt 9) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":9,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:56.668Z WARN  [main] [transport] reconnecting (attempt 9) — close 1006 {"status":"reconnecting","attempt":9,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:56.677Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":9,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:56.677Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":9,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:20:56.677Z WARN  [main] [transport] reconnecting (attempt 10) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":10,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:26.677Z WARN  [main] [transport] reconnecting (attempt 10) — close 1006 {"status":"reconnecting","attempt":10,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:26.683Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":10,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:26.684Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":10,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:26.684Z WARN  [main] [transport] reconnecting (attempt 11) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":11,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:56.685Z WARN  [main] [transport] reconnecting (attempt 11) — close 1006 {"status":"reconnecting","attempt":11,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:56.707Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":11,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:56.707Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":11,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:21:56.707Z WARN  [main] [transport] reconnecting (attempt 12) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":12,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:26.707Z WARN  [main] [transport] reconnecting (attempt 12) — close 1006 {"status":"reconnecting","attempt":12,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:26.709Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":12,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:26.709Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":12,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:26.709Z WARN  [main] [transport] reconnecting (attempt 13) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":13,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:56.711Z WARN  [main] [transport] reconnecting (attempt 13) — close 1006 {"status":"reconnecting","attempt":13,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:56.714Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":13,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:56.715Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":13,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:22:56.715Z WARN  [main] [transport] reconnecting (attempt 14) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":14,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:23:26.715Z WARN  [main] [transport] reconnecting (attempt 14) — close 1006 {"status":"reconnecting","attempt":14,"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:23:26.718Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":14,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:23:26.718Z ERROR [main] [transport] failed — network [WS_ERROR]: WebSocket error during connection setup {"status":"failed","attempt":14,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}
+2026-06-24T17:23:26.718Z WARN  [main] [transport] reconnecting (attempt 15) retry in 30000ms — network [WS_ERROR]: WebSocket error during connection setup {"status":"reconnecting","attempt":15,"nextRetryInMs":30000,"error":{"kind":"network","message":"WebSocket error during connection setup","code":"WS_ERROR"},"close":{"code":1006,"wasClean":false},"url":"ws://127.0.0.1:34403"}

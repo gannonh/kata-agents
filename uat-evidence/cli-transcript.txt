@@ -1,0 +1,191 @@
+# CLI rename UAT transcript (AC 11)
+Date: 2026-06-24T17:24:07Z
+
+## 1. Non-headless boot (separate run)
+See window-boot.log — Created window for first workspace (line 65-66).
+
+## 2. Headless server credentials
+KATA_SERVER_URL=ws://127.0.0.1:44211
+KATA_SERVER_TOKEN=d38c5044-3151-4b3f-801b-37a4daf9eecc
+
+## 3. ping
+Connected: clientId=1be60ae7-554f-4e54-843c-a718597474b2 latency=7ms
+
+## 4. workspaces (after bootstrap)
+workspaces:create => {
+  "name": "uat-demo",
+  "rootPath": "/tmp/kata-uat-ws-uAP8Jo",
+  "slug": "kata-uat-ws-uAP8Jo",
+  "id": "7ca9275e-5480-3773-06d1-00bec4e2eeb6",
+  "createdAt": 1782321848048
+}
+[
+  {
+    "name": "uat-demo",
+    "rootPath": "/tmp/kata-uat-ws-OSwlrp",
+    "slug": "kata-uat-ws-OSwlrp",
+    "id": "63d3332c-7621-5a0f-720e-b776886823d0",
+    "createdAt": 1782321423321
+  },
+  {
+    "name": "uat-demo",
+    "rootPath": "/tmp/kata-uat-ws-uAP8Jo",
+    "slug": "kata-uat-ws-uAP8Jo",
+    "id": "7ca9275e-5480-3773-06d1-00bec4e2eeb6",
+    "createdAt": 1782321848048
+  }
+]
+
+## 5. session create / sessions / session messages
+session create => {
+  "id": "260624-silver-willow",
+  "workspaceRootPath": "/tmp/kata-uat-ws-uAP8Jo",
+  "sdkCwd": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+  "createdAt": 1782321848170,
+  "lastUsedAt": 1782321848170,
+  "lastMessageAt": 1782321848170,
+  "name": "demo",
+  "isFlagged": false,
+  "enabledSourceSlugs": [],
+  "permissionMode": "safe",
+  "model": "claude-opus-4-8",
+  "thinkingLevel": "medium",
+  "workspaceId": "7ca9275e-5480-3773-06d1-00bec4e2eeb6",
+  "workspaceName": "uat-demo",
+  "messages": [],
+  "isProcessing": false,
+  "sessionFolderPath": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+  "supportsBranching": true
+}
+[
+  {
+    "id": "260624-silver-willow",
+    "workspaceRootPath": "/tmp/kata-uat-ws-uAP8Jo",
+    "sdkCwd": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+    "createdAt": 1782321848170,
+    "lastUsedAt": 1782321848170,
+    "lastMessageAt": 1782321848170,
+    "name": "demo",
+    "isFlagged": false,
+    "enabledSourceSlugs": [],
+    "permissionMode": "safe",
+    "model": "claude-opus-4-8",
+    "thinkingLevel": "medium",
+    "workspaceId": "7ca9275e-5480-3773-06d1-00bec4e2eeb6",
+    "workspaceName": "uat-demo",
+    "messages": [],
+    "isProcessing": false,
+    "sessionFolderPath": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+    "supportsBranching": true
+  }
+]
+{
+  "id": "260624-silver-willow",
+  "workspaceRootPath": "/tmp/kata-uat-ws-uAP8Jo",
+  "sdkCwd": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+  "createdAt": 1782321848170,
+  "lastUsedAt": 1782321848170,
+  "lastMessageAt": 1782321848170,
+  "name": "demo",
+  "isFlagged": false,
+  "enabledSourceSlugs": [],
+  "permissionMode": "safe",
+  "model": "claude-opus-4-8",
+  "thinkingLevel": "medium",
+  "workspaceId": "7ca9275e-5480-3773-06d1-00bec4e2eeb6",
+  "workspaceName": "uat-demo",
+  "messages": [],
+  "isProcessing": false,
+  "sessionFolderPath": "/tmp/kata-uat-ws-uAP8Jo/sessions/260624-silver-willow",
+  "supportsBranching": true
+}
+
+## 6. invoke labels:list
+[
+  {
+    "id": "development",
+    "name": "Development",
+    "color": {
+      "light": "#3B82F6",
+      "dark": "#60A5FA"
+    },
+    "children": [
+      {
+        "id": "code",
+        "name": "Code",
+        "color": {
+          "light": "#4F46E5",
+          "dark": "#818CF8"
+        }
+      },
+      {
+        "id": "bug",
+        "name": "Bug",
+        "color": {
+          "light": "#0EA5E9",
+          "dark": "#38BDF8"
+        }
+      },
+      {
+        "id": "automation",
+        "name": "Automation",
+        "color": {
+          "light": "#06B6D4",
+          "dark": "#22D3EE"
+        }
+      }
+    ]
+  },
+  {
+    "id": "content",
+    "name": "Content",
+    "color": {
+      "light": "#8B5CF6",
+      "dark": "#A78BFA"
+    },
+    "children": [
+      {
+        "id": "writing",
+        "name": "Writing",
+        "color": {
+          "light": "#7C3AED",
+          "dark": "#C4B5FD"
+        }
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "color": {
+          "light": "#A855F7",
+          "dark": "#C084FC"
+        }
+      },
+      {
+        "id": "design",
+        "name": "Design",
+        "color": {
+          "light": "#D946EF",
+          "dark": "#E879F9"
+        }
+      }
+    ]
+  },
+  {
+    "id": "priority",
+    "name": "Priority",
+    "color": {
+      "light": "#F59E0B",
+      "dark": "#FBBF24"
+    },
+    "valueType": "number"
+  },
+  {
+    "id": "project",
+    "name": "Project",
+    "color": "foreground/50",
+    "valueType": "string"
+  }
+]
+
+## 7. invoke system:homeDir
+/home/ubuntu
