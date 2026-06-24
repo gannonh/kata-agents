@@ -37,6 +37,7 @@ Each package has its own agent context file — read it before modifying that pa
 - Permission modes are fixed: `safe`, `ask`, `allow-all`. Source types are fixed: `mcp`, `api`, `local`.
 - Release notes: append bullets to `apps/electron/resources/release-notes/next.md` for user-visible changes. Never pre-create `{version}.md` files in feature commits.
 - Commits: Conventional Commits (`feat(scope): summary`). Commit after every logical unit of work.
+- Deferred work: any work deferred during planning, implementation, verification, or testing must be filed as a GitHub issue immediately using the `.github/ISSUE_TEMPLATE/deferred_work.yml` template. Do not leave deferrals only in code comments, chat, or memory.
 
 ## Active context
 
