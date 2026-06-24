@@ -761,6 +761,32 @@ async function cmdCancel(client: CliRpcClient, args: CliArgs): Promise<void> {
   out(args.json ? { cancelled: sessionId } : `Cancelled: ${sessionId}`, args.json)
 }
 
+/**
+ * RPC channels whose handler expects `workspaceId` as its first positional arg.
+ * `invoke` resolves the active workspace for these (honoring `--workspace`,
+ * auto-detecting the first workspace otherwise) and injects it before the
+ * user's args — mirroring the dedicated `sessions`/`sources` commands. Global
+ * channels (e.g. `system:homeDir`, `permissions:getDefaults`) stay passthrough.
+ *
+ * Source of truth: handler signatures in
+ * packages/server-core/src/handlers/rpc/{labels,sources,skills,automations,workspace}.ts.
+ * Keep in sync if a handler's first positional arg changes.
+ */
+const WORKSPACE_SCOPED_INVOKE_CHANNELS = new Set<string>([
+  'labels:list', 'labels:create', 'labels:delete',
+  'sources:get', 'sources:create', 'sources:delete', 'sources:getPermissions', 'sources:getMcpTools', 'sources:saveCredentials',
+  'skills:get', 'skills:getFiles', 'skills:delete', 'skills:openEditor', 'skills:openFinder',
+  'automations:get', 'automations:getHistory', 'automations:getLastExecuted', 'automations:delete', 'automations:setEnabled', 'automations:duplicate', 'automations:replay',
+  'workspace:getPermissions', 'workspaceSettings:get', 'workspaceSettings:update',
+])
+
+/** Build positional args for an invoke call, injecting the workspace first for scoped channels. */
+export function buildInvokeArgs(channel: string, userArgs: unknown[], workspaceId: string | undefined): unknown[] {
+  return workspaceId && WORKSPACE_SCOPED_INVOKE_CHANNELS.has(channel)
+    ? [workspaceId, ...userArgs]
+    : userArgs
+}
+
 async function cmdInvoke(client: CliRpcClient, args: CliArgs): Promise<void> {
   const channel = args.rest[0]
   if (!channel) {
@@ -770,15 +796,26 @@ async function cmdInvoke(client: CliRpcClient, args: CliArgs): Promise<void> {
   await client.connect()
 
   // Parse remaining args as JSON
-  const invokeArgs: unknown[] = []
+  const userArgs: unknown[] = []
   for (let i = 1; i < args.rest.length; i++) {
     try {
-      invokeArgs.push(JSON.parse(args.rest[i]))
+      userArgs.push(JSON.parse(args.rest[i]))
     } catch {
-      invokeArgs.push(args.rest[i])
+      userArgs.push(args.rest[i])
     }
   }
 
+  // Workspace-scoped config channels need the active workspace as the first arg.
+  let workspaceId: string | undefined
+  if (WORKSPACE_SCOPED_INVOKE_CHANNELS.has(channel)) {
+    workspaceId = await resolveWorkspace(client, args.workspace)
+    if (!workspaceId) {
+      err('No workspace available. Use --workspace <id>')
+      process.exit(1)
+    }
+  }
+
+  const invokeArgs = buildInvokeArgs(channel, userArgs, workspaceId)
   const result = await client.invoke(channel, ...invokeArgs)
   out(result, args.json)
 }

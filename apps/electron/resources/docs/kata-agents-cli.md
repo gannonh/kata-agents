@@ -44,6 +44,8 @@ kata-agents-cli run "Summarize this repo"
 
 Workspace config (labels, sources, skills, automations, permissions) is exposed through RPC channels. Call them with `invoke` instead of editing files directly when scripting.
 
+Workspace-scoped channels auto-resolve the active workspace and pass it as the first argument, so you only supply the operation's own args (a label input, a source slug, an automation id). Pass `--workspace <id>` to target a specific workspace. Global channels such as `system:homeDir` and `permissions:getDefaults` take no workspace.
+
 ### Labels
 
 ```bash
