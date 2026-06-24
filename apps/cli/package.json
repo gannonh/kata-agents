@@ -4,12 +4,20 @@
   "license": "Apache-2.0",
   "description": "Terminal client for Kata Agent server",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/cli.js",
   "bin": {
-    "kata-agents-cli": "src/index.ts"
+    "kata-agents-cli": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "bun run src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --outfile=dist/cli.js --log-level=warning",
+    "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test src/"
   },

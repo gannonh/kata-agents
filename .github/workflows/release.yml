@@ -437,12 +437,15 @@ jobs:
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
 
-  # ── npm CLI publish — deferred pending product decision ───────────────────────
-  # `if: false` keeps this job permanently skipped until npm publishing is enabled.
-  # Wire NPM_TOKEN and flip the guard when publishing `@kata-sh/agents-cli`.
+  # ── npm CLI publish — publishes @kata-sh/agents-cli to npm ──────────────────
+  # Publishes the renamed terminal client (@kata-sh/agents-cli / bin kata-agents-cli)
+  # from main on stable releases. Gated: main ref + stable channel + not a dry run,
+  # so PRs/branches/nightly-when-unversioned never publish. Requires the NPM_TOKEN
+  # repo secret. Nightly dist-tag publishing can be enabled by relaxing the channel
+  # gate once nightly version bumping is in place.
   publish_cli:
     needs: [release_meta, release]
-    if: false
+    if: github.ref == 'refs/heads/main' && needs.release_meta.outputs.channel == 'stable' && needs.release_meta.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -453,14 +456,15 @@ jobs:
           bun-version: "1.3.10"
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Build CLI bundle
+        # esbuild bundles src/index.ts (preserving the #!/usr/bin/env bun shebang)
+        # into a single self-contained dist/cli.js — no runtime workspace deps.
+        run: cd apps/cli && bun run build
+      - name: Setup npm registry
+        uses: actions/setup-node@v4
+        with:
+          registry-url: https://registry.npmjs.org
       - name: Publish CLI to npm
-        # dist-tag follows the channel: nightly → "nightly", stable → "latest".
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          dist_tag="latest"
-          if [ "${{ needs.release_meta.outputs.channel }}" = "nightly" ]; then
-            dist_tag="nightly"
-          fi
-          echo "Would publish @kata-sh/agents-cli with --tag $dist_tag (disabled pending product decision)"
-          # cd apps/cli && npm publish --tag "$dist_tag" --access public
+        run: cd apps/cli && npm publish --tag ${{ needs.release_meta.outputs.channel }} --access public
