@@ -3,10 +3,19 @@
  *
  * Spawns `bun run <serverEntry>`, reads stdout for the `KATA_SERVER_URL=`
  * and `KATA_SERVER_TOKEN=` lines, and returns a handle to stop the server.
+ *
+ * Runtime-agnostic: uses only Node APIs (child_process / fs / url) so the
+ * published CLI bundle works under both Bun and plain Node.js. Note: spawning
+ * the server still shells out to `bun` (the server process itself runs under
+ * Bun); the CLI client that imports this only needs Node to run the commands
+ * that target an existing server.
  */
 
-import { resolve, join } from 'node:path'
-import type { Subprocess } from 'bun'
+import { resolve, join, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { spawn, type ChildProcessByStdio } from 'node:child_process'
+import type { Readable } from 'node:stream'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,10 +45,10 @@ export interface SpawnServerOptions {
 function findServerEntry(): string {
   // Walk up from this file's directory to find the monorepo root.
   // Expected layout: apps/cli/src/server-spawner.ts → root/packages/server/src/index.ts
-  let dir = import.meta.dir
+  let dir = dirname(fileURLToPath(import.meta.url))
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, 'packages', 'server', 'src', 'index.ts')
-    if (Bun.file(candidate).size > 0) return candidate
+    if (existsSync(candidate)) return candidate
     dir = resolve(dir, '..')
   }
   throw new Error(
@@ -60,7 +69,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
   // Strip CLAUDECODE to avoid the Claude Agent SDK's nesting guard rejecting
   // subprocess launches when the CLI is invoked from within a Claude Code session.
   const { CLAUDECODE: _, ...parentEnv } = process.env
-  const proc: Subprocess = Bun.spawn(['bun', 'run', serverEntry], {
+  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('bun', ['run', serverEntry], {
     env: {
       ...parentEnv,
       ...opts?.env,
@@ -68,20 +77,15 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
       KATA_RPC_PORT: '0',
       KATA_RPC_HOST: '127.0.0.1',
     },
-    stdout: 'pipe',
-    stderr: 'pipe',
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
   // Pipe server stderr to our stderr so --debug logs are visible (unless quiet)
-  if (proc.stderr && !opts?.quiet) {
+  if (!opts?.quiet) {
     ;(async () => {
-      // @ts-expect-error — Bun Subprocess types don't narrow stderr to ReadableStream when stderr: 'pipe'
-      const reader = proc.stderr.getReader()
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          process.stderr.write(value)
+        for await (const chunk of proc.stderr) {
+          process.stderr.write(chunk)
         }
       } catch {
         // Server exited — normal
@@ -117,7 +121,7 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
             token,
             stop: async () => {
               proc.kill('SIGTERM')
-              await proc.exited
+              await new Promise<void>((r) => proc.on('exit', () => r()))
             },
           })
           return
@@ -126,15 +130,12 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
     }
 
     ;(async () => {
-      // @ts-expect-error — Bun Subprocess types don't narrow stdout to ReadableStream when stdout: 'pipe'
-      const reader = proc.stdout.getReader()
       const decoder = new TextDecoder()
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
+        for await (const chunk of proc.stdout) {
+          buffer += decoder.decode(chunk, { stream: true })
           processLines()
+          if (url) return
         }
       } catch {
         // Stream closed

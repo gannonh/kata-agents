@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * kata-agents-cli — Terminal client for Kata Agent server.
  *
@@ -8,7 +8,50 @@
  */
 
 import { resolve } from 'path'
+import { pathToFileURL } from 'url'
 import { CliRpcClient } from './client.ts'
+
+// ---------------------------------------------------------------------------
+// Runtime-agnostic helpers (run under both Bun and plain Node.js)
+// The published bundle (dist/cli.js) must not use Bun-only APIs so that
+// `npm i -g @kata-sh/agents-cli` / `npx @kata-sh/agents-cli` work with only
+// Node installed. Keep these free of `Bun.*` and `import.meta.main`.
+// ---------------------------------------------------------------------------
+
+/**
+ * True when this module is the executed entry point (not imported by a test).
+ * Portable across Bun and plain Node, and across the ESM source and the CJS
+ * published bundle (which has `__filename` instead of `import.meta.url`).
+ * Compares the launched script (argv[1]) against this module's path.
+ */
+export function isMainModule(): boolean {
+  try {
+    const launched = process.argv[1] ?? ''
+    // CJS bundle (esbuild provides __filename); ESM source uses import.meta.url
+    // @ts-expect-error - __filename only exists in the CJS bundle
+    const modulePath: string = typeof __filename !== 'undefined' ? __filename : undefined
+    if (modulePath) {
+      return resolve(launched) === resolve(modulePath)
+    }
+    return import.meta.url === pathToFileURL(launched).href
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Read all of stdin as a string. Works under Bun and Node (process.stdin is a
+ * readable stream in both). Closes stdin so the process can exit after a piped
+ * message.
+ */
+export async function readStdin(): Promise<string> {
+  return await new Promise<string>((resolve) => {
+    const chunks: Buffer[] = []
+    process.stdin.on('data', (chunk) => chunks.push(chunk as Buffer))
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    process.stdin.on('error', () => resolve(Buffer.concat(chunks).toString('utf8')))
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -380,15 +423,7 @@ async function readPrompt(words: string[], restArgs?: string[]): Promise<string>
   const wantsStdin = restArgs?.includes('--stdin')
   const isTTY = typeof process.stdin.isTTY === 'boolean' ? process.stdin.isTTY : false
   if (wantsStdin || (!message && !isTTY)) {
-    const chunks: string[] = []
-    const reader = Bun.stdin.stream().getReader()
-    const decoder = new TextDecoder()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(decoder.decode(value, { stream: true }))
-    }
-    const stdinText = chunks.join('')
+    const stdinText = await readStdin()
     message = message ? `${message}\n${stdinText}` : stdinText
   }
 
@@ -2107,6 +2142,6 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 }
 
 // Run if executed directly (not when imported by tests)
-if (import.meta.main) {
+if (isMainModule()) {
   main()
 }
