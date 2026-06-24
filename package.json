@@ -53,6 +53,7 @@
     "lint:i18n:sorted": "bun scripts/sort-locales.ts --check",
     "lint": "bun run lint:ipc-sends && bun run lint:tool-name-checks && bun run lint:electron && bun run lint:shared && bun run lint:ui",
     "link": "bun link",
+    "worktree:setup": "bash scripts/worktree-setup.sh",
     "electron:clean": "bun run scripts/electron-clean.ts",
     "electron:build:main": "bun run scripts/electron-build-main.ts",
     "electron:build:preload": "bun run scripts/electron-build-preload.ts",
