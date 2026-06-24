@@ -33,6 +33,32 @@ You do not have to run all four. A dry-run failure is expected to be fixed befor
 
 ---
 
+## Stable release notes (required, not automated)
+
+The in-app What's New overlay reads versioned files at
+`apps/electron/resources/release-notes/<version>.md`. PRs accumulate pending
+bullets in `next.md`. **Stable dispatches are not auto-generated from
+`next.md`** — the `release_meta` job fails fast if `<version>.md` is missing:
+
+> Stable release <version> is missing release notes at
+> apps/electron/resources/release-notes/<version>.md. Promote next.md to
+> <version>.md (see docs/operations/release.md) before releasing.
+
+Before dispatching any **stable** release (dry run or real), promote the notes:
+
+1. Copy `apps/electron/resources/release-notes/next.md` to
+   `apps/electron/resources/release-notes/<version>.md` with a
+   `# v<version> — <summary>` header (match the style of existing versioned
+   files like `0.10.6.md` / `0.10.7.md`).
+2. Reset `next.md` to the empty pending template (keep the header comment and
+   the empty Features / Improvements / Bug Fixes / Breaking Changes sections).
+3. Commit as `docs(release): promote next.md to <version>.md` and push to `main`.
+
+Nightlies are exempt — they never promote `next.md` and bundle the latest
+existing versioned file (so nightly What's New lags one stable cycle by design).
+
+---
+
 ## Pre-flight checks
 
 Before dispatching any release:
@@ -52,6 +78,21 @@ gh secret list --repo gannonh/kata-agents
 # Required: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
 #           APPLE_TEAM_ID, APPLE_SIGNING_IDENTITY
 ```
+
+### Stable-only: promote release notes
+
+For **stable** dispatches, also verify the versioned notes file exists before
+dispatching. The workflow gates this in `release_meta` and fails before any
+build work:
+
+```bash
+version=0.10.7  # the version you are about to release
+notes="apps/electron/resources/release-notes/${version}.md"
+[[ -f "$notes" ]] && echo "OK: $notes" || echo "MISSING: promote next.md to $notes first (see the Stable release notes section above)"
+```
+
+If missing, promote `next.md` → `<version>.md` and push before dispatching.
+Nightly dispatches skip this check entirely.
 
 ---
 
@@ -162,7 +203,7 @@ gh release view --repo gannonh/kata-agents <tag>
 | `Release package manifest not found: D:\D:\...` | Windows path doubling from `.pathname` | Use `fileURLToPath(import.meta.url)` instead of `new URL(import.meta.url).pathname` |
 | `signing_gate` fails | Missing Apple secrets | Run `gh secret list --repo gannonh/kata-agents` and add missing secrets from `.env` |
 | macOS build fails after 10+ minutes | Notarization timeout or Apple service issue | Retry; notarization can be rate-limited |
-| Linux/Windows build fails | Best-effort legs; check logs | Fix if straightforward; these don't block release |
+| `Stable release <version> is missing release notes at .../<version>.md` | Stable dispatch with no versioned What's New file | Promote `next.md` to `apps/electron/resources/release-notes/<version>.md`, reset `next.md`, commit `docs(release): promote next.md to <version>.md`, push to `main`, then re-dispatch |
 
 ---
 
