@@ -466,4 +466,8 @@ jobs:
       - name: Publish CLI to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: cd apps/cli && npm publish --tag ${{ needs.release_meta.outputs.channel }} --access public
+        run: |
+          CHANNEL="${{ needs.release_meta.outputs.channel }}"
+          TAG="${CHANNEL}"
+          if [ "$CHANNEL" = "stable" ]; then TAG="latest"; fi
+          cd apps/cli && npm publish --tag "$TAG" --access public

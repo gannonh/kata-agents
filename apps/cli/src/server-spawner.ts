@@ -45,7 +45,7 @@ export interface SpawnServerOptions {
 function findServerEntry(): string {
   // Walk up from this file's directory to find the monorepo root.
   // Expected layout: apps/cli/src/server-spawner.ts → root/packages/server/src/index.ts
-  let dir = dirname(fileURLToPath(import.meta.url))
+  let dir = typeof __dirname !== 'undefined' ? __dirname : dirname(fileURLToPath(import.meta.url))
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, 'packages', 'server', 'src', 'index.ts')
     if (existsSync(candidate)) return candidate
@@ -99,6 +99,8 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
       proc.kill()
       reject(new Error(`Server did not start within ${startupTimeout}ms`))
     }, startupTimeout)
+
+    proc.on('error', reject)
 
     let url = ''
     let buffer = ''

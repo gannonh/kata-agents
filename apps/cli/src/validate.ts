@@ -427,8 +427,11 @@ export function getValidateSteps(): ValidateStep[] {
         // Verify labels were actually applied
         const sessions = (await client.invoke('sessions:get', ctx.workspaceId)) as any[]
         const session = sessions?.find((s: any) => s.id === ctx.createdSessionId)
-        const labels = session?.labels ?? session?.labelIds ?? []
-        if (!labels.length) throw new Error('Labels not applied to session')
+        const labels: string[] = session?.labels ?? session?.labelIds ?? []
+        const hasExpectedLabel = labels.some((label: string) =>
+          label === ctx.e2eTestLabelId || label === 'e2e-test' || label.includes('e2e-test')
+        )
+        if (!hasExpectedLabel) throw new Error(`Expected e2e-test label, got: ${JSON.stringify(labels)}`)
         return `${result} — labels verified: ${JSON.stringify(labels)}`
       },
     },
@@ -747,7 +750,7 @@ SKILLEOF`, 90_000, true, undefined, ctx.onEvent)
         if (!ctx.automationTestSessionId || !ctx.workspaceId) return 'skipped (no automation session)'
         // Verify label was auto-created
         const labels = (await client.invoke('labels:list', ctx.workspaceId)) as ValidateLabel[]
-        const found = labels?.find((l) => (l.id ?? l.name ?? '') === 'cli-validate-label')
+        const found = labels?.find((l) => l.id === 'cli-validate-label' || l.name === 'cli-validate-label')
         if (!found) throw new Error('Label cli-validate-label was not auto-created')
         ctx.createdLabelId = found.id ?? 'cli-validate-label'
 

@@ -35,6 +35,7 @@ export function createSpinner(text: string): { stop(): void } {
   const timer = setInterval(() => {
     process.stdout.write(`\r\x1b[2K${text} ${c.dim(spinnerFrames[i++ % spinnerFrames.length])}`)
   }, 80)
+  timer.unref()
   return {
     stop() {
       if (stopped) return

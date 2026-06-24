@@ -75,14 +75,16 @@ export async function sendAndStream(
     }
   })
 
-  await client.invoke('sessions:sendMessage', sessionId, message)
+  try {
+    await client.invoke('sessions:sendMessage', sessionId, message)
 
-  const deadline = Date.now() + args.sendTimeout
-  while (!finished && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 100))
+    const deadline = Date.now() + args.sendTimeout
+    while (!finished && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  } finally {
+    unsub()
   }
-
-  unsub()
 
   if (!finished) {
     err('Send timeout — no completion event received')
