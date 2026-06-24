@@ -14,6 +14,13 @@ import {
   isReadOnlyBashCommandWithConfig,
   getBashRejectionReason,
 } from '../src/agent/mode-manager.ts';
+import { getAgentsCliReadOnlyInvokeBashPatterns } from '../src/config/agents-cli-invoke.ts';
+
+const agentsCliInvokePatterns = getAgentsCliReadOnlyInvokeBashPatterns().map((rule) => ({
+  regex: new RegExp(rule.pattern),
+  source: rule.pattern,
+  comment: rule.comment,
+}));
 
 // ============================================================
 // Test Configuration (mirrors mode-manager.test.ts TEST_MODE_CONFIG)
@@ -99,13 +106,8 @@ const TEST_MODE_CONFIG = {
       comment: 'npm read operations',
     },
 
-    // kata-agents-cli invoke read-only
-    {
-      regex: /^kata-agents-cli\s+invoke\s+(labels:list|sources:get|sources:getPermissions|skills:get|automations:get|automations:getHistory|automations:getLastExecuted|workspace:getPermissions|permissions:getDefaults|workspaceSettings:get|system:homeDir)\b/,
-      source: '^kata-agents-cli\\s+invoke\\s+(labels:list|sources:get|sources:getPermissions|skills:get|automations:get|automations:getHistory|automations:getLastExecuted|workspace:getPermissions|permissions:getDefaults|workspaceSettings:get|system:homeDir)\\b',
-      comment: 'kata-agents-cli invoke read-only RPC channels',
-    },
-    { regex: /^kata-agents-cli\s+--help\b/, source: '^kata-agents-cli\\s+--help\\b', comment: 'kata-agents-cli help' },
+    // kata-agents-cli invoke read-only (derived from shared policy)
+    ...agentsCliInvokePatterns,
 
     // Version checks
     { regex: /^node\s+(--version|-v)\b/, source: 'node version', comment: 'Node.js version' },

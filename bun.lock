@@ -118,7 +118,7 @@
       "name": "@kata-sh/agents-cli",
       "version": "0.10.3",
       "bin": {
-        "kata-agents-cli": "src/index.ts",
+        "kata-agents-cli": "dist/cli.cjs",
       },
       "dependencies": {
         "@kata-sh/server-core": "workspace:*",
@@ -127,6 +127,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^22.0.0",
+        "esbuild": "^0.25.0",
         "typescript": "^5.8.2",
       },
     },

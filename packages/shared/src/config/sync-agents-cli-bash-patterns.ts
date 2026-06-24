@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { getAgentsCliReadOnlyInvokeBashPatterns } from './cli-domains.ts'
+import { getAgentsCliReadOnlyInvokeBashPatterns } from './agents-cli-invoke.ts'
 
 interface AllowedBashEntry {
   pattern: string

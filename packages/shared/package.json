@@ -9,7 +9,8 @@
   "scripts": {
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "sync:kata-agent-bash-patterns": "bun run src/config/sync-kata-agent-bash-patterns.ts"
+    "sync:agents-cli-bash-patterns": "bun run src/config/sync-agents-cli-bash-patterns.ts",
+    "sync:kata-agent-bash-patterns": "bun run sync:agents-cli-bash-patterns"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -21,6 +22,7 @@
     "./auth/callback-page": "./src/auth/callback-page.ts",
     "./auth/types": "./src/auth/types.ts",
     "./config": "./src/config/index.ts",
+    "./config/agents-cli-invoke": "./src/config/agents-cli-invoke.ts",
     "./docs": "./src/docs/index.ts",
     "./docs/doc-links": "./src/docs/doc-links.ts",
     "./config/types": "./src/config/types.ts",

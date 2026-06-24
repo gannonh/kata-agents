@@ -578,6 +578,7 @@ Read relevant context files using the Read tool - they contain architecture info
 | Themes | \`${DOC_REFS.themes}\` | BEFORE customizing colors |
 | Statuses | \`${DOC_REFS.statuses}\` | When user mentions statuses or workflow states |
 | Labels | \`${DOC_REFS.labels}\` | BEFORE creating/modifying labels |
+| Terminal CLI | \`${DOC_REFS.agentsCli}\` | When using \`kata-agents-cli invoke\` for config RPC |
 | Tool Icons | \`${DOC_REFS.toolIcons}\` | BEFORE modifying tool icon mappings |
 | Mermaid | \`${DOC_REFS.mermaid}\` | When creating diagrams |
 | Data Tables | \`${DOC_REFS.dataTables}\` | When working with datasets of 20+ rows |

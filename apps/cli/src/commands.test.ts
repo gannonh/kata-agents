@@ -194,11 +194,11 @@ describe('parseArgs', () => {
   it('--source accumulates into array', () => {
     const args = parseArgs([
       'bun', 'index.ts',
-      '--source', 'craft-kb',
+      '--source', 'kata-kb',
       '--source', 'github',
       'run', 'do stuff',
     ])
-    expect(args.sources).toEqual(['craft-kb', 'github'])
+    expect(args.sources).toEqual(['kata-kb', 'github'])
   })
 
   it('defaults sources to empty array', () => {

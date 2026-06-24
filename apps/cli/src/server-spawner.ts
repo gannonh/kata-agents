@@ -120,8 +120,13 @@ export async function spawnServer(opts?: SpawnServerOptions): Promise<SpawnedSer
             url,
             token,
             stop: async () => {
+              if (proc.exitCode !== null || proc.killed) return
               proc.kill('SIGTERM')
-              await new Promise<void>((r) => proc.on('exit', () => r()))
+              await Promise.race([
+                new Promise<void>((r) => proc.once('exit', () => r())),
+                new Promise<void>((r) => setTimeout(r, 5_000)),
+              ])
+              if (proc.exitCode === null) proc.kill('SIGKILL')
             },
           })
           return

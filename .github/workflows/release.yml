@@ -457,8 +457,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Build CLI bundle
-        # esbuild bundles src/index.ts (preserving the #!/usr/bin/env bun shebang)
-        # into a single self-contained dist/cli.js — no runtime workspace deps.
+        # esbuild bundles src/index.ts into dist/cli.cjs (Node shebang) — no runtime workspace deps.
         run: cd apps/cli && bun run build
       - name: Setup npm registry
         uses: actions/setup-node@v4

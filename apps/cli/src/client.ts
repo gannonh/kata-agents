@@ -12,7 +12,7 @@ import {
 import {
   serializeEnvelope,
   deserializeEnvelope,
-} from '@kata-sh/server-core/transport'
+} from '@kata-sh/server-core/transport/codec'
 
 // ---------------------------------------------------------------------------
 // Types

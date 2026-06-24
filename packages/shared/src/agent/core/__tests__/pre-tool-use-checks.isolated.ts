@@ -458,6 +458,16 @@ describe('runPreToolUseChecks', () => {
       }
     });
 
+    it('allows direct Read on labels config files after phantom CLI guard removal', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/workspace/labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+    });
+
     it('does not block unrelated non-workspace labels paths in bash commands', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'Bash',

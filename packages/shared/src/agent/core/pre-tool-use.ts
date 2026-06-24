@@ -123,9 +123,6 @@ export const FILE_PATH_TOOLS = new Set([
 /** Tools that can write config files */
 export const CONFIG_WRITE_TOOLS = new Set(['Write', 'Edit']);
 
-/** File tools blocked for labels domain. */
-export const LABELS_BLOCKED_FILE_TOOLS = new Set(['Read', 'Write', 'Edit']);
-
 
 // ============================================================
 // PATH EXPANSION
