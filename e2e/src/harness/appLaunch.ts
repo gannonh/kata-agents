@@ -10,7 +10,7 @@ import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { buildElectronLaunchEnv, isRendererWindow } from "./launchEnv.ts";
-import { readReleaseAppPath } from "./env.ts";
+import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 
 function attachElectronLogging(context: E2ERunContext, app: ElectronApplication): void {
   app.on("window", (page) => {
@@ -74,15 +74,18 @@ async function resolveRendererWindow(
   electronApp: ElectronApplication,
   rendererPort: number,
   timeoutMs: number,
+  launchTarget: "dev" | "release",
 ): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
+  const expectation =
+    launchTarget === "release" ? "file:// renderer window" : `Vite on port ${rendererPort}`;
 
   return await new Promise<Page>((resolve, reject) => {
     const onClose = () => {
       const windowUrls = electronApp.windows().map((page) => page.url());
       reject(
         new Error(
-          `Electron exited before the renderer window opened (expected Vite on port ${rendererPort}). Last windows: ${windowUrls.join(", ") || "(none)"}`,
+          `Electron exited before the renderer window opened (expected ${expectation}). Last windows: ${windowUrls.join(", ") || "(none)"}`,
         ),
       );
     };
@@ -91,7 +94,7 @@ async function resolveRendererWindow(
     const poll = async () => {
       while (Date.now() < deadline) {
         for (const page of electronApp.windows()) {
-          if (isRendererWindow(page.url(), rendererPort)) {
+          if (isRendererWindow(page.url(), rendererPort, launchTarget)) {
             electronApp.off("close", onClose);
             resolve(page);
             return;
@@ -103,7 +106,7 @@ async function resolveRendererWindow(
       const windowUrls = electronApp.windows().map((page) => page.url());
       reject(
         new Error(
-          `Electron renderer window not found within ${timeoutMs}ms (expected Vite on port ${rendererPort}). Open windows: ${windowUrls.join(", ") || "(none)"}`,
+          `Electron renderer window not found within ${timeoutMs}ms (expected ${expectation}). Open windows: ${windowUrls.join(", ") || "(none)"}`,
         ),
       );
     };
@@ -117,8 +120,9 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
 
   const launchEnv = toStringEnv(env);
   if (context.launchTarget === "release") {
-    // Release validation is deferred; fail loud when no packaged app is provided.
-    const executablePath = readReleaseAppPath();
+    // Launch the packaged .app's executable. Fails loud when KATA_E2E_RELEASE_APP
+    // is unset or the bundle is missing.
+    const executablePath = resolveReleaseExecutablePath();
     logHarnessPhase("Launching packaged Electron app (release)...");
     electronApp = await electron.launch({ executablePath, env: launchEnv });
   } else {
@@ -143,6 +147,7 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
     electronApp,
     context.vitePort,
     E2E_TIMEOUTS.electronWindowMs,
+    context.launchTarget,
   );
   logHarnessPhase("Electron renderer window is ready.");
 

@@ -20,16 +20,28 @@ export function buildElectronLaunchEnv(context: E2ERunContext): NodeJS.ProcessEn
 }
 
 /**
- * In dev, the renderer window is served by Vite on the allocated port. The
- * splash/other windows use about:blank or devtools URLs and must be excluded.
+ * Dev: the renderer window is served by Vite on the allocated port.
+ * Release: the packaged app loads the renderer from a file:// URL
+ * (window-manager.ts loadFile renderer/index.html). Non-renderer windows use
+ * about:blank or devtools URLs and must be excluded in both modes.
  */
-export function isRendererWindow(url: string, vitePort: number): boolean {
+export function isRendererWindow(
+  url: string,
+  vitePort: number,
+  launchTarget: "dev" | "release" = "dev",
+): boolean {
   if (!url || url === "about:blank" || url.startsWith("devtools://")) {
     return false;
   }
 
   try {
     const parsed = new URL(url);
+
+    if (launchTarget === "release") {
+      // Packaged renderer is a file:// URL pointing at renderer/index.html.
+      return parsed.protocol === "file:" && parsed.pathname.endsWith("index.html");
+    }
+
     const host = parsed.hostname;
     const port =
       parsed.port.length > 0

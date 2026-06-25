@@ -28,7 +28,7 @@ export async function openAppearanceSettings(page: Page): Promise<void> {
   await page
     .getByRole("radiogroup")
     .first()
-    .waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
+    .waitFor({ state: "visible", timeout: E2E_TIMEOUTS.authMs });
 }
 
 export async function setThemeMode(page: Page, mode: ThemeMode): Promise<void> {
