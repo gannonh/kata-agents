@@ -277,7 +277,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Align package versions to release version
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --file apps/cli/package.json
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --file apps/cli/package.json
 
       - name: Generate electron-builder release config
         shell: bash
@@ -413,7 +415,9 @@ jobs:
 
       - name: Update version strings
         id: update_versions
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --file apps/cli/package.json --github-output
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --file apps/cli/package.json --github-output
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'

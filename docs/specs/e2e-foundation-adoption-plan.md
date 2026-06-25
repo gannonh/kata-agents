@@ -1,3 +1,7 @@
+---
+type: spec
+---
+
 # Plan: Adopt the local Electron E2E foundation in Kata Agents
 
 ## Context

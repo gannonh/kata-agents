@@ -34,7 +34,7 @@ describe('permissions kata-agents-cli invoke allowlist sync', () => {
     }
 
     const deprecated = (permissions.allowedBashPatterns ?? []).filter(
-      (entry) => /\bkata-agent\s/.test(entry.pattern) || /\bcraft-agent/.test(entry.pattern),
+      (entry) => /kata-agent(\\s|\\b|\s)/.test(entry.pattern) || /\bcraft-agent/.test(entry.pattern),
     )
     expect(deprecated).toEqual([])
   })
