@@ -126,7 +126,7 @@ Observable pass/fail outcomes. Build implements these; Verify tests them. macOS 
 4. **Build gate fails loud.** With `apps/electron/dist/main.cjs` or `dist/bootstrap-preload.cjs` missing, the harness throws an error naming the missing artifact and instructing `bun run electron:build` (no silent skip).
 5. **Settings tier.** `bun run e2e --project desktop-dev --grep @settings` reaches `#app-ready` via the deferred-setup path (handling `workspace-picker` if shown), changes an appearance/language setting, reloads, and asserts the change persisted. Exits 0.
 6. **Agent tier.** With a real provider key in `.env`, `bun run e2e --project desktop-dev --grep @agent` configures a real Anthropic connection through onboarding, sends a deterministic prompt, asserts a non-empty assistant reply, and exits 0. Runs with `workers: 1`.
-7. **Release scaffold fails loud.** `bun run e2e:release --grep @smoke` with `KATA_E2E_RELEASE_APP` unset exits non-zero with a clear missing-path error that names the variable (no silent skip, no dev fallback).
+7. **Release channel works end-to-end.** With a packaged `.app` (built via `bun run e2e:build-release`), `bun run e2e:release` runs all three tiers green against the packaged app (renderer loaded from `file://`). With `KATA_E2E_RELEASE_APP` unset, `e2e:release` exits non-zero with a clear missing-path error naming the variable (no silent skip, no dev fallback). The `e2e:*` scripts run the Playwright CLI under Node (Bun's WebSocket client cannot complete the packaged-app inspector attach).
 8. **Prerequisite errors name the variable.** Missing required env (provider key for `@agent`, release app path for release) throws an error containing the exact variable name and a pointer to `e2e/README.md`.
 9. **Static checks clean.** Per-package `tsc --noEmit` passes for any touched packages (`apps/electron`, `packages/shared` if modified). Harness unit tests, if added, pass under `bun test`.
 10. **No CI / no pre-push coupling.** E2E is not added to any CI workflow and not wired into the pre-push hook. Default `bun run e2e` runs only the `desktop-dev` project.
@@ -149,6 +149,6 @@ bun run electron:build   # produces dist/main.cjs + dist/bootstrap-preload.cjs
 ```
 
 ## Follow-up issues to file (deferred work, per AGENTS.md)
-- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe.
-- macOS CI runner strategy before any CI adoption.
-- Real `desktop-release` validation once a packaged `.app` path is standardized.
+- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe. ([#11](https://github.com/gannonh/kata-agents/issues/11))
+- macOS CI runner strategy before any CI adoption. ([#12](https://github.com/gannonh/kata-agents/issues/12))
+- ~~Real `desktop-release` validation~~ **Done.** The release channel runs all three tiers green against a packaged `.app`; see `e2e:build-release` and the build report. ([#13](https://github.com/gannonh/kata-agents/issues/13) closed)

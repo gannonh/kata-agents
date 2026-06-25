@@ -91,4 +91,44 @@ gate them. Independent subagent review was not used.
 
 - #11 parallel isolation (subprocess server ports, `workers > 1`).
 - #12 macOS CI runner strategy.
-- #13 real `desktop-release` validation against a packaged `.app`.
+
+## Addendum (2026-06-25): desktop-release channel implemented
+
+The `desktop-release` channel was completed to parity (closing #13). The same
+spec files now run under both `desktop-dev` and `desktop-release` via
+`metadata.launchTarget`.
+
+What was added:
+- `e2e/src/harness/releaseTarget.ts` resolves the executable under
+  `.app/Contents/MacOS`. `isRendererWindow` detects packaged `file://` renderer
+  windows; `appLaunch` launches the bundle executable for release.
+- Configurable agent provider/model: `KATA_E2E_AGENT_PROVIDER` (anthropic|openai,
+  default anthropic) and `KATA_E2E_AGENT_MODEL`, with OpenAI key support.
+- Timeout knobs: `authMs` (15s), `agentReplyMs` aligned to 60s.
+- `e2e/scripts/build-release-app.sh` (`bun run e2e:build-release`): stages the
+  root-hoisted `@anthropic-ai/claude-agent-sdk` + `@vscode/ripgrep` via
+  `build-dmg.sh`, then ad-hoc re-signs with a debugger entitlement.
+- `e2e:*` scripts now run the Playwright CLI under **Node**.
+
+Root causes found and fixed:
+1. **Packaging.** A bare `electron-builder` run (`electron:dist:dev:mac`) shipped
+   an app missing the externalized SDK (hoisted to root `node_modules`), so the
+   packaged main process crashed before opening a window. `build-dmg.sh` stages
+   it correctly; `e2e:build-release` wraps that.
+2. **Signature.** The production hardened-runtime signature (no `get-task-allow`)
+   blocks Playwright's inspector attach. The E2E build re-signs ad-hoc with a
+   debugger entitlement. Production build config is unchanged.
+3. **Runner.** Under Bun, `_electron.launch` could not complete the
+   Node-inspector WebSocket handshake for a packaged app (`101 Switching
+   Protocols` rejected); the same flow works under Node. Scripts route through
+   Node. Verified: Kata Code's own signed nightly exhibits the same Bun failure.
+
+Verification (macOS, packaged `.app` built from this branch):
+- `bun run e2e:release` → 3 passed (`@smoke` 2.8s, `@settings` 4.4s, `@agent`
+  10s). The `@agent` trace confirms the real flow ran: onboarding-wizard → API
+  Key → Continue → Get Started → app-ready → New Session → model switch to
+  Haiku 4.5 → `E2E_AGENT_OK` token present twice (prompt echo + real reply).
+- `bun run e2e:release` with `KATA_E2E_RELEASE_APP` unset → exit 1, error names
+  the variable.
+- `bun run e2e` (desktop-dev) → 3 passed (no regression).
+- `e2e` `tsc -p tsconfig.json` → exit 0.

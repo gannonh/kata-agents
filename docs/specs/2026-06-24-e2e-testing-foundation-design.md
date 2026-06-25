@@ -31,8 +31,13 @@ decisions, the environment contract, and the verification matrix.
   optional `#workspace-picker`). No `data-testid`.
 - **Starter tiers.** `@smoke` (offline launch + onboarding wizard), `@settings` (deferred-setup →
   ready → persist a setting), `@agent` (real provider reply, `workers: 1`).
-- **Release deferred.** The `desktop-release` Playwright project is scaffolded but no-ops with a
-  clear error when `KATA_E2E_RELEASE_APP` is unset.
+- **Release supported.** The `desktop-release` project launches a packaged `.app` (renderer from
+  `file://`) and runs the same specs as `desktop-dev`. Build an E2E-ready app with
+  `bun run e2e:build-release` (stages the SDK + ripgrep, ad-hoc re-signs with a debugger
+  entitlement). `KATA_E2E_RELEASE_APP` unset → loud error.
+- **Node runner.** The `e2e:*` scripts invoke the Playwright CLI under Node. Bun's WebSocket
+  client cannot complete the Node-inspector handshake `_electron.launch` uses to attach to a
+  packaged Electron app, so release launches hang under Bun.
 
 ## Reaching app states deterministically
 
@@ -77,7 +82,8 @@ harness `isolatedRun`/`launchEnv` modules.
 | Build gate | Remove `dist/main.cjs`, run smoke | Loud error naming the artifact + `electron:build` |
 | Settings | `bun run e2e --grep @settings` | Reaches `#app-ready`, setting persists across reload |
 | Agent | `bun run e2e --grep @agent` (key in `.env`) | Non-empty assistant reply, `workers: 1` |
-| Release scaffold | `bun run e2e:release --grep @smoke` (no app path) | Non-zero, clear missing-path error |
+| Release channel | `KATA_E2E_RELEASE_APP=<app> bun run e2e:release` | All tiers green against packaged `.app` |
+| Release missing app | `bun run e2e:release` (no app path) | Non-zero, clear missing-path error |
 | Static | per-package `tsc --noEmit` | No regressions |
 | CI unchanged | existing workflows | E2E absent from CI and pre-push |
 
@@ -85,6 +91,6 @@ harness `isolatedRun`/`launchEnv` modules.
 
 Filed as GitHub issues per `AGENTS.md`:
 
-- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe.
-- macOS CI runner strategy before any CI adoption.
-- Real `desktop-release` validation once a packaged `.app` path is standardized.
+- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe. ([#11](https://github.com/gannonh/kata-agents/issues/11))
+- macOS CI runner strategy before any CI adoption. ([#12](https://github.com/gannonh/kata-agents/issues/12))
+- Real `desktop-release` validation: **done** — all three tiers pass against a packaged `.app`. ([#13](https://github.com/gannonh/kata-agents/issues/13), closed)
