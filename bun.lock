@@ -120,11 +120,9 @@
       "bin": {
         "kata-agents-cli": "dist/cli.cjs",
       },
-      "dependencies": {
+      "devDependencies": {
         "@kata-sh/server-core": "workspace:*",
         "@kata-sh/shared": "workspace:*",
-      },
-      "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^22.0.0",
         "esbuild": "^0.25.0",
