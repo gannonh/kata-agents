@@ -8,7 +8,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 /**
  * Minimal dotenv-style parser.
  *
- * Brave strip a ` #...` inline comment that follows a value, and honor quoted
+ * Strip a ` #...` inline comment that follows a value, and honor quoted
  * values (strip the quotes, preserving interior whitespace). This is stricter
  * than scripts/electron-dev.ts:loadEnvFile but avoids a common footgun: a line
  * like `KEY="value"   # comment` must yield `value`, not `value   # comment`.

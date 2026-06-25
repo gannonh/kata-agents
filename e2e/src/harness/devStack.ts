@@ -1,17 +1,32 @@
-import { type ChildProcess } from "node:child_process";
+import { access } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
-import { assertDesktopBuildArtifacts } from "./desktopArtifacts.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { spawnWithArtifactLogs, terminateChildProcess } from "./processSpawn.ts";
-import { waitForViteDevServer } from "./readiness.ts";
 
-export interface DevStackHandle {
-  readonly process: ChildProcess;
+// Dev launch loads the renderer from Vite (VITE_DEV_SERVER_URL), so the renderer
+// dist is not required. The main + preload bundles must exist for Electron to boot.
+const REQUIRED_DEV_ARTIFACTS = [
+  "apps/electron/dist/main.cjs",
+  "apps/electron/dist/bootstrap-preload.cjs",
+] as const;
+
+async function assertDesktopBuildArtifacts(repoRoot: string): Promise<void> {
+  for (const relative of REQUIRED_DEV_ARTIFACTS) {
+    const path = join(repoRoot, relative);
+    try {
+      await access(path);
+    } catch {
+      throw new Error(
+        `desktop-dev launch: missing ${path}. Run "bun run ensure:electron" and "bun run electron:build" before E2E.`,
+      );
+    }
+  }
 }
 
 /**
@@ -19,7 +34,7 @@ export interface DevStackHandle {
  * electron:dev would also spawn its own Electron and duplicate backends.
  * Mirrors the Vite spawn in scripts/electron-dev.ts:541.
  */
-export function buildViteArgs(vitePort: number): string[] {
+function buildViteArgs(vitePort: number): string[] {
   return [
     "dev",
     "--config",
@@ -28,6 +43,25 @@ export function buildViteArgs(vitePort: number): string[] {
     String(vitePort),
     "--strictPort",
   ];
+}
+
+// Vite binds to `localhost` (which may resolve to IPv6 ::1), matching
+// VITE_DEV_SERVER_URL. Probe the same host rather than forcing 127.0.0.1.
+async function waitForViteDevServer(vitePort: number, timeoutMs: number): Promise<void> {
+  const url = `http://localhost:${vitePort}`;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, { redirect: "manual" });
+      if (response.status > 0) {
+        return;
+      }
+    } catch {
+      // Vite not up yet; keep polling.
+    }
+    await delay(500);
+  }
+  throw new Error(`Timed out waiting for Vite dev server at ${url}.`);
 }
 
 async function readLogTail(context: E2ERunContext, label: string): Promise<string | undefined> {
@@ -39,7 +73,12 @@ async function readLogTail(context: E2ERunContext, label: string): Promise<strin
   }
 }
 
-export async function startDevStack(context: E2ERunContext): Promise<DevStackHandle> {
+/**
+ * Start Vite (only) on the allocated port and wait for it to serve. Asserts the
+ * desktop build artifacts first. The returned process is tracked for cleanup;
+ * callers do not need the handle.
+ */
+export async function startDevStack(context: E2ERunContext): Promise<void> {
   await assertDesktopBuildArtifacts(context.repoRoot);
 
   logHarnessPhase(
@@ -47,12 +86,12 @@ export async function startDevStack(context: E2ERunContext): Promise<DevStackHan
   );
 
   const viteBin = join(context.repoRoot, "node_modules", ".bin", "vite");
-  const { process: child } = spawnWithArtifactLogs(context, {
+  const child = spawnWithArtifactLogs(context, {
     label: "dev-stack",
     command: viteBin,
     args: buildViteArgs(context.vitePort),
     cwd: context.repoRoot,
-    env: context.devEnv,
+    env: context.baseEnv,
   });
 
   registerCleanup(context, async () => {
@@ -71,6 +110,4 @@ export async function startDevStack(context: E2ERunContext): Promise<DevStackHan
     throw new Error(`${(error as Error).message}\n${details}`);
   }
   logHarnessPhase("Vite dev server is ready.");
-
-  return { process: child };
 }

@@ -94,17 +94,20 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 
 ```text
 e2e/
-  playwright.config.ts        # projects: setup, desktop-dev (default), desktop-release
+  playwright.config.ts        # projects: desktop-dev (default), desktop-release
   src/
     config/                   # loadEnv, timeouts, tags
     harness/                  # generic launch/process/isolation — no product selectors
+    fixtures/                 # Playwright fixture composition root (wires flows → harness)
     flows/                    # product UI steps (shell, onboarding, settings, agentChat)
     assertions/               # launch-health only
   tests/{smoke,settings,agent}/*.spec.ts
 ```
 
 Dependency direction: `tests → fixtures → harness`, `tests → flows`,
-`flows → harness`. Never `harness → flows`.
+`flows → harness`. Never `harness → flows`. The fixtures layer is the
+composition root: it is the only place flows may be wired into the launch
+pipeline; generic harness modules must not import flows.
 
 ### Key design points
 

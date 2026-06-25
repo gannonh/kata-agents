@@ -22,7 +22,9 @@ Read [`e2e/README.md`](../../../e2e/README.md) first.
   app path) must throw with the variable name and a pointer to `e2e/README.md`.
   Never silently skip an assertion.
 - **Keep layers separate.** `tests → fixtures → harness`, `tests → flows`,
-  `flows → harness`. Never import flows from harness.
+  `flows → harness`. Never import flows from harness. The fixtures layer
+  (`e2e/src/fixtures/`) is the composition root that wires flows into the
+  launch pipeline; harness modules stay product-selector-free.
 
 ## Where things go
 
@@ -34,6 +36,7 @@ Read [`e2e/README.md`](../../../e2e/README.md) first.
 | Settings step | `e2e/src/flows/settings.ts` |
 | Agent chat step | `e2e/src/flows/agentChat.ts` |
 | Launch/process/isolation | `e2e/src/harness/*` |
+| Playwright fixtures (composition root) | `e2e/src/fixtures/testFixtures.ts` |
 | Launch-health assertion | `e2e/src/assertions/appAssertions.ts` |
 
 ## Fixtures

@@ -14,7 +14,7 @@ export function resolveArtifactRoot(): string {
   return join(e2eRoot, "test-results");
 }
 
-export function resolveRunManifestPath(runId: string): string {
+function resolveRunManifestPath(runId: string): string {
   return join(resolveArtifactRoot(), runId, "manifest.json");
 }
 

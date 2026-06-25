@@ -4,28 +4,12 @@ import { _electron as electron, type ElectronApplication, type Page } from "@pla
 
 import { appendProcessLog } from "./artifacts.ts";
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
-import { assertDesktopBuildArtifacts } from "./desktopArtifacts.ts";
 import { startDevStack } from "./devStack.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 import { registerCleanup } from "./isolatedRun.ts";
 import { logHarnessPhase } from "./log.ts";
 import { buildElectronLaunchEnv, isRendererWindow } from "./launchEnv.ts";
 import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
-
-function attachElectronLogging(context: E2ERunContext, app: ElectronApplication): void {
-  app.on("window", (page) => {
-    page.on("console", (message) => {
-      void appendProcessLog(context, "renderer-console", `[${message.type()}] ${message.text()}\n`);
-    });
-    page.on("pageerror", (error) => {
-      void appendProcessLog(
-        context,
-        "renderer-pageerror",
-        `${error.message}\n${error.stack ?? ""}\n`,
-      );
-    });
-  });
-}
 
 // Console error messages that are network/resource noise rather than fatal
 // bootstrap JS failures. The dev index.html injects a React DevTools script
@@ -39,18 +23,47 @@ function isBenignConsoleError(text: string): boolean {
   );
 }
 
-function attachFatalLaunchErrorTracking(page: Page): () => readonly string[] {
-  const errors: string[] = [];
-  // Uncaught exceptions are always fatal.
-  page.on("pageerror", (error) => {
-    errors.push(error.message);
-  });
-  page.on("console", (message) => {
-    if (message.type() === "error" && !isBenignConsoleError(message.text())) {
-      errors.push(message.text());
-    }
-  });
-  return () => errors;
+/**
+ * Attach console + pageerror listeners to every renderer window — those already
+ * open and any opened later — and return a fatal-error reader for the
+ * launch-health assertion. Registered synchronously after electron.launch
+ * resolves so the initial window's bootstrap events are captured before
+ * resolveRendererWindow completes. A fatal bootstrap pageerror otherwise
+ * prevents the window from resolving, leaving the smoke assertion unrun.
+ */
+function attachRendererTracking(
+  context: E2ERunContext,
+  app: ElectronApplication,
+): () => readonly string[] {
+  const fatalErrors: string[] = [];
+
+  const track = (page: Page): void => {
+    page.on("console", (message) => {
+      void appendProcessLog(
+        context,
+        "renderer-console",
+        `[${message.type()}] ${message.text()}\n`,
+      );
+      if (message.type() === "error" && !isBenignConsoleError(message.text())) {
+        fatalErrors.push(message.text());
+      }
+    });
+    page.on("pageerror", (error) => {
+      fatalErrors.push(error.message);
+      void appendProcessLog(
+        context,
+        "renderer-pageerror",
+        `${error.message}\n${error.stack ?? ""}\n`,
+      );
+    });
+  };
+
+  for (const page of app.windows()) {
+    track(page);
+  }
+  app.on("window", track);
+
+  return () => [...fatalErrors];
 }
 
 /** Playwright's electron.launch env requires defined string values. */
@@ -126,7 +139,7 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
     logHarnessPhase("Launching packaged Electron app (release)...");
     electronApp = await electron.launch({ executablePath, env: launchEnv });
   } else {
-    await assertDesktopBuildArtifacts(context.repoRoot);
+    // startDevStack asserts the desktop build artifacts before spawning Vite.
     await startDevStack(context);
     logHarnessPhase("Launching Electron (dev)...");
     // Equivalent to `electron apps/electron`; Playwright resolves the local binary.
@@ -141,7 +154,8 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
     await electronApp.close();
   });
 
-  attachElectronLogging(context, electronApp);
+  const readFatalErrors = attachRendererTracking(context, electronApp);
+
   logHarnessPhase("Waiting for the Electron renderer window...");
   const window = await resolveRendererWindow(
     electronApp,
@@ -151,6 +165,5 @@ export async function launchApp(context: E2ERunContext): Promise<LaunchedApp> {
   );
   logHarnessPhase("Electron renderer window is ready.");
 
-  const readFatalErrors = attachFatalLaunchErrorTracking(window);
   return { electronApp, window, readFatalErrors };
 }

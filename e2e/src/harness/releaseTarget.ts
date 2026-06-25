@@ -18,7 +18,7 @@ export function resolveReleaseAppBundlePath(): string {
 
   if (!existsSync(configured)) {
     throw new Error(
-      `desktop-release launch: release app bundle does not exist at ${configured}. Build one (bun run electron:dist:mac) or point KATA_E2E_RELEASE_APP at a local app.`,
+      `desktop-release launch: release app bundle does not exist at ${configured}. Build one (bun run e2e:build-release) or point KATA_E2E_RELEASE_APP at a local app.`,
     );
   }
 

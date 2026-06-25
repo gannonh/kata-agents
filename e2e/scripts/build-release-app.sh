@@ -23,9 +23,25 @@
 set -euo pipefail
 
 ARCH="${1:-arm64}"
+case "$ARCH" in
+  arm64|x64) ;;
+  *)
+    echo "[e2e] ERROR: unsupported architecture '$ARCH' (expected arm64 or x64)" >&2
+    exit 2
+    ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ELECTRON_DIR="$REPO_ROOT/apps/electron"
+ENT=""
+
+cleanup() {
+  if [ -n "$ENT" ]; then
+    rm -f "$ENT"
+  fi
+}
+trap cleanup EXIT
 
 echo "[e2e] Building staged release app ($ARCH) via build-dmg.sh ..."
 # build-dmg.sh stages the SDK + ripgrep and runs electron-builder. It also
@@ -36,9 +52,9 @@ bash "$ELECTRON_DIR/scripts/build-dmg.sh" "$ARCH"
 build_status=$?
 set -e
 
-APP_DIR="$ELECTRON_DIR/release/mac-$( [ "$ARCH" = "arm64" ] && echo "arm64" || echo "x64" )"
-# electron-builder uses release/mac for x64 and release/mac-arm64 for arm64.
-if [ "$ARCH" = "x64" ]; then
+if [ "$ARCH" = "arm64" ]; then
+  APP_DIR="$ELECTRON_DIR/release/mac-arm64"
+else
   APP_DIR="$ELECTRON_DIR/release/mac"
 fi
 APP_PATH="$APP_DIR/Kata Agents.app"
@@ -47,9 +63,12 @@ if [ ! -d "$APP_PATH" ]; then
   echo "[e2e] ERROR: expected app bundle not found at $APP_PATH (build-dmg.sh exit=$build_status)" >&2
   exit 1
 fi
+if [ "$build_status" -ne 0 ]; then
+  echo "[e2e] build-dmg.sh exited $build_status after producing the app bundle; continuing with local E2E re-sign." >&2
+fi
 
 echo "[e2e] Re-signing $APP_PATH ad-hoc with debugger entitlement ..."
-ENT="$(mktemp -t kata-e2e-entitlements).plist"
+ENT="$(mktemp -t kata-e2e-entitlements)"
 cat > "$ENT" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,9 +88,9 @@ cat > "$ENT" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc re-sign (drops hardened runtime) so the Node inspector attaches.
-codesign --force --deep --sign - --entitlements "$ENT" "$APP_PATH" >/dev/null 2>&1
-rm -f "$ENT"
+# Ad-hoc re-sign (drops hardened runtime) so the Node inspector attaches. Let
+# codesign print its own diagnostics and fail the script if re-signing fails.
+codesign --force --deep --sign - --entitlements "$ENT" "$APP_PATH"
 
 echo "[e2e] Release app ready. Set KATA_E2E_RELEASE_APP to the path below:"
 echo "$APP_PATH"

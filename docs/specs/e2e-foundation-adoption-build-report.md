@@ -26,7 +26,7 @@ timestamp: 2026-06-25T00:00:00Z
 - **Spec fix**: added OKF frontmatter, `## Status`, and a formal `## Acceptance criteria` (13 criteria).
 - **Phase 0**: OKF decision record; linked from `docs/specs/index.md`; `log.md` entry.
 - **Phase 1**: `@playwright/test` devDep; root `e2e`/`e2e:headed`/`e2e:ui`/`e2e:release` scripts; `.gitignore`; `.env.example`; `e2e/src/config/{loadEnv,timeouts,tags}.ts`.
-- **Phase 2**: harness — `ports`, `isolatedRun`, `devStack`, `desktopArtifacts`, `appLaunch`, `launchEnv`, `readiness`, `artifacts`, `processSpawn`, `log`, `env`, `testFixtures`.
+- **Phase 2**: harness + fixtures — `isolatedRun`, `devStack`, `appLaunch`, `launchEnv`, `artifacts`, `processSpawn`, `log`, `env`, `releaseTarget`, and `fixtures/testFixtures`.
 - **Phase 3**: product id markers; flows `shell`/`onboarding`/`settings`/`agentChat`; assertion helper; `playwright.config.ts`; three specs; `e2e/README.md`; `e2e-test-author` skill; `AGENTS.md` link; `e2e/tsconfig.json`.
 - **Phase 4**: verification, deferred-work issues, status update, this report.
 
@@ -34,7 +34,7 @@ timestamp: 2026-06-25T00:00:00Z
 
 New: `e2e/playwright.config.ts`, `e2e/tsconfig.json`, `e2e/README.md`,
 `e2e/src/config/{loadEnv,timeouts,tags}.ts`,
-`e2e/src/harness/{ports,isolatedRun,devStack,desktopArtifacts,appLaunch,launchEnv,readiness,artifacts,processSpawn,log,env,testFixtures}.ts`,
+`e2e/src/harness/{isolatedRun,devStack,appLaunch,launchEnv,artifacts,processSpawn,log,env,releaseTarget}.ts`, `e2e/src/fixtures/testFixtures.ts`,
 `e2e/src/flows/{shell,onboarding,settings,agentChat}.ts`,
 `e2e/src/assertions/appAssertions.ts`,
 `e2e/tests/{smoke/launch,settings/appearance,agent/reply}.spec.ts`,
@@ -75,7 +75,7 @@ Full-suite run: `bun run e2e --project desktop-dev` → 3 passed.
 2. **Vite readiness host.** Probe `http://localhost:<port>` (not `127.0.0.1`) because Vite binds to `localhost`/IPv6, matching `VITE_DEV_SERVER_URL`.
 3. **Benign console-error filter.** The dev `index.html` injects a React DevTools script (`localhost:8097`) absent under E2E, producing a benign `ERR_CONNECTION_REFUSED` resource error. The fatal-error collector ignores resource/DevTools console errors; uncaught `pageerror` exceptions remain fatal.
 4. **@agent model selection.** Onboarding seeds an outdated default model (`Claude Haiku 3.5` / `claude-3-5-haiku-20241022`) that the live key 404s. The flow explicitly selects a current registry model (Haiku 4.5) in the composer before sending. The assertion requires the deterministic token to appear ≥2 times (prompt echo + reply) to prevent a false pass on the echoed prompt.
-5. **Single Vite port model.** Kata Agents uses one Vite port over IPC (no server/web offset pair), so `ports.ts` is a minimal `findAvailablePort()` rather than the reference offset model. Subprocess server-port isolation is deferred (issue #11), and V1 stays `workers: 1`.
+5. **Single Vite port model.** Kata Agents uses one Vite port over IPC (no server/web offset pair), so `isolatedRun.ts` owns a minimal `findAvailablePort()` rather than the reference offset model. Subprocess server-port isolation is deferred (issue #11), and V1 stays `workers: 1`.
 
 ## Review gates
 
@@ -132,3 +132,31 @@ Verification (macOS, packaged `.app` built from this branch):
   the variable.
 - `bun run e2e` (desktop-dev) → 3 passed (no regression).
 - `e2e` `tsc -p tsconfig.json` → exit 0.
+
+## Addendum (2026-06-25): strict quality review fixes
+
+A strict implementation-quality review found two merge blockers and several
+legitimate cleanup items. Fixed in this pass:
+
+- Moved Playwright fixture composition from `e2e/src/harness/testFixtures.ts` to
+  `e2e/src/fixtures/testFixtures.ts`, preserving the documented dependency
+  direction: `tests → fixtures → harness`, `tests → flows`, `flows → harness`.
+- Attached renderer console/pageerror tracking immediately after
+  `electron.launch` and before `resolveRendererWindow`, so bootstrap fatal errors
+  are captured even when the renderer never reaches the ready window state.
+- Collapsed single-caller harness wrappers into their owners:
+  `ports.ts` → `isolatedRun.ts`, `readiness.ts` and `desktopArtifacts.ts` →
+  `devStack.ts`.
+- Removed the dead Playwright `setup` project, unused `setupMs`, dead exports,
+  and redundant dev build-artifact assertion in `appLaunch.ts`.
+- Renamed `devEnv` to `baseEnv`, made `isRendererWindow` require an explicit
+  launch target, and made the `@agent` spec use the `appWindow` fixture.
+- Hardened `e2e/scripts/build-release-app.sh`: validates architecture, avoids
+  the `mktemp` suffix leak, traps entitlement cleanup, and lets `codesign` fail
+  loud with diagnostics.
+- Updated release-path guidance from `bun run electron:dist:mac` to
+  `bun run e2e:build-release`.
+
+Verification:
+- `bunx tsc --noEmit -p e2e/tsconfig.json` → exit 0.
+- `bun run e2e --list` → 3 desktop-dev tests listed, exit 0.

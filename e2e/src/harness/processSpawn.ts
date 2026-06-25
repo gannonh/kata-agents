@@ -5,10 +5,6 @@ import { join } from "node:path";
 import { appendProcessLog } from "./artifacts.ts";
 import type { E2ERunContext } from "./isolatedRun.ts";
 
-export interface LoggedChildProcess {
-  readonly process: ChildProcess;
-}
-
 function openArtifactLogFd(artifactRoot: string, label: string): number {
   mkdirSync(artifactRoot, { recursive: true });
   return openSync(join(artifactRoot, `${label}.log`), "a");
@@ -23,7 +19,7 @@ export function spawnWithArtifactLogs(
     readonly env: NodeJS.ProcessEnv;
     readonly cwd: string;
   },
-): LoggedChildProcess {
+): ChildProcess {
   const stdoutFd = openArtifactLogFd(context.artifactRoot, `${input.label}-stdout`);
   const stderrFd = openArtifactLogFd(context.artifactRoot, `${input.label}-stderr`);
 
@@ -44,7 +40,7 @@ export function spawnWithArtifactLogs(
     );
   });
 
-  return { process: child };
+  return child;
 }
 
 export async function terminateChildProcess(child: ChildProcess): Promise<void> {

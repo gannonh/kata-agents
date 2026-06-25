@@ -13,8 +13,8 @@ import {
   readAgentProviderConfig,
   readAgentProviderPrerequisite,
 } from "../../src/harness/env.ts";
-import { waitForAppReady, waitForRootMounted } from "../../src/flows/shell.ts";
-import { test } from "../../src/harness/testFixtures.ts";
+import { waitForAppReady } from "../../src/flows/shell.ts";
+import { test } from "../../src/fixtures/testFixtures.ts";
 
 // Real provider + shared state: keep a single worker. Allow a longer per-test
 // budget for onboarding + real provider round-trip.
@@ -22,7 +22,7 @@ test.describe.configure({ mode: "serial", timeout: E2E_TIMEOUTS.agentTestMs });
 
 test.describe(`Agent reply ${E2E_TAGS.agent}`, () => {
   test("real provider connection returns a deterministic reply", async ({
-    launchedApp,
+    appWindow,
   }) => {
     const prerequisite = readAgentProviderPrerequisite();
     if (!prerequisite.ok) {
@@ -30,8 +30,7 @@ test.describe(`Agent reply ${E2E_TAGS.agent}`, () => {
     }
     const { model } = readAgentProviderConfig();
 
-    const page = launchedApp.window;
-    await waitForRootMounted(page);
+    const page = appWindow;
     await completeApiKeyOnboarding(page);
     await waitForAppReady(page);
 

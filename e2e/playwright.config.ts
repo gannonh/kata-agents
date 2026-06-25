@@ -31,11 +31,6 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "setup",
-      testMatch: /setup\/.*\.setup\.ts/,
-      timeout: E2E_TIMEOUTS.setupMs,
-    },
-    {
       name: "desktop-dev",
       testMatch: /.*\.spec\.ts/,
       metadata: { launchTarget: "dev" },

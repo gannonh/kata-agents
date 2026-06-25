@@ -9,7 +9,6 @@ export const E2E_TIMEOUTS = {
   electronWindowMs: readPositiveIntEnv("KATA_E2E_ELECTRON_WINDOW_TIMEOUT_MS", 30_000),
   testMs: readPositiveIntEnv("KATA_E2E_TEST_TIMEOUT_MS", 90_000),
   agentTestMs: readPositiveIntEnv("KATA_E2E_AGENT_TEST_TIMEOUT_MS", 150_000),
-  setupMs: readPositiveIntEnv("KATA_E2E_SETUP_TIMEOUT_MS", 20_000),
   assertionMs: readPositiveIntEnv("KATA_E2E_ASSERTION_TIMEOUT_MS", 10_000),
   authMs: readPositiveIntEnv("KATA_E2E_AUTH_TIMEOUT_MS", 15_000),
   agentReplyMs: readPositiveIntEnv("KATA_E2E_AGENT_REPLY_TIMEOUT_MS", 60_000),

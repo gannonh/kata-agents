@@ -55,10 +55,6 @@ export async function sendAgentPrompt(page: Page, text: string): Promise<void> {
   await page.locator(SEND_BUTTON_SELECTOR).click();
 }
 
-export function normalize(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 /**
  * Assert the agent replied with the deterministic token.
  *

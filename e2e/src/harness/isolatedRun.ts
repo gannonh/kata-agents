@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { findAvailablePort } from "./ports.ts";
 import { resolveArtifactRoot } from "./artifacts.ts";
 
 export type LaunchTarget = "dev" | "release";
@@ -18,12 +18,40 @@ export interface E2ERunContext {
   readonly vitePort: number;
   readonly artifactRoot: string;
   /** Base env for the dev stack + Electron launch, mirroring getElectronEnv(). */
-  readonly devEnv: NodeJS.ProcessEnv;
+  readonly baseEnv: NodeJS.ProcessEnv;
 }
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const cleanupCallbacksByRunId = new Map<string, Array<() => Promise<void> | void>>();
+
+/**
+ * Allocate a free TCP port by binding to port 0 on the loopback interface and
+ * reading the OS-assigned port. Kata Agents uses a single Vite port per run
+ * (no server/web offset pair), so this is intentionally minimal.
+ *
+ * Note: there is an inherent race between releasing the probe socket and the
+ * caller binding the port. V1 runs `workers: 1`, so concurrent allocation is
+ * not a concern; a follow-up issue tracks subprocess server-port isolation for
+ * `workers > 1`.
+ */
+function findAvailablePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Failed to allocate a TCP port (no address from net server)."));
+        return;
+      }
+      const { port } = address;
+      server.close(() => resolve(port));
+    });
+  });
+}
 
 function createRunId(): string {
   return `e2e-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -40,8 +68,8 @@ export async function createIsolatedRun(input: {
   const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
   // Mirror the dev-stack env keys from getElectronEnv() in
-  // scripts/electron-dev.ts:277-292. Single owner for E2E dev-stack env.
-  const devEnv: NodeJS.ProcessEnv = {
+  // scripts/electron-dev.ts:277-292. Single owner for E2E launch env.
+  const baseEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KATA_CONFIG_DIR: configDir,
     KATA_VITE_PORT: String(vitePort),
@@ -63,7 +91,7 @@ export async function createIsolatedRun(input: {
     configDir,
     vitePort,
     artifactRoot,
-    devEnv,
+    baseEnv,
   };
 }
 

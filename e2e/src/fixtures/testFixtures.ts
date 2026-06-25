@@ -2,16 +2,16 @@ import { test as base, expect, type ElectronApplication, type Page } from "@play
 
 import { completeDeferredSetup } from "../flows/onboarding.ts";
 import { waitForAppReady, waitForRootMounted } from "../flows/shell.ts";
-import { launchApp, type LaunchedApp } from "./appLaunch.ts";
-import { logHarnessPhase } from "./log.ts";
-import { writeRunManifest } from "./artifacts.ts";
-import { assertMacOsHost } from "./env.ts";
+import { launchApp, type LaunchedApp } from "../harness/appLaunch.ts";
+import { writeRunManifest } from "../harness/artifacts.ts";
+import { assertMacOsHost } from "../harness/env.ts";
+import { logHarnessPhase } from "../harness/log.ts";
 import {
   cleanupRunState,
   createIsolatedRun,
   type E2ERunContext,
   type LaunchTarget,
-} from "./isolatedRun.ts";
+} from "../harness/isolatedRun.ts";
 
 const LAUNCH_TARGETS = new Set<LaunchTarget>(["dev", "release"]);
 

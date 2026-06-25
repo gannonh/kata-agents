@@ -4,7 +4,7 @@ const DEV_ONLY_ENV_KEYS = ["VITE_DEV_SERVER_URL", "KATA_VITE_PORT"] as const;
 
 export function buildElectronLaunchEnv(context: E2ERunContext): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    ...context.devEnv,
+    ...context.baseEnv,
     ELECTRON_ENABLE_LOGGING: "1",
   };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -28,7 +28,7 @@ export function buildElectronLaunchEnv(context: E2ERunContext): NodeJS.ProcessEn
 export function isRendererWindow(
   url: string,
   vitePort: number,
-  launchTarget: "dev" | "release" = "dev",
+  launchTarget: "dev" | "release",
 ): boolean {
   if (!url || url === "about:blank" || url.startsWith("devtools://")) {
     return false;
