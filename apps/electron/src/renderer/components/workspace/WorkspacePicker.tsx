@@ -63,7 +63,7 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-sidebar px-4">
+    <div id="workspace-picker" className="flex h-screen items-center justify-center bg-sidebar px-4">
       <AddWorkspaceContainer>
         <AddWorkspaceStepHeader
           title={t("workspace.selectWorkspace")}

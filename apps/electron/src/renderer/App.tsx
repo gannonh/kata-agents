@@ -1998,6 +1998,7 @@ export default function App() {
 
           {/* Main UI - always rendered, splash fades away to reveal it */}
           <div
+            id="app-ready"
             className="h-full flex flex-col text-foreground"
             style={{ paddingTop: 'var(--topbar-height)' }}
           >

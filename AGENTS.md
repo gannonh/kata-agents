@@ -28,6 +28,7 @@ Each package has its own agent context file — read it before modifying that pa
 - Type-check a package: `cd packages/shared && bun run tsc --noEmit` or `cd apps/electron && bun run typecheck`
 - Run tests: `bun test`
 - Shared package tests: `cd packages/shared && bun test`
+- Local E2E (real Electron, macOS-only): `bun run e2e` — see [`e2e/README.md`](e2e/README.md). Authoring guide: [`.agents/skills/e2e-test-author/SKILL.md`](.agents/skills/e2e-test-author/SKILL.md).
 
 ## Monorepo conventions
 
