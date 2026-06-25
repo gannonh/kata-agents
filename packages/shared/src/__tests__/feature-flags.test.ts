@@ -1,11 +1,10 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { isDevRuntime, isDeveloperFeedbackEnabled, isKataAgentsCliEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
   KATA_DEBUG: process.env.KATA_DEBUG,
   KATA_FEATURE_DEVELOPER_FEEDBACK: process.env.KATA_FEATURE_DEVELOPER_FEEDBACK,
-  KATA_FEATURE_KATA_AGENTS_CLI: process.env.KATA_FEATURE_KATA_AGENTS_CLI,
   KATA_FEATURE_EMBEDDED_SERVER: process.env.KATA_FEATURE_EMBEDDED_SERVER,
 };
 
@@ -18,9 +17,6 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_FEATURE_DEVELOPER_FEEDBACK === undefined) delete process.env.KATA_FEATURE_DEVELOPER_FEEDBACK;
   else process.env.KATA_FEATURE_DEVELOPER_FEEDBACK = ORIGINAL_ENV.KATA_FEATURE_DEVELOPER_FEEDBACK;
-
-  if (ORIGINAL_ENV.KATA_FEATURE_KATA_AGENTS_CLI === undefined) delete process.env.KATA_FEATURE_KATA_AGENTS_CLI;
-  else process.env.KATA_FEATURE_KATA_AGENTS_CLI = ORIGINAL_ENV.KATA_FEATURE_KATA_AGENTS_CLI;
 
   if (ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.KATA_FEATURE_EMBEDDED_SERVER;
   else process.env.KATA_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER;
@@ -62,24 +58,6 @@ describe('feature-flags runtime helpers', () => {
     delete process.env.KATA_FEATURE_DEVELOPER_FEEDBACK;
 
     expect(isDeveloperFeedbackEnabled()).toBe(true);
-  });
-
-  it('isKataAgentsCliEnabled defaults to false when no override is set', () => {
-    delete process.env.KATA_FEATURE_KATA_AGENTS_CLI;
-
-    expect(isKataAgentsCliEnabled()).toBe(false);
-  });
-
-  it('isKataAgentsCliEnabled honors explicit override true', () => {
-    process.env.KATA_FEATURE_KATA_AGENTS_CLI = '1';
-
-    expect(isKataAgentsCliEnabled()).toBe(true);
-  });
-
-  it('isKataAgentsCliEnabled honors explicit override false', () => {
-    process.env.KATA_FEATURE_KATA_AGENTS_CLI = '0';
-
-    expect(isKataAgentsCliEnabled()).toBe(false);
   });
 
   it('isEmbeddedServerEnabled defaults to false when no override is set', () => {

@@ -4,13 +4,15 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-* [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md): Rename `apps/cli` to `@kata-sh/agents-cli` / bin `kata-agents-cli` and remove all phantom `kata-agent` commands-CLI references (system prompt, permission policies, feature flag, bundled docs, orphaned env vars). Plan approved 2026-06-24. Deferred-work backlog: [#4](https://github.com/gannonh/kata-agents/issues/4).
+*(none)*
 
 ## Planned implementation phases
 
 Completed under [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md). Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md).
 
 ## Completed
+
+* [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md): Rename `apps/cli` to `@kata-sh/agents-cli` / bin `kata-agents-cli` and remove phantom `kata-agent` commands-CLI references. Build report: [2026-06-24-cli-rename-and-phantom-removal-build-report.md](2026-06-24-cli-rename-and-phantom-removal-build-report.md). Deferred-work backlog: [#4](https://github.com/gannonh/kata-agents/issues/4).
 
 * [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md): Hard-cutover Kata identity across packages, runtime, desktop app, CLI/server/viewer/webui, bundled resources, docs, and release metadata. Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md) — all 12 ACs pass.
 

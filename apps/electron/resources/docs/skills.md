@@ -2,9 +2,7 @@
 
 This guide explains how to create and configure skills in Kata Agent.
 
-> **CLI-first workflow (recommended):** Use `kata-agent skill ...` commands instead of editing `SKILL.md` files directly.
-> - `kata-agent skill --help`
-> - Canonical command reference: [kata-cli.md](./kata-cli.md)
+> **Terminal client:** Use `kata-agents-cli invoke <channel>` for config-domain operations. See [kata-agents-cli.md](./kata-agents-cli.md) for connection flags and invoke examples.
 
 ## What Are Skills?
 

@@ -169,16 +169,6 @@ if (isDebugMode) {
   }
 
   process.env.KATA_SCRIPTS = scriptsDir
-  process.env.KATA_COMMANDS_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'packages', 'kata-agents-commands', 'src', 'main.ts')
-    : join(process.cwd(), 'packages', 'kata-agents-commands', 'src', 'main.ts')
-  process.env.KATA_CLI_ENTRY = app.isPackaged
-    ? join(app.getAppPath(), 'packages', 'kata-cli', 'src', 'cli.ts')
-    : join(process.cwd(), 'packages', 'kata-cli', 'src', 'cli.ts')
-  process.env.KATA_COMMANDS_DOC_PATH = app.isPackaged
-    ? join(resourcesBase, 'resources', 'docs', 'kata-cli.md')
-    : join(process.cwd(), 'apps', 'electron', 'resources', 'docs', 'kata-cli.md')
-  process.env.KATA_CLI_DOC_PATH = process.env.KATA_COMMANDS_DOC_PATH
   process.env.KATA_AGENT_VERSION = app.getVersion()
   // Prepend both generic wrappers dir and platform uv dir:
   // - binDir exposes wrapper commands (pdf-tool, docx-tool, ...)

@@ -2,9 +2,7 @@
 
 This guide explains how to configure custom permission rules for Explore mode.
 
-> **CLI-first workflow (recommended):** Use `kata-agent permission ...` commands instead of editing JSON directly.
-> - `kata-agent permission --help`
-> - Canonical command reference: [kata-cli.md](./kata-cli.md)
+> **Terminal client:** Use `kata-agents-cli invoke <channel>` for config-domain operations. See [kata-agents-cli.md](./kata-agents-cli.md) for connection flags and invoke examples.
 
 ## Overview
 

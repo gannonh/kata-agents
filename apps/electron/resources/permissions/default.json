@@ -102,44 +102,12 @@
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {
-      "pattern": "^kata-agent\\s+label\\s+(list|get|auto-rule-list|auto-rule-validate)\\b",
-      "comment": "kata-agent label read-only operations"
+      "pattern": "^kata-agents-cli\\s+invoke\\s+(labels:list|sources:get|sources:getPermissions|skills:get|automations:get|automations:getHistory|automations:getLastExecuted|workspace:getPermissions|permissions:getDefaults|workspaceSettings:get|system:homeDir)(\\s+.*)?$",
+      "comment": "kata-agents-cli invoke read-only RPC channels"
     },
     {
-      "pattern": "^kata-agent\\s+source\\s+(list|get|validate|test|auth-help)\\b",
-      "comment": "kata-agent source read-only operations"
-    },
-    {
-      "pattern": "^kata-agent\\s+skill\\s+(list|get|validate|where)\\b",
-      "comment": "kata-agent skill read-only operations"
-    },
-    {
-      "pattern": "^kata-agent\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b",
-      "comment": "kata-agent automation read-only operations"
-    },
-    {
-      "pattern": "^kata-agent\\s+permission\\s+(list|get|validate)\\b",
-      "comment": "kata-agent permission read-only operations"
-    },
-    {
-      "pattern": "^kata-agent\\s+theme\\s+(get|validate|list-presets|get-preset)\\b",
-      "comment": "kata-agent theme read-only operations"
-    },
-    {
-      "pattern": "^kata-agent\\s*$",
-      "comment": "kata-agent bare invocation (prints help)"
-    },
-    {
-      "pattern": "^kata-agent\\s+(label|source|skill|automation|permission|theme)\\s*$",
-      "comment": "kata-agent entity help"
-    },
-    {
-      "pattern": "^kata-agent\\s+(label|source|skill|automation|permission|theme)\\s+--help\\b",
-      "comment": "kata-agent entity help flags"
-    },
-    {
-      "pattern": "^kata-agent\\s+--(help|version|discover)\\b",
-      "comment": "kata-agent global flags"
+      "pattern": "^kata-agents-cli\\s+--help$",
+      "comment": "kata-agents-cli help"
     },
     {
       "pattern": "^find\\b",

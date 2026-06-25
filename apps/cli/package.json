@@ -1,23 +1,30 @@
 {
-  "name": "@kata-sh/cli",
+  "name": "@kata-sh/agents-cli",
   "version": "0.10.3",
   "license": "Apache-2.0",
   "description": "Terminal client for Kata Agent server",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/cli.cjs",
   "bin": {
-    "kata-cli": "src/index.ts"
+    "kata-agents-cli": "dist/cli.cjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "bun run src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --target=es2022 --outfile=dist/cli.cjs --log-level=error",
+    "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test src/"
   },
-  "dependencies": {
-    "@kata-sh/shared": "workspace:*",
-    "@kata-sh/server-core": "workspace:*"
-  },
   "devDependencies": {
+    "@kata-sh/shared": "workspace:*",
+    "@kata-sh/server-core": "workspace:*",
+    "esbuild": "^0.25.0",
     "typescript": "^5.8.2",
     "@types/node": "^22.0.0",
     "@types/bun": "latest"

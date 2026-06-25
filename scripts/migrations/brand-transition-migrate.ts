@@ -58,7 +58,7 @@ const REPLACEMENTS: Array<[string, string]> = [
   ['.craft-agent', '.kata-agents'],
   // Binaries
   ['craft-server', 'kata-server'],
-  ['craft-cli', 'kata-cli'],
+  ['craft-cli', 'kata-agents-cli'],
   // Root package name in contexts
   ['"craft-agent"', '"kata-agents"'],
   ["'craft-agent'", "'kata-agents'"],
@@ -86,7 +86,6 @@ const FILE_RENAMES: Array<[string, string]> = [
   ['craft-agent.cmd', 'kata-agent.cmd'],
   ['craft-agent', 'kata-agent'],
   ['craft-metadata-schema.ts', 'kata-metadata-schema.ts'],
-  ['permissions-config-craft-cli-flag.test.ts', 'permissions-config-kata-cli-flag.test.ts'],
 ];
 
 function shouldSkip(relPath: string): boolean {

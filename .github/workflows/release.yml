@@ -277,7 +277,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Align package versions to release version
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}"
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION"
 
       - name: Generate electron-builder release config
         shell: bash
@@ -413,7 +415,9 @@ jobs:
 
       - name: Update version strings
         id: update_versions
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --github-output
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
@@ -425,7 +429,7 @@ jobs:
           RELEASE_TAG: ${{ needs.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- package.json apps/electron/package.json bun.lock; then
+          if git diff --quiet -- package.json apps/electron/package.json apps/cli/package.json bun.lock; then
             echo "No version changes to commit."
             exit 0
           fi
@@ -433,18 +437,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add package.json apps/electron/package.json bun.lock
+          git add package.json apps/electron/package.json apps/cli/package.json bun.lock
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
 
-  # ── npm CLI publish — SCAFFOLDED BUT DISABLED in Project B ────────────────────
-  # `if: false` keeps this job permanently skipped so nothing is published to npm
-  # under the soon-to-be-renamed @kata-sh/* scope. Project C enables npm
-  # publishing (after the scope/env rename); flip the guard there and wire
-  # NPM_TOKEN. Until then this job documents the intended shape only.
+  # ── npm CLI publish — publishes @kata-sh/agents-cli to npm ──────────────────
+  # Publishes the renamed terminal client (@kata-sh/agents-cli / bin kata-agents-cli)
+  # from main on stable releases. Gated: main ref + stable channel + not a dry run,
+  # so PRs/branches/nightly-when-unversioned never publish. Requires the NPM_TOKEN
+  # repo secret. Nightly dist-tag publishing can be enabled by relaxing the channel
+  # gate once nightly version bumping is in place.
   publish_cli:
     needs: [release_meta, release]
-    if: false
+    if: github.ref == 'refs/heads/main' && needs.release_meta.outputs.channel == 'stable' && needs.release_meta.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -455,14 +460,18 @@ jobs:
           bun-version: "1.3.10"
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Build CLI bundle
+        # esbuild bundles src/index.ts into dist/cli.cjs (Node shebang) — no runtime workspace deps.
+        run: cd apps/cli && bun run build
+      - name: Setup npm registry
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          registry-url: https://registry.npmjs.org
       - name: Publish CLI to npm
-        # dist-tag follows the channel: nightly → "nightly", stable → "latest".
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          dist_tag="latest"
-          if [ "${{ needs.release_meta.outputs.channel }}" = "nightly" ]; then
-            dist_tag="nightly"
-          fi
-          echo "Would publish apps/cli with --tag $dist_tag (disabled in Project B)"
-          # cd apps/cli && npm publish --tag "$dist_tag" --access public
+          CHANNEL="${{ needs.release_meta.outputs.channel }}"
+          TAG="${CHANNEL}"
+          if [ "$CHANNEL" = "stable" ]; then TAG="latest"; fi
+          cd apps/cli && npm publish --tag "$TAG" --access public --ignore-scripts

@@ -578,6 +578,7 @@ Read relevant context files using the Read tool - they contain architecture info
 | Themes | \`${DOC_REFS.themes}\` | BEFORE customizing colors |
 | Statuses | \`${DOC_REFS.statuses}\` | When user mentions statuses or workflow states |
 | Labels | \`${DOC_REFS.labels}\` | BEFORE creating/modifying labels |
+| Terminal CLI | \`${DOC_REFS.agentsCli}\` | When using \`kata-agents-cli invoke\` for config RPC |
 | Tool Icons | \`${DOC_REFS.toolIcons}\` | BEFORE modifying tool icon mappings |
 | Mermaid | \`${DOC_REFS.mermaid}\` | When creating diagrams |
 | Data Tables | \`${DOC_REFS.dataTables}\` | When working with datasets of 20+ rows |
@@ -586,20 +587,9 @@ Read relevant context files using the Read tool - they contain architecture info
 | Image Preview | \`${DOC_REFS.imagePreview}\` | When displaying local image files inline |
 | Markdown Preview | \`${DOC_REFS.markdownPreview}\` | When displaying rendered .md files inline |
 | Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_tool\`) |
-| LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |${FEATURE_FLAGS.kataAgentsCli ? `
-| Kata CLI | \`${DOC_REFS.kataCli}\` | When managing labels/sources/skills/automations via \`kata-agent\` |` : ''}
+| LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |
 
-**IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - these have specific patterns that differ from standard approaches.${FEATURE_FLAGS.kataAgentsCli ? `
-
-## Kata Agent CLI
-
-Prefer \`kata-agent\` CLI over direct file edits for labels, sources, skills, and automations.
-
-- Labels help: \`kata-agent label --help\`
-- Sources help: \`kata-agent source --help\`
-- Skills help: \`kata-agent skill --help\`
-- Automations help: \`kata-agent automation --help\`
-- Canonical reference: \`${DOC_REFS.kataCli}\`` : ''}
+**IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - these have specific patterns that differ from standard approaches.
 
 ## User preferences
 

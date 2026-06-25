@@ -14,6 +14,13 @@ import {
   isReadOnlyBashCommandWithConfig,
   getBashRejectionReason,
 } from '../src/agent/mode-manager.ts';
+import { getAgentsCliReadOnlyInvokeBashPatterns } from '../src/config/agents-cli-invoke.ts';
+
+const agentsCliInvokePatterns = getAgentsCliReadOnlyInvokeBashPatterns().map((rule) => ({
+  regex: new RegExp(rule.pattern),
+  source: rule.pattern,
+  comment: rule.comment,
+}));
 
 // ============================================================
 // Test Configuration (mirrors mode-manager.test.ts TEST_MODE_CONFIG)
@@ -99,14 +106,8 @@ const TEST_MODE_CONFIG = {
       comment: 'npm read operations',
     },
 
-    // kata-agent CLI read-only
-    { regex: /^kata-agent\s+label\s+(list|get)\b/, source: '^kata-agent\\s+label\\s+(list|get)\\b', comment: 'kata-agent label read-only operations' },
-    { regex: /^kata-agent\s+source\s+(list|get|validate|test)\b/, source: '^kata-agent\\s+source\\s+(list|get|validate|test)\\b', comment: 'kata-agent source read-only operations' },
-    { regex: /^kata-agent\s+skill\s+(list|get|validate|where)\b/, source: '^kata-agent\\s+skill\\s+(list|get|validate|where)\\b', comment: 'kata-agent skill read-only operations' },
-    { regex: /^kata-agent\s+automation\s+(list|get|validate|history|last-executed|test|lint)\b/, source: '^kata-agent\\s+automation\\s+(list|get|validate|history|last-executed|test|lint)\\b', comment: 'kata-agent automation read-only operations' },
-    { regex: /^kata-agent\s*$/, source: '^kata-agent\\s*$', comment: 'kata-agent bare invocation' },
-    { regex: /^kata-agent\s+(label|source|skill|automation)\s+--help\b/, source: '^kata-agent\\s+(label|source|skill|automation)\\s+--help\\b', comment: 'kata-agent entity help flags' },
-    { regex: /^kata-agent\s+--(help|version|discover)\b/, source: '^kata-agent\\s+--(help|version|discover)\\b', comment: 'kata-agent global flags' },
+    // kata-agents-cli invoke read-only (derived from shared policy)
+    ...agentsCliInvokePatterns,
 
     // Version checks
     { regex: /^node\s+(--version|-v)\b/, source: 'node version', comment: 'Node.js version' },
@@ -835,55 +836,32 @@ describe('ShellGuard corpus: resource exhaustion', () => {
 });
 
 // ============================================================
-// Group 27: kata-agent CLI allowlist
+// Group 27: kata-agents-cli invoke allowlist
 // ============================================================
 
-describe('ShellGuard corpus: kata-agent CLI allowlist', () => {
+describe('ShellGuard corpus: kata-agents-cli invoke allowlist', () => {
   const shouldAllow = [
-    'kata-agent',
-    'kata-agent --help',
-    'kata-agent --version',
-    'kata-agent --discover',
-    'kata-agent label --help',
-    'kata-agent label list',
-    'kata-agent label get bug',
-    'kata-agent source --help',
-    'kata-agent source list',
-    'kata-agent source get linear',
-    'kata-agent source validate linear',
-    'kata-agent source test linear',
-    'kata-agent skill --help',
-    'kata-agent skill list',
-    'kata-agent skill get commit-helper',
-    'kata-agent skill where commit-helper',
-    'kata-agent skill validate commit-helper',
-    'kata-agent automation list',
-    'kata-agent automation get abc123',
-    'kata-agent automation validate',
-    'kata-agent automation history abc123 --limit 5',
-    'kata-agent automation last-executed abc123',
-    'kata-agent automation test abc123 --match "x"',
-    'kata-agent automation lint',
+    'kata-agents-cli --help',
+    'kata-agents-cli invoke labels:list',
+    'kata-agents-cli invoke sources:get',
+    'kata-agents-cli invoke sources:getPermissions',
+    'kata-agents-cli invoke skills:get',
+    'kata-agents-cli invoke automations:get',
+    'kata-agents-cli invoke automations:getHistory',
+    'kata-agents-cli invoke automations:getLastExecuted',
+    'kata-agents-cli invoke workspace:getPermissions',
+    'kata-agents-cli invoke permissions:getDefaults',
+    'kata-agents-cli invoke workspaceSettings:get',
+    'kata-agents-cli invoke system:homeDir',
   ];
 
   const shouldBlock = [
-    'kata-agent label create --name Bug',
-    'kata-agent label update bug --name "Bug Report"',
-    'kata-agent label delete bug',
-    'kata-agent label move bug --parent root',
-    'kata-agent label reorder --parent root a b c',
-    'kata-agent source create --name Linear --provider linear --type mcp',
-    'kata-agent source update linear --json "{\"enabled\":false}"',
-    'kata-agent source delete linear',
-    'kata-agent skill create --name "Review" --description "x"',
-    'kata-agent skill update review --json "{\"description\":\"y\"}"',
-    'kata-agent skill delete review',
-    'kata-agent automation create --event UserPromptSubmit --prompt "x"',
-    'kata-agent automation update abc123 --json "{\"enabled\":false}"',
-    'kata-agent automation delete abc123',
-    'kata-agent automation enable abc123',
-    'kata-agent automation disable abc123',
-    'kata-agent automation duplicate abc123',
+    'kata-agents-cli ping',
+    'kata-agents-cli workspaces',
+    'kata-agents-cli invoke labels:create',
+    'kata-agents-cli invoke sources:create',
+    'kata-agents-cli invoke skills:create',
+    'kata-agents-cli invoke automations:create',
   ];
 
   for (const cmd of shouldAllow) {

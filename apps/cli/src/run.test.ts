@@ -186,12 +186,12 @@ describe('run command', () => {
   it('parseArgs: run with --source accumulates sources', () => {
     const args = parseArgs([
       'bun', 'index.ts',
-      '--source', 'craft-kb',
+      '--source', 'kata-kb',
       '--source', 'github',
       'run', 'do', 'stuff',
     ])
     expect(args.command).toBe('run')
-    expect(args.sources).toEqual(['craft-kb', 'github'])
+    expect(args.sources).toEqual(['kata-kb', 'github'])
     expect(args.rest).toEqual(['do', 'stuff'])
   })
 
@@ -233,14 +233,14 @@ describe('run command', () => {
 
     const session = await client.invoke('sessions:create', 'ws-1', {
       permissionMode: 'allow-all',
-      enabledSourceSlugs: ['craft-kb'],
+      enabledSourceSlugs: ['kata-kb'],
     }) as { id: string }
     expect(session.id).toBe('run-session-1')
 
     // Verify the create args
     expect(mockWsServer!.createSessionArgs).toEqual([
       'ws-1',
-      { permissionMode: 'allow-all', enabledSourceSlugs: ['craft-kb'] },
+      { permissionMode: 'allow-all', enabledSourceSlugs: ['kata-kb'] },
     ])
 
     // Verify channel order
@@ -350,7 +350,7 @@ describe('run command', () => {
     // Session is created with the bootstrapped workspace ID
     await client.invoke('sessions:create', ws.id, {
       permissionMode: 'allow-all',
-      enabledSourceSlugs: ['craft-public'],
+      enabledSourceSlugs: ['kata-public'],
     })
 
     expect(mockWsServer!.invokedChannels).toEqual([

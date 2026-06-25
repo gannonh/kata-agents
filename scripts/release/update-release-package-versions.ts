@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 export const DEFAULT_RELEASE_PACKAGE_FILES = [
   'package.json',
   'apps/electron/package.json',
+  'apps/cli/package.json',
 ] as const
 
 export function setPackageVersion(

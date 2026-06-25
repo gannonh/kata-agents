@@ -24,7 +24,7 @@ Kata Agents is a desktop app, headless server, and CLI client for running AI age
 - **Multi-provider AI** — Claude (Anthropic API, Max/Pro OAuth, Bedrock), OpenAI, Google AI Studio, GitHub Copilot, OpenRouter, Ollama, and any OpenAI-compatible endpoint
 - **Desktop app** — Electron + React GUI with a multi-session inbox, file attachments, real-time streaming, and workspace management
 - **Headless server** — WebSocket RPC server (port 9100) for remote or automated agent sessions
-- **CLI client** — `kata-cli` connects to any running server and supports scripted workflows
+- **CLI client** — `kata-agents-cli` connects to any running server and supports scripted workflows
 - **Sources** — Attach live data connections (MCP, API, local) to agent sessions
 - **Skills** — Define custom `SKILL.md` files to extend agent behavior per workspace
 - **Automations** — Event-driven automations across sessions and messaging platforms
@@ -82,17 +82,17 @@ The server exposes a WebSocket RPC API at `ws://localhost:9100`. TLS is supporte
 
 ### CLI client
 
-`kata-cli` connects to any running server:
+`kata-agents-cli` connects to any running server:
 
 ```bash
 # Link globally
 cd apps/cli && bun link
-kata-cli ping               # verify connectivity
-kata-cli sessions           # list sessions
-kata-cli send <id> "Hello"  # stream a message
+kata-agents-cli ping               # verify connectivity
+kata-agents-cli sessions           # list sessions
+kata-agents-cli send <id> "Hello"  # stream a message
 
 # Self-contained run (no server setup needed)
-ANTHROPIC_API_KEY=sk-... kata-cli run "Summarize this repo"
+ANTHROPIC_API_KEY=sk-... kata-agents-cli run "Summarize this repo"
 ```
 
 See [CLI Reference](docs/reference/cli.md) for the full command surface.
@@ -191,7 +191,7 @@ See [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 | | |
 |---|---|
 | [Architecture Overview](docs/architecture/system-overview.md) | System map, package responsibilities, agent backends |
-| [CLI Reference](docs/reference/cli.md) | Full `kata-cli` command surface and flags |
+| [CLI Reference](docs/reference/cli.md) | Full `kata-agents-cli` command surface and flags |
 | [CI Pipeline](docs/operations/ci.md) | GitHub Actions CI setup |
 | [Release Pipeline](docs/operations/release.md) | Nightly/stable release process and required secrets |
 | [Contributing](CONTRIBUTING.md) | Branch naming, PR process, code style |

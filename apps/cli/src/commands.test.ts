@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseArgs, resolveApiKey, shouldSetupLlmConnection } from './index.ts'
+import { parseArgs, resolveApiKey, shouldSetupLlmConnection, buildInvokeArgs } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing tests
@@ -133,6 +133,36 @@ describe('parseArgs', () => {
     expect(args.rest).toEqual(['sessions:get', '["workspace-1"]'])
   })
 
+  describe('buildInvokeArgs (workspace injection)', () => {
+    it('injects the workspace as the first arg for a scoped channel with no user args', () => {
+      expect(buildInvokeArgs('labels:list', [], 'ws-1')).toEqual(['ws-1'])
+    })
+
+    it('injects the workspace before user args for a scoped channel', () => {
+      // labels:create handler is (_ctx, workspaceId, input)
+      const input = { name: 'Bug', color: 'accent' }
+      expect(buildInvokeArgs('labels:create', [input], 'ws-1')).toEqual(['ws-1', input])
+    })
+
+    it('injects the workspace for sources:getPermissions keeping the slug arg', () => {
+      // sources:getPermissions handler is (_ctx, workspaceId, slug)
+      expect(buildInvokeArgs('sources:getPermissions', ['linear'], 'ws-1')).toEqual(['ws-1', 'linear'])
+    })
+
+    it('passes args through unchanged for a global channel even when a workspace is resolved', () => {
+      // system:homeDir takes no workspace; injecting one would shift its real args
+      expect(buildInvokeArgs('system:homeDir', [], 'ws-1')).toEqual([])
+    })
+
+    it('passes user args through when no workspace could be resolved', () => {
+      expect(buildInvokeArgs('labels:list', [], undefined)).toEqual([])
+    })
+
+    it('does not treat sessions:get as workspace-scoped (sessions have a dedicated command)', () => {
+      expect(buildInvokeArgs('sessions:get', ['explicit-ws'], 'ws-1')).toEqual(['explicit-ws'])
+    })
+  })
+
   it('defaults to empty command (shows help)', () => {
     const args = parseArgs(['bun', 'index.ts'])
     expect(args.command).toBe('')
@@ -164,11 +194,11 @@ describe('parseArgs', () => {
   it('--source accumulates into array', () => {
     const args = parseArgs([
       'bun', 'index.ts',
-      '--source', 'craft-kb',
+      '--source', 'kata-kb',
       '--source', 'github',
       'run', 'do stuff',
     ])
-    expect(args.sources).toEqual(['craft-kb', 'github'])
+    expect(args.sources).toEqual(['kata-kb', 'github'])
   })
 
   it('defaults sources to empty array', () => {
