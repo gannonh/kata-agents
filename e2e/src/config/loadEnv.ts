@@ -6,9 +6,29 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 /**
- * Minimal .env parser mirroring loadEnvFile() in scripts/electron-dev.ts:98-120.
- * Existing process.env values win so explicit overrides are not clobbered.
+ * Minimal dotenv-style parser.
+ *
+ * Brave strip a ` #...` inline comment that follows a value, and honor quoted
+ * values (strip the quotes, preserving interior whitespace). This is stricter
+ * than scripts/electron-dev.ts:loadEnvFile but avoids a common footgun: a line
+ * like `KEY="value"   # comment` must yield `value`, not `value   # comment`.
+ * Existing process.env values always win so explicit overrides are not clobbered.
  */
+const COMMENT_AFTER_VALUE = /\s+#.*$/;
+
+function parseValue(raw: string): string {
+  let value = raw.trim();
+  const first = value[0];
+  if (first === '"' || first === "'") {
+    const closing = value.indexOf(first, 1);
+    if (closing > 0) {
+      // Quoted: take the interior literally; drop anything after the close quote.
+      return value.slice(1, closing);
+    }
+  }
+  return value.replace(COMMENT_AFTER_VALUE, "");
+}
+
 function parseEnvFile(path: string): Record<string, string> {
   const out: Record<string, string> = {};
   const content = readFileSync(path, "utf8");
@@ -22,14 +42,7 @@ function parseEnvFile(path: string): Record<string, string> {
       continue;
     }
     const key = trimmed.slice(0, eqIndex).trim();
-    let value = trimmed.slice(eqIndex + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
+    out[key] = parseValue(trimmed.slice(eqIndex + 1));
   }
   return out;
 }
