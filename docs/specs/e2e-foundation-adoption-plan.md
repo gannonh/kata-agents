@@ -1,8 +1,17 @@
 ---
-type: spec
+type: Spec
+title: "Adopt the local Electron E2E foundation in Kata Agents"
+description: "Local-only macOS-first Playwright + real-Electron E2E foundation for Kata Agents: isolated runs, @smoke/@settings/@agent tiers, no CI in V1."
+tags: [testing, e2e, electron, playwright, kata-agents]
+status: Approved
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Plan: Adopt the local Electron E2E foundation in Kata Agents
+
+## Status
+
+Approved
 
 ## Context
 
@@ -106,6 +115,24 @@ Adapt module boundaries from Kata Code; rewrite internals.
 - Keep E2E out of CI and out of the pre-push hook.
 
 ---
+
+## Acceptance criteria
+
+Observable pass/fail outcomes. Build implements these; Verify tests them. macOS GUI session assumed; provider key present in root `.env`.
+
+1. **Scaffolding present.** `@playwright/test` is a root devDependency. Root `package.json` defines `e2e`, `e2e:headed`, `e2e:ui`, `e2e:release` scripts where `e2e` targets `--project desktop-dev`. `.gitignore` ignores `e2e/.auth/`, `e2e/test-results/`, `e2e/playwright-report/`. `.env.example` documents `KATA_E2E_RELEASE_APP` and notes provider keys power `@agent`.
+2. **Test listing.** `bun run e2e --list` exits 0 and lists at least the `@smoke`, `@settings`, and `@agent` starter specs.
+3. **Smoke green + isolation.** `bun run e2e --project desktop-dev --grep @smoke` exits 0 with zero fatal renderer errors asserted, and writes a per-run `manifest.json` (runId, allocated Vite port, temp `KATA_CONFIG_DIR`). Two sequential `@smoke` runs produce manifests with **different** Vite ports and **different** config dirs.
+4. **Build gate fails loud.** With `apps/electron/dist/main.cjs` or `dist/bootstrap-preload.cjs` missing, the harness throws an error naming the missing artifact and instructing `bun run electron:build` (no silent skip).
+5. **Settings tier.** `bun run e2e --project desktop-dev --grep @settings` reaches `#app-ready` via the deferred-setup path (handling `workspace-picker` if shown), changes an appearance/language setting, reloads, and asserts the change persisted. Exits 0.
+6. **Agent tier.** With a real provider key in `.env`, `bun run e2e --project desktop-dev --grep @agent` configures a real Anthropic connection through onboarding, sends a deterministic prompt, asserts a non-empty assistant reply, and exits 0. Runs with `workers: 1`.
+7. **Release scaffold fails loud.** `bun run e2e:release --grep @smoke` with `KATA_E2E_RELEASE_APP` unset exits non-zero with a clear missing-path error that names the variable (no silent skip, no dev fallback).
+8. **Prerequisite errors name the variable.** Missing required env (provider key for `@agent`, release app path for release) throws an error containing the exact variable name and a pointer to `e2e/README.md`.
+9. **Static checks clean.** Per-package `tsc --noEmit` passes for any touched packages (`apps/electron`, `packages/shared` if modified). Harness unit tests, if added, pass under `bun test`.
+10. **No CI / no pre-push coupling.** E2E is not added to any CI workflow and not wired into the pre-push hook. Default `bun run e2e` runs only the `desktop-dev` project.
+11. **Decision record + docs.** `docs/specs/2026-06-24-e2e-testing-foundation-design.md` exists with OKF frontmatter (`type: Spec`), is linked from `docs/specs/index.md`, and relevant `log.md` entries are added. `e2e/README.md` exists and is linked from `AGENTS.md`.
+12. **Surgical product edits only.** Product code changes are limited to added stable `id` attributes (`#onboarding-wizard`, `#app-ready`, optional `#workspace-picker`); no behavior changes to onboarding, app state, or workspace logic.
+13. **Deferred work filed.** Each follow-up listed in this plan (parallel server-port isolation, macOS CI strategy, real release validation) is filed as a GitHub issue using `.github/ISSUE_TEMPLATE/deferred_work.yml`.
 
 ## Files
 
