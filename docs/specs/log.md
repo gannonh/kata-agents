@@ -2,7 +2,8 @@
 
 ## 2026-06-25
 
-* **Drafted + Approved**: [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md) — added OKF frontmatter, `## Status: Approved`, and a formal `## Acceptance criteria` section (13 observable criteria) to the local Electron E2E adoption plan. Added decision record [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md) (V1 constraints, `KATA_*` env contract, verification matrix) and linked both from [index.md](index.md) Active.
+* **Implemented**: [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md) — built the local Electron E2E foundation: Playwright harness (isolated runs, Vite-only dev stack, plain electron launch, build gate, release scaffold), flows (deferred-setup + real API-key onboarding, appearance settings, deterministic agent reply), and `@smoke`/`@settings`/`@agent` specs. Added stable id markers (`#onboarding-wizard`, `#app-ready`, `#workspace-picker`). All 13 ACs pass on macOS. Build report: [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md). Deferred work filed: [#11](https://github.com/gannonh/kata-agents/issues/11), [#12](https://github.com/gannonh/kata-agents/issues/12), [#13](https://github.com/gannonh/kata-agents/issues/13). Moved Active → Completed in [index.md](index.md).
+* **Drafted + Approved**: [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md) — added OKF frontmatter, `## Status: Approved`, and a formal `## Acceptance criteria` section (13 observable criteria). Added decision record [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md) (V1 constraints, `KATA_*` env contract, verification matrix).
 
 ## 2026-06-24
 

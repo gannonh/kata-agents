@@ -3,7 +3,7 @@ type: Spec
 title: "Adopt the local Electron E2E foundation in Kata Agents"
 description: "Local-only macOS-first Playwright + real-Electron E2E foundation for Kata Agents: isolated runs, @smoke/@settings/@agent tiers, no CI in V1."
 tags: [testing, e2e, electron, playwright, kata-agents]
-status: Approved
+status: Implemented
 timestamp: 2026-06-25T00:00:00Z
 ---
 
@@ -11,7 +11,7 @@ timestamp: 2026-06-25T00:00:00Z
 
 ## Status
 
-Approved
+Implemented (2026-06-25). All 13 acceptance criteria verified on macOS; `@smoke`, `@settings`, and `@agent` green. Build report: [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md). Deferred work: [#11](https://github.com/gannonh/kata-agents/issues/11), [#12](https://github.com/gannonh/kata-agents/issues/12), [#13](https://github.com/gannonh/kata-agents/issues/13).
 
 ## Context
 
