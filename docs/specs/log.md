@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-25
+
+* **Drafted + Approved**: [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md) — added OKF frontmatter, `## Status: Approved`, and a formal `## Acceptance criteria` section (13 observable criteria) to the local Electron E2E adoption plan. Added decision record [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md) (V1 constraints, `KATA_*` env contract, verification matrix) and linked both from [index.md](index.md) Active.
+
 ## 2026-06-24
 
 * **Implemented**: [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md) — Renamed `@kata-sh/cli` / `kata-cli` to `@kata-sh/agents-cli` / `kata-agents-cli`; removed `kataAgentsCli` feature flag, pre-tool-use redirects, phantom bundled docs, orphaned env vars, and `kata-agent` bash allowlist patterns (replaced with `kata-agents-cli invoke` allowlist). Build report: [2026-06-24-cli-rename-and-phantom-removal-build-report.md](2026-06-24-cli-rename-and-phantom-removal-build-report.md). Moved Active → Completed in [index.md](index.md).

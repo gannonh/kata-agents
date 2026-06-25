@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-*(none)*
+* [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md): Adopt the local-only, macOS-first Playwright + real-Electron E2E foundation in Kata Agents (`@smoke`/`@settings`/`@agent` tiers, run isolation, no CI in V1). Decision record: [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md). Adoption guide: [e2e-foundation-adoption.md](e2e-foundation-adoption.md).
 
 ## Planned implementation phases
 
