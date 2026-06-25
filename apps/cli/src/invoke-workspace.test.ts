@@ -16,6 +16,9 @@ const workspaceFirstHandlerChannels = new Set<string>([
 
 describe('agents-cli workspace-scoped invoke channels', () => {
   it('lists only channels registered on workspace-first RPC handlers', () => {
+    // Every CLI-exposed workspace-scoped channel must exist in the handler set.
+    // The reverse is intentionally NOT asserted: the CLI exposes only a subset
+    // of workspace-first channels (the ones safe for CLI invoke), not all.
     for (const channel of AGENTS_CLI_WORKSPACE_SCOPED_INVOKE_CHANNELS) {
       expect(workspaceFirstHandlerChannels.has(channel)).toBe(true)
     }

@@ -28,7 +28,7 @@ kata-agents-cli invoke automations:getHistory '"<id>"'
 kata-agents-cli invoke automations:getLastExecuted '"<id>"'
 ```
 
-For create/update/delete operations, use the desktop UI or `kata-agents-cli invoke` with the appropriate mutation channel and JSON payload. See [kata-agents-cli.md](./kata-agents-cli.md).
+For create/update/delete operations, use the desktop UI. The `kata-agents-cli invoke` allowlist only permits read-only channels in Explore mode; mutation channels are not exposed via the CLI. See [kata-agents-cli.md](./kata-agents-cli.md).
 
 ## Basic Structure
 

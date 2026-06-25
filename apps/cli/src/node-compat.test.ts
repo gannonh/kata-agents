@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { isMainModule, readStdin } from './runtime.ts'
 
-const CLI_SOURCE_FILES = ['index.ts', 'client.ts', 'server-spawner.ts', 'runtime.ts', 'workspace.ts', 'streaming.ts', 'llm-setup.ts', 'output.ts'] as const
+const CLI_SOURCE_FILES = ['index.ts', 'client.ts', 'server-spawner.ts', 'runtime.ts', 'workspace.ts', 'streaming.ts', 'llm-setup.ts', 'output.ts', 'args.ts', 'help.ts', 'validate.ts'] as const
 const FORBIDDEN_BUN_API = [
   'Bun.stdin',
   'Bun.file',

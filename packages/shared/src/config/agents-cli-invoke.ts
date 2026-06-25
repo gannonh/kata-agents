@@ -79,11 +79,11 @@ export function getAgentsCliReadOnlyInvokeBashPatterns(): BashPatternRule[] {
   const channelAlternation = getAgentsCliReadOnlyInvokeChannelAlternation()
   return [
     {
-      pattern: `^kata-agents-cli\\s+invoke\\s+(${channelAlternation})\\b`,
+      pattern: `^kata-agents-cli\\s+invoke\\s+(${channelAlternation})(\\s+.*)?$`,
       comment: 'kata-agents-cli invoke read-only RPC channels',
     },
     {
-      pattern: '^kata-agents-cli\\s+--help\\b',
+      pattern: '^kata-agents-cli\\s+--help$',
       comment: 'kata-agents-cli help',
     },
   ]

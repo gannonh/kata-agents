@@ -277,7 +277,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Align package versions to release version
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}"
+        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --file apps/cli/package.json
 
       - name: Generate electron-builder release config
         shell: bash
@@ -413,7 +413,7 @@ jobs:
 
       - name: Update version strings
         id: update_versions
-        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --github-output
+        run: bun run scripts/release/update-release-package-versions.ts "${{ needs.release_meta.outputs.version }}" --file apps/cli/package.json --github-output
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
@@ -425,7 +425,7 @@ jobs:
           RELEASE_TAG: ${{ needs.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- package.json apps/electron/package.json bun.lock; then
+          if git diff --quiet -- package.json apps/electron/package.json apps/cli/package.json bun.lock; then
             echo "No version changes to commit."
             exit 0
           fi
@@ -433,7 +433,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add package.json apps/electron/package.json bun.lock
+          git add package.json apps/electron/package.json apps/cli/package.json bun.lock
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
 
@@ -460,7 +460,7 @@ jobs:
         # esbuild bundles src/index.ts into dist/cli.cjs (Node shebang) — no runtime workspace deps.
         run: cd apps/cli && bun run build
       - name: Setup npm registry
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           registry-url: https://registry.npmjs.org
       - name: Publish CLI to npm
@@ -470,4 +470,4 @@ jobs:
           CHANNEL="${{ needs.release_meta.outputs.channel }}"
           TAG="${CHANNEL}"
           if [ "$CHANNEL" = "stable" ]; then TAG="latest"; fi
-          cd apps/cli && npm publish --tag "$TAG" --access public
+          cd apps/cli && npm publish --tag "$TAG" --access public --ignore-scripts

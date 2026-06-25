@@ -41,6 +41,7 @@ export function resolveApiKey(provider: string, explicit: string): string {
   if (provider === 'amazon-bedrock') return '' // IAM credentials, not API key
   const envKey = PROVIDER_ENV_KEYS[provider]
   if (envKey && process.env[envKey]) return process.env[envKey]!
+  if (process.env.LLM_API_KEY) return process.env.LLM_API_KEY
   throw new Error(
     `No API key found. Use --api-key, set $LLM_API_KEY, or set $${envKey ?? `${provider.toUpperCase()}_API_KEY`}`,
   )

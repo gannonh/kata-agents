@@ -21,11 +21,9 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test src/"
   },
-  "dependencies": {
-    "@kata-sh/shared": "workspace:*",
-    "@kata-sh/server-core": "workspace:*"
-  },
   "devDependencies": {
+    "@kata-sh/shared": "workspace:*",
+    "@kata-sh/server-core": "workspace:*",
     "esbuild": "^0.25.0",
     "typescript": "^5.8.2",
     "@types/node": "^22.0.0",

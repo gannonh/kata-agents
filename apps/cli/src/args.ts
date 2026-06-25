@@ -61,7 +61,7 @@ export function parseArgs(argv: string[]): CliArgs {
         workspace = args[++i]
         break
       case '--timeout':
-        timeout = parseInt(args[++i] ?? '10000', 10)
+        timeout = parsePositiveInt(args[++i] ?? '', 'timeout', 10_000)
         break
       case '--json':
         json = true
@@ -70,7 +70,7 @@ export function parseArgs(argv: string[]): CliArgs {
         tlsCa = args[++i]
         break
       case '--send-timeout':
-        sendTimeout = parseInt(args[++i] ?? '300000', 10)
+        sendTimeout = parsePositiveInt(args[++i] ?? '', 'send-timeout', 300_000)
         break
       case '--source':
         sources.push(args[++i] ?? '')
@@ -139,4 +139,15 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
   return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
+}
+
+function parsePositiveInt(raw: string, flagName: string, fallback: number): number {
+  const trimmed = raw.trim()
+  if (trimmed === '') return fallback
+  const parsed = Number(trimmed)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    process.stderr.write(`Error: --${flagName} must be a positive integer, got "${raw}"\n`)
+    process.exit(1)
+  }
+  return parsed
 }

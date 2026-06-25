@@ -102,11 +102,11 @@
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {
-      "pattern": "^kata-agents-cli\\s+invoke\\s+(labels:list|sources:get|sources:getPermissions|skills:get|automations:get|automations:getHistory|automations:getLastExecuted|workspace:getPermissions|permissions:getDefaults|workspaceSettings:get|system:homeDir)\\b",
+      "pattern": "^kata-agents-cli\\s+invoke\\s+(labels:list|sources:get|sources:getPermissions|skills:get|automations:get|automations:getHistory|automations:getLastExecuted|workspace:getPermissions|permissions:getDefaults|workspaceSettings:get|system:homeDir)(\\s+.*)?$",
       "comment": "kata-agents-cli invoke read-only RPC channels"
     },
     {
-      "pattern": "^kata-agents-cli\\s+--help\\b",
+      "pattern": "^kata-agents-cli\\s+--help$",
       "comment": "kata-agents-cli help"
     },
     {

@@ -275,7 +275,7 @@ export function getValidateSteps(): ValidateStep[] {
           try {
             key = resolveApiKey(provider, ctx.apiKey || '')
           } catch (error) {
-            return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
+            throw new Error(error instanceof Error ? error.message : 'missing API key')
           }
           const slug = `${provider}-cli`
           const isAnthropicApi = provider === 'anthropic'
@@ -293,7 +293,7 @@ export function getValidateSteps(): ValidateStep[] {
             customEndpoint: { api: isAnthropicApi ? 'anthropic-messages' : 'openai-completions' },
             defaultModel: isAnthropicApi ? 'claude-sonnet-4-6' : 'gpt-4o',
           }) as { success: boolean; error?: string }
-          if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
+          if (!result?.success) throw new Error(`setup failed: ${result?.error ?? 'unknown'}`)
           await client.invoke('LLM_Connection:setDefault', slug)
           return `${r?.length ?? 0} existing + custom endpoint via ${ctx.baseUrl}`
         }
@@ -305,7 +305,7 @@ export function getValidateSteps(): ValidateStep[] {
           const region = process.env.AWS_REGION || 'us-east-1'
           const sessionToken = process.env.AWS_SESSION_TOKEN
           if (!accessKeyId || !secretAccessKey) {
-            return '0 connections (missing AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)'
+            throw new Error('missing AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY')
           }
           const slug = 'amazon-bedrock-cli'
           await client.invoke('LLM_Connection:save', {
@@ -323,7 +323,7 @@ export function getValidateSteps(): ValidateStep[] {
             iamCredentials: { accessKeyId, secretAccessKey, sessionToken },
             awsRegion: region,
           }) as { success: boolean; error?: string }
-          if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
+          if (!result?.success) throw new Error(`setup failed: ${result?.error ?? 'unknown'}`)
           await client.invoke('LLM_Connection:setDefault', slug)
           return `${r?.length ?? 0} existing + Bedrock IAM (${region})`
         }
@@ -337,7 +337,7 @@ export function getValidateSteps(): ValidateStep[] {
         try {
           key = resolveApiKey(provider, ctx.apiKey || '')
         } catch (error) {
-          return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
+          throw new Error(error instanceof Error ? error.message : 'missing API key')
         }
         const slug = `${provider}-cli`
         const providerType = provider === 'anthropic' ? 'anthropic' : 'pi'
@@ -353,7 +353,7 @@ export function getValidateSteps(): ValidateStep[] {
           ? { slug, credential: key }
           : { slug, credential: key, piAuthProvider: provider }
         const result = await client.invoke('settings:setupLlmConnection', setupPayload) as { success: boolean; error?: string }
-        if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
+        if (!result?.success) throw new Error(`setup failed: ${result?.error ?? 'unknown'}`)
         await client.invoke('LLM_Connection:setDefault', slug)
         return `0 found → created ${provider} connection`
       },
@@ -568,10 +568,13 @@ export function getValidateSteps(): ValidateStep[] {
         ctx.createdSkillSlug = '__cli-validate-skill'
         const sourceSlug = ctx.createdSourceSlug ?? 'cat-facts'
         const skillDir = `${ctx.workspaceRootPath}/skills/${ctx.createdSkillSlug}`
+        const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+        const quotedSkillDir = shellQuote(skillDir)
+        const quotedSkillFile = shellQuote(`${skillDir}/SKILL.md`)
         // Use bash to create the skill file deterministically
         return await waitForSendEvents(client, ctx.createdSessionId,
           `Use the Bash tool to run this exact command:
-mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF'
+mkdir -p ${quotedSkillDir} && cat > ${quotedSkillFile} << 'SKILLEOF'
 ---
 name: "CLI Validate Skill"
 description: "Validation skill created by kata-agents-cli"

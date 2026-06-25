@@ -113,4 +113,4 @@ kata-agents-cli session messages "$SESSION_ID"
 - Automations: [automations.md](./automations.md)
 - Permissions: [permissions.md](./permissions.md)
 
-Full command reference: [docs/reference/cli.md](https://github.com/gannonh/kata-agents/blob/main/docs/reference/cli.md) in the repository.
+Full command reference: see the repository `docs/reference/cli.md`.

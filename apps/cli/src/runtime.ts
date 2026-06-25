@@ -12,7 +12,7 @@ export function isMainModule(): boolean {
     if (!launched) return false
     const launchedPath = resolve(launched)
     // CJS bundle (esbuild provides __filename); ESM source uses import.meta.url
-    // @ts-expect-error - __filename only exists in the CJS bundle
+    // @ts-ignore - __filename only exists in the CJS bundle, not ESM source
     if (typeof __filename !== 'undefined') {
       return launchedPath === resolve(__filename)
     }

@@ -154,7 +154,7 @@ The `run` command is fully self-contained — it spawns a headless server, creat
 # Multi-provider examples
 kata-agents-cli run --provider openai --model gpt-4o "Summarize this repo"
 GOOGLE_API_KEY=... kata-agents-cli run --provider google --model gemini-2.0-flash "Hello"
-kata-agents-cli run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OR_KEY "Hello"
+kata-agents-cli run --provider anthropic --base-url https://openrouter.ai/api/v1 --api-key $OPENROUTER_API_KEY "Hello"
 ```
 
 Prompt can also be piped via stdin:
