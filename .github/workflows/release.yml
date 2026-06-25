@@ -279,7 +279,7 @@ jobs:
       - name: Align package versions to release version
         env:
           RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
-        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --file apps/cli/package.json
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION"
 
       - name: Generate electron-builder release config
         shell: bash
@@ -417,7 +417,7 @@ jobs:
         id: update_versions
         env:
           RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
-        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --file apps/cli/package.json --github-output
+        run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
