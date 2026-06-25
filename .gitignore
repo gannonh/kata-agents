@@ -87,4 +87,9 @@ apps/electron/electron-builder.generated.yml
 # UAT evidence (skill artifacts, not for commit)
 uat-evidence/
 
+# E2E (Playwright) run artifacts and auth state
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/
+
 # .agents/skills/

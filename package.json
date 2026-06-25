@@ -98,11 +98,16 @@
     "marketing:preview": "vite preview --config apps/marketing/vite.config.ts",
     "docs:dev": "cd apps/online-docs && npm install && npx mintlify dev",
     "oss:sync": "bun run scripts/oss-sync.ts",
+    "e2e": "playwright test --config e2e/playwright.config.ts --project desktop-dev",
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --project desktop-dev --headed",
+    "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
+    "e2e:release": "playwright test --config e2e/playwright.config.ts --project desktop-release",
     "prepare": "husky"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.947.0",
     "@electron/packager": "^19.0.1",
+    "@playwright/test": "^1.61.1",
     "@rollup/rollup-win32-arm64-msvc": "^4.55.1",
     "@sentry/vite-plugin": "^4.8.0",
     "@tailwindcss/vite": "^4.1.18",
