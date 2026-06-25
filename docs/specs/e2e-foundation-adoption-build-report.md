@@ -160,3 +160,13 @@ legitimate cleanup items. Fixed in this pass:
 Verification:
 - `bunx tsc --noEmit -p e2e/tsconfig.json` → exit 0.
 - `bun run e2e --list` → 3 desktop-dev tests listed, exit 0.
+
+## Addendum (2026-06-25): loadEnv inline-comment fix
+
+`loadEnv.ts` previously read quoted values verbatim, so a line like
+`KATA_E2E_AGENT_MODEL="Haiku 4.5"   # composer model name` baked the trailing
+comment into the parsed value, producing a non-matching model-selection regex
+that stalled the `@agent` tier. Switched to dotenv-style semantics: a `\s+#`
+comment after a value is dropped, and quoted values take their interior literally
+(including anything after the closing quote). Unquoted values also get trailing
+comments stripped. Existing `process.env` values still win.

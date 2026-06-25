@@ -2,6 +2,7 @@
 
 ## 2026-06-25
 
+* **loadEnv fix**: documented the `.env` inline-comment parser fix in the E2E build report and [specs/log.md](specs/log.md).
 * **Quality review fixes**: Updated E2E foundation docs after strict review: fixture layer boundary, collapsed harness helper inventory, release build-script guidance, and validation evidence. See [specs/log.md](specs/log.md) and [specs/e2e-foundation-adoption-build-report.md](specs/e2e-foundation-adoption-build-report.md).
 
 ## 2026-06-23
