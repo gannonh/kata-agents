@@ -44,3 +44,8 @@ Each package has its own agent context file — read it before modifying that pa
 
 - **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.
 - **Rebrand Phase 1** (user-facing copy only) is complete. See `./docs/specs/rebrand-kata-agents-phase-1.md`.
+
+<!-- BEGIN @agent-native/skills -->
+When using a high-cost frontier model for codebase-heavy work, use the /efficient-frontier skill always.
+When writing final response status indicators, use the /quick-recap skill always.
+<!-- END @agent-native/skills -->
