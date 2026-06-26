@@ -26,6 +26,8 @@ export interface SettingsSegmentedControlProps<T extends string = string> {
   options: SettingsSegmentedOption<T>[]
   /** Size variant */
   size?: 'sm' | 'md'
+  /** Optional prefix for locale-neutral E2E selectors (`${testIdPrefix}-${value}`). */
+  testIdPrefix?: string
   /** Additional className */
   className?: string
 }
@@ -49,6 +51,7 @@ export function SettingsSegmentedControl<T extends string = string>({
   onValueChange,
   options,
   size = 'md',
+  testIdPrefix,
   className,
 }: SettingsSegmentedControlProps<T>) {
   return (
@@ -65,6 +68,7 @@ export function SettingsSegmentedControl<T extends string = string>({
             type="button"
             role="radio"
             aria-checked={isSelected}
+            data-testid={testIdPrefix ? `${testIdPrefix}-${option.value}` : undefined}
             onClick={() => onValueChange(option.value)}
             className={cn(
               'flex items-center gap-1.5 rounded-lg transition-all',

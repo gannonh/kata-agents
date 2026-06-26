@@ -12,6 +12,8 @@ Completed under [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22
 
 ## Completed
 
+* [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md): Local-only, macOS-first Playwright + real-Electron E2E foundation (`@smoke`/`@settings`/`@agent` tiers, run isolation, no CI in V1). Implemented 2026-06-25; all 13 ACs pass. Decision record: [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md). Build report: [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md). Deferred: [#11](https://github.com/gannonh/kata-agents/issues/11), [#12](https://github.com/gannonh/kata-agents/issues/12), [#13](https://github.com/gannonh/kata-agents/issues/13).
+
 * [2026-06-24-cli-rename-and-phantom-removal-design.md](2026-06-24-cli-rename-and-phantom-removal-design.md): Rename `apps/cli` to `@kata-sh/agents-cli` / bin `kata-agents-cli` and remove phantom `kata-agent` commands-CLI references. Build report: [2026-06-24-cli-rename-and-phantom-removal-build-report.md](2026-06-24-cli-rename-and-phantom-removal-build-report.md). Deferred-work backlog: [#4](https://github.com/gannonh/kata-agents/issues/4).
 
 * [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md): Hard-cutover Kata identity across packages, runtime, desktop app, CLI/server/viewer/webui, bundled resources, docs, and release metadata. Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md) — all 12 ACs pass.

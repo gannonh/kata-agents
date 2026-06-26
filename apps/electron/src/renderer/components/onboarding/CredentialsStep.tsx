@@ -282,6 +282,7 @@ export function CredentialsStep({
         <>
           <BackButton onClick={onBack} disabled={status === 'validating'} />
           <ContinueButton
+            data-testid="onboarding-api-key-continue"
             type="submit"
             form="api-key-form"
             disabled={false}

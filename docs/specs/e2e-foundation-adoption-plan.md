@@ -1,12 +1,21 @@
 ---
-type: spec
+type: Spec
+title: "Adopt the local Electron E2E foundation in Kata Agents"
+description: "Local-only macOS-first Playwright + real-Electron E2E foundation for Kata Agents: isolated runs, @smoke/@settings/@agent tiers, no CI in V1."
+tags: [testing, e2e, electron, playwright, kata-agents]
+status: Implemented
+timestamp: 2026-06-25T00:00:00Z
 ---
 
 # Plan: Adopt the local Electron E2E foundation in Kata Agents
 
+## Status
+
+Implemented (2026-06-25). All 13 acceptance criteria verified on macOS; `@smoke`, `@settings`, and `@agent` green. Build report: [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md). Deferred work: [#11](https://github.com/gannonh/kata-agents/issues/11), [#12](https://github.com/gannonh/kata-agents/issues/12), [#13](https://github.com/gannonh/kata-agents/issues/13).
+
 ## Context
 
-Kata Agents has unit tests (`bun test`) and manual desktop smoke (`electron:start`) but **no E2E coverage**. The adoption guide `docs/specs/e2e-foundation-adoption.md` describes bringing the Playwright + real-Electron foundation proven in the sibling repo Kata Code (`/Volumes/EVO/dev/kata-code`, branch `feat/mobile-e2e-testing-foundation`) into this repo. This plan implements that adoption, adapted to Kata Agents' actual architecture.
+Kata Agents has unit tests (`bun test`) and manual desktop smoke (`electron:start`) but **no E2E coverage**. The adoption guide `docs/specs/e2e-foundation-adoption.md` describes bringing the Playwright + real-Electron foundation proven in the sibling Kata Code repo (branch `feat/mobile-e2e-testing-foundation`) into this repo. This plan implements that adoption, adapted to Kata Agents' actual architecture.
 
 Goal: a **local-only, macOS-first** Playwright suite that launches the real Electron app against real services, with run isolation (temp config dir, allocated port, per-run artifacts), starter tests at `@smoke` / `@settings` / `@agent`, and **no CI** in V1.
 
@@ -68,15 +77,13 @@ App boot (`apps/electron/src/renderer/App.tsx:651-681`) calls `getSetupNeeds()`:
 ### Phase 2 — Harness (`e2e/src/harness/`)
 Adapt module boundaries from Kata Code; rewrite internals.
 
-- **`ports.ts`** — minimal `findAvailablePort()` via `net` probe (no offset model). Returns one free port for Vite. *(Note: subprocess servers default near RPC `9100`; V1 stays `workers: 1` sequential to avoid collisions — file a follow-up issue to allocate/override server ports for parallel isolation.)*
-- **`isolatedRun.ts`** — per-run: `runId`, `mkdtemp` temp `KATA_CONFIG_DIR`, allocated Vite port, artifact dir, cleanup registry. Build `devEnv` with `KATA_CONFIG_DIR`, `KATA_VITE_PORT`, `VITE_DEV_SERVER_URL=http://localhost:<port>`, `KATA_APP_NAME`, `KATA_DEEPLINK_SCHEME` (mirror keys from `getElectronEnv()` in `scripts/electron-dev.ts:276-292` — single owner for dev-stack env, per learning #2).
-- **`devStack.ts`** — spawn **Vite only** on the allocated port (mirror the Vite spawn in `scripts/electron-dev.ts:540-548`: `vite dev --config apps/electron/vite.config.ts --port <port> --strictPort`). Do **not** run `electron:dev` (learning #3 — Playwright owns the single Electron instance).
-- **`desktopArtifacts.ts`** — build gate: assert `apps/electron/dist/main.cjs` and `dist/bootstrap-preload.cjs` exist; throw with instruction to run `bun run electron:build` (renderer dist not required in dev — Vite serves it via `VITE_DEV_SERVER_URL`).
+- **`isolatedRun.ts`** — per-run isolation plus minimal `findAvailablePort()` via `net` probe (no offset model). Returns one free port for Vite. *(Note: subprocess servers default near RPC `9100`; V1 stays `workers: 1` sequential to avoid collisions — file a follow-up issue to allocate/override server ports for parallel isolation.)*
+- **`isolatedRun.ts`** — per-run: `runId`, `mkdtemp` temp `KATA_CONFIG_DIR`, allocated Vite port, artifact dir, cleanup registry. Build `baseEnv` with `KATA_CONFIG_DIR`, `KATA_VITE_PORT`, `VITE_DEV_SERVER_URL=http://localhost:<port>`, `KATA_APP_NAME`, `KATA_DEEPLINK_SCHEME` (mirror keys from `getElectronEnv()` in `scripts/electron-dev.ts:276-292` — single owner for E2E launch env, per learning #2).
+- **`devStack.ts`** — dev build gate plus **Vite only** stack: assert `apps/electron/dist/main.cjs` and `dist/bootstrap-preload.cjs`, spawn Vite on the allocated port (mirror the Vite spawn in `scripts/electron-dev.ts:540-548`: `vite dev --config apps/electron/vite.config.ts --port <port> --strictPort`), and wait for readiness. Do **not** run `electron:dev` (learning #3 — Playwright owns the single Electron instance).
 - **`appLaunch.ts`** — dev: `_electron.launch({ args: [join(repoRoot, 'apps/electron')], env, cwd: repoRoot })` (Playwright resolves the local `electron` binary; equivalent to `electron apps/electron`). Wait for the renderer window, attach console/pageerror logging, and a fatal-error collector (port the `resolveRendererWindow` + `attachFatalLaunchErrorTracking` patterns from `kata-code/e2e/src/harness/appLaunch.ts`).
 - **`launchEnv.ts`** — release env stripping (remove `VITE_DEV_SERVER_URL`, dev port) for `desktop-release` (learning #4).
-- **`readiness.ts`** — TCP/HTTP wait on the Vite port before launch.
 - **`artifacts.ts` / `processSpawn.ts` / `log.ts` / `env.ts`** — per-run manifest (runId, port, config dir), process-log appender, prerequisite readers that **fail loud** with the missing var name + pointer to `e2e/README.md` (learning #8).
-- **`testFixtures.ts`** — fixture chain (do not collapse, per spec):
+- **`fixtures/testFixtures.ts`** — fixture chain (do not collapse, per spec):
   - `launchedApp` — Vite-only dev stack + Electron boot + renderer window + fatal-error listeners.
   - `appWindow` — wait for `#root` mounted and the active shell marker visible.
   - `authenticatedAppWindow` — opt-in: drive deferred-setup (or real API-key config for `@agent`) to reach `#app-ready`, handling `workspace-picker`.
@@ -92,7 +99,7 @@ Adapt module boundaries from Kata Code; rewrite internals.
   - `e2e/tests/smoke/launch.spec.ts` `@smoke` — launch → `#root` → `#onboarding-wizard` visible → assert 0 fatal errors.
   - `e2e/tests/settings/appearance.spec.ts` `@settings` — `authenticatedAppWindow` → change appearance/language → reload → assert persisted.
   - `e2e/tests/agent/reply.spec.ts` `@agent` — real provider → new session → deterministic prompt → assert assistant reply (`workers: 1`).
-- **`e2e/playwright.config.ts`** — projects `setup`, `desktop-dev` (default), `desktop-release`; reporters list/html/json; `trace`/`screenshot` on failure; `workers` from env (default 1).
+- **`e2e/playwright.config.ts`** — projects `desktop-dev` (default), `desktop-release`; reporters list/html/json; `trace`/`screenshot` on failure; `workers` from env (default 1).
 - **`e2e/README.md`** — operator commands, env vars, prerequisites; link from `AGENTS.md`.
 - **`.agents/skills/e2e-test-author/SKILL.md`** — adapt from Kata Code's skill (Kata Agents flow names, id-selector convention).
 
@@ -107,13 +114,31 @@ Adapt module boundaries from Kata Code; rewrite internals.
 
 ---
 
+## Acceptance criteria
+
+Observable pass/fail outcomes. Build implements these; Verify tests them. macOS GUI session assumed; provider key present in root `.env`.
+
+1. **Scaffolding present.** `@playwright/test` is a root devDependency. Root `package.json` defines `e2e`, `e2e:headed`, `e2e:ui`, `e2e:release` scripts where `e2e` targets `--project desktop-dev`. `.gitignore` ignores `e2e/.auth/`, `e2e/test-results/`, `e2e/playwright-report/`. `.env.example` documents `KATA_E2E_RELEASE_APP` and notes provider keys power `@agent`.
+2. **Test listing.** `bun run e2e --list` exits 0 and lists at least the `@smoke`, `@settings`, and `@agent` starter specs.
+3. **Smoke green + isolation.** `bun run e2e --project desktop-dev --grep @smoke` exits 0 with zero fatal renderer errors asserted, and writes a per-run `manifest.json` (runId, allocated Vite port, temp `KATA_CONFIG_DIR`). Two sequential `@smoke` runs produce manifests with **different** Vite ports and **different** config dirs.
+4. **Build gate fails loud.** With `apps/electron/dist/main.cjs` or `dist/bootstrap-preload.cjs` missing, the harness throws an error naming the missing artifact and instructing `bun run electron:build` (no silent skip).
+5. **Settings tier.** `bun run e2e --project desktop-dev --grep @settings` reaches `#app-ready` via the deferred-setup path (handling `workspace-picker` if shown), changes an appearance/language setting, reloads, and asserts the change persisted. Exits 0.
+6. **Agent tier.** With a real provider key in `.env`, `bun run e2e --project desktop-dev --grep @agent` configures a real Anthropic connection through onboarding, sends a deterministic prompt, asserts a non-empty assistant reply, and exits 0. Runs with `workers: 1`.
+7. **Release channel works end-to-end.** With a packaged `.app` (built via `bun run e2e:build-release`), `bun run e2e:release` runs all three tiers green against the packaged app (renderer loaded from `file://`). With `KATA_E2E_RELEASE_APP` unset, `e2e:release` exits non-zero with a clear missing-path error naming the variable (no silent skip, no dev fallback). The `e2e:*` scripts run the Playwright CLI under Node (Bun's WebSocket client cannot complete the packaged-app inspector attach).
+8. **Prerequisite errors name the variable.** Missing required env (provider key for `@agent`, release app path for release) throws an error containing the exact variable name and a pointer to `e2e/README.md`.
+9. **Static checks clean.** Per-package `tsc --noEmit` passes for any touched packages (`apps/electron`, `packages/shared` if modified). Harness unit tests, if added, pass under `bun test`.
+10. **No CI / no pre-push coupling.** E2E is not added to any CI workflow and not wired into the pre-push hook. Default `bun run e2e` runs only the `desktop-dev` project.
+11. **Decision record + docs.** `docs/specs/2026-06-24-e2e-testing-foundation-design.md` exists with OKF frontmatter (`type: Spec`), is linked from `docs/specs/index.md`, and relevant `log.md` entries are added. `e2e/README.md` exists and is linked from `AGENTS.md`.
+12. **Surgical product edits only.** Product code changes are limited to added stable `id` attributes (`#onboarding-wizard`, `#app-ready`, optional `#workspace-picker`); no behavior changes to onboarding, app state, or workspace logic.
+13. **Deferred work filed.** Each follow-up listed in this plan (parallel server-port isolation, macOS CI strategy, real release validation) is filed as a GitHub issue using `.github/ISSUE_TEMPLATE/deferred_work.yml`.
+
 ## Files
 
-**New:** `e2e/playwright.config.ts`; `e2e/src/config/{loadEnv,timeouts,tags}.ts`; `e2e/src/harness/{ports,isolatedRun,devStack,desktopArtifacts,appLaunch,launchEnv,readiness,artifacts,processSpawn,log,env,testFixtures}.ts`; `e2e/src/flows/{shell,onboarding}.ts`; `e2e/tests/{smoke,settings,agent}/*.spec.ts`; `e2e/README.md`; `.agents/skills/e2e-test-author/SKILL.md`; `docs/specs/2026-06-24-e2e-testing-foundation-design.md`.
+**New:** `e2e/playwright.config.ts`; `e2e/src/config/{loadEnv,timeouts,tags}.ts`; `e2e/src/harness/{isolatedRun,devStack,appLaunch,launchEnv,artifacts,processSpawn,log,env,releaseTarget}.ts`; `e2e/src/fixtures/testFixtures.ts`; `e2e/src/flows/{shell,onboarding,settings,agentChat}.ts`; `e2e/tests/{smoke,settings,agent}/*.spec.ts`; `e2e/README.md`; `.agents/skills/e2e-test-author/SKILL.md`; `docs/specs/2026-06-24-e2e-testing-foundation-design.md`.
 
 **Modified (surgical):** root `package.json` (devDep + 4 scripts); `.gitignore`; `.env.example`; `apps/electron/src/renderer/components/onboarding/OnboardingWizard.tsx` (+`id`); `apps/electron/src/renderer/App.tsx` (+`id`); optionally `WorkspacePicker` (+`id`); `docs/specs/index.md` + `log.md`.
 
-**Reuse / mirror (do not re-invent):** Vite spawn + env shape from `scripts/electron-dev.ts` (`getElectronEnv` 276-292, Vite spawn 540-548, `loadEnvFile` 98-120); harness patterns from `/Volumes/EVO/dev/kata-code/e2e/src/harness/*`; build via existing `bun run ensure:electron` + `bun run electron:build`.
+**Reuse / mirror (do not re-invent):** Vite spawn + env shape from `scripts/electron-dev.ts` (`getElectronEnv` 276-292, Vite spawn 540-548, `loadEnvFile` 98-120); harness patterns from the sibling Kata Code repo's `e2e/src/harness/*`; build via existing `bun run ensure:electron` + `bun run electron:build`.
 
 ## Build prerequisites (before first run)
 ```bash
@@ -122,6 +147,6 @@ bun run electron:build   # produces dist/main.cjs + dist/bootstrap-preload.cjs
 ```
 
 ## Follow-up issues to file (deferred work, per AGENTS.md)
-- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe.
-- macOS CI runner strategy before any CI adoption.
-- Real `desktop-release` validation once a packaged `.app` path is standardized.
+- Parallel isolation: allocate/override subprocess server ports (RPC ~9100) so `workers > 1` is safe. ([#11](https://github.com/gannonh/kata-agents/issues/11))
+- macOS CI runner strategy before any CI adoption. ([#12](https://github.com/gannonh/kata-agents/issues/12))
+- ~~Real `desktop-release` validation~~ **Done.** The release channel runs all three tiers green against a packaged `.app`; see `e2e:build-release` and the build report. ([#13](https://github.com/gannonh/kata-agents/issues/13) closed)

@@ -46,7 +46,9 @@ export function CompletionStep({
       }
       actions={
         status === 'complete' ? (
-          <Button onClick={onFinish} className="w-full max-w-[320px] bg-background shadow-minimal text-foreground hover:bg-foreground/5 rounded-lg" size="lg">
+          <Button
+            data-testid="onboarding-finish"
+            onClick={onFinish} className="w-full max-w-[320px] bg-background shadow-minimal text-foreground hover:bg-foreground/5 rounded-lg" size="lg">
             {t("onboarding.welcome.getStarted")}
           </Button>
         ) : undefined

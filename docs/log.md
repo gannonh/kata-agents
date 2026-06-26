@@ -1,5 +1,10 @@
 # Documentation Bundle Update Log
 
+## 2026-06-25
+
+* **loadEnv fix**: documented the `.env` inline-comment parser fix in the E2E build report and [specs/log.md](specs/log.md).
+* **Quality review fixes**: Updated E2E foundation docs after strict review: fixture layer boundary, collapsed harness helper inventory, release build-script guidance, and validation evidence. See [specs/log.md](specs/log.md) and [specs/e2e-foundation-adoption-build-report.md](specs/e2e-foundation-adoption-build-report.md).
+
 ## 2026-06-23
 
 * **Verified**: Complete Kata brand transition — Verify phase passed. New [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md). Fixed broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon`/`craft_logo_c.svg`, a `copy-assets.ts` stale-file hygiene bug, GitHub org refs (`lukilabs` -> `gannonh`), and mock/test data. All 12 ACs pass; packaged `Info.plist` = `sh.kata.agents`. Updated [specs/index.md](specs/index.md), [index.md](index.md), [specs/log.md](specs/log.md), build/verify/spec status, and root `AGENTS.md` active context.
