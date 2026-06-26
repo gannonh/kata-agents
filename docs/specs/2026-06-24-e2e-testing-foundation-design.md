@@ -59,7 +59,7 @@ auth fixture writes this flag into the temp config dir to reach `ready` credenti
 
 | Variable | Owner | Purpose |
 |---|---|---|
-| `KATA_CONFIG_DIR` | harness (per run) | Temp app config dir; isolates each run. Default `~/.kata-agents`. |
+| `KATA_CONFIG_DIR` | harness (per run) | Per-run temp config dir created via `mkdtemp` and exported to the app. `~/.kata-agents` is used only when the env var is unset outside E2E. |
 | `KATA_VITE_PORT` | harness (per run) | Allocated free Vite port; passed to `vite dev --strictPort`. |
 | `VITE_DEV_SERVER_URL` | harness | `http://localhost:<KATA_VITE_PORT>`; renderer entry for dev launch. |
 | `KATA_APP_NAME` | harness | Mirrors `getElectronEnv()` shape. |

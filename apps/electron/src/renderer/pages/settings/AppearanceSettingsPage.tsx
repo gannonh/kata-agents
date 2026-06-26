@@ -256,6 +256,7 @@ export default function AppearanceSettingsPage() {
                     <SettingsSegmentedControl
                       value={mode}
                       onValueChange={setMode}
+                      testIdPrefix="appearance-mode"
                       options={[
                         { value: 'system', label: t("settings.appearance.system"), icon: <Monitor className="w-4 h-4" /> },
                         { value: 'light', label: t("settings.appearance.light"), icon: <Sun className="w-4 h-4" /> },

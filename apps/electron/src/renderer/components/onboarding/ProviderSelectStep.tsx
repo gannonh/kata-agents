@@ -92,6 +92,7 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
         {PROVIDER_OPTIONS.map((option) => (
           <button
             key={option.id}
+            data-testid={`onboarding-provider-${option.id}`}
             onClick={() => onSelect(option.id)}
             className={cn(
               "flex w-full items-center gap-3 rounded-xl bg-foreground-2 p-3 text-left transition-all",
@@ -119,6 +120,7 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
       {onSkip && (
         <div className="mt-4 text-center">
           <button
+            data-testid="onboarding-setup-later"
             onClick={onSkip}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >

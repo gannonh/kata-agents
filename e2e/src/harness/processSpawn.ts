@@ -43,21 +43,25 @@ export function spawnWithArtifactLogs(
   return child;
 }
 
+function childHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 export async function terminateChildProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) {
+  if (childHasExited(child)) {
     return;
   }
 
   await new Promise<void>((resolve) => {
     child.once("exit", () => resolve());
-    if (child.exitCode !== null) {
+    if (childHasExited(child)) {
       resolve();
       return;
     }
 
     child.kill("SIGTERM");
     setTimeout(() => {
-      if (child.exitCode === null && !child.killed) {
+      if (!childHasExited(child)) {
         child.kill("SIGKILL");
       }
     }, 5_000).unref();

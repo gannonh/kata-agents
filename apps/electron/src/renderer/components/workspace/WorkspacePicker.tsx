@@ -80,6 +80,7 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
             {workspaces.map(ws => (
               <button
                 key={ws.id}
+                data-testid={`workspace-select-${ws.id}`}
                 onClick={() => onSelectWorkspace(ws.id)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-foreground/5"
               >
@@ -101,6 +102,7 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
         {/* Create new */}
         <div className="w-full space-y-2">
           <input
+            data-testid="workspace-create-input"
             type="text"
             value={newName}
             onChange={e => setNewName(e.target.value)}
@@ -109,6 +111,7 @@ export function WorkspacePicker({ onSelectWorkspace }: WorkspacePickerProps) {
             className="w-full rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
           />
           <AddWorkspacePrimaryButton
+            data-testid="workspace-create-button"
             onClick={handleCreate}
             disabled={!newName.trim()}
             loading={creating}

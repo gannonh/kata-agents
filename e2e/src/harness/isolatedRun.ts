@@ -40,7 +40,7 @@ function findAvailablePort(): Promise<number> {
     const server = createServer();
     server.unref();
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, "localhost", () => {
       const address = server.address();
       if (address === null || typeof address === "string") {
         server.close();
@@ -97,10 +97,23 @@ export async function createIsolatedRun(input: {
 
 export async function cleanupRunState(context: E2ERunContext): Promise<void> {
   const callbacks = cleanupCallbacksByRunId.get(context.runId) ?? [];
-  for (const callback of [...callbacks].reverse()) {
-    await callback();
+  const errors: Error[] = [];
+  try {
+    for (const callback of [...callbacks].reverse()) {
+      try {
+        await callback();
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  } finally {
+    cleanupCallbacksByRunId.delete(context.runId);
   }
-  cleanupCallbacksByRunId.delete(context.runId);
+  if (errors.length > 0) {
+    throw new Error(
+      `E2E cleanup failed for ${context.runId}: ${errors.map((error) => error.message).join("; ")}`,
+    );
+  }
 }
 
 export function registerCleanup(

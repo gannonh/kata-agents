@@ -17,8 +17,8 @@ import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 // ERR_CONNECTION_REFUSED resource error.
 function isBenignConsoleError(text: string): boolean {
   return (
-    text.startsWith("Failed to load resource") ||
-    text.includes("localhost:8097") ||
+    text.startsWith("Failed to load resource") &&
+    text.includes("localhost:8097") &&
     text.includes("ERR_CONNECTION_REFUSED")
   );
 }
@@ -38,17 +38,27 @@ function attachRendererTracking(
   const fatalErrors: string[] = [];
 
   const track = (page: Page): void => {
+    const isCurrentRenderer = () =>
+      isRendererWindow(page.url(), context.vitePort, context.launchTarget);
+
     page.on("console", (message) => {
       void appendProcessLog(
         context,
         "renderer-console",
         `[${message.type()}] ${message.text()}\n`,
       );
-      if (message.type() === "error" && !isBenignConsoleError(message.text())) {
+      if (
+        isCurrentRenderer() &&
+        message.type() === "error" &&
+        !isBenignConsoleError(message.text())
+      ) {
         fatalErrors.push(message.text());
       }
     });
     page.on("pageerror", (error) => {
+      if (!isCurrentRenderer()) {
+        return;
+      }
       fatalErrors.push(error.message);
       void appendProcessLog(
         context,

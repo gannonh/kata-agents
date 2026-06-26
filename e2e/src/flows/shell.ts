@@ -13,7 +13,17 @@ export const APP_READY_SELECTOR = "#app-ready";
 export const WORKSPACE_PICKER_SELECTOR = "#workspace-picker";
 
 export async function waitForRootMounted(page: Page, timeoutMs = E2E_TIMEOUTS.assertionMs): Promise<void> {
-  await page.locator(ROOT_SELECTOR).waitFor({ state: "attached", timeout: timeoutMs });
+  const selectors = [ONBOARDING_SELECTOR, APP_READY_SELECTOR, WORKSPACE_PICKER_SELECTOR];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const selector of selectors) {
+      if ((await page.locator(selector).count()) > 0) {
+        return;
+      }
+    }
+    await delay(100);
+  }
+  throw new Error(`E2E shell: renderer did not mount within ${timeoutMs}ms.`);
 }
 
 export async function waitForOnboardingWizard(

@@ -7,10 +7,6 @@ import {
   waitForReadyOrWorkspacePicker,
 } from "./shell.ts";
 
-/** English copy for onboarding controls (i18n keys live in packages/shared/src/i18n/locales). */
-const SETUP_LATER_LABEL = "Setup later"; // onboarding.providerSelect.setupLater
-const OTHER_PROVIDER_LABEL = "I use other provider"; // onboarding.providerSelect.otherProvider
-
 /**
  * Create the first workspace if the picker appears. The picker offers existing
  * workspaces and a create control; a fresh temp config dir has none, so we
@@ -22,13 +18,16 @@ async function handleWorkspacePickerIfPresent(page: Page): Promise<void> {
     return;
   }
 
-  // Create / select the first workspace. The picker auto-selects a default
-  // name; pressing the primary action button advances to the ready shell.
-  const createButton = page
-    .locator("#workspace-picker")
-    .getByRole("button")
-    .last();
-  await createButton.click();
+  const picker = page.locator("#workspace-picker");
+  const existingWorkspace = picker.locator('[data-testid^="workspace-select-"]').first();
+  if (await existingWorkspace.count()) {
+    await existingWorkspace.click();
+  } else {
+    const workspaceName = `E2E Workspace ${Date.now()}`;
+    await picker.locator('[data-testid="workspace-create-input"]').fill(workspaceName);
+    await picker.locator('[data-testid="workspace-create-button"]').click();
+  }
+
   await waitForReadyOrWorkspacePicker(page).then((state) => {
     if (state !== "ready") {
       throw new Error("Workspace picker did not advance to the ready shell after selection.");
@@ -43,10 +42,7 @@ async function handleWorkspacePickerIfPresent(page: Page): Promise<void> {
  */
 export async function completeDeferredSetup(page: Page): Promise<void> {
   await waitForOnboardingWizard(page);
-  await page
-    .locator("#onboarding-wizard")
-    .getByText(SETUP_LATER_LABEL, { exact: true })
-    .click();
+  await page.locator('[data-testid="onboarding-setup-later"]').click();
   await handleWorkspacePickerIfPresent(page);
 }
 
@@ -56,8 +52,8 @@ export async function completeDeferredSetup(page: Page): Promise<void> {
  *
  * Flow (validated on a headed harness run, adoption guide learning #7):
  * provider select -> "I use other provider" lands on the API Configuration
- * step with an "API Key" textbox (Anthropic endpoint preselected) and a
- * Continue button.
+ * step with an API key field (Anthropic endpoint preselected) and a Continue
+ * button.
  *
  * NOTE: the validated UI path is the Anthropic API-key endpoint. The provider
  * is resolved from KATA_E2E_AGENT_PROVIDER (default anthropic); a non-anthropic
@@ -69,19 +65,19 @@ export async function completeApiKeyOnboarding(page: Page): Promise<void> {
   await waitForOnboardingWizard(page);
 
   // Provider select -> "I use other provider" -> API Configuration step.
-  await wizard.getByText(OTHER_PROVIDER_LABEL, { exact: true }).click();
+  await wizard.locator('[data-testid="onboarding-provider-api_key"]').click();
 
-  // Enter the key into the "API Key" textbox and continue.
-  const keyInput = wizard.getByRole("textbox", { name: "API Key" });
+  // Enter the key and continue.
+  const keyInput = wizard.locator("#api-key");
   await keyInput.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
   await keyInput.fill(apiKey);
 
-  await wizard.getByRole("button", { name: "Continue" }).click();
+  await wizard.locator('[data-testid="onboarding-api-key-continue"]').click();
 
-  // Completion step: "You're all set!" -> "Get Started" finalizes onboarding.
-  const getStarted = wizard.getByRole("button", { name: "Get Started" });
-  await getStarted.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
-  await getStarted.click();
+  // Completion step -> finish onboarding.
+  const finishButton = wizard.locator('[data-testid="onboarding-finish"]');
+  await finishButton.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
+  await finishButton.click();
 
   // Onboarding completes and the app reaches ready (handling workspace picker).
   await handleWorkspacePickerIfPresent(page);

@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
+import { readAgentProviderConfig } from "../harness/env.ts";
 
 export interface DeterministicAgentTurn {
   readonly prompt: string;
@@ -18,13 +19,14 @@ export function buildDeterministicAgentTurn(): DeterministicAgentTurn {
 
 const CHAT_INPUT_SELECTOR = '[data-tutorial="chat-input"]';
 const SEND_BUTTON_SELECTOR = '[data-tutorial="send-button"]';
+const MODEL_PICKER_TRIGGER_SELECTOR = '[data-tutorial="model-picker-trigger"]';
 
 /**
  * From the ready shell (session list), start a new session so the composer
- * mounts. The empty state and the sidebar both expose a "New Session" button.
+ * mounts.
  */
 export async function startNewSession(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "New Session" }).first().click();
+  await page.locator('[data-tutorial="new-chat-button"]').first().click();
   await page
     .locator(CHAT_INPUT_SELECTOR)
     .waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
@@ -35,14 +37,11 @@ export async function startNewSession(page: Page): Promise<void> {
  * seeds an outdated default model id ("Claude Haiku 3.5") that the provider
  * 404s, so the @agent flow explicitly picks a live registry model before
  * sending.
- *
- * The composer model picker is a Radix DropdownMenu whose trigger shows the
- * current model display name; items are menuitems labelled by model name.
  */
-export async function selectModel(page: Page, modelName = "Haiku 4.5"): Promise<void> {
-  // The trigger button currently displays the seeded "Claude Haiku 3.5".
-  await page.getByRole("button", { name: /Claude Haiku 3\.5/ }).first().click();
-  const modelItem = page.getByRole("menuitem", { name: new RegExp(modelName, "i") }).first();
+export async function selectModel(page: Page, modelName?: string): Promise<void> {
+  const targetModel = modelName ?? readAgentProviderConfig().model;
+  await page.locator(MODEL_PICKER_TRIGGER_SELECTOR).first().click();
+  const modelItem = page.locator(`[data-model-name="${targetModel}"]`).first();
   await modelItem.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
   await modelItem.click();
 }

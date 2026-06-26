@@ -2035,6 +2035,7 @@ export function FreeFormInput({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
+                    data-tutorial="model-picker-trigger"
                     className={cn(
                       "input-toolbar-btn inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 transition-colors select-none",
                       modelDropdownOpen && "bg-foreground/5",
@@ -2175,6 +2176,7 @@ export function FreeFormInput({
                                 return (
                                   <StyledDropdownMenuItem
                                     key={modelId}
+                                    data-model-name={modelName}
                                     onSelect={() => {
                                       // If selecting a different connection, update both connection and model
                                       if (!isCurrentConnection && onConnectionChange) {
@@ -2267,6 +2269,7 @@ export function FreeFormInput({
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
+                        data-model-name={modelName}
                         onSelect={() => onModelChange(modelId, effectiveConnection)}
                         className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                       >

@@ -44,6 +44,14 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[e2e] Building staged release app ($ARCH) via build-dmg.sh ..."
+if [ "$ARCH" = "arm64" ]; then
+  APP_DIR="$ELECTRON_DIR/release/mac-arm64"
+else
+  APP_DIR="$ELECTRON_DIR/release/mac"
+fi
+APP_PATH="$APP_DIR/Kata Agents.app"
+rm -rf "$APP_PATH"
+
 # build-dmg.sh stages the SDK + ripgrep and runs electron-builder. It also
 # attempts notarization when APPLE_* creds are present; that step may fail
 # offline, but the .app is produced before notarization. Tolerate that failure.

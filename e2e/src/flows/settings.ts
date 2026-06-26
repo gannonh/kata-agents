@@ -4,13 +4,6 @@ import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 
-/** English labels for the appearance Mode radio (settings.appearance.{light,dark,system}). */
-const MODE_LABELS: Record<ThemeMode, string> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
-};
-
 /**
  * Open the Appearance settings page via the renderer navigation event.
  * Mirrors navigate(routes.view.settings('appearance')) in
@@ -32,7 +25,7 @@ export async function openAppearanceSettings(page: Page): Promise<void> {
 }
 
 export async function setThemeMode(page: Page, mode: ThemeMode): Promise<void> {
-  await page.getByText(MODE_LABELS[mode], { exact: true }).first().click();
+  await page.locator(`[data-testid="appearance-mode-${mode}"]`).first().click();
   if (mode === "dark") {
     await expectResolvedTheme(page, "dark");
   } else if (mode === "light") {

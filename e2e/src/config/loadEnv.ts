@@ -49,16 +49,17 @@ function parseEnvFile(path: string): Record<string, string> {
 
 export function loadRepoEnv(): void {
   // .env.local overrides .env; neither overrides an already-set process.env key.
+  const merged: Record<string, string> = {};
   for (const fileName of [".env", ".env.local"]) {
     const path = join(repoRoot, fileName);
     if (!existsSync(path)) {
       continue;
     }
-    const parsed = parseEnvFile(path);
-    for (const [key, value] of Object.entries(parsed)) {
-      if (process.env[key] === undefined) {
-        process.env[key] = value;
-      }
+    Object.assign(merged, parseEnvFile(path));
+  }
+  for (const [key, value] of Object.entries(merged)) {
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
     }
   }
 }

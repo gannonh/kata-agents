@@ -49,7 +49,12 @@ const DEFAULT_MODELS: Record<AgentProvider, string> = {
 
 function resolveProvider(): AgentProvider {
   const raw = firstNonEmpty(process.env.KATA_E2E_AGENT_PROVIDER)?.toLowerCase();
-  if (raw === "openai" || raw === "anthropic") {
+  if (raw === "openai") {
+    throw new Error(
+      "KATA_E2E_AGENT_PROVIDER=openai is not supported yet; the @agent onboarding flow only implements the Anthropic API-key path. Use anthropic or omit the variable.",
+    );
+  }
+  if (raw === "anthropic") {
     return raw;
   }
   return "anthropic";
