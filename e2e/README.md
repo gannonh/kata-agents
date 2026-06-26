@@ -76,7 +76,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `KATA_VITE_PORT` | Set per-run by the harness (allocated free port). | — |
 | `KATA_E2E_RELEASE_APP` | Packaged `.app` path for `desktop-release`. | unset → loud error |
 | `KATA_E2E_AGENT_PROVIDER` | `@agent` provider: `anthropic` or `openai`. | `anthropic` |
-| `KATA_E2E_AGENT_MODEL` | Composer model name picked in `@agent`. | per-provider default |
+| `KATA_E2E_AGENT_MODEL` | Composer model id picked in `@agent`. | per-provider default |
 | `KATA_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY` | Anthropic key for `@agent`. | from `.env` |
 | `KATA_OPENAI_API_KEY` / `OPENAI_API_KEY` | OpenAI key for `@agent` (provider=openai). | from `.env` |
 | `KATA_E2E_WORKERS` | Worker count. | `1` |

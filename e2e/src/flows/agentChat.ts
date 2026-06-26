@@ -38,10 +38,10 @@ export async function startNewSession(page: Page): Promise<void> {
  * 404s, so the @agent flow explicitly picks a live registry model before
  * sending.
  */
-export async function selectModel(page: Page, modelName?: string): Promise<void> {
-  const targetModel = modelName ?? readAgentProviderConfig().model;
+export async function selectModel(page: Page, modelId?: string): Promise<void> {
+  const targetModel = modelId ?? readAgentProviderConfig().model;
   await page.locator(MODEL_PICKER_TRIGGER_SELECTOR).first().click();
-  const modelItem = page.locator(`[data-model-name="${targetModel}"]`).first();
+  const modelItem = page.locator(`[data-model-id="${targetModel}"]`).first();
   await modelItem.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
   await modelItem.click();
 }

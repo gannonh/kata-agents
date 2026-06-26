@@ -13,13 +13,16 @@ export const APP_READY_SELECTOR = "#app-ready";
 export const WORKSPACE_PICKER_SELECTOR = "#workspace-picker";
 
 export async function waitForRootMounted(page: Page, timeoutMs = E2E_TIMEOUTS.assertionMs): Promise<void> {
-  const selectors = [ONBOARDING_SELECTOR, APP_READY_SELECTOR, WORKSPACE_PICKER_SELECTOR];
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    for (const selector of selectors) {
-      if ((await page.locator(selector).count()) > 0) {
-        return;
-      }
+    if (await page.locator(ONBOARDING_SELECTOR).isVisible().catch(() => false)) {
+      return;
+    }
+    if (await page.locator(APP_READY_SELECTOR).isVisible().catch(() => false)) {
+      return;
+    }
+    if (await isWorkspacePickerVisible(page)) {
+      return;
     }
     await delay(100);
   }

@@ -43,12 +43,15 @@ function openaiApiKey(): string | undefined {
 const ANTHROPIC_KEY_NAMES = "KATA_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)";
 const OPENAI_KEY_NAMES = "KATA_OPENAI_API_KEY (or OPENAI_API_KEY)";
 const DEFAULT_MODELS: Record<AgentProvider, string> = {
-  anthropic: "Haiku 4.5",
+  anthropic: "claude-haiku-4-5-20251001",
   openai: "gpt-5.4-mini",
 };
 
 function resolveProvider(): AgentProvider {
   const raw = firstNonEmpty(process.env.KATA_E2E_AGENT_PROVIDER)?.toLowerCase();
+  if (raw === undefined) {
+    return "anthropic";
+  }
   if (raw === "openai") {
     throw new Error(
       "KATA_E2E_AGENT_PROVIDER=openai is not supported yet; the @agent onboarding flow only implements the Anthropic API-key path. Use anthropic or omit the variable.",
@@ -57,7 +60,9 @@ function resolveProvider(): AgentProvider {
   if (raw === "anthropic") {
     return raw;
   }
-  return "anthropic";
+  throw new Error(
+    `Unknown KATA_E2E_AGENT_PROVIDER="${raw}". Supported values: anthropic (or omit for default).`,
+  );
 }
 
 function keyNameFor(provider: AgentProvider): string {

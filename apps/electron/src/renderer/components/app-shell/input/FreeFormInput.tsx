@@ -2176,7 +2176,7 @@ export function FreeFormInput({
                                 return (
                                   <StyledDropdownMenuItem
                                     key={modelId}
-                                    data-model-name={modelName}
+                                    data-model-id={`${conn.slug}:${modelId}`}
                                     onSelect={() => {
                                       // If selecting a different connection, update both connection and model
                                       if (!isCurrentConnection && onConnectionChange) {
@@ -2269,7 +2269,7 @@ export function FreeFormInput({
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
-                        data-model-name={modelName}
+                        data-model-id={modelId}
                         onSelect={() => onModelChange(modelId, effectiveConnection)}
                         className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                       >
