@@ -2,7 +2,7 @@
 
 ## 2026-06-26
 
-* **Drafted**: [mcp-oauth-callback-support-plan.md](mcp-oauth-callback-support-plan.md) — converted the MCP OAuth callback visual plan into the local OKF spec format. Captures the free-tier Cloudflare Worker relay decision, hosted plus localhost return-target policy, MCP `resource` requirement, acceptance criteria, and Build handoff.
+* **Drafted**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — converted the MCP OAuth callback visual plan into the local OKF spec format. Captures the free-tier Cloudflare Worker relay decision, hosted plus localhost return-target policy, MCP `resource` requirement, acceptance criteria, and Build handoff.
 
 ## 2026-06-25
 

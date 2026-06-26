@@ -15,7 +15,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **MCP OAuth callback support** — [specs/mcp-oauth-callback-support-plan.md](specs/mcp-oauth-callback-support-plan.md) — draft plan for a free-tier Cloudflare Worker callback relay plus MCP OAuth callback/token completion.
+* **MCP OAuth callback support** — [specs/2026-06-26-mcp-oauth-callback-support-plan.md](specs/2026-06-26-mcp-oauth-callback-support-plan.md) — draft plan for a free-tier Cloudflare Worker callback relay plus MCP OAuth callback/token completion.
 
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — completed. Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
 * **ADRs** — [adrs/](adrs/) — one accepted (kata-identity hard-cutover); seed is in place for future decisions
