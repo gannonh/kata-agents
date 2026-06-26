@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-26
+
+* **Drafted**: [mcp-oauth-callback-support-plan.md](mcp-oauth-callback-support-plan.md) — converted the MCP OAuth callback visual plan into the local OKF spec format. Captures the free-tier Cloudflare Worker relay decision, hosted plus localhost return-target policy, MCP `resource` requirement, acceptance criteria, and Build handoff.
+
 ## 2026-06-25
 
 * **loadEnv inline-comment fix**: fixed `e2e/src/config/loadEnv.ts` to strip `\s+#` inline comments after .env values and honor quoted-value interiors, preventing a trailing comment from baking into the parsed model name and stalling `@agent`. See [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md) addendum.

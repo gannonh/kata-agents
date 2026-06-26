@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-*(none)*
+* [mcp-oauth-callback-support-plan.md](mcp-oauth-callback-support-plan.md): Draft plan to add a free-tier Cloudflare Worker relay for `https://agents.kata.sh/auth/callback`, complete MCP OAuth callback/token handling, and preserve Electron localhost OAuth.
 
 ## Planned implementation phases
 
