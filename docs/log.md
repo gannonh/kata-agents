@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-06-27
+
+* **Devbox**: added [reference/devbox.md](reference/devbox.md) runbook for `scripts/devbox.sh` — single-command isolated worktree dev containers (OrbStack/Docker) solving port collisions between concurrent Electron/Vite worktrees. Updated [reference/index.md](reference/index.md) and [reference/log.md](reference/log.md).
+
 ## 2026-06-25
 
 * **loadEnv fix**: documented the `.env` inline-comment parser fix in the E2E build report and [specs/log.md](specs/log.md).
