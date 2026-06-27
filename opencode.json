@@ -1,9 +1,0 @@
-{
-  "mcp": {
-    "plan": {
-      "type": "remote",
-      "url": "https://plan.agent-native.com/_agent-native/mcp",
-      "enabled": true
-    }
-  }
-}
