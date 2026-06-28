@@ -73,8 +73,9 @@ cmd_list() {
   while IFS=$'\t' read -r branch name state; do
     [[ -z "${name}" ]] && continue
     if [[ "${state}" == "running" ]]; then
+      local u="http://${name}.orb.local:6080/vnc.html"
       printf '  %-22s %-9s ' "${branch}" "${state}" >&2
-      hyperlink "http://${name}.orb.local:6080/vnc.html" "noVNC" >&2
+      hyperlink "${u}" "${u}" >&2
       printf '\n' >&2
     else
       printf '  %-22s %-9s (stopped — start with: devbox.sh %s)\n' "${branch}" "${state}" "${branch}" >&2
