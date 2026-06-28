@@ -81,7 +81,7 @@ RUN npm install -g @earendil-works/pi-coding-agent
 # shell.openExternal, and direct `chromium` invocations — launches a working
 # browser.
 RUN mv /usr/bin/chromium /usr/bin/chromium.real \
-    && printf '#!/bin/sh\nexec /usr/bin/chromium.real --no-sandbox --disable-gpu "$@"\n' \
+    && printf '#!/bin/sh\nexec /usr/bin/chromium.real --no-sandbox --disable-gpu --test-type "$@"\n' \
        > /usr/bin/chromium \
     && chmod +x /usr/bin/chromium
 
