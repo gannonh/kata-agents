@@ -186,10 +186,12 @@ cmd_up() {
   [[ -n "${cid}" ]] || die "container did not come up; check 'devcontainer up' output above"
 
   # Persist GH_TOKEN into the box so every shell (this one, future --attach, and
-  # restarts) is authed without re-passing it. Written root-owned, mode 600.
+  # restarts) is authed without re-passing it. /etc/profile sources profile.d
+  # for login shells; the file must be readable by the non-root 'node' user, so
+  # own it node:node mode 600 (secret, readable only by the user who needs it).
   if [[ -n "${gh_token}" ]]; then
     printf 'export GH_TOKEN=%q\n' "${gh_token}" \
-      | docker exec -i -u root "${cid}" bash -c 'cat > /etc/profile.d/gh-token.sh && chmod 600 /etc/profile.d/gh-token.sh'
+      | docker exec -i -u root "${cid}" bash -c 'cat > /etc/profile.d/gh-token.sh && chown node:node /etc/profile.d/gh-token.sh && chmod 600 /etc/profile.d/gh-token.sh'
   fi
 
   # OrbStack exposes container ports at <name>.orb.local:<port> (no publishing,
