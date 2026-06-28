@@ -173,11 +173,12 @@ cmd_up() {
     --label "devbox.repo=${REPO_NAME}" \
     --label "devbox.branch=${branch}" \
     --label "devbox.worktree=${path}" \
-    "${IMAGE}"
+    "${IMAGE}" \
+    sleep infinity
 
-  # Wait for first-run provisioning to finish (bun install + ensure:electron can
-  # take a couple minutes cold). Poll the handoff marker; print a heartbeat so
-  # the user knows it isn't stuck.
+  # Wait for first-run provisioning to finish (bun install + ensure:electron
+  # can take a couple minutes cold). The entrypoint prints the handoff line
+  # once provisioning completes and it execs the container CMD (sleep infinity).
   info "first-run provisioning (bun install, ensure:electron) — cold start takes a couple minutes:"
   local waited=0
   while ! docker logs "${name}" 2>&1 | grep -q '\[display\] handing off to:'; do
