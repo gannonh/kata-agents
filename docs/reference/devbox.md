@@ -56,6 +56,7 @@ gh pr create            # gh, ripgrep, fd, fzf, tmux all present
 |---|---|
 | Runtime | Node 22, Bun, pnpm |
 | Agent | Pi (`@earendil-works/pi-coding-agent`) + your extensions from `~/.pi` |
+| Browser | Chromium 149 (headed via noVNC + `--headless=new` for testing the web UIs) |
 | CLIs | gh, ripgrep, fd, fzf, tmux, jq, git |
 | Display | Xvfb + x11vnc + noVNC + fluxbox (headed Electron) |
 
@@ -195,3 +196,23 @@ inside the box and the screen populates.
   pixel-accurate vs. a native macOS build.
 - For a native VNC client instead of the browser, point it at
   `<container-name>.orb.local:5900` (or `brew install --cask tigervnc-viewer`).
+
+## Browser + OAuth
+
+Chromium is installed and wrapped so every caller — `xdg-open`, Electron's
+`shell.openExternal`, and direct `chromium` invocations — launches it with
+`--no-sandbox` (required under Xvfb in a container). The `BROWSER=chromium` env
+makes `xdg-open` route to it.
+
+This is what makes provider OAuth work inside the box: when the app starts an
+OAuth flow, it opens the consent page in Chromium (visible in noVNC), and the
+`localhost:1455` callback resolves because Chromium and the callback server
+share the container's network namespace.
+
+Test the web UIs headlessly:
+
+```bash
+chromium --headless=new --no-sandbox --disable-gpu --dump-dom http://localhost:5175
+```
+
+Or open them in the headed Chromium via noVNC with `xdg-open http://localhost:5175`.

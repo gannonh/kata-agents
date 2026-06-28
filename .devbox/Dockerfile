@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libgbm1 \
       libasound2 \
       fonts-liberation \
+      chromium \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
 
@@ -74,13 +75,25 @@ RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash \
 # -----------------------------------------------------------------------------
 RUN npm install -g @earendil-works/pi-coding-agent
 
+# Chromium needs --no-sandbox under Xvfb in a container (same SUID issue as
+# Electron). Wrap the real binary in place so EVERY caller — xdg-open (via the
+# chromium.desktop entry that hardcodes /usr/bin/chromium), Electron's
+# shell.openExternal, and direct `chromium` invocations — launches a working
+# browser.
+RUN mv /usr/bin/chromium /usr/bin/chromium.real \
+    && printf '#!/bin/sh\nexec /usr/bin/chromium.real --no-sandbox --disable-gpu "$@"\n' \
+       > /usr/bin/chromium \
+    && chmod +x /usr/bin/chromium
+
 # Display defaults (overridable via devcontainer.json containerEnv).
+# BROWSER makes xdg-open (and thus Electron's shell.openExternal) launch Chromium.
 ENV DISPLAY=:99 \
     VNC_PORT=5900 \
     NOVNC_PORT=6080 \
     SCREEN_WIDTH=1600 \
     SCREEN_HEIGHT=1000 \
-    SCREEN_DEPTH=24
+    SCREEN_DEPTH=24 \
+    BROWSER=chromium
 
 # The display launcher runs as a postStartCommand (see devcontainer.json), so it
 # does not need to be the entrypoint. Copy it where provision can find it.
