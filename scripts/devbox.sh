@@ -124,8 +124,10 @@ cmd_up() {
   if [[ -n "${cid}" ]]; then
     info "starting stopped box for ${branch}"
     docker start "${cid}" >/dev/null
-    # Re-run display stack after restart.
-    docker exec -u node "${cid}" bash -lc 'nohup /usr/local/bin/devbox-start-display >/tmp/devbox-display.log 2>&1 &' || true
+    # Re-run display stack after restart. setsid so it survives this exec
+    # session closing (a backgrounded job would be reaped).
+    docker exec -u node "${cid}" bash -lc 'setsid bash -c /usr/local/bin/devbox-start-display </dev/null >/tmp/devbox-display.log 2>&1 || true' || true
+    sleep 2
     exec docker exec ${DOCKER_TTY} -w /workspace -u node "${cid}" bash -l
   fi
 

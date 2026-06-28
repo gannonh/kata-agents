@@ -72,4 +72,13 @@ else
   log "Pi config already present or host ~/.pi not mounted — skipping"
 fi
 
+# --- 5. Start the headed display now (first run) ------------------------------
+# postStartCommand also starts it on every boot, but kick it here so the box is
+# viewable immediately after `devcontainer up` without waiting for a restart.
+# setsid detaches it so it survives this provisioning shell exiting.
+if [[ -x /usr/local/bin/devbox-start-display ]]; then
+  setsid bash -c /usr/local/bin/devbox-start-display </dev/null >/tmp/devbox-display.log 2>&1 || true
+  log "display stack starting (noVNC :6080)"
+fi
+
 log "provisioning complete"
