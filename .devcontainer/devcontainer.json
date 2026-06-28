@@ -42,7 +42,10 @@
   "containerEnv": {
     "DISPLAY": ":99",
     "NOVNC_PORT": "6080",
-    "VNC_PORT": "5900"
+    "VNC_PORT": "5900",
+    // Electron's Chromium SUID sandbox can't run with host-owned node_modules
+    // bind-mounted in; the container is the isolation boundary, so disable it.
+    "KATA_ELECTRON_NO_SANDBOX": "1"
   },
 
   // Lifecycle hooks (devcontainer spec):

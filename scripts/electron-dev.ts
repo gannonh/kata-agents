@@ -594,8 +594,18 @@ async function main(): Promise<void> {
   // 5. Start Electron (build already verified)
   console.log("🚀 Starting Electron...\n");
 
+  // In a Linux container, Chromium's SUID sandbox needs chrome-sandbox to be
+  // root-owned with mode 4755. With node_modules bind-mounted from the host
+  // that isn't the case, so Electron aborts (FATAL: SUID sandbox helper ...).
+  // The container is already the isolation boundary, so allow opting out via
+  // KATA_ELECTRON_NO_SANDBOX=1 (set by the devbox). Host runs are unaffected.
+  const electronArgs = [ELECTRON_BIN, "apps/electron"];
+  if (process.env.KATA_ELECTRON_NO_SANDBOX === "1") {
+    electronArgs.push("--no-sandbox");
+  }
+
   const electronProc = spawn({
-    cmd: [ELECTRON_BIN, "apps/electron"],
+    cmd: electronArgs,
     cwd: ROOT_DIR,
     stdin: "ignore",
     stdout: "inherit",
