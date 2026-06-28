@@ -154,14 +154,16 @@ cmd_up() {
   info "building + starting dev container (first run pulls base + provisions; takes a few min)"
   # devcontainer up reads .devcontainer/devcontainer.json from the worktree.
   # --id-label tags the container so we can find it again for attach/stop/rm.
-  # --mount-git-worktree-common-dir mounts the main repo's .git so git works in
-  # the box (the worktree's .git only points at the common dir). Requires the
-  # worktree to use --relative-paths (done above).
+  # Make git work inside the box. A worktree's .git points (relatively, via
+  # --relative-paths above) at the main repo's .git, which lives beside the
+  # worktree on the host. The worktree mounts at /workspace, so the relative
+  # pointer ../<repo>/.git resolves to /<repo>/.git in the box — mount the main
+  # .git there (read-write: commits need to write refs/index/objects).
   DEVBOX_ENV="${DEVBOX_ENV}" devcontainer up \
     --workspace-folder "${path}" \
     --id-label "$(id_label "${branch}")" \
     --id-label "devbox.repo=${REPO_NAME}" \
-    --mount-git-worktree-common-dir \
+    --mount "type=bind,source=${REPO_ROOT}/.git,target=/${REPO_NAME}/.git" \
     2>&1 | sed 's/^/[devcontainer] /'
 
   cid="$(container_for "${branch}")"
