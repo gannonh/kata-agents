@@ -82,7 +82,7 @@ List running boxes:
 |---|---|
 | Re-enter a running box | `./scripts/devbox.sh <branch> --attach` |
 | Stop a box (keeps the worktree) | `./scripts/devbox.sh <branch> --stop` |
-| Stop box AND remove the worktree | `./scripts/devbox.sh <branch> --rm` |
+| Stop box AND remove the worktree + branch | `./scripts/devbox.sh <branch> --rm` |
 | List running boxes | `./scripts/devbox.sh --list` |
 
 Stopped boxes keep their container filesystem and worktree. Re-attaching is
@@ -119,6 +119,8 @@ The image is intentionally repo-agnostic. To adapt for another repo:
 Nothing else needs to change.
 
 ## Troubleshooting
+
+**`fatal: a branch named 'X' already exists`** — handled automatically. If a branch exists without a worktree (e.g. a prior run crashed before the worktree was created), the launcher reuses the existing branch instead of failing. Use `--rm` to delete both the worktree and its branch.
 
 **`euid != euid != 0,directory /tmp/.X11-unix` warning** — harmless. Xvfb still starts and the display works. The socket dir ownership warning appears because the container runs as a non-root user.
 

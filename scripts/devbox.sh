@@ -104,6 +104,13 @@ cmd_rm() {
       || rm -rf "${path}"
     info "removed worktree ${path}"
   fi
+  # Also delete the branch so a later `devbox.sh <branch>` doesn't hit
+  # "branch already exists". Force only removes devbox-created branches; if the
+  # branch is shared/protected, use --stop instead of --rm.
+  if git -C "${REPO_ROOT}" show-ref --verify --quiet "refs/heads/${branch}"; then
+    git -C "${REPO_ROOT}" branch -D "${branch}" 2>/dev/null \
+      && info "deleted branch ${branch}"
+  fi
   info "removed ${name}"
 }
 
@@ -137,11 +144,18 @@ cmd_up() {
     exec docker exec ${DOCKER_TTY} "${name}" bash -l
   fi
 
-  # Fresh box: create the worktree from main.
+  # Fresh box: create the worktree from main. If the branch already exists
+  # (e.g. left over from a prior crashed run where the worktree was removed but
+  # the branch wasn't), reuse it instead of dying on `worktree add -b`.
   if [[ ! -d "${path}" ]]; then
     info "creating worktree ${branch} -> ${path}"
     git -C "${REPO_ROOT}" fetch origin main 2>/dev/null || true
-    git -C "${REPO_ROOT}" worktree add -b "${branch}" "${path}" main
+    if git -C "${REPO_ROOT}" show-ref --verify --quiet "refs/heads/${branch}"; then
+      info "branch ${branch} exists, checking it out into the worktree"
+      git -C "${REPO_ROOT}" worktree add "${path}" "${branch}"
+    else
+      git -C "${REPO_ROOT}" worktree add -b "${branch}" "${path}" main
+    fi
   else
     info "worktree exists at ${path}, reusing"
   fi
