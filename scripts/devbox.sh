@@ -151,6 +151,21 @@ cmd_up() {
 
   [[ -f "${DEVBOX_ENV}" ]] || warn "no .env at ${DEVBOX_ENV} (set DEVBOX_ENV)"
 
+  # GitHub auth: pull a token from the host gh (keyring) so gh + git push work
+  # in the box. Nothing is written to disk — it flows keyring -> container env.
+  # Honor an explicit GH_TOKEN/GITHUB_TOKEN if already exported.
+  local gh_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [[ -z "${gh_token}" ]] && command -v gh >/dev/null 2>&1; then
+    gh_token="$(gh auth token 2>/dev/null || true)"
+  fi
+  local gh_env_args=()
+  if [[ -n "${gh_token}" ]]; then
+    gh_env_args=(--remote-env "GH_TOKEN=${gh_token}")
+    info "forwarding GitHub token from host gh"
+  else
+    warn "no GitHub token (host gh not authed); gh/git push will need 'gh auth login' in the box"
+  fi
+
   info "building + starting dev container (first run pulls base + provisions; takes a few min)"
   # devcontainer up reads .devcontainer/devcontainer.json from the worktree.
   # --id-label tags the container so we can find it again for attach/stop/rm.
@@ -164,10 +179,18 @@ cmd_up() {
     --id-label "$(id_label "${branch}")" \
     --id-label "devbox.repo=${REPO_NAME}" \
     --mount "type=bind,source=${REPO_ROOT}/.git,target=/${REPO_NAME}/.git" \
+    "${gh_env_args[@]}" \
     2>&1 | sed 's/^/[devcontainer] /'
 
   cid="$(container_for "${branch}")"
   [[ -n "${cid}" ]] || die "container did not come up; check 'devcontainer up' output above"
+
+  # Persist GH_TOKEN into the box so every shell (this one, future --attach, and
+  # restarts) is authed without re-passing it. Written root-owned, mode 600.
+  if [[ -n "${gh_token}" ]]; then
+    printf 'export GH_TOKEN=%q\n' "${gh_token}" \
+      | docker exec -i -u root "${cid}" bash -c 'cat > /etc/profile.d/gh-token.sh && chmod 600 /etc/profile.d/gh-token.sh'
+  fi
 
   # OrbStack exposes container ports at <name>.orb.local:<port> (no publishing,
   # no collisions). Fall back to the container IP on non-OrbStack Docker.
