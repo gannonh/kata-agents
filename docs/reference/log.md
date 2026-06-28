@@ -1,5 +1,9 @@
 # Reference Update Log
 
+## 2026-06-28
+
+* **Reworked devbox onto the devcontainer standard**: [devbox.md](devbox.md) rewritten. The box now builds on `mcr.microsoft.com/devcontainers/typescript-node` and is driven by `@devcontainers/cli` (`devcontainer up`) via `.devcontainer/devcontainer.json`. Adds the full dev toolchain (gh, ripgrep, fd, fzf, tmux) and the Pi agent: host `~/.pi` is copied in (minus sessions/npm/cache) and extensions are reinstalled Linux-native from `settings.json`. Headed GUI is reached via OrbStack's `<container>.orb.local:6080` instead of published host ports.
+
 ## 2026-06-27
 
 * **Added**: [devbox.md](devbox.md) — runbook for `scripts/devbox.sh`, the single-command isolated worktree dev container. Covers the port-isolation problem it solves (concurrent Electron/Vite worktrees collide on `:5173`/`:9100`), the headed noVNC viewer, lifecycle (`--attach`/`--stop`/`--rm`/`--list`; `--rm` also deletes the branch), branch reuse on crashed runs, secrets handling, and reuse across other TypeScript projects.

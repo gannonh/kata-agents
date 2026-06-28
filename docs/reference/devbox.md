@@ -1,29 +1,30 @@
 ---
 type: Reference
-title: Devbox — isolated worktree environments
-description: Single-command isolated Linux containers for concurrent Electron/Vite worktrees with per-container port isolation and a headed noVNC viewer.
-tags: [devbox, docker, orbstack, electron, worktree, port-isolation]
-timestamp: 2026-06-27T15:55:00Z
+title: Devbox — isolated worktree dev environments
+description: Single-command isolated devcontainers for concurrent Electron/Vite worktrees, with the full dev toolchain (Bun, gh, Pi agent) and a headed noVNC viewer.
+tags: [devbox, devcontainer, docker, orbstack, electron, worktree, pi]
+timestamp: 2026-06-28T01:00:00Z
 ---
 
-# Devbox — isolated worktree environments
+# Devbox — isolated worktree dev environments
 
-A single command that spins up a git worktree in a fully isolated Linux container,
-with its own network namespace (no port collisions between concurrent worktrees),
-its own headed display, and automatic provisioning. Designed for running several
-Electron/Vite worktrees of this repo in parallel on one Mac.
+One command spins up a git worktree in a fully isolated Linux dev container with
+its own network namespace (no port collisions between concurrent worktrees), the
+full developer toolchain, your Pi agent (config + extensions), and a headed
+display for running Electron. Built on the [devcontainer](https://containers.dev)
+standard, so the same config also works in VS Code, GitHub Codespaces, and Cursor.
 
 ## The problem this solves
 
 `electron:dev` and the dev servers hardcode ports (Vite `:5173`, RPC `:9100`).
-Running two worktrees at once on the host means they fight over those ports. The
-devbox puts each worktree inside its own container, where `:5173` is scoped to
-that container's loopback only. Three worktrees up = three independent `:5173`s.
+Running multiple worktrees on the host means they fight over those ports. Each
+devbox runs in its own container network namespace, so `:5173` in one box is
+unrelated to `:5173` in another. Run three worktrees at once with zero collisions.
 
 ## Requirements
 
-- Docker (tested with OrbStack 2.2.1; Docker Desktop works too)
-- The repo checked out at the location you run the script from
+- Docker (tested with OrbStack; Docker Desktop works too)
+- `@devcontainers/cli`: `npm i -g @devcontainers/cli`
 
 ## Quick start
 
@@ -36,41 +37,53 @@ From the repo root:
 That will:
 
 1. Create a worktree `../kata-agents-my-feature` from `main`
-2. Build the `kata-devbox:latest` image (first run only)
-3. Launch a container with isolated networking
-4. Run provisioning once: `bun install`, `ensure:electron`, link `.env`
-5. Drop you into a bash shell inside the box
+2. Build the image (first run only) and start the dev container via `devcontainer up`
+3. Provision once: `bun install`, `ensure:electron`, link `.env`, copy your Pi
+   config and reinstall your Pi extensions Linux-native
+4. Drop you into a bash shell inside the box
 
-Inside the box, start the app as normal:
+Inside the box, everything is ready:
 
 ```bash
-bun run electron:dev
+pi                      # your agent, with your extensions + auth
+bun run electron:dev    # the app, headed (view via noVNC)
+gh pr create            # gh, ripgrep, fd, fzf, tmux all present
 ```
+
+## What's in the box
+
+| Category | Tools |
+|---|---|
+| Runtime | Node 22, Bun, pnpm |
+| Agent | Pi (`@earendil-works/pi-coding-agent`) + your extensions from `~/.pi` |
+| CLIs | gh, ripgrep, fd, fzf, tmux, jq, git |
+| Display | Xvfb + x11vnc + noVNC + fluxbox (headed Electron) |
+
+Base image: `mcr.microsoft.com/devcontainers/typescript-node:22` — the same
+generic Node/TS devcontainer family Codespaces and Cursor build on.
 
 ## Viewing the headed GUI
 
-Electron runs inside the container against a virtual framebuffer. View it from
-your Mac browser at the URL the launcher prints (default first box):
+Electron renders to a virtual framebuffer inside the box. View it in your Mac
+browser at the URL the launcher prints:
 
 ```
-http://localhost:6080/vnc.html
+http://<container-name>.orb.local:6080/vnc.html
 ```
 
-Password: `kata`. Override with the `VNC_PASSWORD` env var at launch.
-
-A native VNC client can also connect to `localhost:5900`.
+OrbStack auto-exposes every container port at `<container-name>.orb.local:<port>`,
+so there's nothing to publish and no host-port collisions. The Vite dev server is
+similarly reachable at `http://<container-name>.orb.local:5173` when running.
 
 ## Running multiple worktrees concurrently
 
-Each box gets its own host-side noVNC/VNC port, picked from a free range:
-
 ```bash
-./scripts/devbox.sh feature-a   # -> :6080
-./scripts/devbox.sh feature-b   # -> :6081
-./scripts/devbox.sh feature-c   # -> :6082
+./scripts/devbox.sh feature-a
+./scripts/devbox.sh feature-b
+./scripts/devbox.sh feature-c
 ```
 
-List running boxes:
+Each is a separate container with its own `.orb.local` domain. List them:
 
 ```bash
 ./scripts/devbox.sh --list
@@ -81,57 +94,80 @@ List running boxes:
 | Action | Command |
 |---|---|
 | Re-enter a running box | `./scripts/devbox.sh <branch> --attach` |
-| Stop a box (keeps the worktree) | `./scripts/devbox.sh <branch> --stop` |
-| Stop box AND remove the worktree + branch | `./scripts/devbox.sh <branch> --rm` |
-| List running boxes | `./scripts/devbox.sh --list` |
+| Stop a box (keeps worktree + container) | `./scripts/devbox.sh <branch> --stop` |
+| Remove container, worktree, and branch | `./scripts/devbox.sh <branch> --rm` |
+| List boxes | `./scripts/devbox.sh --list` |
 
-Stopped boxes keep their container filesystem and worktree. Re-attaching is
-instant (provisioning only runs once per container).
+Stopped boxes keep their filesystem and worktree. Re-attaching restarts the box
+and re-runs only the display stack (provisioning runs once per container).
+
+## Pi agent setup
+
+On first provision, the launcher mounts your host `~/.pi` read-only and copies it
+into the box, **excluding** `agent/sessions`, `agent/npm`, and `agent/cache` (the
+bulky/macOS-native dirs — your 1.3GB `~/.pi` becomes a few hundred MB). It then
+reads `~/.pi/agent/settings.json` and runs `pi install <spec>` for each entry in
+`.packages[]`, rebuilding every extension Linux-native. Your `auth.json` carries
+over, so all providers stay logged in — no re-auth per box.
+
+If you re-authenticate or add an extension on the host, recreate the box
+(`--rm` then launch again) to pick up the change.
 
 ## Secrets
 
-`.env` is **never** baked into the image. The launcher bind-mounts it read-only
-from the central dotfiles store (`~/dotfiles/repos/<repo>/.env`, matching what
-`scripts/worktree-setup.sh` already expects) into `/home/node/.env`, and
-provisioning symlinks it into `/workspace/.env`. Override the source path:
+`.env` is never baked into the image. It's bind-mounted read-only from
+`${DEVBOX_ENV}` (default `~/dotfiles/repos/<repo>/.env`) into `/home/node/.env`,
+and provisioning symlinks it into `/workspace/.env`. Override:
 
 ```bash
 DEVBOX_ENV=/path/to/.env ./scripts/devbox.sh my-feature
 ```
 
+## Adding tools
+
+Two standard hooks, both persist for every future box:
+
+- **A maintained Feature** — add to `features` in `.devcontainer/devcontainer.json`.
+  See [containers.dev/features](https://containers.dev/features). Example: add
+  `"ghcr.io/devcontainers/features/aws-cli:1": {}` and it's installed next boot.
+- **An apt/npm line** — add to `.devbox/Dockerfile` for anything without a Feature.
+
+Per-repo setup commands (build, codegen) go in `postCreateCommand` (runs once) or
+`.devbox/provision.sh`.
+
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `.devbox/Dockerfile` | Generic image: Ubuntu + Node LTS + Bun + pnpm + ripgrep + Xvfb + x11vnc + noVNC + fluxbox |
-| `.devbox/start-display.sh` | Container entrypoint: brings up the display stack, provisions, hands off |
-| `.devbox/provision.sh` | Repo-specific setup (bun install, ensure:electron, .env link). Swap this for other repos |
-| `scripts/devbox.sh` | The launcher |
+| `.devcontainer/devcontainer.json` | Standard devcontainer config: image, mounts, features, lifecycle hooks, ports |
+| `.devbox/Dockerfile` | Image layered on the MS TS-Node base: dev CLIs + Pi + display stack |
+| `.devbox/provision.sh` | `postCreateCommand`: repo deps, Electron, `.env`, Pi config + extension replay |
+| `.devbox/start-display.sh` | `postStartCommand`: brings up Xvfb/x11vnc/noVNC/fluxbox |
+| `scripts/devbox.sh` | Launcher: worktree + `devcontainer up` + lifecycle |
 
 ## Reusing across other TypeScript projects
 
-The image is intentionally repo-agnostic. To adapt for another repo:
-
-1. Copy `.devbox/` and `scripts/devbox.sh` into the target repo
-2. Edit `.devbox/provision.sh` if the project's setup differs (e.g. `pnpm install` instead of `bun install`, or no `ensure:electron` step)
+1. Copy `.devcontainer/`, `.devbox/`, and `scripts/devbox.sh` into the target repo
+2. Edit `.devbox/provision.sh` if setup differs (e.g. `pnpm install`, no `ensure:electron`)
 3. Run `./scripts/devbox.sh <branch>`
 
-Nothing else needs to change.
+The image and Pi steps are generic; only `provision.sh` knows the repo.
 
 ## Troubleshooting
 
-**`fatal: a branch named 'X' already exists`** — handled automatically. If a branch exists without a worktree (e.g. a prior run crashed before the worktree was created), the launcher reuses the existing branch instead of failing. Use `--rm` to delete both the worktree and its branch.
+**`Dev container config not found`** — the worktree was created from a commit
+that predates `.devcontainer/`. Make sure these files are committed on `main`;
+git worktrees only carry committed files.
 
-**`euid != euid != 0,directory /tmp/.X11-unix` warning** — harmless. Xvfb still starts and the display works. The socket dir ownership warning appears because the container runs as a non-root user.
+**`fatal: a branch named 'X' already exists`** — handled automatically. The
+launcher reuses an existing branch instead of failing. `--rm` deletes the branch.
 
-**noVNC page loads but shows a black screen** — the window manager or app hasn't painted yet. Start the Electron app inside the box (`bun run electron:dev`) and the screen will populate.
-
-**Port already in use** — the launcher auto-picks the first free port near 6080/5900. If the range is exhausted, stop unused boxes with `--stop`.
+**noVNC black screen** — the app hasn't painted yet. Start `bun run electron:dev`
+inside the box and the screen populates.
 
 ## Notes
 
-- Electron renders against a software Xvfb (no GPU). Fine for dev work and
-  functional UI; not pixel-accurate vs. a native macOS build.
-- The dev server is reachable from inside the box only by default. To expose it
-  to the host, add a port mapping or use the container's OrbStack DNS name
-  (`http://<container-name>.orb.local:5173`).
+- Electron renders against software Xvfb (no GPU). Fine for dev work; not
+  pixel-accurate vs. a native macOS build.
+- For a native VNC client instead of the browser, point it at
+  `<container-name>.orb.local:5900` (or `brew install --cask tigervnc-viewer`).

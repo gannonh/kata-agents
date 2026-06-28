@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-06-28
+
+* **Devbox -> devcontainer standard**: reworked the isolated worktree boxes onto `.devcontainer/devcontainer.json` + `@devcontainers/cli`, MS TS-Node base image, full dev toolchain, and Pi agent (config + extensions). Updated [reference/devbox.md](reference/devbox.md) and [reference/log.md](reference/log.md).
+
 ## 2026-06-27
 
 * **Devbox**: added [reference/devbox.md](reference/devbox.md) runbook for `scripts/devbox.sh` — single-command isolated worktree dev containers (OrbStack/Docker) solving port collisions between concurrent Electron/Vite worktrees. Updated [reference/index.md](reference/index.md) and [reference/log.md](reference/log.md).
