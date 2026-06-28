@@ -75,6 +75,14 @@ OrbStack auto-exposes every container port at `<container-name>.orb.local:<port>
 so there's nothing to publish and no host-port collisions. The Vite dev server is
 similarly reachable at `http://<container-name>.orb.local:5173` when running.
 
+The ready banner and `--list` render the noVNC URL as a clickable terminal
+hyperlink (OSC 8) in Ghostty/iTerm. To get the link on demand:
+
+```bash
+./scripts/devbox.sh my-feature --url     # print the URL (bare, copy/pipe friendly)
+./scripts/devbox.sh my-feature --open    # open it in your default browser
+```
+
 ## Running multiple worktrees concurrently
 
 ```bash
@@ -94,9 +102,11 @@ Each is a separate container with its own `.orb.local` domain. List them:
 | Action | Command |
 |---|---|
 | Re-enter a running box | `./scripts/devbox.sh <branch> --attach` |
+| Print the noVNC URL (clickable) | `./scripts/devbox.sh <branch> --url` |
+| Open the noVNC URL in a browser | `./scripts/devbox.sh <branch> --open` |
 | Stop a box (keeps worktree + container) | `./scripts/devbox.sh <branch> --stop` |
 | Remove container, worktree, and branch | `./scripts/devbox.sh <branch> --rm` |
-| List boxes | `./scripts/devbox.sh --list` |
+| List boxes (with clickable URLs) | `./scripts/devbox.sh --list` |
 
 Stopped boxes keep their filesystem and worktree. Re-attaching restarts the box
 and re-runs only the display stack (provisioning runs once per container).

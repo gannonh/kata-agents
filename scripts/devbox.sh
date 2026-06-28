@@ -4,9 +4,11 @@
 #
 #   ./scripts/devbox.sh my-feature            # create/boot a box for a branch
 #   ./scripts/devbox.sh my-feature --attach   # re-enter a running box
+#   ./scripts/devbox.sh my-feature --url       # print the noVNC URL (clickable)
+#   ./scripts/devbox.sh my-feature --open      # open the noVNC URL in a browser
 #   ./scripts/devbox.sh my-feature --stop      # stop (keeps worktree + container)
 #   ./scripts/devbox.sh my-feature --rm        # remove container, worktree, branch
-#   ./scripts/devbox.sh --list                 # list devbox containers
+#   ./scripts/devbox.sh --list                 # list devbox containers + URLs
 #
 # Built on the devcontainer standard: this script drives `devcontainer up`
 # against a per-worktree folder, so each worktree is fully isolated (its own
@@ -40,6 +42,20 @@ id_label()        { echo "devbox.branch=${1}"; }
 
 DOCKER_TTY="-i"; [[ -t 0 ]] && DOCKER_TTY="-it"
 
+# OSC 8 terminal hyperlink: renders as clickable text in Ghostty/iTerm/etc.
+# Falls back to the raw URL on terminals that don't support it.
+hyperlink() {
+  local url="$1" text="${2:-$1}"
+  printf '\e]8;;%s\e\\%s\e]8;;\e\\' "${url}" "${text}"
+}
+
+# noVNC URL for a running box's container.
+novnc_url_for() {
+  local cid="$1" cname
+  cname="$(docker inspect "${cid}" --format '{{.Name}}' | sed 's,^/,,')"
+  echo "http://${cname}.orb.local:6080/vnc.html"
+}
+
 # Resolve the running container id for a worktree by its id label.
 container_for() {
   docker ps -q --filter "label=$(id_label "$1")" 2>/dev/null | head -1
@@ -51,8 +67,19 @@ container_for_all() {
 # --- commands ----------------------------------------------------------------
 cmd_list() {
   info "devbox containers:"
-  docker ps -a --filter "label=devbox.repo=${REPO_NAME}" \
-    --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+  local rows; rows="$(docker ps -a --filter "label=devbox.repo=${REPO_NAME}" \
+    --format '{{.Label "devbox.branch"}}\t{{.Names}}\t{{.State}}')"
+  [[ -n "${rows}" ]] || { echo "  (none)" >&2; return; }
+  while IFS=$'\t' read -r branch name state; do
+    [[ -z "${name}" ]] && continue
+    if [[ "${state}" == "running" ]]; then
+      printf '  %-22s %-9s ' "${branch}" "${state}" >&2
+      hyperlink "http://${name}.orb.local:6080/vnc.html" "noVNC" >&2
+      printf '\n' >&2
+    else
+      printf '  %-22s %-9s (stopped — start with: devbox.sh %s)\n' "${branch}" "${state}" "${branch}" >&2
+    fi
+  done <<< "${rows}"
 }
 
 cmd_stop() {
@@ -133,23 +160,40 @@ cmd_up() {
   # no collisions). Fall back to the container IP on non-OrbStack Docker.
   local cname; cname="$(docker inspect "${cid}" --format '{{.Name}}' | sed 's,^/,,')"
   local host="${cname}.orb.local"
+  local novnc="http://${host}:6080/vnc.html"
+  local vite="http://${host}:5173"
 
-  cat >&2 <<EOF
-
-$(printf "${CYAN}")━━━ devbox ready ━━━$(printf "${NC}")
-  branch:     ${branch}
-  worktree:   ${path}
-  Pi:         pi            (config + extensions copied from your ~/.pi)
-  Electron:   bun run electron:dev
-  noVNC:      http://${host}:6080/vnc.html
-  Vite:       http://${host}:5173    (when running)
-  Re-enter:   ./scripts/devbox.sh ${branch} --attach
-  Stop:       ./scripts/devbox.sh ${branch} --stop
-  Remove:     ./scripts/devbox.sh ${branch} --rm
-
-EOF
+  {
+    printf "\n${CYAN}━━━ devbox ready ━━━${NC}\n"
+    printf "  branch:     %s\n" "${branch}"
+    printf "  worktree:   %s\n" "${path}"
+    printf "  Pi:         pi            (config + extensions copied from your ~/.pi)\n"
+    printf "  Electron:   bun run electron:dev\n"
+    printf "  noVNC:      "; hyperlink "${novnc}" "${novnc}"; printf "\n"
+    printf "  Vite:       "; hyperlink "${vite}" "${vite}"; printf "    (when running)\n"
+    printf "  Re-enter:   ./scripts/devbox.sh %s --attach\n" "${branch}"
+    printf "  URL/open:   ./scripts/devbox.sh %s --url   (add --open to launch a browser)\n" "${branch}"
+    printf "  Stop:       ./scripts/devbox.sh %s --stop\n" "${branch}"
+    printf "  Remove:     ./scripts/devbox.sh %s --rm\n\n" "${branch}"
+  } >&2
 
   exec docker exec ${DOCKER_TTY} -w /workspace -u node "${cid}" bash -l
+}
+
+cmd_url() {
+  local branch="$1" open=0
+  [[ "${2:-}" == "--open" || "${2:-}" == "-o" ]] && open=1
+  local cid; cid="$(container_for "${branch}")"
+  [[ -n "${cid}" ]] || die "no running box for ${branch} (start it with: devbox.sh ${branch})"
+  local url; url="$(novnc_url_for "${cid}")"
+  if [[ "${open}" -eq 1 ]]; then
+    info "opening ${url}"
+    open "${url}" 2>/dev/null || die "could not open browser (URL: ${url})"
+  else
+    # Bare URL on stdout (copy/pipe friendly); clickable hint on stderr.
+    echo "${url}"
+    [[ -t 2 ]] && { printf '  ' >&2; hyperlink "${url}" "open in browser" >&2; printf '\n' >&2; }
+  fi
 }
 
 # --- dispatch ----------------------------------------------------------------
@@ -159,7 +203,7 @@ normalize() {
   local a="$1" b="${2:-}"
   case "$a" in
     --stop|--rm|--list|--help|-l|-h) FLAG="$a"; BRANCH="$b" ;;
-    --attach|-a) FLAG="$a"; BRANCH="$b" ;;
+    --attach|-a|--url|--open|-o) FLAG="$a"; BRANCH="$b" ;;
     -*) die "unknown option: $a" ;;
     *) BRANCH="$a"; FLAG="${b:-}" ;;
   esac
@@ -170,6 +214,8 @@ normalize "$1" "${2:-}"
 case "${FLAG}" in
   "")          [[ -n "${BRANCH}" ]] || usage; cmd_up "${BRANCH}" ;;
   --attach|-a) [[ -n "${BRANCH}" ]] || die "usage: devbox.sh <branch> --attach"; cmd_up "${BRANCH}" --attach ;;
+  --url)       [[ -n "${BRANCH}" ]] || die "usage: devbox.sh <branch> --url [--open]"; cmd_url "${BRANCH}" "${3:-}" ;;
+  --open|-o)   [[ -n "${BRANCH}" ]] || die "usage: devbox.sh <branch> --open"; cmd_url "${BRANCH}" --open ;;
   --list|-l)   cmd_list ;;
   --help|-h)   usage ;;
   --stop)      [[ -n "${BRANCH}" ]] || die "usage: devbox.sh <branch> --stop"; cmd_stop "${BRANCH}" ;;
