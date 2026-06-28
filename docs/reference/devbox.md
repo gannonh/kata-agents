@@ -123,6 +123,20 @@ over, so all providers stay logged in — no re-auth per box.
 If you re-authenticate or add an extension on the host, recreate the box
 (`--rm` then launch again) to pick up the change.
 
+## GitHub auth
+
+The launcher forwards a GitHub token into the box so `gh` and `git push` work
+without logging in per box. It runs `gh auth token` on the host (or honors an
+exported `GH_TOKEN` / `GITHUB_TOKEN`) and persists it to
+`/etc/profile.d/gh-token.sh` (owned `node:node`, mode 600) so every login shell
+— initial, `--attach`, and restarts — is authed. Nothing is written to the repo;
+the token flows from your host keyring into the container env.
+
+Inside the box, `gh auth status` shows you logged in, and the git credential
+helper is wired for HTTPS push. If the host `gh` isn't authed, the launcher
+warns and you can run `gh auth login` in the box instead. Re-authing on the host
+doesn't refresh existing boxes — recreate them to pick up a new token.
+
 ## Secrets
 
 `.env` is never baked into the image. It's bind-mounted read-only from
