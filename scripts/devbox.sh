@@ -133,13 +133,17 @@ cmd_up() {
   fi
 
   # Fresh box: create the worktree (reuse branch if it already exists).
+  # --relative-paths makes the worktree's .git pointer use relative paths, so it
+  # resolves both on the host and inside the container (where the main repo's
+  # .git is mounted via --mount-git-worktree-common-dir). Without it, .git holds
+  # an absolute host path and `git` fails inside the box ("not a git repository").
   if [[ ! -d "${path}" ]]; then
     info "creating worktree ${branch} -> ${path}"
     git -C "${REPO_ROOT}" fetch origin main 2>/dev/null || true
     if git -C "${REPO_ROOT}" show-ref --verify --quiet "refs/heads/${branch}"; then
-      git -C "${REPO_ROOT}" worktree add "${path}" "${branch}"
+      git -C "${REPO_ROOT}" worktree add --relative-paths "${path}" "${branch}"
     else
-      git -C "${REPO_ROOT}" worktree add -b "${branch}" "${path}" main
+      git -C "${REPO_ROOT}" worktree add --relative-paths -b "${branch}" "${path}" main
     fi
   else
     info "worktree exists at ${path}, reusing"
@@ -150,10 +154,14 @@ cmd_up() {
   info "building + starting dev container (first run pulls base + provisions; takes a few min)"
   # devcontainer up reads .devcontainer/devcontainer.json from the worktree.
   # --id-label tags the container so we can find it again for attach/stop/rm.
+  # --mount-git-worktree-common-dir mounts the main repo's .git so git works in
+  # the box (the worktree's .git only points at the common dir). Requires the
+  # worktree to use --relative-paths (done above).
   DEVBOX_ENV="${DEVBOX_ENV}" devcontainer up \
     --workspace-folder "${path}" \
     --id-label "$(id_label "${branch}")" \
     --id-label "devbox.repo=${REPO_NAME}" \
+    --mount-git-worktree-common-dir \
     2>&1 | sed 's/^/[devcontainer] /'
 
   cid="$(container_for "${branch}")"
