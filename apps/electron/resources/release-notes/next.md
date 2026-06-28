@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **MCP OAuth for remote HTTP sources** — OAuth-protected MCP sources can complete browser authentication through the hosted callback relay at `https://agents.kata.sh/auth/callback`. Desktop flows continue to use the local Electron callback server.
+
 ## Improvements
 
 - **CLI rename** — The terminal client package is now `@kata-sh/agents-cli` with binary `kata-agents-cli`. Bundled docs and reference guides were updated to match.

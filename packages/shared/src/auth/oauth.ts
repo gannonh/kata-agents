@@ -500,7 +500,8 @@ async function exchangeMcpCodeForTokens(
   code: string,
   codeVerifier: string,
   clientId: string,
-  redirectUri: string
+  redirectUri: string,
+  resource?: string,
 ): Promise<OAuthTokens> {
   const params = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -509,6 +510,10 @@ async function exchangeMcpCodeForTokens(
     client_id: clientId,
     code_verifier: codeVerifier,
   });
+
+  if (resource) {
+    params.set('resource', resource);
+  }
 
   const response = await fetch(tokenEndpoint, {
     method: 'POST',
@@ -554,6 +559,7 @@ export async function prepareMcpOAuth(
     throw new Error(`No OAuth metadata found for ${mcpUrl}`);
   }
 
+  const resource = canonicalizeMcpOAuthResource(mcpUrl);
   const pkce = generatePKCE();
   const state = generateState();
   const redirectUri = options.callbackUrl
@@ -587,6 +593,7 @@ export async function prepareMcpOAuth(
   authUrl.searchParams.set('state', state);
   authUrl.searchParams.set('code_challenge', pkce.challenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
+  authUrl.searchParams.set('resource', resource);
 
   return {
     authUrl: authUrl.toString(),
@@ -597,6 +604,7 @@ export async function prepareMcpOAuth(
     clientSecret,
     redirectUri,
     provider: 'mcp',
+    resource,
   };
 }
 
@@ -610,7 +618,8 @@ export async function exchangeMcpOAuth(params: OAuthExchangeParams): Promise<OAu
       params.code,
       params.codeVerifier,
       params.clientId,
-      params.redirectUri
+      params.redirectUri,
+      params.resource,
     );
 
     return {
@@ -639,6 +648,40 @@ export function getMcpBaseUrl(mcpUrl: string): string {
     // If URL parsing fails, return as-is and let caller handle it
     return mcpUrl;
   }
+}
+
+/**
+ * Canonicalize the MCP OAuth resource indicator from a configured MCP server URL.
+ */
+export function canonicalizeMcpOAuthResource(mcpUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(mcpUrl);
+  } catch {
+    throw new Error(`Invalid MCP URL: ${mcpUrl}`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`MCP URL must use http or https: ${mcpUrl}`);
+  }
+
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  url.protocol = url.protocol.toLowerCase();
+  url.hostname = url.hostname.toLowerCase();
+
+  if (url.protocol === 'http:' && url.port === '80') {
+    url.port = '';
+  }
+  if (url.protocol === 'https:' && url.port === '443') {
+    url.port = '';
+  }
+
+  const path = url.pathname || '/';
+  const normalizedPath = path === '/' ? '/' : path;
+  return `${url.origin}${normalizedPath}`;
 }
 
 export interface OAuthMetadata {

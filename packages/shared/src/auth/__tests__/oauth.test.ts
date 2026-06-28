@@ -1,5 +1,5 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
-import { getMcpBaseUrl, discoverOAuthMetadata, prepareMcpOAuth } from '../oauth';
+import { getMcpBaseUrl, discoverOAuthMetadata, prepareMcpOAuth, exchangeMcpOAuth, canonicalizeMcpOAuthResource } from '../oauth';
 
 // ============================================================
 // Unit tests for internal helpers exported only for testing
@@ -1223,5 +1223,84 @@ describe('prepareMcpOAuth', () => {
     });
 
     await expect(prepareMcpOAuth('https://example.com/mcp', { callbackPort: 8914 })).rejects.toThrow('Failed to register OAuth client: Server error');
+  });
+
+  it('includes the canonical MCP resource in the authorization URL', async () => {
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (options?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      if (url === 'https://example.com/.well-known/oauth-authorization-server') {
+        return Promise.resolve(new Response(JSON.stringify({
+          authorization_endpoint: 'https://example.com/oauth/authorize',
+          token_endpoint: 'https://example.com/oauth/token',
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response('Not Found', { status: 404 }));
+    });
+
+    const result = await prepareMcpOAuth('HTTPS://Example.COM:443/mcp?version=1#fragment', { callbackPort: 8914 });
+
+    expect(result.resource).toBe('https://example.com/mcp');
+    const authUrl = new URL(result.authUrl);
+    expect(authUrl.searchParams.get('resource')).toBe('https://example.com/mcp');
+  });
+});
+
+describe('canonicalizeMcpOAuthResource', () => {
+  it('normalizes scheme, host, default ports, and strips query/hash', () => {
+    expect(canonicalizeMcpOAuthResource('HTTPS://Example.COM:443/mcp?version=1#fragment'))
+      .toBe('https://example.com/mcp');
+  });
+
+  it('preserves meaningful endpoint paths', () => {
+    expect(canonicalizeMcpOAuthResource('https://mcp.linear.app/sse'))
+      .toBe('https://mcp.linear.app/sse');
+  });
+
+  it('keeps root path normalization for origin-only URLs', () => {
+    expect(canonicalizeMcpOAuthResource('https://example.com/'))
+      .toBe('https://example.com/');
+  });
+
+  it('rejects unsupported schemes', () => {
+    expect(() => canonicalizeMcpOAuthResource('ftp://example.com/mcp')).toThrow('MCP URL must use http or https');
+  });
+});
+
+describe('exchangeMcpOAuth', () => {
+  const originalFetch = globalThis.fetch;
+  let mockFetch: ReturnType<typeof mock>;
+
+  beforeEach(() => {
+    mockFetch = mock(() => Promise.resolve(new Response('Not Found', { status: 404 })));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('includes the MCP resource in the token exchange request body', async () => {
+    mockFetch.mockImplementation((_url: string, options?: RequestInit) => {
+      const body = options?.body?.toString() ?? '';
+      expect(body).toContain('resource=https%3A%2F%2Fexample.com%2Fmcp');
+      return Promise.resolve(new Response(JSON.stringify({
+        access_token: 'token-123',
+        token_type: 'Bearer',
+      }), { status: 200 }));
+    });
+
+    const result = await exchangeMcpOAuth({
+      code: 'auth-code',
+      codeVerifier: 'verifier',
+      tokenEndpoint: 'https://example.com/oauth/token',
+      clientId: 'client-id',
+      redirectUri: 'https://agents.kata.sh/auth/callback',
+      resource: 'https://example.com/mcp',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.accessToken).toBe('token-123');
   });
 });

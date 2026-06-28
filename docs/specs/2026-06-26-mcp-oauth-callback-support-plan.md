@@ -3,14 +3,14 @@ type: Spec
 title: MCP OAuth callback support
 description: Add a free-tier Cloudflare Worker relay and complete MCP OAuth callback/token handling for remote HTTP MCP sources.
 tags: [mcp, oauth, cloudflare, sources, webui, electron]
-status: Draft
+status: Implemented
 timestamp: 2026-06-26T00:00:00Z
 ---
 
 # MCP OAuth callback support
 
 ## Status
-Draft
+Implemented
 
 ## Goal
 
@@ -305,6 +305,10 @@ Likely touched files or areas:
 9. **No relay-side token handling.** Code review and tests confirm the Cloudflare Worker does not store flow state, exchange authorization codes, persist tokens, or call credential APIs.
 10. **Docs and release notes updated.** Documentation explains `mcp.authType: "oauth"`, the callback URI, hosted relay behavior, localhost/Electron behavior, and provider fallback guidance; release notes are updated if the change is user-visible.
 11. **Targeted tests pass.** The targeted shared auth, source relay, server callback, and worker tests pass with the implementation.
+
+## Build completion report
+
+See [2026-06-26-mcp-oauth-callback-support-build-report.md](./2026-06-26-mcp-oauth-callback-support-build-report.md).
 
 ## Build handoff
 

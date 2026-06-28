@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-06-28
+
+* **Implemented**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — Added stateless Cloudflare Worker relay at `workers/oauth-callback-relay/`, shared relay handler, MCP OAuth `resource` parameter support, docs/release notes, targeted tests, and E2E integration (`bun run e2e:oauth`). Build report: [2026-06-26-mcp-oauth-callback-support-build-report.md](2026-06-26-mcp-oauth-callback-support-build-report.md). Verify report: [2026-06-26-mcp-oauth-callback-support-verify-report.md](2026-06-26-mcp-oauth-callback-support-verify-report.md). Moved Active → Completed in [index.md](index.md).
+
 ## 2026-06-26
 
 * **Drafted**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — converted the MCP OAuth callback visual plan into the local OKF spec format. Captures the free-tier Cloudflare Worker relay decision, hosted plus localhost return-target policy, MCP `resource` requirement, acceptance criteria, and Build handoff.

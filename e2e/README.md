@@ -67,6 +67,13 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@smoke` | `appWindow` | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline. |
 | `@settings` | `authenticatedAppWindow` | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted. |
 | `@agent` | (in-test) | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`. |
+| `@oauth` | (Bun integration) | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Offline; Linux-friendly. |
+
+## Commands (OAuth tier)
+
+```bash
+bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline)
+```
 
 ## Environment variables
 

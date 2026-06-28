@@ -4,13 +4,13 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-* [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md): Draft plan to add a free-tier Cloudflare Worker relay for `https://agents.kata.sh/auth/callback`, complete MCP OAuth callback/token handling, and preserve Electron localhost OAuth.
-
 ## Planned implementation phases
 
 Completed under [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md). Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md).
 
 ## Completed
+
+* [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md): Stateless Cloudflare Worker relay for `https://agents.kata.sh/auth/callback`, MCP OAuth `resource` parameter support, and Electron/WebUI callback completion. Build report: [2026-06-26-mcp-oauth-callback-support-build-report.md](2026-06-26-mcp-oauth-callback-support-build-report.md).
 
 * [e2e-foundation-adoption-plan.md](e2e-foundation-adoption-plan.md): Local-only, macOS-first Playwright + real-Electron E2E foundation (`@smoke`/`@settings`/`@agent` tiers, run isolation, no CI in V1). Implemented 2026-06-25; all 13 ACs pass. Decision record: [2026-06-24-e2e-testing-foundation-design.md](2026-06-24-e2e-testing-foundation-design.md). Build report: [e2e-foundation-adoption-build-report.md](e2e-foundation-adoption-build-report.md). Deferred: [#11](https://github.com/gannonh/kata-agents/issues/11), [#12](https://github.com/gannonh/kata-agents/issues/12), [#13](https://github.com/gannonh/kata-agents/issues/13).
 

@@ -22,6 +22,8 @@ export interface PendingOAuthFlow {
   clientSecret?: string;
   tokenEndpoint: string;
   provider: OAuthProvider;
+  /** MCP OAuth resource indicator for token exchange */
+  resource?: string;
 
   // Binding fields — validated on oauth:complete
   ownerClientId: string;

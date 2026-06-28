@@ -129,4 +129,17 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
       innerState: result.state,
     });
   });
+
+  it('does not use the public relay when Electron provides callbackPort only', async () => {
+    const result = await credManager.prepareOAuth(createMcpSource(), {
+      callbackPort: 8914,
+    });
+
+    expect(result.redirectUri).toBe('http://localhost:8914/oauth/callback');
+
+    const authUrl = new URL(result.authUrl);
+    expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:8914/oauth/callback');
+    expect(authUrl.searchParams.get('state')).toBe(result.state);
+    expect(isOAuthRelayState(authUrl.searchParams.get('state')!)).toBe(false);
+  });
 });
