@@ -2,7 +2,7 @@
  * Starter template for recording WebUI tests with Playwright CodeGen.
  *
  * Workflow:
- *   1. Start the WebUI stack: bun run server:dev:webui
+ *   1. Start the WebUI stack: bun run webui:dev:full
  *   2. Record a new flow:     bun run e2e:codegen
  *   3. Interact with the WebUI in the browser.
  *   4. Copy the generated code below.

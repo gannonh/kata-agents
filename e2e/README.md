@@ -78,18 +78,35 @@ bun run e2e:web      # Playwright browser coverage for WebUI relay callback page
 bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integration)
 ```
 
-## Recording WebUI flows
+## WebUI startup modes
 
-Playwright CodeGen records browser/WebUI flows. It does not record Electron
-`_electron.launch` tests directly.
+- `bun run webui:dev` starts the browser frontend on `http://localhost:5175`. It
+  expects the headless server to already be running on `http://localhost:9100`.
+- `bun run webui:dev:full` starts the built WebUI and the server together. It
+  generates a fresh `KATA_SERVER_TOKEN` for you and serves the app from the
+  server process.
+
+For manual testing, use one of these:
 
 ```bash
-bun run server:dev:webui   # or another WebUI stack you want to record against
+bun run webui:dev:full
+# or, split frontend and backend into two terminals:
+TOKEN=$(bun run packages/server/src/index.ts --generate-token)
+KATA_SERVER_TOKEN="$TOKEN" bun run packages/server/src/index.ts
+bun run webui:dev
+```
+
+For Playwright recording:
+
+```bash
+bun run webui:dev:full
 bun run e2e:codegen
 ```
 
-Paste generated tests into `e2e/tests/web/recorded.spec.ts`, then tighten
-selectors and assertions before treating the flow as durable coverage.
+Playwright CodeGen records browser/WebUI flows. It does not record Electron
+`_electron.launch` tests directly. Paste generated tests into
+`e2e/tests/web/recorded.spec.ts`, then tighten selectors and assertions before
+relying on the flow as durable coverage.
 
 ## Environment variables
 
