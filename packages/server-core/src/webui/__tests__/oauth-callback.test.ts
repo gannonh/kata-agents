@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { PendingOAuthFlow } from '@kata-sh/shared/auth/oauth-flow-store';
 import { createWebuiHandler } from '../http-server';
 
 const TEMP_DIRS: string[] = [];
@@ -31,12 +32,12 @@ afterEach(() => {
 
 describe('WebUI /api/oauth/callback', () => {
   it('completes OAuth when the relay forwards the inner flow state', async () => {
-    const flow = {
+    const flow: PendingOAuthFlow = {
       flowId: 'flow-1',
       state: 'inner-state-123',
       codeVerifier: 'verifier',
       redirectUri: 'https://agents.kata.sh/auth/callback',
-      source: {} as any,
+      source: {} as PendingOAuthFlow['source'],
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
       tokenEndpoint: 'https://oauth2.googleapis.com/token',
@@ -47,7 +48,7 @@ describe('WebUI /api/oauth/callback', () => {
       createdAt: Date.now(),
       expiresAt: Date.now() + 60_000,
     };
-    const flows = new Map([[flow.state, flow]]);
+    const flows = new Map<string, PendingOAuthFlow>([[flow.state, flow]]);
 
     const handler = createWebuiHandler({
       webuiDir: createTestWebuiDir(),
@@ -89,10 +90,22 @@ describe('WebUI /api/oauth/callback', () => {
   });
 
   it('renders an OAuth failure page when the relay forwards provider errors', async () => {
-    const flow = {
+    const flow: PendingOAuthFlow = {
+      flowId: 'flow-2',
       state: 'inner-state-456',
+      codeVerifier: 'verifier',
+      redirectUri: 'https://agents.kata.sh/auth/callback',
+      source: {} as PendingOAuthFlow['source'],
+      clientId: 'test-client-id',
+      tokenEndpoint: 'https://oauth2.googleapis.com/token',
+      provider: 'google',
+      ownerClientId: 'client-1',
+      workspaceId: 'workspace-1',
+      sourceSlug: 'gmail',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
     };
-    const flows = new Map([[flow.state, flow]]);
+    const flows = new Map<string, PendingOAuthFlow>([[flow.state, flow]]);
 
     const handler = createWebuiHandler({
       webuiDir: createTestWebuiDir(),
