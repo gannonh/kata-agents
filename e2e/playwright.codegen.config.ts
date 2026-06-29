@@ -9,12 +9,13 @@
  *   4. Replace `page` with the provided `page` fixture or move stable flows into
  *      dedicated specs under e2e/tests/web/.
  *
- * This records browser/WebUI flows. Electron tests still need hand-authored
- * Playwright steps because Playwright CodeGen does not record `_electron.launch`.
+ * This records browser/WebUI flows against http://localhost:9100 by default.
+ * Electron tests still need hand-authored Playwright steps because Playwright
+ * CodeGen does not record `_electron.launch`.
  */
 import { defineConfig, devices } from "@playwright/test";
 
-const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:5175";
+const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100";
 
 export default defineConfig({
   testDir: "./tests/web",

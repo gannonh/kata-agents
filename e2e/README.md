@@ -82,14 +82,16 @@ bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integra
 
 - `bun run webui:dev` starts the browser frontend on `http://localhost:5175`. It
   expects the headless server to already be running on `http://localhost:9100`.
-- `bun run webui:dev:full` starts the built WebUI and the server together. It
-  generates a fresh `KATA_SERVER_TOKEN` for you and serves the app from the
-  server process.
+- `bun run webui:dev:full` starts the built WebUI and the server together on
+  `http://localhost:9100/login`. It generates a fresh `KATA_SERVER_TOKEN`, sets
+  the dev login password to `dev`, and serves the app from the server process.
 
 For manual testing, use one of these:
 
 ```bash
 bun run webui:dev:full
+# open http://localhost:9100/login and sign in with password: dev
+
 # or, split frontend and backend into two terminals:
 TOKEN=$(bun run packages/server/src/index.ts --generate-token)
 KATA_SERVER_TOKEN="$TOKEN" bun run packages/server/src/index.ts

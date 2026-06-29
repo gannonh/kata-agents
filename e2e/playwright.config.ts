@@ -7,7 +7,7 @@ import { isVideoEnabled, readWorkerCount } from "./src/harness/env.ts";
 import { resolveE2eRoot } from "./src/harness/artifacts.ts";
 
 const e2eRoot = resolveE2eRoot();
-const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:5175";
+const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100";
 const WEB_TEST_MATCH = /web\/.*\.spec\.ts/;
 const WEB_TEST_IGNORE = WEB_TEST_MATCH;
 
