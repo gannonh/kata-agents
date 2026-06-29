@@ -120,6 +120,15 @@ export function isMultiHeaderCredential(cred: ApiCredential): cred is MultiHeade
  * });
  * ```
  */
+function shouldUseOAuthRelay(callbackUrl: string | undefined): boolean {
+  if (!callbackUrl) return false;
+  try {
+    return new URL(callbackUrl).pathname === '/api/oauth/callback';
+  } catch {
+    return false;
+  }
+}
+
 export class SourceCredentialManager {
   // Track in-flight refresh promises to prevent concurrent refreshes for the same source
   // This prevents race conditions (especially important for Microsoft which rotates refresh tokens)
@@ -416,13 +425,15 @@ export class SourceCredentialManager {
     options: { callbackPort?: number; callbackUrl?: string },
   ): Promise<PreparedOAuthFlow> {
     const { callbackPort } = options;
-    const relayReturnTo = options.callbackUrl;
-    // When callbackUrl is provided (WebUI), keep the provider-facing redirect_uri
-    // stable so providers like Google only need a single registered callback.
-    // The relay unwraps the real server callback target from the outer state.
+    const relayReturnTo = shouldUseOAuthRelay(options.callbackUrl)
+      ? options.callbackUrl
+      : undefined;
+    // WebUI callbacks use the hosted relay because providers need a stable
+    // registered redirect URI. Electron-local callback URLs stay direct so the
+    // browser returns to the local callback server instead of the public relay.
     const providerCallbackUrl = relayReturnTo
       ? OAUTH_RELAY_CALLBACK_URL
-      : undefined;
+      : options.callbackUrl;
     const provider = this.detectProvider(source);
 
     let prepared: PreparedOAuthFlow;

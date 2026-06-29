@@ -47,8 +47,8 @@ function createMcpSource(mcpUrl: string, workspaceRootPath: string): LoadedSourc
  *
  * Mirrors apps/electron/src/preload/bootstrap.ts performOAuth:
  *   1. createCallbackServer (local, http://localhost:<port>/callback) — no relay.
- *   2. SourceCredentialManager.prepareOAuth(callbackPort) — redirect_uri is
- *      http://localhost:<port>/oauth/callback, state is a plain CSRF token
+ *   2. SourceCredentialManager.prepareOAuth(callbackUrl) — redirect_uri is
+ *      http://localhost:<port>/callback, state is a plain CSRF token
  *      (NOT a ca1. relay envelope).
  *   3. The user approves consent; the provider redirects to the local server.
  *   4. completeOAuthFlow exchanges the code for a token and stores the credential.
@@ -94,10 +94,13 @@ describe("@oauth Electron local callback (AC8)", () => {
     fixturesToClose.push({ close: async () => { await callbackServer.close(); } });
     const port = Number(new URL(callbackServer.url).port);
 
-    // 2. Prepare the flow with the local callback port.
+    // 2. Prepare the flow with the exact local callback URL used by
+    //    apps/electron/src/preload/bootstrap.ts performOAuth.
     const credManager = new SourceCredentialManager();
-    const prepared = await credManager.prepareOAuth(source, { callbackPort: port });
-    expect(prepared.redirectUri).toBe(`http://localhost:${port}/oauth/callback`);
+    const callbackUrl = `${callbackServer.url}/callback`;
+    const prepared = await credManager.prepareOAuth(source, { callbackUrl });
+    expect(prepared.redirectUri).toBe(callbackUrl);
+    expect(isOAuthRelayState(new URL(prepared.authUrl).searchParams.get("state")!)).toBe(false);
 
     // 3. Simulate the user approving consent. The provider redirects to the
     //    local callback server (http://localhost:<port>/oauth/callback).
@@ -106,7 +109,7 @@ describe("@oauth Electron local callback (AC8)", () => {
     });
     const providerUrl = new URL(location);
     expect(providerUrl.origin).toBe(`http://localhost:${port}`);
-    expect(providerUrl.pathname).toBe("/oauth/callback");
+    expect(providerUrl.pathname).toBe("/callback");
     const code = providerUrl.searchParams.get("code")!;
     const state = providerUrl.searchParams.get("state")!;
     expect(state).toBe(prepared.state);

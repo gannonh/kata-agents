@@ -90,24 +90,17 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
     });
   });
 
-  it('uses the relay for desktop Google flows (callbackUrl)', async () => {
+  it('keeps desktop callbackUrl flows local instead of using the public relay', async () => {
     const result = await credManager.prepareOAuth(createApiSource(), {
       callbackUrl: 'http://localhost:6477/callback',
     });
 
-    expect(result.redirectUri).toBe(OAUTH_RELAY_CALLBACK_URL);
+    expect(result.redirectUri).toBe('http://localhost:6477/callback');
     expect(result.state).toBeTruthy();
 
     const authUrl = new URL(result.authUrl);
-    expect(authUrl.searchParams.get('redirect_uri')).toBe(OAUTH_RELAY_CALLBACK_URL);
-
-    const outerState = authUrl.searchParams.get('state');
-    expect(outerState).toBeTruthy();
-    expect(isOAuthRelayState(outerState!)).toBe(true);
-    expect(decodeOAuthRelayState(outerState!)).toEqual({
-      returnTo: 'http://localhost:6477/callback',
-      innerState: result.state,
-    });
+    expect(authUrl.searchParams.get('redirect_uri')).toBe('http://localhost:6477/callback');
+    expect(isOAuthRelayState(authUrl.searchParams.get('state')!)).toBe(false);
   });
 
   it('passes the stable relay redirect URI into MCP prepare-time metadata flow', async () => {
