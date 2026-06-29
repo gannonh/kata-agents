@@ -80,6 +80,8 @@ credentials.enc
 .claude-plugin/
 sessions/
 statuses/
+labels/
+sources/
 
 # Generated per-build electron-builder config (release-config.ts)
 apps/electron/electron-builder.generated.yml
@@ -92,4 +94,5 @@ e2e/.auth/
 e2e/test-results/
 e2e/playwright-report/
 
-# .agents/skills/
+
+kata-agents.code-workspace
