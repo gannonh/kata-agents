@@ -73,6 +73,7 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
   it('uses the stable relay redirect URI for WebUI Google flows', async () => {
     const result = await credManager.prepareOAuth(createApiSource(), {
       callbackUrl: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
+      useRelay: true,
     });
 
     expect(result.redirectUri).toBe(OAUTH_RELAY_CALLBACK_URL);
@@ -106,6 +107,7 @@ describe('SourceCredentialManager.prepareOAuth relay wrapping', () => {
   it('passes the stable relay redirect URI into MCP prepare-time metadata flow', async () => {
     const result = await credManager.prepareOAuth(createMcpSource(), {
       callbackUrl: 'https://ghalmos.craftdocs-cf-t1.com/api/oauth/callback',
+      useRelay: true,
     });
 
     expect(result.redirectUri).toBe(OAUTH_RELAY_CALLBACK_URL);

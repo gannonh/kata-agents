@@ -75,11 +75,15 @@ describe("@oauth worker entrypoint (AC1: public callback route)", () => {
     expect(await response.text()).toContain("Return target origin is not allowed");
   });
 
-  it("accepts localhost dev return targets when the hosted allowlist is configured", async () => {
+  it("accepts localhost dev return targets when localhost relay is enabled", async () => {
     const devReturnTo = "http://localhost:3100/api/oauth/callback";
     const relayState = encodeOAuthRelayState(devReturnTo, "inner-dev");
     const response = await callWorker(
       `${PRODUCTION_CALLBACK}?code=dev-code&state=${encodeURIComponent(relayState)}`,
+      {
+        KATA_OAUTH_RELAY_ALLOWED_RETURN_ORIGINS: PRODUCTION_ORIGIN,
+        KATA_OAUTH_RELAY_ALLOW_LOCALHOST: "true",
+      },
     );
     expect(response.status).toBe(302);
     const location = response.headers.get("location");

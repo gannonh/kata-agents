@@ -36,15 +36,25 @@ describe('validateOAuthRelayReturnTarget', () => {
     )).not.toThrow();
   });
 
-  it('accepts localhost development callbacks', () => {
+  it('accepts localhost development callbacks when enabled', () => {
+    const options = { allowLocalhostReturns: true };
     expect(() => validateOAuthRelayReturnTarget(
       'http://localhost:3100/api/oauth/callback',
       ALLOWED_ORIGINS,
+      options,
     )).not.toThrow();
     expect(() => validateOAuthRelayReturnTarget(
       'http://127.0.0.1:3100/api/oauth/callback',
       ALLOWED_ORIGINS,
+      options,
     )).not.toThrow();
+  });
+
+  it('rejects localhost callbacks when disabled', () => {
+    expect(() => validateOAuthRelayReturnTarget(
+      'http://localhost:3100/api/oauth/callback',
+      ALLOWED_ORIGINS,
+    )).toThrow('Localhost return targets are not allowed');
   });
 
   it('rejects unapproved HTTPS hosts', () => {
@@ -122,6 +132,7 @@ describe('handleOAuthRelayCallback', () => {
 
     const response = handleOAuthRelayCallback(requestUrl, {
       allowedReturnOrigins: ALLOWED_ORIGINS,
+      allowLocalhostReturns: true,
     });
 
     expect(response.status).toBe(302);

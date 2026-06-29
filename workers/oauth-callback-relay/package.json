@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Stateless Cloudflare Worker relay for Kata Agents OAuth callbacks",
   "type": "module",
+  "dependencies": {
+    "@kata-sh/shared": "workspace:*"
+  },
   "scripts": {
     "test": "bun test ../../packages/shared/src/auth/__tests__/oauth-relay-handler.test.ts",
     "deploy": "wrangler deploy",

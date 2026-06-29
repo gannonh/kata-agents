@@ -18,6 +18,7 @@
     "./services": "./src/services/index.ts",
     "./handlers/rpc": "./src/handlers/rpc/index.ts",
     "./handlers/rpc/*": "./src/handlers/rpc/*.ts",
+    "./handlers/push-sources-changed": "./src/handlers/push-sources-changed.ts",
     "./sessions": "./src/sessions/index.ts",
     "./webui": "./src/webui/index.ts"
   },

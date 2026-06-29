@@ -83,7 +83,20 @@ describe("@oauth relay callback chain", () => {
   it("relay success redirects to WebUI callback and completes token storage", async () => {
     const servers = await startServers();
     const innerState = "inner-state-e2e-success";
-    servers.setFlow(innerState, {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const target = requestTarget(url);
+      if (target === "https://example.com/oauth/token" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return originalFetch(url, init);
+    }) as typeof fetch;
+
+    try {
+      servers.setFlow(innerState, {
       flowId: "flow-e2e",
       state: innerState,
       codeVerifier: "verifier",
@@ -121,6 +134,9 @@ describe("@oauth relay callback chain", () => {
     const exchangeCalls = servers.getExchangeCalls();
     expect(exchangeCalls).toHaveLength(1);
     expect(exchangeCalls[0]?.resource).toBe("https://mcp.linear.app/sse");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("relay forwards provider errors to WebUI callback", async () => {
@@ -170,6 +186,7 @@ describe("@oauth MCP OAuth prepare", () => {
     const credManager = new SourceCredentialManager();
     const prepared = await credManager.prepareOAuth(createMcpSource("HTTPS://MCP.Linear.APP/sse?x=1#frag"), {
       callbackUrl: "https://agents.kata.sh/api/oauth/callback",
+      useRelay: true,
     });
 
     expect(prepared.redirectUri).toBe("https://agents.kata.sh/auth/callback");

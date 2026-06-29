@@ -3,10 +3,15 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createWebuiHandler } from "../../../packages/server-core/src/webui/http-server.ts";
+import { exchangeMcpOAuth } from "../../../packages/shared/src/auth/mcp-oauth.ts";
 import {
   handleOAuthRelayCallback,
   oauthRelayErrorResponse,
 } from "../../../packages/shared/src/auth/oauth-relay-handler.ts";
+import { OAuthFlowStore } from "../../../packages/shared/src/auth/oauth-flow-store.ts";
+import type { LoadedSource } from "../../../packages/shared/src/sources/types.ts";
+import type { PendingOAuthFlow } from "../../../packages/shared/src/auth/oauth-flow-store.ts";
 
 const noopLogger = {
   info: () => {},
@@ -15,14 +20,13 @@ const noopLogger = {
   debug: () => {},
 };
 
-type OAuthFlow = Record<string, unknown>;
-
 export interface OAuthRelayTestServers {
   relayBaseUrl: string;
   webuiBaseUrl: string;
   returnTo: string;
-  setFlow: (state: string, flow: OAuthFlow) => void;
+  setFlow: (state: string, flow: Partial<PendingOAuthFlow> & { state: string }) => void;
   getExchangeCalls: () => Array<Record<string, unknown>>;
+  getStoredAccessToken: () => string | undefined;
   close: () => Promise<void>;
 }
 
@@ -81,62 +85,54 @@ async function listen(server: Server): Promise<{ port: number; close: () => Prom
   };
 }
 
-function callbackHtml(title: string, body: string): Response {
-  return new Response(`<!doctype html><html><body><h1>${title}</h1><p>${body}</p></body></html>`, {
-    status: 200,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
-}
-
 export async function startOAuthRelayTestServers(): Promise<OAuthRelayTestServers> {
   const webuiDir = mkdtempSync(join(tmpdir(), "kata-oauth-e2e-webui-"));
   writeFileSync(join(webuiDir, "login.html"), "<!doctype html><html><body>login</body></html>");
   writeFileSync(join(webuiDir, "index.html"), "<!doctype html><html><body>app</body></html>");
 
-  const flows = new Map<string, OAuthFlow>();
+  const flowStore = new OAuthFlowStore();
   const exchangeCalls: Array<Record<string, unknown>> = [];
+  let storedToken: string | undefined;
 
-  const webuiServer = createServer(
-    nodeRequestListener(async (req) => {
-      const url = new URL(req.url);
-      if (url.pathname !== "/api/oauth/callback" || req.method !== "GET") {
-        return new Response("Not Found", { status: 404 });
-      }
+  const handler = createWebuiHandler({
+    webuiDir,
+    secret: "test-secret",
+    password: "test-password",
+    wsProtocol: "ws",
+    wsPort: 9100,
+    getHealthCheck: () => ({ status: "ok" }),
+    logger: noopLogger,
+  });
 
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      const error = url.searchParams.get("error");
-      const errorDescription = url.searchParams.get("error_description");
+  handler.setOAuthCallbackDeps({
+    flowStore,
+    credManager: {
+      exchangeAndStore: async (
+        _source: LoadedSource,
+        _provider: string,
+        params: {
+          code: string;
+          codeVerifier: string;
+          tokenEndpoint: string;
+          clientId: string;
+          clientSecret?: string;
+          redirectUri: string;
+          resource?: string;
+        },
+      ) => {
+        exchangeCalls.push({ ...params });
+        const result = await exchangeMcpOAuth(params);
+        if (result.success && result.accessToken) {
+          storedToken = result.accessToken;
+        }
+        return { success: result.success, error: result.error, email: result.email };
+      },
+    },
+    sessionManager: { completeAuthRequest: async () => {} },
+    pushSourcesChanged: () => {},
+  });
 
-      if (error) {
-        if (state && flows.has(state)) flows.delete(state);
-        const errorMsg = errorDescription || error;
-        noopLogger.warn(`OAuth callback error: ${errorMsg}`);
-        return callbackHtml("Authorization Failed", errorMsg);
-      }
-
-      if (!code || !state) {
-        return callbackHtml("Authorization Failed", "Missing code or state parameter");
-      }
-
-      const flow = flows.get(state);
-      if (!flow) {
-        return callbackHtml("Authorization Failed", "Unknown or expired OAuth flow");
-      }
-
-      exchangeCalls.push({
-        code,
-        codeVerifier: flow.codeVerifier,
-        tokenEndpoint: flow.tokenEndpoint,
-        clientId: flow.clientId,
-        clientSecret: flow.clientSecret,
-        redirectUri: flow.redirectUri,
-        resource: flow.resource,
-      });
-      flows.delete(state);
-      return callbackHtml("Authorization Successful", "Authorization successful");
-    }),
-  );
+  const webuiServer = createServer(nodeRequestListener(handler.fetch));
   const webui = await listen(webuiServer);
   const webuiBaseUrl = `http://127.0.0.1:${webui.port}`;
   const returnTo = `${webuiBaseUrl}/api/oauth/callback`;
@@ -150,6 +146,7 @@ export async function startOAuthRelayTestServers(): Promise<OAuthRelayTestServer
       try {
         return handleOAuthRelayCallback(requestUrl, {
           allowedReturnOrigins: [webuiBaseUrl],
+          allowLocalhostReturns: true,
         });
       } catch (error) {
         return oauthRelayErrorResponse(error);
@@ -164,10 +161,32 @@ export async function startOAuthRelayTestServers(): Promise<OAuthRelayTestServer
     webuiBaseUrl,
     returnTo,
     setFlow: (state, flow) => {
-      flows.set(state, flow);
+      flowStore.store({
+        flowId: flow.flowId ?? "flow-e2e",
+        state,
+        codeVerifier: flow.codeVerifier ?? "",
+        redirectUri: flow.redirectUri ?? "https://agents.kata.sh/auth/callback",
+        source: (flow.source ?? { config: { slug: "fixture" } }) as LoadedSource,
+        clientId: flow.clientId ?? "client",
+        clientSecret: flow.clientSecret,
+        tokenEndpoint: flow.tokenEndpoint ?? "",
+        provider: (flow.provider ?? "mcp") as PendingOAuthFlow["provider"],
+        resource: flow.resource,
+        ownerClientId: flow.ownerClientId ?? "owner",
+        workspaceId: flow.workspaceId ?? "workspace-1",
+        sourceSlug: flow.sourceSlug ?? "fixture",
+        createdAt: flow.createdAt ?? Date.now(),
+        expiresAt: flow.expiresAt ?? Date.now() + 60_000,
+        sessionId: flow.sessionId,
+        authRequestId: flow.authRequestId,
+      });
     },
     getExchangeCalls: () => [...exchangeCalls],
+    getStoredAccessToken: () => storedToken,
     close: async () => {
+      handler.dispose();
+      flowStore.dispose();
+      storedToken = undefined;
       await Promise.all([relay.close(), webui.close()]);
     },
   };

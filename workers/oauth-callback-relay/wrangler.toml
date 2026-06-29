@@ -12,3 +12,4 @@ routes = [
 # Comma-separated exact origins allowed for hosted HTTPS return targets.
 # Confirm staging/production WebUI origins before deploy and extend this list.
 KATA_OAUTH_RELAY_ALLOWED_RETURN_ORIGINS = "https://agents.kata.sh"
+KATA_OAUTH_RELAY_ALLOW_LOCALHOST = "false"

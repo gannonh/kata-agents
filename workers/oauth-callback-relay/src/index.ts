@@ -2,10 +2,11 @@ import {
   handleOAuthRelayCallback,
   oauthRelayErrorResponse,
   parseAllowedReturnOrigins,
-} from '../../../packages/shared/src/auth/oauth-relay-handler.ts';
+} from '@kata-sh/shared/auth';
 
 export interface Env {
   KATA_OAUTH_RELAY_ALLOWED_RETURN_ORIGINS?: string;
+  KATA_OAUTH_RELAY_ALLOW_LOCALHOST?: string;
 }
 
 export default {
@@ -21,6 +22,7 @@ export default {
         allowedReturnOrigins: parseAllowedReturnOrigins(
           env.KATA_OAUTH_RELAY_ALLOWED_RETURN_ORIGINS,
         ),
+        allowLocalhostReturns: env.KATA_OAUTH_RELAY_ALLOW_LOCALHOST === 'true',
       });
     } catch (error) {
       return oauthRelayErrorResponse(error);

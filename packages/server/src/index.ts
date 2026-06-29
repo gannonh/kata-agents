@@ -280,20 +280,14 @@ if (webuiHandler) {
   healthCheckFn = () => getHealthCheck(depsLike)
 
   // Wire up OAuth callback deps so /api/oauth/callback works
-  const { getSourceCredentialManager, loadWorkspaceSources } = await import('@kata-sh/shared/sources')
-  const { getWorkspaceByNameOrId } = await import('@kata-sh/shared/config')
-  const { pushTyped } = await import('@kata-sh/server-core/transport')
-  const { RPC_CHANNELS } = await import('@kata-sh/shared/protocol')
+  const { getSourceCredentialManager } = await import('@kata-sh/shared/sources')
+  const { createPushSourcesChanged } = await import('@kata-sh/server-core/handlers/push-sources-changed')
 
   webuiHandler.setOAuthCallbackDeps({
     flowStore: instance.oauthFlowStore,
     credManager: getSourceCredentialManager(),
     sessionManager: instance.sessionManager,
-    pushSourcesChanged: (workspaceId: string) => {
-      const ws = getWorkspaceByNameOrId(workspaceId)
-      const sources = ws ? loadWorkspaceSources(ws.rootPath) : []
-      pushTyped(instance.wsServer, RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
-    },
+    pushSourcesChanged: createPushSourcesChanged(instance.wsServer),
   })
 }
 

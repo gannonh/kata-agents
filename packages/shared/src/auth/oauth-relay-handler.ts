@@ -1,9 +1,10 @@
 import { decodeOAuthRelayState, isOAuthRelayState } from './oauth-relay.ts';
-
-const LOCALHOST_CALLBACK_PATH = '/api/oauth/callback';
+import { WEBUI_OAUTH_CALLBACK_PATH } from './oauth-relay-policy.ts';
 
 export interface OAuthRelayHandlerConfig {
   allowedReturnOrigins: string[];
+  /** When false, localhost/127.0.0.1 return targets are rejected (production default). */
+  allowLocalhostReturns?: boolean;
 }
 
 export class OAuthRelayError extends Error {
@@ -30,6 +31,7 @@ export function parseAllowedReturnOrigins(value: string | undefined): string[] {
 export function validateOAuthRelayReturnTarget(
   returnTo: string,
   allowedReturnOrigins: string[],
+  options: { allowLocalhostReturns?: boolean } = {},
 ): void {
   let url: URL;
   try {
@@ -46,7 +48,7 @@ export function validateOAuthRelayReturnTarget(
     throw new OAuthRelayError('Return target must not include credentials');
   }
 
-  if (url.pathname !== LOCALHOST_CALLBACK_PATH) {
+  if (url.pathname !== WEBUI_OAUTH_CALLBACK_PATH) {
     throw new OAuthRelayError('Return target must use /api/oauth/callback');
   }
 
@@ -60,6 +62,10 @@ export function validateOAuthRelayReturnTarget(
   const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
   if (!isLocalhost) {
     throw new OAuthRelayError('Return target origin is not allowed');
+  }
+
+  if (!options.allowLocalhostReturns) {
+    throw new OAuthRelayError('Localhost return targets are not allowed');
   }
 }
 
@@ -102,7 +108,9 @@ export function handleOAuthRelayCallback(
     throw new OAuthRelayError('Invalid OAuth relay state');
   }
 
-  validateOAuthRelayReturnTarget(relayState.returnTo, config.allowedReturnOrigins);
+  validateOAuthRelayReturnTarget(relayState.returnTo, config.allowedReturnOrigins, {
+    allowLocalhostReturns: config.allowLocalhostReturns,
+  });
 
   const location = buildOAuthRelayRedirectUrl(
     relayState.returnTo,

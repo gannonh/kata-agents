@@ -273,6 +273,7 @@ export function createWebApi(options: WebApiOptions): {
         const result = await client.invoke('oauth:start', {
           sourceSlug: args.sourceSlug,
           callbackUrl,
+          useRelay: true,
           sessionId: args.sessionId,
           authRequestId: args.authRequestId,
         })

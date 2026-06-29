@@ -120,15 +120,6 @@ export function isMultiHeaderCredential(cred: ApiCredential): cred is MultiHeade
  * });
  * ```
  */
-function shouldUseOAuthRelay(callbackUrl: string | undefined): boolean {
-  if (!callbackUrl) return false;
-  try {
-    return new URL(callbackUrl).pathname === '/api/oauth/callback';
-  } catch {
-    return false;
-  }
-}
-
 export class SourceCredentialManager {
   // Track in-flight refresh promises to prevent concurrent refreshes for the same source
   // This prevents race conditions (especially important for Microsoft which rotates refresh tokens)
@@ -422,16 +413,14 @@ export class SourceCredentialManager {
    */
   async prepareOAuth(
     source: LoadedSource,
-    options: { callbackPort?: number; callbackUrl?: string },
+    options: { callbackPort?: number; callbackUrl?: string; useRelay?: boolean },
   ): Promise<PreparedOAuthFlow> {
-    const { callbackPort } = options;
-    const relayReturnTo = shouldUseOAuthRelay(options.callbackUrl)
-      ? options.callbackUrl
-      : undefined;
-    // WebUI callbacks use the hosted relay because providers need a stable
-    // registered redirect URI. Electron-local callback URLs stay direct so the
-    // browser returns to the local callback server instead of the public relay.
-    const providerCallbackUrl = relayReturnTo
+    const { callbackPort, useRelay } = options;
+    if (useRelay && !options.callbackUrl) {
+      throw new Error('callbackUrl is required when useRelay is true');
+    }
+    const relayReturnTo = useRelay ? options.callbackUrl : undefined;
+    const providerCallbackUrl = useRelay
       ? OAUTH_RELAY_CALLBACK_URL
       : options.callbackUrl;
     const provider = this.detectProvider(source);

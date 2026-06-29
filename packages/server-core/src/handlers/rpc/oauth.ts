@@ -3,8 +3,10 @@ import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
 import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@kata-sh/shared/sources'
 import { createPendingFlow } from '@kata-sh/shared/auth'
+import type { OAuthCompletionDeps } from '@kata-sh/shared/auth/oauth-completion-deps'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { createPushSourcesChanged } from '../push-sources-changed'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.oauth.START,
@@ -25,11 +27,11 @@ export const HANDLED_CHANNELS = [
 export async function completeOAuthFlow(opts: {
   code: string
   state: string
-  flowStore: { getByState(state: string): any; remove(state: string): void }
-  credManager: { exchangeAndStore(...args: any[]): Promise<any> }
-  sessionManager: { completeAuthRequest(...args: any[]): Promise<void> }
-  pushSourcesChanged: (workspaceId: string) => void
-  logger: { info(msg: string): void; }
+  flowStore: OAuthCompletionDeps['flowStore']
+  credManager: OAuthCompletionDeps['credManager']
+  sessionManager: OAuthCompletionDeps['sessionManager']
+  pushSourcesChanged: OAuthCompletionDeps['pushSourcesChanged']
+  logger: { info(msg: string): void }
   clientId?: string
   workspaceId?: string | null
 }): Promise<{ success: boolean; error?: string; email?: string }> {
@@ -86,10 +88,11 @@ export function registerOAuthHandlers(server: RpcServer, deps: HandlerDeps): voi
     sourceSlug: string
     callbackPort?: number
     callbackUrl?: string
+    useRelay?: boolean
     sessionId?: string
     authRequestId?: string
   }) => {
-    const { sourceSlug, callbackPort, callbackUrl, sessionId, authRequestId } = args
+    const { sourceSlug, callbackPort, callbackUrl, useRelay, sessionId, authRequestId } = args
 
     if (!ctx.workspaceId) {
       throw new Error('No workspace bound to this client')
@@ -105,7 +108,7 @@ export function registerOAuthHandlers(server: RpcServer, deps: HandlerDeps): voi
       throw new Error(`Source not found: ${sourceSlug}`)
     }
 
-    const prepared = await credManager.prepareOAuth(source, { callbackPort, callbackUrl })
+    const prepared = await credManager.prepareOAuth(source, { callbackPort, callbackUrl, useRelay })
 
     const flowId = randomUUID()
     flowStore.store(createPendingFlow({
@@ -149,11 +152,7 @@ export function registerOAuthHandlers(server: RpcServer, deps: HandlerDeps): voi
       flowStore,
       credManager,
       sessionManager: deps.sessionManager,
-      pushSourcesChanged: (workspaceId) => {
-        const ws = getWorkspaceByNameOrId(workspaceId)
-        const sources = ws ? loadWorkspaceSources(ws.rootPath) : []
-        pushTyped(server, RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
-      },
+      pushSourcesChanged: createPushSourcesChanged(server),
       logger: log,
       clientId: ctx.clientId,
       workspaceId: ctx.workspaceId,
