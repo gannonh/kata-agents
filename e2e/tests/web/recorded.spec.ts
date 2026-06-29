@@ -2,22 +2,21 @@
  * Starter template for recording WebUI tests with Playwright CodeGen.
  *
  * Workflow:
- *   1. Start the WebUI stack: bun run webui:dev:full
- *   2. Record a new flow:     bun run e2e:codegen
- *   3. Interact with the WebUI in the browser.
- *   4. Copy the generated code below.
- *   5. Run:                  bun run e2e:web
+ *   1. Record a new flow:     bun run e2e:codegen
+ *   2. Interact with the WebUI in the browser.
+ *   3. Copy the generated code below.
+ *   4. Run:                  bun run e2e:web
  *
- * Keep recorded selectors as a draft. After recording, replace brittle CSS or
- * text selectors with stable roles, labels, or explicit test ids before relying
- * on the test as branch coverage.
+ * `webPage` is already authenticated and on "/" with the app shell visible.
+ * Replace or extend the test below with your recorded actions. Keep recorded
+ * selectors as a draft — tighten to stable roles, labels, or test ids before
+ * relying on a flow as durable coverage.
  */
-import { expect, test } from "@playwright/test";
+import { webTest as test, expect } from "../../src/harness/webSetup.ts";
 
 test.describe("WebUI recorded flows", () => {
-  test("recording template loads the configured WebUI URL", async ({ page }) => {
-    await page.goto("/");
-    await expect(page).toHaveURL(/.*/);
+  test("authenticated shell loads", async ({ webPage }) => {
+    await expect(webPage.locator("#root")).toBeAttached();
   });
 
   // Paste CodeGen output below this line. Keep each recorded flow in its own

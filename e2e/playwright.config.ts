@@ -7,15 +7,7 @@ import { isVideoEnabled, readWorkerCount } from "./src/harness/env.ts";
 import { resolveE2eRoot } from "./src/harness/artifacts.ts";
 
 const e2eRoot = resolveE2eRoot();
-const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100";
-const shouldStartWebServer = process.argv.some((arg) => (
-  arg === "web-dev" ||
-  arg.endsWith("=web-dev") ||
-  arg.includes("tests/web/") ||
-  arg.includes("e2e/tests/web/")
-));
 const WEB_TEST_MATCH = /web\/.*\.spec\.ts/;
-const WEB_TEST_IGNORE = WEB_TEST_MATCH;
 
 export default defineConfig({
   testDir: "./tests",
@@ -42,29 +34,21 @@ export default defineConfig({
     {
       name: "desktop-dev",
       testMatch: /.*\.spec\.ts/,
-      testIgnore: WEB_TEST_IGNORE,
+      testIgnore: WEB_TEST_MATCH,
       metadata: { launchTarget: "dev" },
     },
     {
       name: "desktop-release",
       testMatch: /.*\.spec\.ts/,
-      testIgnore: WEB_TEST_IGNORE,
+      testIgnore: WEB_TEST_MATCH,
       metadata: { launchTarget: "release" },
     },
     {
       name: "web-dev",
       testMatch: WEB_TEST_MATCH,
       use: {
-        baseURL: webUrl,
+        baseURL: process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100",
       },
     },
   ],
-  webServer: shouldStartWebServer
-    ? {
-      command: "bash scripts/start-web-e2e-server.sh",
-      url: webUrl,
-      reuseExistingServer: true,
-      timeout: 120_000,
-    }
-    : undefined,
 });

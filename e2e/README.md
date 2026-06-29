@@ -99,7 +99,10 @@ bun run webui:dev
 ```
 
 For Playwright tests, no manual server startup is required. The `web-dev`
-project starts an isolated WebUI server with a temp `KATA_CONFIG_DIR`:
+project uses a fixture (`e2e/src/harness/webSetup.ts`) that starts an isolated
+WebUI server on a free port, authenticates via the `/login` password form,
+and tears the server down when the test scope ends. This works for CLI,
+direct-file runs, and the VS Code Playwright extension:
 
 ```bash
 bun run e2e:web

@@ -12,6 +12,7 @@ trap cleanup EXIT INT TERM
 cd "$repo_root"
 
 export KATA_CONFIG_DIR="$config_dir"
+export KATA_RPC_PORT="${KATA_RPC_PORT:-9100}"
 export KATA_SERVER_TOKEN="${KATA_SERVER_TOKEN:-$(bun run packages/server/src/index.ts --generate-token)}"
 export KATA_WEBUI_PASSWORD="${KATA_WEBUI_PASSWORD:-dev}"
 export KATA_WEBUI_DIR="${KATA_WEBUI_DIR:-apps/webui/dist}"
