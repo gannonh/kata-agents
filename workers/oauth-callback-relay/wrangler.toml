@@ -5,7 +5,7 @@ compatibility_date = "2024-01-01"
 # Route only the public OAuth callback path through this worker.
 # Other agents.kata.sh routes remain on their existing owners (for example Vercel).
 routes = [
-  { pattern = "agents.kata.sh/auth/callback", zone_name = "kata.sh" }
+  { pattern = "agents.kata.sh/auth/callback*", zone_name = "kata.sh" }
 ]
 
 [vars]
