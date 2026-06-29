@@ -1,5 +1,11 @@
 # Specs Update Log
 
+## 2026-06-28
+
+* **Added Playwright browser E2E**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — Added `web-dev` Playwright project, OAuth relay browser coverage (`bun run e2e:web`), and a WebUI CodeGen recording template for future walkthroughs. Updated verify report: [2026-06-26-mcp-oauth-callback-support-verify-report.md](2026-06-26-mcp-oauth-callback-support-verify-report.md).
+* **Verified on macOS dev box**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — Added OAuth E2E coverage for the Cloudflare Worker entrypoint, a local OAuth-protected MCP fixture, full WebUI relay flow, and Electron local callback flow. `bun run e2e:oauth` now covers 19 tests across 4 files; targeted unit/server tests remain green. Updated verify report: [2026-06-26-mcp-oauth-callback-support-verify-report.md](2026-06-26-mcp-oauth-callback-support-verify-report.md). Production callback deploy remains pending.
+* **Implemented**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — Added stateless Cloudflare Worker relay at `workers/oauth-callback-relay/`, shared relay handler, MCP OAuth `resource` parameter support, docs/release notes, targeted tests, and E2E integration (`bun run e2e:oauth`). Build report: [2026-06-26-mcp-oauth-callback-support-build-report.md](2026-06-26-mcp-oauth-callback-support-build-report.md). Verify report: [2026-06-26-mcp-oauth-callback-support-verify-report.md](2026-06-26-mcp-oauth-callback-support-verify-report.md). Moved Active → Completed in [index.md](index.md).
+
 ## 2026-06-26
 
 * **Drafted**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — converted the MCP OAuth callback visual plan into the local OKF spec format. Captures the free-tier Cloudflare Worker relay decision, hosted plus localhost return-target policy, MCP `resource` requirement, acceptance criteria, and Build handoff.

@@ -60,6 +60,8 @@
     "electron:build:renderer": "bun run scripts/electron-build-renderer.ts",
     "electron:build:resources": "bun run scripts/electron-build-resources.ts",
     "build:wa-worker": "bun run scripts/build-wa-worker.ts",
+    "test:oauth-relay": "cd packages/shared && bun test src/auth/__tests__/oauth-relay-handler.test.ts src/auth/__tests__/oauth-relay.test.ts src/sources/__tests__/oauth-relay.test.ts && bun test src/auth/__tests__/oauth.test.ts && cd ../../packages/server-core && bun test src/webui/__tests__/oauth-callback.test.ts",
+    "e2e:oauth": "cd e2e && bun test tests/oauth",
     "electron:build:assets": "cd apps/electron && bun scripts/copy-assets.ts",
     "electron:build": "bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources && bun run electron:build:assets",
     "ensure:electron": "bun run scripts/ensure-electron.ts",
@@ -87,12 +89,13 @@
     "viewer:build": "vite build --config apps/viewer/vite.config.ts",
     "viewer:preview": "vite preview --config apps/viewer/vite.config.ts",
     "webui:dev": "lsof -ti:5175 | xargs kill -9 2>/dev/null; vite dev --config apps/webui/vite.config.ts",
+    "webui:dev:full": "bash scripts/webui-dev-full.sh",
     "webui:clean": "rm -rf apps/webui/dist",
     "webui:build": "vite build --config apps/webui/vite.config.ts",
     "webui:typecheck": "cd apps/webui && bun run typecheck",
     "server:build:subprocess": "cd packages/session-mcp-server && bun run build && cd ../pi-agent-server && bun run build",
     "server:prod": "bun run server:build:subprocess && bun run webui:build && KATA_WEBUI_DIR=apps/webui/dist KATA_BUNDLED_ASSETS_ROOT=$PWD/apps/electron bun run packages/server/src/index.ts",
-    "server:dev:webui": "bun run server:build:subprocess && bun run webui:build && KATA_WEBUI_DIR=apps/webui/dist KATA_WEBUI_PORT=3100 bun run server:dev",
+    "server:dev:webui": "bun run server:build:subprocess && bun run webui:build && KATA_WEBUI_DIR=apps/webui/dist bun run server:dev",
     "marketing:dev": "vite dev --config apps/marketing/vite.config.ts",
     "marketing:build": "vite build --config apps/marketing/vite.config.ts",
     "marketing:preview": "vite preview --config apps/marketing/vite.config.ts",
@@ -101,6 +104,8 @@
     "e2e": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-dev",
     "e2e:headed": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-dev --headed",
     "e2e:ui": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --ui",
+    "e2e:web": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project web-dev",
+    "e2e:codegen": "node node_modules/@playwright/test/cli.js codegen --config e2e/playwright.codegen.config.ts ${KATA_WEBUI_E2E_URL:-http://localhost:9100}",
     "e2e:release": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-release",
     "e2e:build-release": "bash e2e/scripts/build-release-app.sh",
     "prepare": "husky"
@@ -214,5 +219,12 @@
     "@img/sharp-libvips-darwin-x64": "1.2.4",
     "@img/sharp-libvips-linux-arm64": "1.2.4",
     "@img/sharp-libvips-linux-x64": "1.2.4"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "1.3.14",
+      "onFail": "download"
+    }
   }
 }

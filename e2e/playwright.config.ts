@@ -7,6 +7,7 @@ import { isVideoEnabled, readWorkerCount } from "./src/harness/env.ts";
 import { resolveE2eRoot } from "./src/harness/artifacts.ts";
 
 const e2eRoot = resolveE2eRoot();
+const WEB_TEST_MATCH = /web\/.*\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests",
@@ -33,12 +34,21 @@ export default defineConfig({
     {
       name: "desktop-dev",
       testMatch: /.*\.spec\.ts/,
+      testIgnore: WEB_TEST_MATCH,
       metadata: { launchTarget: "dev" },
     },
     {
       name: "desktop-release",
       testMatch: /.*\.spec\.ts/,
+      testIgnore: WEB_TEST_MATCH,
       metadata: { launchTarget: "release" },
+    },
+    {
+      name: "web-dev",
+      testMatch: WEB_TEST_MATCH,
+      use: {
+        baseURL: process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100",
+      },
     },
   ],
 });

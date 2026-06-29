@@ -20,8 +20,9 @@ import {
   buildSessionCookie,
   buildLogoutCookie,
 } from './auth'
-import { generateCallbackPage } from '@kata-sh/shared/auth'
+import type { OAuthCompletionDeps } from '@kata-sh/shared/auth/oauth-completion-deps'
 import type { PlatformServices } from '../runtime/platform'
+import { handleWebuiOAuthCallback } from './oauth-callback-http'
 
 // ---------------------------------------------------------------------------
 // MIME types for static file serving
@@ -111,12 +112,7 @@ export function resolveWebSocketUrl(
 // ---------------------------------------------------------------------------
 
 /** Dependencies for the /api/oauth/callback HTTP route (server-side OAuth completion). */
-export interface OAuthCallbackDeps {
-  flowStore: { getByState: (state: string) => any; remove: (state: string) => void }
-  credManager: { exchangeAndStore: (...args: any[]) => Promise<any> }
-  sessionManager: { completeAuthRequest: (...args: any[]) => Promise<void> }
-  pushSourcesChanged: (workspaceId: string) => void
-}
+export type OAuthCallbackDeps = OAuthCompletionDeps;
 
 export interface WebuiHandlerOptions {
   /** Path to built web UI dist/ directory. */
@@ -274,6 +270,46 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       })
     }
 
+    // ── Token login endpoint (GET) ──
+    // Accepts ?token=<KATA_SERVER_TOKEN|KATA_WEBUI_PASSWORD>, validates it with the
+    // same verifyPassword path as the login form, sets the session cookie, and
+    // redirects to "/". Lets dev launchers open an authenticated URL in one step.
+    if (path === '/api/auth/token' && req.method === 'GET') {
+      await passwordReady
+      const ip = getClientIp(req)
+      const requestHost = url.hostname
+      const isLoopback = requestHost === '127.0.0.1' || requestHost === 'localhost' || requestHost === '::1'
+      if (!isLoopback) {
+        return new Response('Token login is only available on loopback hosts', { status: 403 })
+      }
+
+      if (!rateLimiter.check(ip)) {
+        logger.warn(`[webui] Rate limited token auth attempt from ${ip}`)
+        return new Response('Too many attempts. Try again later.', { status: 429 })
+      }
+
+      const token = url.searchParams.get('token')
+      if (!token || typeof token !== 'string') {
+        return new Response('Token is required', { status: 400 })
+      }
+
+      if (!await verifyPassword(token)) {
+        logger.warn(`[webui] Failed token auth attempt from ${ip}`)
+        return Response.redirect('/login', 302)
+      }
+
+      const jwt = await createSessionToken(secret)
+      logger.info(`[webui] Successful token auth from ${ip}`)
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Set-Cookie': buildSessionCookie(jwt, useSecureCookies),
+          'Location': '/',
+          'Cache-Control': 'no-store',
+        },
+      })
+    }
+
     // ── Logout endpoint ──
     if (path === '/api/auth/logout' && req.method === 'POST') {
       return new Response(null, {
@@ -287,62 +323,15 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     // ── OAuth callback (no cookie auth — state param is CSRF protection) ──
     // Receives redirect from the relay (or directly from OAuth provider for MCP sources).
     // Completes the token exchange server-side and renders a success/error page.
-    if (path === '/api/oauth/callback' && req.method === 'GET' && options.oauthCallbackDeps) {
-      const code = url.searchParams.get('code')
-      const state = url.searchParams.get('state')
-      const error = url.searchParams.get('error')
-      const errorDescription = url.searchParams.get('error_description')
-
-      if (error) {
-        const flow = state ? options.oauthCallbackDeps.flowStore.getByState(state) : null
-        if (flow && state) options.oauthCallbackDeps.flowStore.remove(state)
-        const errorMsg = errorDescription || error
-        logger.warn(`[webui] OAuth callback error: ${errorMsg}`)
-        return new Response(generateCallbackPage({ title: 'Authorization Failed', isSuccess: false, errorDetail: errorMsg }), {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    if (path === '/api/oauth/callback' && req.method === 'GET') {
+      if (!options.oauthCallbackDeps) {
+        return new Response('OAuth callback handler is not configured', {
+          status: 503,
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
         })
       }
 
-      if (!code || !state) {
-        return new Response(generateCallbackPage({ title: 'Authorization Failed', isSuccess: false, errorDetail: 'Missing code or state parameter' }), {
-          status: 400,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        })
-      }
-
-      try {
-        const { completeOAuthFlow } = await import('../handlers/rpc/oauth')
-        const result = await completeOAuthFlow({
-          code,
-          state,
-          flowStore: options.oauthCallbackDeps.flowStore,
-          credManager: options.oauthCallbackDeps.credManager as any,
-          sessionManager: options.oauthCallbackDeps.sessionManager,
-          pushSourcesChanged: options.oauthCallbackDeps.pushSourcesChanged,
-          logger,
-          // No clientId/workspaceId — HTTP callback skips ownership checks (state is auth)
-        })
-
-        if (result.success) {
-          return new Response(generateCallbackPage({ title: 'Authorization Successful', isSuccess: true }), {
-            status: 200,
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          })
-        } else {
-          return new Response(generateCallbackPage({ title: 'Authorization Failed', isSuccess: false, errorDetail: result.error }), {
-            status: 200,
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          })
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Token exchange failed'
-        logger.error(`[webui] OAuth callback failed: ${msg}`)
-        return new Response(generateCallbackPage({ title: 'Authorization Failed', isSuccess: false, errorDetail: msg }), {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        })
-      }
+      return handleWebuiOAuthCallback(url, options.oauthCallbackDeps, logger)
     }
 
     // ── Config endpoint (requires session cookie) ──

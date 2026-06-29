@@ -19,10 +19,12 @@ For the `@agent` tier, a real Anthropic key must be in the repo root `.env`
 ## Commands
 
 ```bash
-bun run e2e --list                              # list tests
+bun run e2e --list                              # list desktop-dev tests
 bun run e2e                                     # all tests, desktop-dev project
 bun run e2e --grep @smoke                       # one tier
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
+bun run e2e:web                                 # browser/WebUI Playwright tests
+bun run e2e:codegen                             # record WebUI flows with Playwright CodeGen
 bun run e2e:ui                                  # Playwright UI mode
 KATA_E2E_RELEASE_APP="/path/Kata Agents.app" bun run e2e:release   # packaged app
 ```
@@ -67,6 +69,62 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@smoke` | `appWindow` | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline. |
 | `@settings` | `authenticatedAppWindow` | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted. |
 | `@agent` | (in-test) | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`. |
+| `@oauth` | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
+
+## Commands (OAuth tier)
+
+```bash
+bun run e2e:web      # starts WebUI server, then runs browser coverage
+bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integration)
+```
+
+## WebUI startup modes
+
+- `bun run webui:dev` starts the browser frontend on `http://localhost:5175`. It
+  expects the headless server to already be running on `http://localhost:9100`.
+- `bun run webui:dev:full` starts the built WebUI and the server together, prints
+  `KATA_WEBUI_URL` and `KATA_WEBUI_AUTH_URL`, and opens the browser at the
+  authenticated URL. The auth URL uses `/api/auth/token?token=...`, which
+  validates against the same hash as the login form and sets the session cookie
+  so you skip the password screen. Logs stream inline; Ctrl-C stops the server.
+
+For manual testing, use one of these:
+
+```bash
+bun run webui:dev:full
+# browser opens at the authenticated URL automatically; or open the
+# KATA_WEBUI_AUTH_URL line printed in the terminal.
+
+# manual fallback (password form):
+# open http://localhost:9100/login and sign in with password: dev
+
+# or, split frontend and backend into two terminals:
+TOKEN=$(bun run packages/server/src/index.ts --generate-token)
+KATA_SERVER_TOKEN="$TOKEN" bun run packages/server/src/index.ts
+bun run webui:dev
+```
+
+For Playwright tests, no manual server startup is required. The `web-dev`
+project uses a fixture (`e2e/src/harness/webSetup.ts`) that starts an isolated
+WebUI server on a free port, authenticates via the `/login` password form,
+and tears the server down when the test scope ends. This works for CLI,
+direct-file runs, and the VS Code Playwright extension:
+
+```bash
+bun run e2e:web
+```
+
+For Playwright recording:
+
+```bash
+bun run webui:dev:full
+bun run e2e:codegen
+```
+
+Playwright CodeGen records browser/WebUI flows. It does not record Electron
+`_electron.launch` tests directly. Paste generated tests into
+`e2e/tests/web/recorded.spec.ts`, then tighten selectors and assertions before
+relying on the flow as durable coverage.
 
 ## Environment variables
 
@@ -94,7 +152,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 
 ```text
 e2e/
-  playwright.config.ts        # projects: desktop-dev (default), desktop-release
+  playwright.config.ts        # projects: desktop-dev (default), desktop-release, web-dev
   src/
     config/                   # loadEnv, timeouts, tags
     harness/                  # generic launch/process/isolation — no product selectors
@@ -102,6 +160,7 @@ e2e/
     flows/                    # product UI steps (shell, onboarding, settings, agentChat)
     assertions/               # launch-health only
   tests/{smoke,settings,agent}/*.spec.ts
+  tests/web/*.spec.ts         # browser/WebUI tests and recording templates
 ```
 
 Dependency direction: `tests → fixtures → harness`, `tests → flows`,

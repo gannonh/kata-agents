@@ -21,6 +21,7 @@
  *   KATA_WEBUI_PASSWORD       — optional shorter password for web login (falls back to KATA_SERVER_TOKEN)
  *   KATA_WEBUI_SECURE_COOKIE  — optional true/false override for the session cookie Secure flag
  *   KATA_WEBUI_WS_URL         — optional browser-facing ws:// or wss:// URL returned by /api/config
+ *   KATA_WEBUI_AUTH_URL       — printed at startup: /api/auth/token?token=... one-click login URL
  *   KATA_MESSAGING_WA_WORKER  — absolute path to worker.cjs (default: packages/messaging-whatsapp-worker/dist/worker.cjs)
  *   KATA_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
  */
@@ -279,20 +280,14 @@ if (webuiHandler) {
   healthCheckFn = () => getHealthCheck(depsLike)
 
   // Wire up OAuth callback deps so /api/oauth/callback works
-  const { getSourceCredentialManager, loadWorkspaceSources } = await import('@kata-sh/shared/sources')
-  const { getWorkspaceByNameOrId } = await import('@kata-sh/shared/config')
-  const { pushTyped } = await import('@kata-sh/server-core/transport')
-  const { RPC_CHANNELS } = await import('@kata-sh/shared/protocol')
+  const { getSourceCredentialManager } = await import('@kata-sh/shared/sources')
+  const { createPushSourcesChanged } = await import('@kata-sh/server-core/handlers/push-sources-changed')
 
   webuiHandler.setOAuthCallbackDeps({
     flowStore: instance.oauthFlowStore,
     credManager: getSourceCredentialManager(),
     sessionManager: instance.sessionManager,
-    pushSourcesChanged: (workspaceId: string) => {
-      const ws = getWorkspaceByNameOrId(workspaceId)
-      const sources = ws ? loadWorkspaceSources(ws.rootPath) : []
-      pushTyped(instance.wsServer, RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
-    },
+    pushSourcesChanged: createPushSourcesChanged(instance.wsServer),
   })
 }
 
@@ -309,7 +304,15 @@ const serverProto = instance.protocol === 'wss' ? 'https' : 'http'
 console.log(`KATA_SERVER_URL=${instance.protocol}://${instance.host}:${instance.port}`)
 console.log(`KATA_SERVER_TOKEN=${instance.token}`)
 if (webuiHandler) {
-  console.log(`KATA_WEBUI_URL=${serverProto}://0.0.0.0:${instance.port}`)
+  const webuiHost = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host
+  const webuiUrl = `${serverProto}://${webuiHost}:${instance.port}`
+  console.log(`KATA_WEBUI_URL=${webuiUrl}`)
+  // When a login password/token is configured, print a one-click authenticated URL.
+  // The token is validated by /api/auth/token against the same hash as the login form.
+  const authToken = process.env.KATA_WEBUI_PASSWORD || instance.token
+  if (authToken) {
+    console.log(`KATA_WEBUI_AUTH_URL=${webuiUrl}/api/auth/token?token=${encodeURIComponent(authToken)}`)
+  }
 }
 
 // Block binding to a non-localhost address without TLS — tokens would be sent in cleartext.

@@ -78,12 +78,10 @@ export function wrapPreparedOAuthFlowForRelay(
   returnTo: string,
 ): PreparedOAuthFlow {
   const authUrl = new URL(prepared.authUrl);
-  authUrl.searchParams.set('redirect_uri', OAUTH_RELAY_CALLBACK_URL);
   authUrl.searchParams.set('state', encodeOAuthRelayState(returnTo, prepared.state));
 
   return {
     ...prepared,
     authUrl: authUrl.toString(),
-    redirectUri: OAUTH_RELAY_CALLBACK_URL,
   };
 }

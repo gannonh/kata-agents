@@ -413,16 +413,16 @@ export class SourceCredentialManager {
    */
   async prepareOAuth(
     source: LoadedSource,
-    options: { callbackPort?: number; callbackUrl?: string },
+    options: { callbackPort?: number; callbackUrl?: string; useRelay?: boolean },
   ): Promise<PreparedOAuthFlow> {
-    const { callbackPort } = options;
-    const relayReturnTo = options.callbackUrl;
-    // When callbackUrl is provided (WebUI), keep the provider-facing redirect_uri
-    // stable so providers like Google only need a single registered callback.
-    // The relay unwraps the real server callback target from the outer state.
-    const providerCallbackUrl = relayReturnTo
+    const { callbackPort, useRelay } = options;
+    if (useRelay && !options.callbackUrl) {
+      throw new Error('callbackUrl is required when useRelay is true');
+    }
+    const relayReturnTo = useRelay ? options.callbackUrl : undefined;
+    const providerCallbackUrl = useRelay
       ? OAUTH_RELAY_CALLBACK_URL
-      : undefined;
+      : options.callbackUrl;
     const provider = this.detectProvider(source);
 
     let prepared: PreparedOAuthFlow;

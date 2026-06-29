@@ -23,6 +23,8 @@ export interface PreparedOAuthFlow {
   clientSecret?: string      // Google requires client_secret for Desktop apps
   redirectUri: string        // provider-specific redirect URI used in auth URL + token exchange
   provider: OAuthProvider
+  /** MCP OAuth resource indicator (authorization + token requests) */
+  resource?: string
 }
 
 /**
@@ -36,6 +38,8 @@ export interface OAuthExchangeParams {
   clientId: string
   clientSecret?: string
   redirectUri: string
+  /** MCP OAuth resource indicator for token exchange */
+  resource?: string
 }
 
 /**

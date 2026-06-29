@@ -320,6 +320,15 @@ Model Context Protocol servers provide tools via HTTP/SSE.
 
 After creating, use `source_oauth_trigger` to authenticate.
 
+**OAuth callback behavior:**
+
+- **Desktop (Electron):** OAuth completes through a local callback server on `http://localhost:<port>/oauth/callback`. No public relay is required.
+- **WebUI / hosted server:** OAuth uses the stable public callback URI `https://agents.kata.sh/auth/callback`. A stateless Cloudflare Worker relay decodes the outer `ca1.` state envelope and redirects the browser to your deployment's `/api/oauth/callback` endpoint, where the Kata server exchanges the authorization code and stores credentials.
+- **Provider registration:** If the MCP provider does not support dynamic client registration, register `https://agents.kata.sh/auth/callback` as the redirect URI in the provider dashboard.
+- **MCP resource parameter:** Authorization and token requests include the normalized configured MCP server URL as the OAuth `resource` indicator.
+
+Register `https://agents.kata.sh/auth/callback` with OAuth providers that require a fixed redirect URI when dynamic client registration is unavailable.
+
 **Bearer token authentication:**
 ```json
 {

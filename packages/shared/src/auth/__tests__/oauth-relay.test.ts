@@ -29,15 +29,15 @@ describe('oauth relay state', () => {
 });
 
 describe('wrapPreparedOAuthFlowForRelay', () => {
-  it('keeps the inner flow state but rewrites auth URL state and redirect_uri', () => {
+  it('keeps the inner flow state and rewrites only the auth URL state envelope', () => {
     const prepared: PreparedOAuthFlow = {
-      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=test-client&redirect_uri=https%3A%2F%2Fold.example%2Fcallback&response_type=code&state=inner-state-123',
+      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=test-client&redirect_uri=https%3A%2F%2Fagents.kata.sh%2Fauth%2Fcallback&response_type=code&state=inner-state-123',
       state: 'inner-state-123',
       codeVerifier: 'verifier',
       tokenEndpoint: 'https://oauth2.googleapis.com/token',
       clientId: 'test-client',
       clientSecret: 'test-secret',
-      redirectUri: 'https://old.example/callback',
+      redirectUri: OAUTH_RELAY_CALLBACK_URL,
       provider: 'google',
     };
 
