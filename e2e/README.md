@@ -82,14 +82,20 @@ bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integra
 
 - `bun run webui:dev` starts the browser frontend on `http://localhost:5175`. It
   expects the headless server to already be running on `http://localhost:9100`.
-- `bun run webui:dev:full` starts the built WebUI and the server together on
-  `http://localhost:9100/login`. It generates a fresh `KATA_SERVER_TOKEN`, sets
-  the dev login password to `dev`, and serves the app from the server process.
+- `bun run webui:dev:full` starts the built WebUI and the server together, prints
+  `KATA_WEBUI_URL` and `KATA_WEBUI_AUTH_URL`, and opens the browser at the
+  authenticated URL. The auth URL uses `/api/auth/token?token=...`, which
+  validates against the same hash as the login form and sets the session cookie
+  so you skip the password screen. Logs stream inline; Ctrl-C stops the server.
 
 For manual testing, use one of these:
 
 ```bash
 bun run webui:dev:full
+# browser opens at the authenticated URL automatically; or open the
+# KATA_WEBUI_AUTH_URL line printed in the terminal.
+
+# manual fallback (password form):
 # open http://localhost:9100/login and sign in with password: dev
 
 # or, split frontend and backend into two terminals:

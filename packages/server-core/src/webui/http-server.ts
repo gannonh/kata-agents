@@ -274,6 +274,41 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
       })
     }
 
+    // ── Token login endpoint (GET) ──
+    // Accepts ?token=<KATA_SERVER_TOKEN|KATA_WEBUI_PASSWORD>, validates it with the
+    // same verifyPassword path as the login form, sets the session cookie, and
+    // redirects to "/". Lets dev launchers open an authenticated URL in one step.
+    if (path === '/api/auth/token' && req.method === 'GET') {
+      await passwordReady
+      const ip = getClientIp(req)
+
+      if (!rateLimiter.check(ip)) {
+        logger.warn(`[webui] Rate limited token auth attempt from ${ip}`)
+        return new Response('Too many attempts. Try again later.', { status: 429 })
+      }
+
+      const token = url.searchParams.get('token')
+      if (!token || typeof token !== 'string') {
+        return new Response('Token is required', { status: 400 })
+      }
+
+      if (!await verifyPassword(token)) {
+        logger.warn(`[webui] Failed token auth attempt from ${ip}`)
+        return Response.redirect('/login', 302)
+      }
+
+      const jwt = await createSessionToken(secret)
+      logger.info(`[webui] Successful token auth from ${ip}`)
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Set-Cookie': buildSessionCookie(jwt, useSecureCookies),
+          'Location': '/',
+          'Cache-Control': 'no-store',
+        },
+      })
+    }
+
     // ── Logout endpoint ──
     if (path === '/api/auth/logout' && req.method === 'POST') {
       return new Response(null, {
