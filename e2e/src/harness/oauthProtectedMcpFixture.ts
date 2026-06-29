@@ -99,6 +99,9 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
 
   // Codes issued by /authorize, mapped to the redirect_uri used at approval time.
   const issuedCodes = new Map<string, string>();
+  let authBaseUrl = "";
+  let mcpBaseUrl = "";
+  let mcpUrl = "";
 
   // --- Auth server (OAuth authorization server + protected resource metadata) ---
   const authServer = createServer(async (req, res) => {
@@ -109,8 +112,8 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
-          resource: "http://127.0.0.1:<mcp-port>/mcp",
-          authorization_servers: ["http://127.0.0.1:<auth-port>"],
+          resource: mcpUrl,
+          authorization_servers: [authBaseUrl],
         }),
       );
       return;
@@ -120,9 +123,9 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
-          authorization_endpoint: "http://127.0.0.1:<auth-port>/authorize",
-          token_endpoint: "http://127.0.0.1:<auth-port>/token",
-          registration_endpoint: "http://127.0.0.1:<auth-port>/register",
+          authorization_endpoint: `${authBaseUrl}/authorize`,
+          token_endpoint: `${authBaseUrl}/token`,
+          registration_endpoint: `${authBaseUrl}/register`,
         }),
       );
       return;
@@ -193,7 +196,7 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
     res.end("not found");
   });
   const auth = await listen(authServer);
-  const authBaseUrl = `http://127.0.0.1:${auth.port}`;
+  authBaseUrl = `http://127.0.0.1:${auth.port}`;
 
   // --- MCP resource server (Streamable HTTP, Bearer-protected) ---
   // Low-level server + per-request transport. In stateless mode the SDK requires
@@ -300,8 +303,20 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
-          resource: `http://127.0.0.1:<mcp-port>/mcp`,
+          resource: mcpUrl,
           authorization_servers: [authBaseUrl],
+        }),
+      );
+      return;
+    }
+
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          authorization_endpoint: `${authBaseUrl}/authorize`,
+          token_endpoint: `${authBaseUrl}/token`,
+          registration_endpoint: `${authBaseUrl}/register`,
         }),
       );
       return;
@@ -311,85 +326,8 @@ export async function startOAuthProtectedMcpFixture(): Promise<OAuthProtectedMcp
     res.end("not found");
   });
   const mcp = await listen(mcpServerHttp);
-  const mcpBaseUrl = `http://127.0.0.1:${mcp.port}`;
-  const mcpUrl = `${mcpBaseUrl}/mcp`;
-
-  // Patch the placeholder metadata endpoints now that ports are known.
-  // (The auth server returns templated strings above; rewrite responses live.)
-  // We handle this by overriding the metadata endpoints in the auth server's
-  // closure via a runtime swap: re-register listeners below.
-
-  // Replace the auth server's metadata responses with concrete values.
-  const authHandler = authServer.listeners("request")[0] as
-    | ((req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void)
-    | undefined;
-  authServer.removeAllListeners("request");
-  authServer.on("request", (req, res) => {
-    const u = new URL(req.url ?? "/", `http://127.0.0.1`);
-    if (u.pathname === "/.well-known/oauth-authorization-server") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          authorization_endpoint: `${authBaseUrl}/authorize`,
-          token_endpoint: `${authBaseUrl}/token`,
-          registration_endpoint: `${authBaseUrl}/register`,
-        }),
-      );
-      return;
-    }
-    if (u.pathname === "/.well-known/oauth-protected-resource") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          resource: mcpUrl,
-          authorization_servers: [authBaseUrl],
-        }),
-      );
-      return;
-    }
-    if (authHandler) authHandler(req, res);
-    else {
-      res.writeHead(404);
-      res.end("not found");
-    }
-  });
-
-  // Replace the MCP server's protected-resource metadata with the concrete URL,
-  // and serve RFC 8414 authorization-server metadata on the MCP origin so
-  // discovery (which falls back to the MCP origin's well-known path) resolves.
-  const mcpHandler = mcpServerHttp.listeners("request")[0] as
-    | ((req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void)
-    | undefined;
-  mcpServerHttp.removeAllListeners("request");
-  mcpServerHttp.on("request", (req, res) => {
-    const u = new URL(req.url ?? "/", `http://127.0.0.1`);
-    if (u.pathname === "/.well-known/oauth-protected-resource") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          resource: mcpUrl,
-          authorization_servers: [authBaseUrl],
-        }),
-      );
-      return;
-    }
-    if (u.pathname === "/.well-known/oauth-authorization-server") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          authorization_endpoint: `${authBaseUrl}/authorize`,
-          token_endpoint: `${authBaseUrl}/token`,
-          registration_endpoint: `${authBaseUrl}/register`,
-        }),
-      );
-      return;
-    }
-    if (mcpHandler) mcpHandler(req, res);
-    else {
-      res.writeHead(404);
-      res.end("not found");
-    }
-  });
+  mcpBaseUrl = `http://127.0.0.1:${mcp.port}`;
+  mcpUrl = `${mcpBaseUrl}/mcp`;
 
   return {
     mcpBaseUrl,

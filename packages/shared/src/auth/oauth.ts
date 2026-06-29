@@ -680,8 +680,7 @@ export function canonicalizeMcpOAuthResource(mcpUrl: string): string {
   }
 
   const path = url.pathname || '/';
-  const normalizedPath = path === '/' ? '/' : path;
-  return `${url.origin}${normalizedPath}`;
+  return `${url.origin}${path}`;
 }
 
 export interface OAuthMetadata {

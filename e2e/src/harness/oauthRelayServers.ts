@@ -26,9 +26,9 @@ export interface OAuthRelayTestServers {
   close: () => Promise<void>;
 }
 
-async function nodeRequestListener(
+function nodeRequestListener(
   fetchHandler: (req: Request) => Promise<Response>,
-): Promise<(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void> {
+): (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void {
   return async (req, res) => {
     const host = req.headers.host ?? "127.0.0.1";
     const url = `http://${host}${req.url ?? "/"}`;
@@ -97,7 +97,7 @@ export async function startOAuthRelayTestServers(): Promise<OAuthRelayTestServer
   const exchangeCalls: Array<Record<string, unknown>> = [];
 
   const webuiServer = createServer(
-    await nodeRequestListener(async (req) => {
+    nodeRequestListener(async (req) => {
       const url = new URL(req.url);
       if (url.pathname !== "/api/oauth/callback" || req.method !== "GET") {
         return new Response("Not Found", { status: 404 });
@@ -142,7 +142,7 @@ export async function startOAuthRelayTestServers(): Promise<OAuthRelayTestServer
   const returnTo = `${webuiBaseUrl}/api/oauth/callback`;
 
   const relayServer = createServer(
-    await nodeRequestListener(async (req) => {
+    nodeRequestListener(async (req) => {
       const requestUrl = new URL(req.url);
       if (req.method !== "GET") {
         return new Response("Method Not Allowed", { status: 405 });

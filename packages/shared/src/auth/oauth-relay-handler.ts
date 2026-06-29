@@ -114,10 +114,9 @@ export function handleOAuthRelayCallback(
 }
 
 export function oauthRelayErrorResponse(error: unknown): Response {
-  const message = error instanceof OAuthRelayError
-    ? error.message
-    : 'OAuth callback relay failed';
-  const status = error instanceof OAuthRelayError ? error.status : 400;
+  const relayError = error instanceof OAuthRelayError ? error : undefined;
+  const message = relayError?.message ?? 'OAuth callback relay failed';
+  const status = relayError?.status ?? 400;
 
   return new Response(message, {
     status,

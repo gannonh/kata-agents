@@ -39,9 +39,21 @@ function createMcpSource(mcpUrl: string): LoadedSource {
   } as LoadedSource;
 }
 
+function requestTarget(url: string | URL | Request): string {
+  if (typeof url === "string") {
+    return url;
+  }
+
+  if (url instanceof URL) {
+    return url.toString();
+  }
+
+  return url.url;
+}
+
 function mockMcpMetadataFetch(): void {
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-    const target = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+    const target = requestTarget(url);
     if (init?.method === "HEAD") {
       return new Response(null, { status: 200 });
     }
