@@ -23,8 +23,8 @@ timestamp: 2026-06-28T21:30:00Z
 | AC | Result | Evidence |
 |----|--------|----------|
 | 1 Public callback route exists | **Fail (deploy pending)** | Production probe still returns Vercel `DEPLOYMENT_NOT_FOUND` 404 (`uat-evidence/electron-20260628-215346/responses/production-callback-missing-state.txt`). Local worker entrypoint E2E proves controlled 400 for missing/malformed state (`e2e/tests/oauth/worker-entrypoint.test.ts`, `logs/e2e-oauth-full-rerun2.log`). |
-| 2 Relay success redirects correctly | **Pass** | `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/worker-entrypoint.test.ts`, and `oauth-relay-handler.test.ts`. |
-| 3 Relay provider errors forward correctly | **Pass** | `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/webui-relay-flow.test.ts`, worker entrypoint tests, and unit tests. |
+| 2 Relay success redirects correctly | **Pass** | `e2e/tests/web/oauth-relay.spec.ts`, `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/worker-entrypoint.test.ts`, and `oauth-relay-handler.test.ts`. |
+| 3 Relay provider errors forward correctly | **Pass** | `e2e/tests/web/oauth-relay.spec.ts`, `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/webui-relay-flow.test.ts`, worker entrypoint tests, and unit tests. |
 | 4 Relay rejects unsafe return targets | **Pass** | `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/worker-entrypoint.test.ts`, and `oauth-relay-handler.test.ts`. |
 | 5 MCP resource parameter present | **Pass** | `oauth.test.ts`, `e2e/tests/oauth/oauth.integration.test.ts`, `e2e/tests/oauth/webui-relay-flow.test.ts`, and `e2e/tests/oauth/electron-local-callback.test.ts`. |
 | 6 WebUI callback completes token storage | **Pass** | `server-core/.../oauth-callback.test.ts` + E2E relay chain with exchange capture (`e2e/tests/oauth/webui-relay-flow.test.ts`). |
@@ -41,7 +41,10 @@ timestamp: 2026-06-28T21:30:00Z
 - `e2e/src/harness/oauthProtectedMcpFixture.ts` — local OAuth authorization server + OAuth-protected Streamable HTTP MCP fixture.
 - `e2e/tests/oauth/webui-relay-flow.test.ts` — full WebUI relay flow against the fixture, including relay wrapping, provider approval, callback exchange capture, real token exchange, and `validateMcpConnection` `tools/list` success.
 - `e2e/tests/oauth/electron-local-callback.test.ts` — real local `createCallbackServer` Electron path with non-relay state, token exchange, source status push, and stored-token MCP validation.
-- `bun run e2e:oauth` — offline OAuth integration tier now covers 19 tests across 4 files.
+- `e2e/tests/web/oauth-relay.spec.ts` — Playwright browser coverage for success and provider-error redirects through the relay into WebUI callback pages.
+- `e2e/tests/web/recorded.spec.ts` and `e2e/playwright.codegen.config.ts` — recording template for future WebUI walkthroughs.
+- `bun run e2e:web` — Playwright browser tier covers 2 real OAuth relay tests, with the recording template skipped.
+- `bun run e2e:oauth` — offline OAuth integration tier covers 19 tests across 4 files.
 
 ## Recommendation
 
@@ -52,4 +55,4 @@ timestamp: 2026-06-28T21:30:00Z
 
 ## Status
 
-Spec remains `Implemented` at code level. E2E coverage now proves the WebUI relay path, OAuth-protected MCP usability via local fixture, and Electron local callback path on macOS. Production sign-off remains blocked on worker deploy and real-provider smoke.
+Spec remains `Implemented` at code level. E2E coverage now proves the WebUI relay path in a Playwright browser, OAuth-protected MCP usability via local fixture, and Electron local callback path on macOS. Production sign-off remains blocked on worker deploy and real-provider smoke.

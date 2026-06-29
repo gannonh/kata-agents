@@ -19,10 +19,12 @@ For the `@agent` tier, a real Anthropic key must be in the repo root `.env`
 ## Commands
 
 ```bash
-bun run e2e --list                              # list tests
+bun run e2e --list                              # list desktop-dev tests
 bun run e2e                                     # all tests, desktop-dev project
 bun run e2e --grep @smoke                       # one tier
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
+bun run e2e:web                                 # browser/WebUI Playwright tests
+bun run e2e:codegen                             # record WebUI flows with Playwright CodeGen
 bun run e2e:ui                                  # Playwright UI mode
 KATA_E2E_RELEASE_APP="/path/Kata Agents.app" bun run e2e:release   # packaged app
 ```
@@ -67,13 +69,27 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@smoke` | `appWindow` | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline. |
 | `@settings` | `authenticatedAppWindow` | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted. |
 | `@agent` | (in-test) | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`. |
-| `@oauth` | (Bun integration) | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Offline; Linux-friendly. |
+| `@oauth` | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
 
 ## Commands (OAuth tier)
 
 ```bash
-bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline)
+bun run e2e:web      # Playwright browser coverage for WebUI relay callback pages
+bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integration)
 ```
+
+## Recording WebUI flows
+
+Playwright CodeGen records browser/WebUI flows. It does not record Electron
+`_electron.launch` tests directly.
+
+```bash
+bun run server:dev:webui   # or another WebUI stack you want to record against
+bun run e2e:codegen
+```
+
+Paste generated tests into `e2e/tests/web/recorded.spec.ts`, then tighten
+selectors and assertions before treating the flow as durable coverage.
 
 ## Environment variables
 
@@ -101,7 +117,7 @@ bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline)
 
 ```text
 e2e/
-  playwright.config.ts        # projects: desktop-dev (default), desktop-release
+  playwright.config.ts        # projects: desktop-dev (default), desktop-release, web-dev
   src/
     config/                   # loadEnv, timeouts, tags
     harness/                  # generic launch/process/isolation — no product selectors
@@ -109,6 +125,7 @@ e2e/
     flows/                    # product UI steps (shell, onboarding, settings, agentChat)
     assertions/               # launch-health only
   tests/{smoke,settings,agent}/*.spec.ts
+  tests/web/*.spec.ts         # browser/WebUI tests and recording templates
 ```
 
 Dependency direction: `tests → fixtures → harness`, `tests → flows`,

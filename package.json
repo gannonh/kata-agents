@@ -103,6 +103,8 @@
     "e2e": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-dev",
     "e2e:headed": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-dev --headed",
     "e2e:ui": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --ui",
+    "e2e:web": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project web-dev",
+    "e2e:codegen": "node node_modules/@playwright/test/cli.js codegen --config e2e/playwright.codegen.config.ts ${KATA_WEBUI_E2E_URL:-http://localhost:5175}",
     "e2e:release": "node node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --project desktop-release",
     "e2e:build-release": "bash e2e/scripts/build-release-app.sh",
     "prepare": "husky"
