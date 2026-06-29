@@ -8,6 +8,12 @@ import { resolveE2eRoot } from "./src/harness/artifacts.ts";
 
 const e2eRoot = resolveE2eRoot();
 const webUrl = process.env["KATA_WEBUI_E2E_URL"] ?? "http://localhost:9100";
+const shouldStartWebServer = process.argv.some((arg) => (
+  arg === "web-dev" ||
+  arg.endsWith("=web-dev") ||
+  arg.includes("tests/web/") ||
+  arg.includes("e2e/tests/web/")
+));
 const WEB_TEST_MATCH = /web\/.*\.spec\.ts/;
 const WEB_TEST_IGNORE = WEB_TEST_MATCH;
 
@@ -53,4 +59,12 @@ export default defineConfig({
       },
     },
   ],
+  webServer: shouldStartWebServer
+    ? {
+      command: "bash scripts/start-web-e2e-server.sh",
+      url: webUrl,
+      reuseExistingServer: true,
+      timeout: 120_000,
+    }
+    : undefined,
 });

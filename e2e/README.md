@@ -74,7 +74,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 ## Commands (OAuth tier)
 
 ```bash
-bun run e2e:web      # Playwright browser coverage for WebUI relay callback pages
+bun run e2e:web      # starts WebUI server, then runs browser coverage
 bun run e2e:oauth    # relay/callback chain + MCP OAuth prepare (offline integration)
 ```
 
@@ -96,6 +96,13 @@ bun run webui:dev:full
 TOKEN=$(bun run packages/server/src/index.ts --generate-token)
 KATA_SERVER_TOKEN="$TOKEN" bun run packages/server/src/index.ts
 bun run webui:dev
+```
+
+For Playwright tests, no manual server startup is required. The `web-dev`
+project starts an isolated WebUI server with a temp `KATA_CONFIG_DIR`:
+
+```bash
+bun run e2e:web
 ```
 
 For Playwright recording:

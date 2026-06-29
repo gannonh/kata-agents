@@ -15,7 +15,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("WebUI recorded flows", () => {
-  test.skip("recording template loads the configured WebUI URL", async ({ page }) => {
+  test("recording template loads the configured WebUI URL", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveURL(/.*/);
   });
