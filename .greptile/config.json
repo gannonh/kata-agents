@@ -1,0 +1,4 @@
+{
+  "$schema": "https://www.greptile.com/docs/code-review/greptile-config-reference",
+  "ignorePatterns": ".agents/\n*.md"
+}

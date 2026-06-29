@@ -74,9 +74,9 @@ credentials.enc
 .actrc
 
 # Kata Agent local data (sessions, credentials, config)
-config.json
-events.jsonl
-views.json
+/config.json
+/events.jsonl
+/views.json
 .claude-plugin/
 sessions/
 statuses/
