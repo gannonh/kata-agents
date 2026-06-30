@@ -9,6 +9,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Default theme brand color** — The distributed Default theme now uses the Kata brand highlight color instead of the previous purple accent across bundled theme files and renderer defaults.
 - **CLI rename** — The terminal client package is now `@kata-sh/agents-cli` with binary `kata-agents-cli`. Bundled docs and reference guides were updated to match.
 
 ## Bug Fixes

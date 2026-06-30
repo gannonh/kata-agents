@@ -56,11 +56,11 @@ When `colorTheme` is omitted or undefined, the workspace inherits the app defaul
 ## Color Formats
 
 Any valid CSS color format is supported:
-- **Hex**: `#8b5cf6`, `#8b5cf6cc` (with alpha)
-- **RGB**: `rgb(139, 92, 246)`, `rgba(139, 92, 246, 0.8)`
-- **HSL**: `hsl(262, 83%, 58%)`
-- **OKLCH**: `oklch(0.58 0.22 293)` (recommended)
-- **Named**: `purple`, `rebeccapurple`
+- **Hex**: `#7A4E24`, `#7A4E24cc` (with alpha)
+- **RGB**: `rgb(122, 78, 36)`, `rgba(122, 78, 36, 0.8)`
+- **HSL**: `hsl(29, 54%, 31%)`
+- **OKLCH**: `oklch(0.465 0.082 62.0)` (recommended)
+- **Named**: `sienna`, `rebeccapurple`
 
 **Recommendation**: Use OKLCH for perceptually uniform colors that look consistent across light/dark modes.
 
@@ -70,9 +70,9 @@ Create `~/.kata-agents/theme.json` to override specific colors:
 
 ```json
 {
-  "accent": "oklch(0.58 0.22 293)",
+  "accent": "oklch(0.465 0.082 62.0)",
   "dark": {
-    "accent": "oklch(0.65 0.22 293)"
+    "accent": "oklch(0.841 0.069 71.0)"
   }
 }
 ```
@@ -178,9 +178,9 @@ Scenic mode benefits from semi-transparent surface colors:
 The built-in default theme uses OKLCH colors optimized for accessibility:
 
 **Light Mode:**
-- Background: `oklch(0.98 0.003 265)` - Very light gray with slight purple tint
+- Background: `oklch(0.98 0.003 265)` - Very light gray with slight warm tint
 - Foreground: `oklch(0.185 0.01 270)` - Near-black for high contrast
-- Accent: `oklch(0.58 0.22 293)` - Vibrant purple
+- Accent: `oklch(0.465 0.082 62.0)` - Mintlify docs primary (`#7A4E24`)
 - Info: `oklch(0.75 0.16 70)` - Warm amber
 - Success: `oklch(0.55 0.17 145)` - Clear green
 - Destructive: `oklch(0.58 0.24 28)` - Alert red
@@ -188,7 +188,8 @@ The built-in default theme uses OKLCH colors optimized for accessibility:
 **Dark Mode:**
 - Background: `oklch(0.145 0.015 270)` - Deep dark with purple tint
 - Foreground: `oklch(0.95 0.01 270)` - Near-white
-- Accent/Info/Success/Destructive: Slightly brighter versions for visibility
+- Accent: `oklch(0.841 0.069 71.0)` - Mintlify docs primary-light (`#E8C49A`)
+- Info/Success/Destructive: Slightly brighter versions for visibility
 
 ## Examples
 
