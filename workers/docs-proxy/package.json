@@ -1,0 +1,17 @@
+{
+  "name": "@kata-sh/docs-proxy",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Cloudflare Worker proxy for serving Kata Agent docs from agents.kata.sh/docs",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250320.0",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -13,16 +13,17 @@ When a user wants to add a new source, follow this conversational setup process 
 **Before doing anything else**, search for a specialized guide using the kata-agents-docs MCP:
 
 ```
-mcp__kata-agents-docs__SearchKataAgents({ query: "{service} source setup" })
+mcp__kata-agents-docs__search_kata_agents({ query: "{service} source setup" })
 ```
 
 **Available guides:** GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Craft, Filesystem, Brave Search, Memory
 
 **If a guide exists for the service:**
-1. **Read the guide content** carefully
-2. **Pay special attention to the "Setup Hints" section** - it contains critical instructions
-3. **Follow any CRITICAL/MANDATORY instructions** before proceeding (e.g., GitHub requires checking for `gh` CLI first)
-4. **ALWAYS verify current API endpoints via WebSearch and/or in-app browser** - URLs and docs change frequently
+1. **Read the search excerpt** to identify the relevant guide
+2. **Fetch the full guide** with `mcp__kata-agents-docs__query_docs_filesystem_kata_agents({ path: "<guide path from search result>" })` when you need the complete page content
+3. **Pay special attention to the "Setup Hints" section** - it contains critical instructions
+4. **Follow any CRITICAL/MANDATORY instructions** before proceeding (e.g., GitHub requires checking for `gh` CLI first)
+5. **ALWAYS verify current API endpoints via WebSearch and/or in-app browser** - URLs and docs change frequently
 
 **Why this matters:** Some services have important prerequisites or gotchas that MUST be checked before creating a source. Skipping this step can lead to failed setups or redundant configurations.
 
@@ -207,7 +208,7 @@ Concrete examples tailored to the user's workflow:
 User: I want to add Linear
 
 Agent: [FIRST: Searches for Linear guide]
-       mcp__kata-agents-docs__SearchKataAgents({ query: "linear source setup" })
+       mcp__kata-agents-docs__search_kata_agents({ query: "linear source setup" })
 
 Agent: I found the Linear setup guide! A few questions:
 1. What will you primarily use Linear for? (issue tracking, sprint planning, reporting?)

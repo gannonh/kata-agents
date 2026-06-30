@@ -3,7 +3,7 @@
  * Summaries provide quick context; "Learn more" opens the full docs.
  */
 
-const DOC_BASE_URL = 'https://docs.kata.sh'
+const DOC_BASE_URL = 'https://agents.kata.sh/docs'
 
 export type DocFeature =
   | 'sources'

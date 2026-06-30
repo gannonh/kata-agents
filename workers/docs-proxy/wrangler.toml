@@ -1,0 +1,13 @@
+name = "kata-docs-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Route only the docs subdirectory through this worker.
+# Other agents.kata.sh routes remain on their existing owners (for example Vercel).
+routes = [
+  { pattern = "agents.kata.sh/docs*", zone_name = "kata.sh" }
+]
+
+[vars]
+MINTLIFY_DOCS_HOST = "gannonh-kata-33.mintlify.site"
+CUSTOM_DOCS_HOST = "agents.kata.sh"

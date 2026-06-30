@@ -191,7 +191,7 @@ export function extractDomainFromSource(source: {
  * @deprecated Bundled guides have been removed.
  * Use the kata-agents-docs MCP server to search for setup guides.
  *
- * Example: mcp__kata-agents-docs__SearchKataAgents({ query: "github source setup guide" })
+ * Example: mcp__kata-agents-docs__search_kata_agents({ query: "github source setup guide" })
  */
 export function getSourceGuideForDomain(_domain: string): ParsedSourceGuide | null {
   // Bundled guides removed - guides now come from MCP docs server

@@ -23,8 +23,9 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'TodoWrite': 'Updating Tasks',
   'NotebookEdit': 'Editing Notebook',
 
-  // Documentation tools
-  'SearchKataAgents': 'Search Documentation',
+  // Documentation tools (kata-agents-docs MCP server)
+  'search_kata_agents': 'Search Documentation',
+  'query_docs_filesystem_kata_agents': 'Browse Documentation',
 };
 
 /**

@@ -366,7 +366,7 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
       filePath: `${location}/sources/`,
       context:
         'The user wants to add a local folder source. ' +
-        'First, look up the guide: mcp__kata-agents-docs__SearchKataAgents({ query: "filesystem" }). ' +
+        'First, look up the guide: mcp__kata-agents-docs__search_kata_agents({ query: "filesystem" }); use mcp__kata-agents-docs__query_docs_filesystem_kata_agents with the result path if you need the full page. ' +
         'Local folders are bookmarks - use type: "local" with a local.path field. ' +
         'They use existing Read, Write, Glob, Grep tools - no MCP server needed. ' +
         'If unclear, ask about the folder path they want to connect. ' +

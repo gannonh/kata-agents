@@ -264,7 +264,7 @@ export async function rebuildMenu(): Promise<void> {
       submenu: [
         {
           label: i18n.t("menu.helpAndDocs"),
-          click: () => shell.openExternal('https://docs.kata.sh')
+          click: () => shell.openExternal('https://agents.kata.sh/docs')
         },
         {
           label: i18n.t("menu.keyboardShortcuts"),
