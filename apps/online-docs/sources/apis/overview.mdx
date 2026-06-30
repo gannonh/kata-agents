@@ -1,0 +1,32 @@
+---
+title: "REST API sources"
+description: "Connect Kata Agents to HTTP APIs with structured configuration and authentication."
+keywords: ["REST API", "sources", "authentication", "HTTP"]
+---
+
+REST API sources let Kata Agents call HTTP services directly from a session. Use them for internal tools, SaaS APIs, admin endpoints, reporting systems, and any service with a stable API.
+
+## What an API source defines
+
+An API source typically includes:
+
+- a base URL
+- authentication method
+- allowed endpoints or request templates
+- a guide explaining common operations
+- optional permission rules for Explore mode
+
+## Authentication
+
+Kata Agents supports common auth patterns such as bearer tokens, headers, query parameters, basic auth, and OAuth-backed flows depending on the source configuration.
+
+<Warning>
+  Store credentials through Kata Agents credential prompts or source auth flows. Do not put tokens in documentation, guides, or prompts.
+</Warning>
+
+## Best practices
+
+- Prefer read-only endpoints until the workflow is proven.
+- Document rate limits and destructive operations.
+- Keep the source guide focused on the tasks users actually need.
+- Use source-specific permissions to limit what can run in Explore mode.

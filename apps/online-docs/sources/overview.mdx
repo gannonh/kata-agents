@@ -1,0 +1,46 @@
+---
+title: "Sources"
+description: "Connect Kata Agents to MCP servers, REST APIs, and local folders."
+keywords: ["sources", "MCP", "REST API", "local files", "integrations"]
+---
+
+Sources connect Kata Agents to the systems and files you want it to work with. They are reusable integrations scoped to a workspace.
+
+## Source types
+
+| Type | Use it for | Examples |
+| --- | --- | --- |
+| MCP server | Rich tool integrations exposed through the Model Context Protocol | GitHub, Linear, Slack, Notion |
+| REST API | Direct HTTP access to services and internal tools | SaaS APIs, internal admin APIs |
+| Local folder | Files on your machine | Code repositories, notes, data exports |
+
+## When to create a source
+
+Create a source when the workflow is repeatable, structured, or likely to be shared across sessions.
+
+Use the in-app browser first when the task is one-off, highly UI-driven, or blocked by brittle authentication. You can always turn a repeated browser workflow into a source later.
+
+## Configuration files
+
+```text
+~/.kata-agents/workspaces/{workspace}/sources/{source}/
+├── config.json
+├── guide.md
+└── permissions.json
+```
+
+- `config.json` defines the connection.
+- `guide.md` tells the agent how to use it.
+- `permissions.json` optionally customizes Explore-mode behavior for that source.
+
+<Columns cols={3}>
+  <Card title="MCP servers" icon="plug" href="/sources/mcp-servers/overview">
+    Connect tool servers that implement the Model Context Protocol.
+  </Card>
+  <Card title="REST APIs" icon="braces" href="/sources/apis/overview">
+    Connect HTTP APIs with authentication and reusable request tools.
+  </Card>
+  <Card title="Local folders" icon="folder" href="/sources/local-filesystems">
+    Give the agent scoped access to files on your machine.
+  </Card>
+</Columns>

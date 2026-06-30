@@ -1,0 +1,13 @@
+---
+title: "App settings"
+description: "Understand the global Kata Agents config file and app-level settings."
+keywords: ["config", "settings", "preferences", "Kata Agents"]
+---
+
+Kata Agents stores global app settings in `~/.kata-agents/config.json`.
+
+Use app settings for configuration that should apply across workspaces, such as workspace registration, default model choices, and app-level behavior.
+
+<Warning>
+  Do not store credentials directly in config files. Use Kata Agents credential flows so secrets are encrypted and scoped correctly.
+</Warning>

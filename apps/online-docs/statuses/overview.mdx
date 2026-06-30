@@ -1,0 +1,44 @@
+---
+title: "Statuses"
+description: "Organize Kata Agents sessions into workflow states such as Todo, In Progress, Done, and Archived."
+keywords: ["statuses", "workflow", "sessions", "inbox"]
+---
+
+Statuses organize sessions into workflow states. They let agent work behave like an inbox, task board, or review queue instead of a flat list of conversations.
+
+## Common statuses
+
+| Status | Purpose |
+| --- | --- |
+| Todo | Work that has not started yet |
+| In Progress | Active sessions the agent or user is working on |
+| Blocked | Work waiting on input, access, or a decision |
+| Done | Completed work |
+| Archived | Closed sessions hidden from the active inbox |
+
+## Why statuses matter
+
+Statuses make long-running agent workflows easier to manage:
+
+- keep active work visible
+- separate completed and archived sessions
+- trigger automations when work changes state
+- align agent sessions with your team workflow
+
+## Configuration
+
+Statuses are configured per workspace. A status can define display labels, colors, icons, and whether sessions in that state appear in the inbox or archive.
+
+```json
+{
+  "id": "in_progress",
+  "name": "In Progress",
+  "color": "#D4A574",
+  "icon": "loader-circle",
+  "category": "inbox"
+}
+```
+
+<Tip>
+  Pair statuses with labels for more detailed triage, such as `priority::3`, `area::docs`, or `customer::acme`.
+</Tip>

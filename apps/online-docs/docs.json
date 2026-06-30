@@ -73,9 +73,19 @@
         "icon": "layers",
         "pages": [
           "sources/overview",
+          {
+            "group": "Source types",
+            "expanded": false,
+            "pages": [
+              "sources/mcp-servers/overview",
+              "sources/apis/overview",
+              "sources/local-filesystems"
+            ]
+          },
           "skills/overview",
           "statuses/overview",
           "core-concepts/permissions",
+          "labels/overview",
           "automations/overview",
           "messaging/overview"
         ]
@@ -86,6 +96,7 @@
         "pages": [
           "go-further/workspaces",
           "go-further/themes",
+          "go-further/sharing",
           "server/headless"
         ]
       }
@@ -130,6 +141,11 @@
     {
       "source": "/docs/messaging/overview",
       "destination": "/messaging/overview",
+      "permanent": false
+    },
+    {
+      "source": "/docs/go-further/sharing",
+      "destination": "/go-further/sharing",
       "permanent": false
     }
   ]

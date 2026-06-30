@@ -13,6 +13,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Documentation help links** — The app Help dropdown now opens the hosted Mintlify routes without the stale `/docs` prefix, and the linked Sources, Skills, Statuses, Permissions, Automations, Messaging, and All Documentation pages exist in the docs site.
+
 ## Breaking Changes
 
 - **Terminal client binary renamed to `kata-agents-cli`** — Update scripts, PATH links, and CI invocations to use the new binary name.

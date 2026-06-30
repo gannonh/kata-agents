@@ -83,6 +83,15 @@ statuses/
 labels/
 sources/
 
+# Keep Mintlify documentation routes trackable even though local Kata Agent data
+# directories with the same names are ignored above.
+!apps/online-docs/statuses/
+!apps/online-docs/statuses/**
+!apps/online-docs/labels/
+!apps/online-docs/labels/**
+!apps/online-docs/sources/
+!apps/online-docs/sources/**
+
 # Generated per-build electron-builder config (release-config.ts)
 apps/electron/electron-builder.generated.yml
 

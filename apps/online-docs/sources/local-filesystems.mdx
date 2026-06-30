@@ -1,0 +1,26 @@
+---
+title: "Local folder sources"
+description: "Give Kata Agents scoped access to local folders such as repositories, notes, and data exports."
+keywords: ["local files", "filesystem", "sources", "folders"]
+---
+
+Local folder sources give Kata Agents scoped access to files on your machine. Use them for repositories, notes, exports, logs, and datasets that should be available across sessions.
+
+## Good use cases
+
+- code repositories outside the current working directory
+- Obsidian or Markdown note vaults
+- CSV or JSON exports
+- documentation folders
+- log directories for debugging
+
+## Scoping access
+
+Only add folders that the workspace needs. Narrow source scope makes the agent faster and reduces the chance of reading unrelated files.
+
+## Best practices
+
+- Use one source per meaningful folder or project.
+- Give the source a clear guide that explains what the folder contains.
+- Avoid adding directories with secrets unless the workflow explicitly requires them.
+- Pair folder sources with permission rules for safe Explore-mode behavior.

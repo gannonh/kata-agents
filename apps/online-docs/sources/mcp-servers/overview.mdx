@@ -1,0 +1,38 @@
+---
+title: "MCP server sources"
+description: "Connect Kata Agents to tools exposed through the Model Context Protocol."
+keywords: ["MCP", "Model Context Protocol", "sources", "tools"]
+---
+
+MCP server sources connect Kata Agents to services that expose tools through the Model Context Protocol. They are best when a service already has an MCP server or needs richer operations than a simple REST wrapper.
+
+## When to use MCP
+
+Use MCP when you need:
+
+- multiple named tools with structured inputs
+- server-managed authentication
+- rich service-specific operations
+- integrations shared with other MCP-compatible clients
+
+## Common examples
+
+- GitHub repositories and pull requests
+- Linear issues and projects
+- Slack conversations and files
+- Notion or documentation systems
+- custom internal tool servers
+
+## Setup checklist
+
+<Steps>
+  <Step title="Choose the server">
+    Use an existing MCP server or create one for your internal service.
+  </Step>
+  <Step title="Configure transport and auth">
+    Define whether the source uses stdio, HTTP, OAuth, or another supported connection pattern.
+  </Step>
+  <Step title="Write the guide">
+    Explain the available tools, common workflows, and limitations so the agent can use the source correctly.
+  </Step>
+</Steps>
