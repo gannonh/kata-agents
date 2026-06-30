@@ -8,7 +8,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
+import { initReactI18next } from 'react-i18next'
+import LanguageDetector from 'i18next-browser-languagedetector'
 import { EyeOff, X, XCircle } from 'lucide-react'
+import { setupI18n } from '@kata-sh/shared/i18n'
 import { BrowserControls } from '@kata-sh/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import {
@@ -18,6 +21,8 @@ import {
   StyledDropdownMenuItem,
 } from '@/components/ui/styled-dropdown'
 import './index.css'
+
+setupI18n([LanguageDetector, initReactI18next])
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

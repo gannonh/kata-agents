@@ -1,10 +1,15 @@
 import React, { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { initReactI18next } from 'react-i18next'
+import LanguageDetector from 'i18next-browser-languagedetector'
 import ReactDOM from 'react-dom/client'
+import { setupI18n } from '@kata-sh/shared/i18n'
 import { BrowserEmptyStateCard } from '@kata-sh/ui'
 import { routes } from '../shared/routes'
 import { EMPTY_STATE_PROMPT_SAMPLES } from './components/browser/empty-state-prompts'
 import './index.css'
+
+setupI18n([LanguageDetector, initReactI18next])
 
 function BrowserEmptyStateApp() {
   const { t } = useTranslation()
