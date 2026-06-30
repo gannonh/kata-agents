@@ -277,6 +277,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Align package versions to release version
+        shell: bash
         env:
           RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
         run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION"
