@@ -3,9 +3,9 @@
   "theme": "maple",
   "name": "Kata Agents",
   "colors": {
-    "primary": "#D4A574",
+    "primary": "#7A4E24",
     "light": "#E8C49A",
-    "dark": "#18181B"
+    "dark": "#8B5E34"
   },
   "logo": {
     "light": "/images/kata-logo-black.png",
