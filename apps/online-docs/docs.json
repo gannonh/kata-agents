@@ -8,8 +8,8 @@
     "dark": "#8B5E34"
   },
   "logo": {
-    "light": "/images/kata-logo-black.png",
-    "dark": "/images/kata-logo-white.png",
+    "light": "/images/kata-logo-light.svg",
+    "dark": "/images/kata-logo-dark.svg",
     "href": "/"
   },
   "favicon": "/favicon.svg",
