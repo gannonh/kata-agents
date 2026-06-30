@@ -1,0 +1,45 @@
+---
+title: "Key concepts"
+description: "The main concepts behind Kata Agents: sessions, sources, workspaces, permission modes, skills, and automations."
+keywords: ["sessions", "sources", "workspaces", "permissions", "skills", "automations"]
+---
+
+Kata Agents is organized around persistent sessions, connected sources, and workspace-level configuration.
+
+## Sessions
+
+A session is a persistent conversation with an agent. Sessions keep their history, plans, tool calls, results, and decisions. You can pause work, switch to another task, and return later without reconstructing context.
+
+Sessions can be organized with statuses and labels so your agent work behaves more like an inbox than a scrollback buffer.
+
+## Sources
+
+[Sources](/sources/overview) are external data connections. A source can be an MCP server, REST API, or local folder. Sources expose tools and context to the agent so it can work across services instead of staying inside one project directory.
+
+## Workspaces
+
+[Workspaces](/go-further/workspaces) isolate configuration and history. Each workspace has its own sessions, sources, skills, statuses, permissions, labels, and automations.
+
+Use separate workspaces for separate projects, clients, teams, or environments.
+
+## Permission modes
+
+[Permission modes](/core-concepts/permissions) control autonomy.
+
+| Mode | Behavior |
+| --- | --- |
+| Explore | Read-only. The agent researches, analyzes, and drafts plans. |
+| Ask to Edit | The agent asks before editing or running sensitive actions. |
+| Execute | The agent can act autonomously within configured permissions. |
+
+## Skills
+
+[Skills](/skills/overview) are reusable instruction sets. They teach the agent specialized behavior such as code review, release preparation, docs writing, incident response, or repository-specific workflows.
+
+## Automations
+
+[Automations](/automations/overview) run prompts or commands when events happen, such as schedules, label changes, status changes, or incoming messaging events.
+
+## Messaging
+
+[Messaging](/messaging/overview) connects sessions to external chat apps so you can send prompts and receive replies outside the desktop app.

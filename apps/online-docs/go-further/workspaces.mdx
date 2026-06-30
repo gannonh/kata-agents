@@ -1,0 +1,51 @@
+---
+title: "Workspaces"
+description: "Use workspaces to isolate sessions, sources, skills, statuses, and settings."
+keywords: ["workspaces", "configuration", "isolation", "projects"]
+---
+
+Workspaces isolate your Kata Agents configuration and session history. Use them when different projects, teams, clients, or environments need separate context.
+
+## What a workspace contains
+
+A workspace can have its own:
+
+- sessions
+- sources
+- skills
+- statuses
+- labels
+- permissions
+- automations
+- preferences and settings
+
+## Workspace layout
+
+```text
+~/.kata-agents/workspaces/{workspace}/
+├── sessions/
+├── sources/
+├── skills/
+├── statuses.json
+├── labels.json
+├── permissions.json
+└── automations.json
+```
+
+## When to create a workspace
+
+Create a workspace when you need a hard boundary around tools, data, or behavior.
+
+Examples:
+
+- personal projects versus work projects
+- separate customers or clients
+- production versus development operations
+- experiments that should not affect your main setup
+
+## Best practices
+
+- Keep source access scoped to the workspace that needs it.
+- Store project-specific skills with the project or workspace.
+- Use workspace permissions to encode local safety rules.
+- Name workspaces clearly so session context is easy to understand.

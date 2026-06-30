@@ -1,0 +1,56 @@
+---
+title: "Skills"
+description: "Create reusable instructions that teach Kata Agents specialized behavior."
+keywords: ["skills", "SKILL.md", "instructions", "Claude Code"]
+---
+
+Skills are reusable instruction sets that teach the agent specialized behavior. They use the same `SKILL.md` pattern as Claude Code skills, with YAML frontmatter followed by Markdown instructions.
+
+## What skills are for
+
+Use skills for workflows you repeat often:
+
+- code review checklists
+- release preparation
+- docs authoring standards
+- incident response runbooks
+- repository-specific conventions
+- data extraction or reporting processes
+
+## Skill layout
+
+```text
+skills/{slug}/
+├── SKILL.md
+├── icon.svg
+└── supporting-files.md
+```
+
+A minimal skill looks like this:
+
+```mdx
+---
+name: "Review pull request"
+description: "Review a pull request for correctness, tests, and release risk."
+---
+
+# Review pull request
+
+Follow the repository conventions, inspect the diff, check tests, and summarize risks.
+```
+
+## Invocation
+
+Mention a skill in your prompt when you want the agent to follow it. Skills can also be selected or managed through the app UI.
+
+## Precedence
+
+Kata Agents resolves skills from the most specific context first. Project-level skills can override workspace or global skills, which makes it easy to keep repository-specific behavior close to the code.
+
+## Best practices
+
+- Keep skills focused on one workflow.
+- Put durable instructions in the skill, not in one-off chat messages.
+- Include examples when output shape matters.
+- Avoid secrets or credentials in skill files.
+- Version skills with the project when they describe project conventions.

@@ -1,0 +1,74 @@
+---
+title: "Installation"
+description: "Install and run Kata Agents locally for desktop, server, and CLI workflows."
+keywords: ["install", "desktop", "Kata Agents", "CLI"]
+---
+
+Kata Agents is distributed as a desktop app and can also run as a headless server for remote or browser-based access.
+
+<Info>
+  Distribution details may vary while the project is under active development. For source builds, use the repository commands below.
+</Info>
+
+## Build from source
+
+Clone the repository and install dependencies with Bun.
+
+```bash
+ git clone https://github.com/gannonh/kata-agents.git
+ cd kata-agents
+ bun install
+```
+
+Run the desktop app in development mode:
+
+```bash
+bun run electron:dev
+```
+
+Build and start the Electron app:
+
+```bash
+bun run electron:start
+```
+
+## Local configuration
+
+Kata Agents stores user configuration under `~/.kata-agents/`.
+
+```text
+~/.kata-agents/
+├── config.json
+├── preferences.json
+├── workspaces/
+└── docs/
+```
+
+Bundled documentation is synced to `~/.kata-agents/docs/` on launch so agents can reference configuration guides without needing the hosted docs site.
+
+## Development commands
+
+```bash
+# Desktop app with hot reload
+bun run electron:dev
+
+# Headless server
+bun run server:dev
+
+# Web UI development server
+bun run webui:dev
+
+# CLI entrypoint
+bun run apps/cli/src/index.ts --help
+```
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Understand the concepts" icon="layers" href="/getting-started/key-concepts">
+    Learn about sessions, sources, workspaces, skills, and permissions.
+  </Card>
+  <Card title="Connect sources" icon="database-zap" href="/sources/overview">
+    Add the tools and files your agent needs to work with.
+  </Card>
+</Columns>

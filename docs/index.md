@@ -12,6 +12,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 * [architecture/](architecture/) — System maps, package responsibilities, agent backends
 * [reference/](reference/) — CLI reference, APIs, config schemas
 * [operations/](operations/) — CI and release pipelines, required secrets
+* [../apps/online-docs/](../apps/online-docs/) — Mintlify source for the hosted product documentation
 
 ## Active work
 
@@ -20,6 +21,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Recent work
 
+* **Online docs site** — [apps/online-docs/](../apps/online-docs/) — Mintlify documentation site seeded from the upstream introduction, rewritten for Kata Agents, and linked to the existing product-doc routes used by the app.
 * **MCP OAuth callback support** — [specs/2026-06-26-mcp-oauth-callback-support-plan.md](specs/2026-06-26-mcp-oauth-callback-support-plan.md) — Cloudflare Worker callback relay plus MCP OAuth `resource` handling. Build report: [specs/2026-06-26-mcp-oauth-callback-support-build-report.md](specs/2026-06-26-mcp-oauth-callback-support-build-report.md).
 * **CLI rename and phantom removal** — [specs/2026-06-24-cli-rename-and-phantom-removal-design.md](specs/2026-06-24-cli-rename-and-phantom-removal-design.md) — renamed terminal client to `kata-agents-cli`, removed phantom `kata-agent` commands-CLI references and feature flag. Build report: [specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md](specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md).
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — hard-cutover Kata identity across packages, runtime, desktop, CLI/server, resources, docs. Verify passed 2026-06-23 (all 12 ACs). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).

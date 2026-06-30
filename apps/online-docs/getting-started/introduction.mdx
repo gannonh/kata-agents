@@ -1,0 +1,86 @@
+---
+title: "Introduction"
+description: "What Kata Agents is and how it connects AI agent sessions to your tools, codebases, and workflows."
+keywords: ["Kata Agents", "introduction", "AI workflows", "Claude Agent SDK"]
+---
+
+Kata Agents brings coding-agent capabilities to your full digital workflow. It pairs a desktop inbox-style interface with persistent AI sessions, configurable permissions, and sources that connect the agent to the tools you already use.
+
+It is built on the Claude Agent SDK foundation and extends that model-driven workflow beyond a terminal: GitHub, Linear, Slack, local files, MCP servers, REST APIs, and workspace-specific configuration.
+
+## What makes Kata Agents different
+
+### Familiar interface
+
+Kata Agents organizes work like an inbox and task manager. Each session persists, has a status, and can be reopened later with its full history. You can review agent plans in a document-like interface before execution, just like reviewing work from a teammate.
+
+### Connect to anything
+
+Sources give the agent access to external systems.
+
+| Source type | Examples | What you can do |
+| --- | --- | --- |
+| MCP servers | GitHub, Linear, Slack, Notion | Use rich tool integrations exposed by MCP servers |
+| REST APIs | Internal tools, SaaS APIs | Query and mutate structured data through authenticated endpoints |
+| Local folders | Repositories, Obsidian vaults, data folders | Read and work with files on your machine |
+
+A single session can inspect code, summarize Linear issues, search Slack, and draft follow-up work without losing context.
+
+### Multitask naturally
+
+Start several tasks, switch between them, and let long-running work continue in the background. Sessions preserve history, plans, decisions, and outputs.
+
+### Explore, then execute
+
+Begin in **Explore** mode to keep work read-only. Let the agent research, analyze, and propose a plan. When the plan is right, switch to **Ask to Edit** or **Execute** depending on how much autonomy you want to grant.
+
+### Sessions become documentation
+
+Every session records decisions, trade-offs, commands, and implementation details. Share the session or attach it to a GitHub pull request, Linear issue, or team document so others can understand why work happened, not just what changed.
+
+### Fully customizable
+
+Most behavior is represented as files: skills, statuses, permissions, themes, labels, automations, and sources. You can edit them directly or ask Kata Agent to update them with you.
+
+| What | How it works | Customization level |
+| --- | --- | --- |
+| [Skills](/skills/overview) | YAML frontmatter and Markdown instructions | Reusable task-specific behavior |
+| [Themes](/go-further/themes) | Semantic color configuration | App or workspace visual style |
+| [Statuses](/statuses/overview) | Workflow-state configuration | Inbox, archive, and custom process states |
+| [Permissions](/core-concepts/permissions) | Layered rules and modes | App, workspace, and source-level control |
+
+## Kata Agents and Claude Code
+
+Kata Agents and Claude Code share familiar agent primitives: model reasoning, tools such as Read/Edit/Bash, MCP support, skills, and thinking-level controls. They are optimized for different interfaces.
+
+| Aspect | Claude Code | Kata Agents |
+| --- | --- | --- |
+| Interface | Terminal CLI | Desktop app, web UI, server, and CLI |
+| Data sources | MCP servers | MCP, REST APIs, local folders, and browser workflows |
+| Session organization | Terminal continuation | Persistent inbox with statuses and labels |
+| Configuration scope | Per-project config | Isolated workspaces with separate sources and settings |
+| Permissions | Mode behavior | Modes plus configurable permission rules |
+| Remote access | SSH and terminal | Headless server with desktop, browser, and CLI clients |
+
+## Key concepts
+
+- [Sources](/sources/overview) connect Kata Agents to external systems and files.
+- [Workspaces](/go-further/workspaces) isolate sources, skills, statuses, sessions, and settings.
+- [Permission modes](/core-concepts/permissions) control whether the agent can only read, ask before editing, or act autonomously.
+- [Sessions](/getting-started/key-concepts#sessions) are persistent conversations organized like an inbox.
+- [Skills](/skills/overview) are reusable instructions for specialized workflows.
+
+## Open source
+
+Kata Agents is open source under Apache 2.0. The codebase lives at [github.com/gannonh/kata-agents](https://github.com/gannonh/kata-agents).
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Install Kata Agents" icon="download" href="/getting-started/installation">
+    Set up the desktop app and learn where local configuration lives.
+  </Card>
+  <Card title="Add sources" icon="database-zap" href="/sources/overview">
+    Connect GitHub, Linear, Slack, APIs, MCP servers, and local folders.
+  </Card>
+</Columns>

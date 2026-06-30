@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Hosted docs source** — Added a Mintlify documentation site under `apps/online-docs`, seeded with Kata-branded getting-started and core-concept pages so the app's help links have a repository-backed docs source.
 - **MCP OAuth for remote HTTP sources** — OAuth-protected MCP sources can complete browser authentication through the hosted callback relay at `https://agents.kata.sh/auth/callback`. Desktop flows continue to use the local Electron callback server.
 
 ## Improvements

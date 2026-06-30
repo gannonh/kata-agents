@@ -1,0 +1,33 @@
+---
+title: "Themes"
+description: "Customize Kata Agents visual appearance with workspace or app-level themes."
+keywords: ["themes", "appearance", "colors", "customization"]
+---
+
+Themes customize the visual appearance of Kata Agents. They can be applied globally or per workspace so different contexts have distinct visual identities.
+
+## What themes control
+
+Themes define semantic colors used throughout the app, including background, foreground, accent, muted surfaces, borders, and status colors.
+
+## Theme files
+
+Themes are JSON files. Bundled themes are included with the desktop app, and custom themes can be added to your local configuration.
+
+```json
+{
+  "name": "Example",
+  "colors": {
+    "background": "#18181B",
+    "foreground": "#FAFAFA",
+    "primary": "#D4A574"
+  }
+}
+```
+
+## Best practices
+
+- Use themes to distinguish workspaces at a glance.
+- Keep contrast accessible in both light and dark contexts.
+- Prefer semantic color names over one-off component overrides.
+- Test a theme in the UI before sharing it with a team.

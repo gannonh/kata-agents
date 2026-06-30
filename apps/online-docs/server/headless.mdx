@@ -1,0 +1,40 @@
+---
+title: "Headless server"
+description: "Run Kata Agents without the desktop app for remote, browser, and CLI access."
+keywords: ["server", "headless", "remote", "CLI", "web UI"]
+---
+
+The headless server runs Kata Agents without the Electron desktop shell. Use it for remote machines, shared infrastructure, browser access, or CLI-driven workflows.
+
+## When to use the server
+
+Run a headless server when you want to:
+
+- keep agent sessions running on a remote machine
+- access workspaces from a browser
+- connect CLI clients to the same session backend
+- centralize automations or messaging workflows
+
+## Development command
+
+From the repository root:
+
+```bash
+bun run server:dev
+```
+
+For production-like local testing with built subprocesses and web UI assets:
+
+```bash
+bun run server:prod
+```
+
+## Related clients
+
+- Desktop app: full local Electron experience.
+- Web UI: browser access to server-backed sessions.
+- CLI: terminal access through `kata-agents-cli`.
+
+<Warning>
+  Treat a headless server like any other service with access to tools and credentials. Scope network exposure, credentials, and workspace permissions carefully.
+</Warning>

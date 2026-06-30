@@ -1,0 +1,14 @@
+{
+  "name": "@kata-sh/online-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "mintlify dev",
+    "validate": "mintlify validate",
+    "broken-links": "mintlify broken-links"
+  },
+  "devDependencies": {
+    "mintlify": "latest"
+  }
+}

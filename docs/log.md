@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-06-29
+
+* **Online docs site**: created [apps/online-docs/](../apps/online-docs/) as the Mintlify source for hosted product documentation. Seeded the site with a Kata-rebranded introduction derived from upstream Craft Agents docs, added pages for sources, skills, statuses, permissions, automations, messaging, workspaces, themes, and headless server usage, and validated with Mintlify.
+
 ## 2026-06-28
 
 * **Devbox -> devcontainer standard**: reworked the isolated worktree boxes onto `.devcontainer/devcontainer.json` + `@devcontainers/cli`, MS TS-Node base image, full dev toolchain, and Pi agent (config + extensions). Updated [reference/devbox.md](reference/devbox.md) and [reference/log.md](reference/log.md).

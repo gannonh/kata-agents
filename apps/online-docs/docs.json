@@ -1,0 +1,136 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "Kata Agents",
+  "colors": {
+    "primary": "#D4A574",
+    "light": "#E8C49A",
+    "dark": "#18181B"
+  },
+  "logo": {
+    "light": "/images/kata-logo-black.png",
+    "dark": "/images/kata-logo-white.png",
+    "href": "/"
+  },
+  "favicon": "/favicon.svg",
+  "icons": {
+    "library": "lucide"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "appearance": {
+    "default": "system",
+    "strict": false
+  },
+  "styling": {
+    "eyebrows": "breadcrumbs",
+    "codeblocks": {
+      "theme": {
+        "light": "github-light",
+        "dark": "github-dark"
+      }
+    }
+  },
+  "search": {
+    "prompt": "Search Kata Agents docs..."
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/gannonh/kata-agents"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get started",
+      "href": "/getting-started/introduction"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/gannonh/kata-agents"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "chatgpt", "claude", "cursor", "vscode"]
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting started",
+        "icon": "rocket",
+        "pages": [
+          "index",
+          "getting-started/introduction",
+          "getting-started/installation",
+          "getting-started/key-concepts"
+        ]
+      },
+      {
+        "group": "Core concepts",
+        "icon": "layers",
+        "pages": [
+          "sources/overview",
+          "skills/overview",
+          "statuses/overview",
+          "core-concepts/permissions",
+          "automations/overview",
+          "messaging/overview"
+        ]
+      },
+      {
+        "group": "Go further",
+        "icon": "sparkles",
+        "pages": [
+          "go-further/workspaces",
+          "go-further/themes",
+          "server/headless"
+        ]
+      }
+    ]
+  },
+  "redirects": [
+    {
+      "source": "/docs",
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/docs/getting-started/introduction",
+      "destination": "/getting-started/introduction",
+      "permanent": false
+    },
+    {
+      "source": "/docs/sources/overview",
+      "destination": "/sources/overview",
+      "permanent": false
+    },
+    {
+      "source": "/docs/skills/overview",
+      "destination": "/skills/overview",
+      "permanent": false
+    },
+    {
+      "source": "/docs/statuses/overview",
+      "destination": "/statuses/overview",
+      "permanent": false
+    },
+    {
+      "source": "/docs/core-concepts/permissions",
+      "destination": "/core-concepts/permissions",
+      "permanent": false
+    },
+    {
+      "source": "/docs/automations/overview",
+      "destination": "/automations/overview",
+      "permanent": false
+    },
+    {
+      "source": "/docs/messaging/overview",
+      "destination": "/messaging/overview",
+      "permanent": false
+    }
+  ]
+}

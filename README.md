@@ -190,6 +190,7 @@ See [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 
 | | |
 |---|---|
+| [Online Docs Site](apps/online-docs) | Mintlify source for the hosted product documentation |
 | [Architecture Overview](docs/architecture/system-overview.md) | System map, package responsibilities, agent backends |
 | [CLI Reference](docs/reference/cli.md) | Full `kata-agents-cli` command surface and flags |
 | [CI Pipeline](docs/operations/ci.md) | GitHub Actions CI setup |

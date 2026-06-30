@@ -1,0 +1,56 @@
+---
+title: "Permissions"
+description: "Control how much autonomy Kata Agents has with Explore, Ask to Edit, and Execute modes."
+keywords: ["permissions", "Explore mode", "Ask to Edit", "Execute", "safety"]
+---
+
+Permissions control what the agent can do. Kata Agents combines simple permission modes with configurable rules so you can start safely and grant autonomy when you are ready.
+
+## Permission modes
+
+| Mode | Behavior | Use it when |
+| --- | --- | --- |
+| Explore | Read-only. The agent can inspect, search, and analyze. | You want research, diagnosis, or a plan. |
+| Ask to Edit | The agent asks before changes or sensitive actions. | You want to review each edit or command. |
+| Execute | The agent acts autonomously within configured rules. | You trust the task and want uninterrupted execution. |
+
+## Explore first
+
+A common workflow is:
+
+<Steps>
+  <Step title="Start in Explore">
+    Ask the agent to inspect the problem, gather context, and explain options.
+  </Step>
+  <Step title="Review a plan">
+    Confirm scope, risks, affected files, tests, and rollback steps.
+  </Step>
+  <Step title="Switch modes">
+    Move to Ask to Edit or Execute when you are ready for changes.
+  </Step>
+</Steps>
+
+## Custom rules
+
+Permissions can be configured at multiple levels:
+
+- app defaults
+- workspace rules
+- source-specific rules
+
+Rules can allow specific MCP tools, API endpoints, bash commands, or write paths in otherwise restricted modes.
+
+```json
+{
+  "allowedMcpPatterns": [
+    { "pattern": "search", "comment": "Allow read-only search tools" }
+  ],
+  "allowedBashPatterns": [
+    { "pattern": "^rg\\s", "comment": "Allow ripgrep searches" }
+  ]
+}
+```
+
+<Warning>
+  Only allow operations you understand. Permission rules are powerful because they can remove prompts for matching actions.
+</Warning>
