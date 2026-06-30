@@ -117,7 +117,10 @@ const webuiDir = process.env.KATA_WEBUI_DIR || undefined
 const webuiEnabled = webuiDir && existsSync(webuiDir)
 const webuiSecureCookies = parseOptionalBooleanEnv('KATA_WEBUI_SECURE_COOKIE', process.env.KATA_WEBUI_SECURE_COOKIE)
 const webuiWsUrl = parseOptionalWebSocketUrl('KATA_WEBUI_WS_URL', process.env.KATA_WEBUI_WS_URL)
-const serverToken = process.env.KATA_SERVER_TOKEN
+const serverToken = process.env.KATA_SERVER_TOKEN ?? generateServerToken()
+if (!process.env.KATA_SERVER_TOKEN) {
+  console.warn('[server] KATA_SERVER_TOKEN not set; generated an ephemeral token for this run.')
+}
 
 // ---------------------------------------------------------------------------
 // Create WebUI handler early so it can be embedded in the WsRpcServer.
@@ -167,6 +170,7 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 const instance = await (async () => {
   try {
     return await bootstrapServer<SessionManager, HandlerDeps>({
+      serverToken,
       bundledAssetsRoot,
       serverVersion: process.env.KATA_VERSION ?? packageVersion,
       tls,

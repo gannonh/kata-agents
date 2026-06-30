@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, afterEach } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Subprocess } from 'bun'
 import WebSocket from 'ws'
@@ -22,18 +24,22 @@ interface SpawnedServer {
   token: string
   healthPort: number
   proc: Subprocess
+  configDir: string
   stop: () => Promise<void>
 }
 
-async function spawnTestServer(extraEnv?: Record<string, string>): Promise<SpawnedServer> {
+async function spawnTestServer(extraEnv?: Record<string, string>, options?: { provideToken?: boolean }): Promise<SpawnedServer> {
   const token = crypto.randomUUID() + crypto.randomUUID() // 72 chars, well above 16 minimum
-  const { CLAUDECODE: _, ...parentEnv } = process.env
+  const configDir = mkdtempSync(join(tmpdir(), 'kata-server-smoke-'))
+  const { CLAUDECODE: _, KATA_SERVER_TOKEN: _serverToken, KATA_CONFIG_DIR: _configDir, ...parentEnv } = process.env
+  const provideToken = options?.provideToken ?? true
 
   const proc = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     env: {
       ...parentEnv,
       ...extraEnv,
-      KATA_SERVER_TOKEN: token,
+      ...(provideToken ? { KATA_SERVER_TOKEN: token } : {}),
+      KATA_CONFIG_DIR: configDir,
       KATA_RPC_PORT: '0',
       KATA_RPC_HOST: '127.0.0.1',
       KATA_HEALTH_PORT: '0', // random port
@@ -45,10 +51,12 @@ async function spawnTestServer(extraEnv?: Record<string, string>): Promise<Spawn
   return new Promise<SpawnedServer>((resolve, reject) => {
     const timer = setTimeout(() => {
       proc.kill()
+      rmSync(configDir, { recursive: true, force: true })
       reject(new Error(`Server did not start within ${STARTUP_TIMEOUT}ms`))
     }, STARTUP_TIMEOUT)
 
     let url = ''
+    let printedToken = provideToken ? token : ''
     let buffer = ''
 
     const processLines = () => {
@@ -58,16 +66,21 @@ async function spawnTestServer(extraEnv?: Record<string, string>): Promise<Spawn
         if (line.startsWith('KATA_SERVER_URL=')) {
           url = line.slice('KATA_SERVER_URL='.length).trim()
         }
-        if (url) {
+        if (line.startsWith('KATA_SERVER_TOKEN=')) {
+          printedToken = line.slice('KATA_SERVER_TOKEN='.length).trim()
+        }
+        if (url && printedToken) {
           clearTimeout(timer)
           resolve({
             url,
-            token,
+            token: printedToken,
             healthPort: 0, // health port not printed; we skip health test if 0
             proc,
+            configDir,
             stop: async () => {
               proc.kill('SIGTERM')
               await proc.exited
+              rmSync(configDir, { recursive: true, force: true })
             },
           })
           return
@@ -90,6 +103,7 @@ async function spawnTestServer(extraEnv?: Record<string, string>): Promise<Spawn
       }
       clearTimeout(timer)
       if (!url) {
+        rmSync(configDir, { recursive: true, force: true })
         reject(new Error('Server exited before printing KATA_SERVER_URL'))
       }
     })()
@@ -148,12 +162,23 @@ describe('headless server smoke test', () => {
     ).rejects.toThrow()
   }, TEST_TIMEOUT)
 
+  it('generates and prints a token when KATA_SERVER_TOKEN is not set', async () => {
+    server = await spawnTestServer(undefined, { provideToken: false })
+    expect(server.token).toMatch(/^[0-9a-f]{48}$/)
+
+    const ws = await connectWs(server.url, server.token)
+    expect(ws.readyState).toBe(WebSocket.OPEN)
+    ws.close()
+  }, TEST_TIMEOUT)
+
   it('rejects short token at startup', async () => {
     const token = 'short'
-    const { CLAUDECODE: _, ...parentEnv } = process.env
+    const configDir = mkdtempSync(join(tmpdir(), 'kata-server-smoke-'))
+    const { CLAUDECODE: _, KATA_CONFIG_DIR: _configDir, ...parentEnv } = process.env
     const proc = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
       env: {
         ...parentEnv,
+        KATA_CONFIG_DIR: configDir,
         KATA_SERVER_TOKEN: token,
         KATA_RPC_PORT: '0',
         KATA_RPC_HOST: '127.0.0.1',
@@ -163,6 +188,7 @@ describe('headless server smoke test', () => {
     })
 
     const exitCode = await proc.exited
+    rmSync(configDir, { recursive: true, force: true })
     expect(exitCode).not.toBe(0)
   }, TEST_TIMEOUT)
 

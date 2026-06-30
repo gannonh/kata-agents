@@ -29,6 +29,20 @@ For production-like local testing with built subprocesses and web UI assets:
 bun run server:prod
 ```
 
+On startup, the server prints the connection values clients need:
+
+```bash
+KATA_SERVER_URL=ws://127.0.0.1:9100
+KATA_SERVER_TOKEN=...
+```
+
+If `KATA_SERVER_TOKEN` is not set, the standalone server generates an ephemeral token for that run. For stable clients or production deployments, generate and export a persistent token yourself:
+
+```bash
+export KATA_SERVER_TOKEN="$(bun run packages/server/src/index.ts --generate-token)"
+bun run server:prod
+```
+
 ## Related clients
 
 - Desktop app: full local Electron experience.
