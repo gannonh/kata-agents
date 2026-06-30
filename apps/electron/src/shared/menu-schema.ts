@@ -299,7 +299,7 @@ export const HELP_LINKS: MenuItemUrl[] = [
     type: 'url',
     id: 'helpAndDocs',
     labelKey: 'menu.helpAndDocs',
-    url: 'https://agents.kata.sh',
+    url: 'https://docs.kata.sh',
     icon: 'HelpCircle',
   },
 ]

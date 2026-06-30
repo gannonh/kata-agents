@@ -13,7 +13,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Documentation help links** — The app Help dropdown now opens the hosted Mintlify routes without the stale `/docs` prefix, and the linked Sources, Skills, Statuses, Permissions, Automations, Messaging, and All Documentation pages exist in the docs site.
+- **Documentation help links** — The app Help dropdown now opens the hosted Mintlify docs site at `https://docs.kata.sh`, and the linked Sources, Skills, Statuses, Permissions, Automations, Messaging, and All Documentation pages exist in the docs site.
 
 ## Breaking Changes
 

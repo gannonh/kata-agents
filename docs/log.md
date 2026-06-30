@@ -2,7 +2,7 @@
 
 ## 2026-06-29
 
-* **Help link routes**: updated app Help dropdown links to use hosted Mintlify routes without the stale `/docs` prefix, added missing [sources](../apps/online-docs/sources/overview.mdx), [statuses](../apps/online-docs/statuses/overview.mdx), [labels](../apps/online-docs/labels/overview.mdx), config, and sharing docs pages, and unignored those route directories for tracking.
+* **Help link routes**: updated app Help dropdown links to use hosted Mintlify routes on `https://docs.kata.sh`, added missing [sources](../apps/online-docs/sources/overview.mdx), [statuses](../apps/online-docs/statuses/overview.mdx), [labels](../apps/online-docs/labels/overview.mdx), config, and sharing docs pages, and unignored those route directories for tracking.
 * **Online docs site**: created [apps/online-docs/](../apps/online-docs/) as the Mintlify source for hosted product documentation. Seeded the site with a Kata-rebranded introduction derived from upstream Craft Agents docs, added pages for sources, skills, statuses, permissions, automations, messaging, workspaces, themes, and headless server usage, and validated with Mintlify.
 
 ## 2026-06-28
