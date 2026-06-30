@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -20,6 +20,8 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.KATA_FEATURE_EMBEDDED_SERVER;
   else process.env.KATA_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER;
+
+  delete globalThis.__KATA_FEATURE_FLAGS__;
 });
 
 describe('feature-flags runtime helpers', () => {
@@ -75,6 +77,26 @@ describe('feature-flags runtime helpers', () => {
   it('isEmbeddedServerEnabled honors explicit override false', () => {
     process.env.KATA_FEATURE_EMBEDDED_SERVER = '0';
 
+    expect(isEmbeddedServerEnabled()).toBe(false);
+  });
+
+  it('getFeatureFlagEnv reads injected globals when process.env has no value', () => {
+    delete process.env.KATA_FEATURE_EMBEDDED_SERVER;
+    globalThis.__KATA_FEATURE_FLAGS__ = {
+      KATA_FEATURE_EMBEDDED_SERVER: '1',
+    };
+
+    expect(getFeatureFlagEnv('KATA_FEATURE_EMBEDDED_SERVER')).toBe('1');
+    expect(isEmbeddedServerEnabled()).toBe(true);
+  });
+
+  it('process.env takes precedence over injected globals', () => {
+    process.env.KATA_FEATURE_EMBEDDED_SERVER = '0';
+    globalThis.__KATA_FEATURE_FLAGS__ = {
+      KATA_FEATURE_EMBEDDED_SERVER: '1',
+    };
+
+    expect(getFeatureFlagEnv('KATA_FEATURE_EMBEDDED_SERVER')).toBe('0');
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 });

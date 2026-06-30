@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
@@ -8,7 +8,29 @@ import { resolve } from 'path'
 // SENTRY_ORG, SENTRY_PROJECT to CI secrets. See CLAUDE.md "Sentry Error Tracking" section.
 // import { sentryVitePlugin } from '@sentry/vite-plugin'
 
-export default defineConfig({
+const FEATURE_FLAG_ENV_KEYS = [
+  'NODE_ENV',
+  'KATA_DEBUG',
+  'KATA_FEATURE_DEVELOPER_FEEDBACK',
+  'KATA_FEATURE_EMBEDDED_SERVER',
+] as const
+
+function getRendererFeatureFlags(mode: string): Record<string, string | undefined> {
+  const repoRoot = resolve(__dirname, '../..')
+  const fileEnv = loadEnv(mode, repoRoot, '')
+  const result: Record<string, string | undefined> = {}
+
+  for (const key of FEATURE_FLAG_ENV_KEYS) {
+    result[key] = process.env[key] ?? fileEnv[key]
+  }
+
+  return result
+}
+
+export default defineConfig(({ mode }) => ({
+  define: {
+    'globalThis.__KATA_FEATURE_FLAGS__': JSON.stringify(getRendererFeatureFlags(mode)),
+  },
   plugins: [
     react({
       babel: {
@@ -71,4 +93,4 @@ export default defineConfig({
     port: 5173,
     open: false
   }
-})
+}))

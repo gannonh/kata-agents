@@ -2,10 +2,45 @@
  * Feature flags for controlling experimental or in-development features.
  */
 
+declare global {
+  // Optional renderer/build-time bridge for non-Vite contexts or code that cannot
+  // safely read Node's process.env. Vite/Electron can inject this object via
+  // `define`, and tests can set it directly on globalThis.
+  // eslint-disable-next-line no-var
+  var __KATA_FEATURE_FLAGS__: Record<string, string | undefined> | undefined;
+}
+
 /** Safe accessor for process.env — returns undefined in browser/renderer contexts. */
-function getEnv(key: string): string | undefined {
+function getProcessEnv(key: string): string | undefined {
   if (typeof process !== 'undefined' && process.env) return process.env[key];
   return undefined;
+}
+
+/** Safe accessor for Vite renderer env (`import.meta.env`). */
+function getImportMetaEnv(key: string): string | undefined {
+  try {
+    const meta = import.meta as ImportMeta & { env?: Record<string, string | undefined> };
+    return meta.env?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** Safe accessor for explicitly injected globals. */
+function getInjectedGlobalEnv(key: string): string | undefined {
+  return globalThis.__KATA_FEATURE_FLAGS__?.[key];
+}
+
+/**
+ * Read a feature flag/environment value across all supported runtimes.
+ *
+ * Precedence:
+ * 1. Node process.env — main process, server, tests, subprocesses
+ * 2. Vite import.meta.env — renderer/browser bundles when explicitly exposed
+ * 3. Injected global — renderer/browser bundles via build-time `define`
+ */
+export function getFeatureFlagEnv(key: string): string | undefined {
+  return getProcessEnv(key) ?? getImportMetaEnv(key) ?? getInjectedGlobalEnv(key);
 }
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {
@@ -23,8 +58,8 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
  * so behavior stays consistent across shared code and subprocess backends.
  */
 export function isDevRuntime(): boolean {
-  const nodeEnv = (getEnv('NODE_ENV') || '').toLowerCase();
-  return nodeEnv === 'development' || nodeEnv === 'dev' || getEnv('KATA_DEBUG') === '1';
+  const nodeEnv = (getFeatureFlagEnv('NODE_ENV') || '').toLowerCase();
+  return nodeEnv === 'development' || nodeEnv === 'dev' || getFeatureFlagEnv('KATA_DEBUG') === '1';
 }
 
 /**
@@ -32,7 +67,7 @@ export function isDevRuntime(): boolean {
  * Explicit env override has precedence over dev-runtime defaults.
  */
 export function isDeveloperFeedbackEnabled(): boolean {
-  const override = parseBooleanEnv(getEnv('KATA_FEATURE_DEVELOPER_FEEDBACK'));
+  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_DEVELOPER_FEEDBACK'));
   if (override !== undefined) return override;
   return isDevRuntime();
 }
@@ -43,7 +78,7 @@ export function isDeveloperFeedbackEnabled(): boolean {
  * Defaults to disabled. Override with KATA_FEATURE_EMBEDDED_SERVER=1|0.
  */
 export function isEmbeddedServerEnabled(): boolean {
-  const override = parseBooleanEnv(getEnv('KATA_FEATURE_EMBEDDED_SERVER'));
+  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_EMBEDDED_SERVER'));
   if (override !== undefined) return override;
   return false;
 }
