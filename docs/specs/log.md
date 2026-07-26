@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-07-26
+
+* **Drafted**: [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md) — planned four user-facing vertical slices for Current checkout/New worktree session setup, active-checkout Changes review with line feedback, Kata Code-style commit/push/GitHub PR controls through `gh`, and conservative local/remote worktree lifecycle. Independent adversarial review cleared all blockers after tightening checkout lock timing, selected-file index preservation, the ordered Git action resolver, no-upstream first-push behavior, and remote ownership. Deferred work: [#16](https://github.com/gannonh/kata-agents/issues/16), [#17](https://github.com/gannonh/kata-agents/issues/17), [#18](https://github.com/gannonh/kata-agents/issues/18), [#19](https://github.com/gannonh/kata-agents/issues/19).
+
 ## 2026-06-28
 
 * **Added Playwright browser E2E**: [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md) — Added `web-dev` Playwright project, OAuth relay browser coverage (`bun run e2e:web`), and a WebUI CodeGen recording template for future walkthroughs. Updated verify report: [2026-06-26-mcp-oauth-callback-support-verify-report.md](2026-06-26-mcp-oauth-callback-support-verify-report.md).

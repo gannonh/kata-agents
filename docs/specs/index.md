@@ -4,6 +4,8 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
+* [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md): Draft V1 design for Current checkout/New worktree sessions, a Changes review panel with line feedback, safe commit/push/GitHub PR actions, and local/remote worktree lifecycle parity. Status: Draft; awaiting user review.
+
 ## Planned implementation phases
 
 Completed under [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md). Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md).

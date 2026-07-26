@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-07-26
+
+* **Drafted Git/GitHub V1 spec**: added [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md), updated the documentation and specs roadmaps, recorded independent adversarial review closure, and filed deferred follow-ups [#16](https://github.com/gannonh/kata-agents/issues/16) through [#19](https://github.com/gannonh/kata-agents/issues/19).
+
 ## 2026-06-29
 
 * **Help link routes**: updated app Help dropdown links to use hosted Mintlify routes on `https://agents.kata.sh/docs`, added missing [sources](../apps/online-docs/sources/overview.mdx), [statuses](../apps/online-docs/statuses/overview.mdx), [labels](../apps/online-docs/labels/overview.mdx), config, and sharing docs pages, and unignored those route directories for tracking.
