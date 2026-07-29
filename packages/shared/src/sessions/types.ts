@@ -11,6 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+import type { SessionCheckoutV1 } from '../protocol/git.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@kata-sh/core/types';
 
 /**
@@ -53,6 +54,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'transferredSessionSummaryApplied',
   // Automation origin
   'triggeredBy',
+  // Git checkout metadata (managed worktrees / current checkout)
+  'checkout',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -197,6 +200,12 @@ export interface SessionConfig {
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  /**
+   * Git checkout metadata (schema-versioned). Present when a session has been
+   * bound to a current checkout or managed worktree via checkout preparation.
+   * Absent on legacy sessions, which continue with working-directory behavior.
+   */
+  checkout?: SessionCheckoutV1;
 }
 
 /**
@@ -288,6 +297,8 @@ export interface SessionHeader {
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  /** Git checkout metadata (schema-versioned). See SessionConfig.checkout. */
+  checkout?: SessionCheckoutV1;
   // Pre-computed fields for fast list loading
   /** Number of messages in session */
   messageCount: number;

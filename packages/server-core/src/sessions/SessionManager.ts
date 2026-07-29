@@ -824,6 +824,8 @@ interface ManagedSession {
   // SDK cwd for session storage - set once at creation, never changes.
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
+  // Git checkout metadata (managed worktree / current checkout), when bound.
+  checkout?: import('@kata-sh/shared/protocol').SessionCheckoutV1
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
