@@ -6,3 +6,4 @@
  */
 export * from './comments'
 export * from './status-summary'
+export * from './action-state'
