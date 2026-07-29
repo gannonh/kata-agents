@@ -77,10 +77,15 @@ export function checkManagedCheckoutIdentity(input: {
   const { checkout, liveContext, record } = input
   if (!checkout || checkout.mode !== 'managed-worktree') return null
   const problems: string[] = []
-  if (liveContext.repositoryRoot !== checkout.repositoryRoot) problems.push('repository root')
+  // A linked worktree's own top-level (`git rev-parse --show-toplevel`) is its
+  // checkout directory — NOT the source repository root — so the location
+  // invariant is "the live top-level is still this worktree's checkout path".
+  // The stable identity shared across the source repo and all its worktrees is
+  // the Git common directory, verified below against the registry record.
+  if (liveContext.repositoryRoot !== checkout.checkoutPath) problems.push('checkout path')
   if (record) {
     if (liveContext.gitCommonDir !== record.gitCommonDir) problems.push('git directory')
-    if (record.checkoutPath !== checkout.checkoutPath) problems.push('checkout path')
+    if (record.checkoutPath !== checkout.checkoutPath) problems.push('registry checkout path')
   }
   if (checkout.expectedBranch) {
     const live = liveContext.detached ? null : liveContext.currentBranch

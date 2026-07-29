@@ -243,8 +243,10 @@ function managedRecord(overrides?: Partial<ManagedWorktreeRecord>): ManagedWorkt
 }
 
 describe('checkManagedCheckoutIdentity', () => {
+  // A linked worktree's live top-level (`--show-toplevel`) is its checkout path,
+  // while its Git common directory points back at the source repo's `.git`.
   const liveOk = {
-    repositoryRoot: '/repo',
+    repositoryRoot: '/wt/abcd1234',
     gitCommonDir: '/repo/.git',
     currentBranch: 'kata-agent/abcd1234',
     detached: false,
@@ -296,14 +298,16 @@ describe('checkManagedCheckoutIdentity', () => {
     expect(msg).toMatch(/detached/i)
   })
 
-  it('blocks when the repository root or git dir drifted', () => {
+  it('blocks when the worktree top-level (checkout path) or git dir drifted', () => {
+    // The live top-level no longer matches the worktree's checkout path — the
+    // worktree was moved or the session is resolving a different directory.
     expect(
       checkManagedCheckoutIdentity({
         checkout: managedCheckout(),
         liveContext: { ...liveOk, repositoryRoot: '/elsewhere' },
         record: managedRecord(),
       }),
-    ).toMatch(/repository root/i)
+    ).toMatch(/checkout path/i)
     expect(
       checkManagedCheckoutIdentity({
         checkout: managedCheckout(),
@@ -416,7 +420,8 @@ describe('registerGitHandlers', () => {
       getContext: {
         isGitRepository: true,
         gitCommonDir: '/repo/.git',
-        repositoryRoot: '/repo',
+        // The worktree top-level still matches; only the branch drifted.
+        repositoryRoot: '/wt/abcd1234',
         currentBranch: 'someone-elses-branch',
       },
       registryRecord: managedRecord(),
@@ -438,7 +443,7 @@ describe('registerGitHandlers', () => {
       getContext: {
         isGitRepository: true,
         gitCommonDir: '/repo/.git',
-        repositoryRoot: '/repo',
+        repositoryRoot: '/wt/abcd1234',
         currentBranch: 'kata-agent/abcd1234',
       },
       registryRecord: managedRecord(),
@@ -449,7 +454,8 @@ describe('registerGitHandlers', () => {
 
     const res = (await handlers.get(RPC_CHANNELS.git.PUSH)!(ctx, 's1')) as GitActionResult
     expect(res.stages[0]!.status).toBe('succeeded')
-    expect(calls).toContain('actions.push:/repo')
+    // The action runs in the worktree top-level (its checkout path).
+    expect(calls).toContain('actions.push:/wt/abcd1234')
   })
 
   it('serves GitHub capability status read-only (no flag required)', async () => {
@@ -470,7 +476,7 @@ describe('registerGitHandlers', () => {
       getContext: {
         isGitRepository: true,
         gitCommonDir: '/repo/.git',
-        repositoryRoot: '/repo',
+        repositoryRoot: '/wt/abcd1234',
         currentBranch: 'kata-agent/abcd1234',
         primaryRemote: 'origin',
       },
