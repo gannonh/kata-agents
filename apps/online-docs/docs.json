@@ -85,6 +85,7 @@
           "skills/overview",
           "statuses/overview",
           "core-concepts/permissions",
+          "core-concepts/git-worktrees",
           "labels/overview",
           "automations/overview",
           "messaging/overview"

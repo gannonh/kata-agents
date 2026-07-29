@@ -43,6 +43,20 @@ export KATA_SERVER_TOKEN="$(bun run packages/server/src/index.ts --generate-toke
 bun run server:prod
 ```
 
+## Git & GitHub requirements
+
+Git, worktree, and `gh` commands run on the machine that owns the workspace
+filesystem — the headless server, not the connecting client. To use the preview
+[Git & GitHub worktrees](/core-concepts/git-worktrees) feature against a remote
+workspace, install on the **server**:
+
+- a working `git` client (repository, worktree, commit, pull, push);
+- for pull-request actions, the [GitHub CLI (`gh`)](https://cli.github.com/),
+  installed and authenticated with `gh auth login`.
+
+Clients address Git operations by session ID; they never send repository paths,
+so local and remote workspaces expose the same controls.
+
 ## Related clients
 
 - Desktop app: full local Electron experience.
