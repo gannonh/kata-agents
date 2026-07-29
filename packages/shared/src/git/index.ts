@@ -5,3 +5,4 @@
  * module free of React and transport concerns so it stays unit-testable.
  */
 export * from './comments'
+export * from './status-summary'

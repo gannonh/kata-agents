@@ -6,6 +6,7 @@ import {
   commentsForSession,
   serializeFeedback,
   sortCommentsForSerialization,
+  summarizePendingComments,
 } from '../comments'
 import type { GitPendingComment } from '../../protocol/git'
 
@@ -77,6 +78,29 @@ describe('hasStaleComments', () => {
   it('detects at least one stale comment', () => {
     expect(hasStaleComments([make({ stale: false }), make({ id: 'c2', stale: true })])).toBe(true)
     expect(hasStaleComments([make({ stale: false })])).toBe(false)
+  })
+})
+
+describe('summarizePendingComments', () => {
+  it('allows sending when there are pending comments and none are stale', () => {
+    const s = summarizePendingComments([make({ id: 'c1' }), make({ id: 'c2' })])
+    expect(s.pendingCount).toBe(2)
+    expect(s.staleCount).toBe(0)
+    expect(s.canSend).toBe(true)
+    expect(s.requiresReview).toBe(false)
+  })
+
+  it('blocks sending and requires review when a comment is stale', () => {
+    const s = summarizePendingComments([make({ id: 'c1' }), make({ id: 'c2', stale: true })])
+    expect(s.staleCount).toBe(1)
+    expect(s.canSend).toBe(false)
+    expect(s.requiresReview).toBe(true)
+  })
+
+  it('cannot send with no pending comments', () => {
+    const s = summarizePendingComments([])
+    expect(s.canSend).toBe(false)
+    expect(s.requiresReview).toBe(false)
   })
 })
 

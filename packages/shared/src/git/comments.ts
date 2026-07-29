@@ -69,6 +69,34 @@ export function hasStaleComments(comments: GitPendingComment[]): boolean {
   return comments.some((c) => c.stale)
 }
 
+/**
+ * Derived UI state for the Send-feedback affordance. The spec requires that a
+ * changed diff marks affected comments stale and blocks sending until they are
+ * reviewed, and that sending is only possible when there is at least one
+ * pending comment.
+ */
+export interface PendingCommentSummary {
+  pendingCount: number
+  staleCount: number
+  /** True when there is at least one non-stale comment to send and none are stale. */
+  canSend: boolean
+  /** True when stale comments require review before sending. */
+  requiresReview: boolean
+}
+
+/** Summarize a session's pending comments for the Send-feedback control. */
+export function summarizePendingComments(comments: GitPendingComment[]): PendingCommentSummary {
+  const pendingCount = comments.length
+  const staleCount = comments.reduce((n, c) => (c.stale ? n + 1 : n), 0)
+  const requiresReview = staleCount > 0
+  return {
+    pendingCount,
+    staleCount,
+    canSend: pendingCount > 0 && !requiresReview,
+    requiresReview,
+  }
+}
+
 /** Comments for a single session, filtering out any foreign session IDs. */
 export function commentsForSession(
   comments: GitPendingComment[],
