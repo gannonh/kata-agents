@@ -324,6 +324,15 @@ export const CHANNEL_MAP = {
 
   // Git
   getGitBranch: invoke(RPC_CHANNELS.git.GET_BRANCH),
+
+  // Git / GitHub V1 — workspace checkout controls (feature-flagged)
+  getGitContext: invoke(RPC_CHANNELS.git.GET_CONTEXT),
+  listGitRefs: invoke(RPC_CHANNELS.git.LIST_REFS),
+  prepareGitCheckout: invoke(RPC_CHANNELS.git.PREPARE_CHECKOUT),
+  getGitStatus: invoke(RPC_CHANNELS.git.GET_STATUS),
+  inspectGitWorktreeRemoval: invoke(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL),
+  removeGitWorktree: invoke(RPC_CHANNELS.git.REMOVE_WORKTREE),
+
   checkGitBash: invoke(RPC_CHANNELS.gitbash.CHECK),
   browseForGitBash: invoke(RPC_CHANNELS.gitbash.BROWSE),
   setGitBashPath: invoke(RPC_CHANNELS.gitbash.SET_PATH),

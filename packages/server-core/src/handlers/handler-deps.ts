@@ -1,4 +1,5 @@
 import type { PlatformServices } from '../runtime/platform'
+import type { GitServices } from '../git'
 import type { ISessionManager } from './session-manager-interface'
 import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
@@ -27,4 +28,11 @@ export interface HandlerDeps<
   browserPaneManager?: TBrowserPaneManager
   oauthFlowStore: TOAuthFlowStore
   messagingRegistry?: IMessagingGatewayRegistry
+  /**
+   * Server-owned Git domain (repository/ref discovery, managed worktrees,
+   * mutation lock). Optional: handlers fall back to the lazily-constructed
+   * default services rooted under the Kata config directory when unset, so
+   * both the git RPC handlers and SessionManager share one registry instance.
+   */
+  gitServices?: GitServices
 }

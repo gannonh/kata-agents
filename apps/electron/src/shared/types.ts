@@ -214,6 +214,13 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  RepositoryContext,
+  ListRefsResult,
+  CheckoutPrepareIntent,
+  CheckoutPrepareResult,
+  GitStatusSnapshot,
+  WorktreeRemovalRisk,
+  WorktreeRemovalResult,
 } from '@kata-sh/shared/protocol'
 
 export interface ElectronAPI {
@@ -585,6 +592,14 @@ export interface ElectronAPI {
 
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
+
+  // Git / GitHub V1 — workspace checkout controls (feature-flagged)
+  getGitContext(dirPath: string): Promise<RepositoryContext>
+  listGitRefs(dirPath: string): Promise<ListRefsResult>
+  prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
+  getGitStatus(dirPath: string): Promise<GitStatusSnapshot>
+  inspectGitWorktreeRemoval(managedWorktreeId: string, sessionId: string): Promise<WorktreeRemovalRisk>
+  removeGitWorktree(managedWorktreeId: string, sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>

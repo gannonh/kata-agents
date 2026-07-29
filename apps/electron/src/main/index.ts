@@ -85,6 +85,7 @@ import { join, delimiter } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@kata-sh/server-core/sessions'
+import { getDefaultGitServices } from '@kata-sh/server-core/git'
 import { registerAllRpcHandlers } from './handlers/index'
 import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@kata-sh/server-core/handlers/rpc'
 import type { PlatformServices } from '../runtime/platform'
@@ -683,6 +684,7 @@ app.whenReady().then(async () => {
             browserPaneManager: browserPaneManager ?? undefined,
             oauthFlowStore: ofs,
             messagingRegistry: messagingHandle.registry,
+            gitServices: getDefaultGitServices(),
           }
         },
         // Headless: register only core handlers (no GUI handlers for browser, settings, etc.)

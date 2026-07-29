@@ -83,6 +83,12 @@ export interface ISessionManager {
     sessionId: string,
     intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
   ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult>
+  /**
+   * Inject the server-owned Git domain so the checkout gate shares one
+   * managed-worktree registry with the git RPC handlers. Optional: falls back
+   * to the lazily-constructed default services when never called.
+   */
+  setGitServices?(services: import('../git').GitServices): void
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
