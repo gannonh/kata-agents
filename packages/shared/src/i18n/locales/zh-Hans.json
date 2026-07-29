@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "该分支包含独有的工作，因此会被保留。",
   "git.delete.confirm": "删除会话",
   "git.delete.confirmDestructive": "删除并丢弃工作区",
+  "git.delete.deleteFailedToast": "无法删除会话",
   "git.delete.description": "“{{name}}”及其对话将被永久删除。",
   "git.delete.destructiveHeading": "这将永久丢弃工作：",
   "git.delete.removalBlockedToast": "未删除工作区",

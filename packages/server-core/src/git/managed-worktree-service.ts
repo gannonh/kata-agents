@@ -277,11 +277,18 @@ export class ManagedWorktreeService {
    * Remove a managed worktree. Blocked while another session owns it. The
    * temporary branch is pruned only when it has no unique work. Destructive
    * removal (uncommitted/unique work) requires `force`.
+   *
+   * `options.dryRun` runs every guard — ownership, the `force` requirement, and
+   * identity revalidation — and returns the identical blocked result without
+   * touching the worktree, registry, or branch. Session deletion uses it to
+   * decide *before* it deletes anything that removal will be allowed, so a
+   * blocked removal can never leave a deleted session or an orphaned checkout
+   * behind (spec: AC18–AC19).
    */
   async removeWorktree(
     managedWorktreeId: string,
     requestingSessionId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; dryRun?: boolean },
   ): Promise<WorktreeRemovalResult> {
     const rec = this.registry.get(managedWorktreeId)
     if (!rec) {
@@ -319,6 +326,12 @@ export class ManagedWorktreeService {
         blocked: true,
         blockedReason: identity.reason,
       }
+    }
+
+    // Every guard passed. A dry run stops here, reporting that removal would be
+    // allowed without performing it.
+    if (options?.dryRun) {
+      return { removed: false, branchPruned: false, blocked: false }
     }
 
     return this.mutationLock.withLock(rec.gitCommonDir, async () => {

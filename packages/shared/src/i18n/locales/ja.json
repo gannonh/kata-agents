@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "ブランチには固有の作業があるため保持されます。",
   "git.delete.confirm": "セッションを削除",
   "git.delete.confirmDestructive": "削除してワークツリーを破棄",
+  "git.delete.deleteFailedToast": "セッションを削除できませんでした",
   "git.delete.description": "「{{name}}」とその会話は完全に削除されます。",
   "git.delete.destructiveHeading": "次の作業を完全に破棄します:",
   "git.delete.removalBlockedToast": "ワークツリーは削除されませんでした",

@@ -11,7 +11,7 @@
  * Kept free of React so the decision logic is unit-testable in isolation.
  */
 
-import type { WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
+import type { CheckoutMode, WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
 
 export interface WorktreeRemovalSummary {
   /** Removal is blocked because another session still owns the worktree. */
@@ -48,4 +48,34 @@ export function summarizeWorktreeRemoval(risk: WorktreeRemovalRisk): WorktreeRem
  */
 export function canOfferWorktreeRemoval(risk: WorktreeRemovalRisk | null): boolean {
   return !!risk && risk.exists
+}
+
+/** Which confirmation a delete-session request should go through. */
+export type DeleteConfirmation =
+  /** The richer dialog that also offers managed-worktree removal. */
+  | 'managed-worktree-dialog'
+  /** The ordinary native "delete this session?" confirmation. */
+  | 'native-confirm'
+  /** No confirmation: an empty session with nothing to lose. */
+  | 'skip'
+
+/**
+ * Resolve which confirmation a delete-session request needs.
+ *
+ * The managed-worktree dialog takes precedence over the empty-session shortcut.
+ * Checkout preparation is only allowed *before* the first send, so a session can
+ * hold a managed worktree and still be empty — the user may have prepared one
+ * explicitly, or the first send may have failed after preparation succeeded.
+ * Skipping the dialog for those deleted the session with no remaining way to
+ * reach its checkout, orphaning the worktree and its temporary branch under the
+ * Kata data directory.
+ */
+export function resolveDeleteConfirmation(input: {
+  /** No assistant reply and no name yet. */
+  isEmpty: boolean
+  /** `session.checkout.mode`, when the Git workspace feature is enabled. */
+  checkoutMode?: CheckoutMode | null
+}): DeleteConfirmation {
+  if (input.checkoutMode === 'managed-worktree') return 'managed-worktree-dialog'
+  return input.isEmpty ? 'skip' : 'native-confirm'
 }

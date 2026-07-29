@@ -44,7 +44,10 @@ export interface ISessionManager {
   getSessions(workspaceId?: string): Session[]
   getSession(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
-  deleteSession(sessionId: string): Promise<void>
+  deleteSession(
+    sessionId: string,
+    options?: import('@kata-sh/shared/protocol').SessionDeleteOptions,
+  ): Promise<import('@kata-sh/shared/protocol').SessionDeleteResult>
 
   // ---------------------------------------------------------------------------
   // Session state

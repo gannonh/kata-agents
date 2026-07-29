@@ -467,4 +467,21 @@ function WorkspaceCheckoutBadgeInner(
 }
 
 export const WorkspaceCheckoutBadge = React.forwardRef(WorkspaceCheckoutBadgeInner)
+
+/**
+ * Whether a session is bound to a checkout (prepared in this composer, or
+ * restored from persisted checkout metadata on resume).
+ *
+ * Once bound, the checkout owns where the session works: Git actions, the
+ * Changes surface, and `sdkCwd` all resolve from the persisted checkout, so the
+ * server rejects working-directory changes for a bound session. The composer
+ * uses this to hide its directory selectors — the checkout badge shows the
+ * bound identity in their place — so the UI never offers a mutation that would
+ * be refused, or that would silently split "where the agent edits" from "what
+ * Kata inspects and commits".
+ */
+export function useCheckoutBound(sessionId?: string): boolean {
+  const session = useAtomValue(sessionAtomFamily(sessionId ?? '__no_session__'))
+  return FEATURE_FLAGS.gitWorkspaceV1 && !!session?.checkout
+}
 WorkspaceCheckoutBadge.displayName = 'WorkspaceCheckoutBadge'

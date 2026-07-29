@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "Der Branch enthält eigene Arbeit und bleibt erhalten.",
   "git.delete.confirm": "Sitzung löschen",
   "git.delete.confirmDestructive": "Löschen & Worktree verwerfen",
+  "git.delete.deleteFailedToast": "Sitzung konnte nicht gelöscht werden",
   "git.delete.description": "„{{name}}\" und der zugehörige Verlauf werden dauerhaft gelöscht.",
   "git.delete.destructiveHeading": "Dies verwirft dauerhaft Arbeit:",
   "git.delete.removalBlockedToast": "Worktree nicht entfernt",

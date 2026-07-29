@@ -186,3 +186,70 @@ describe('SessionManager.removeManagedWorktree — session-resolved identity', (
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })
 })
+
+describe('ManagedWorktreeService.removeWorktree — dry run', () => {
+  test('reports the verdict of every guard without touching anything', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'dry', wsRoot)
+
+    const prep = await sm.prepareCheckout('dry', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const id = prep.checkout.managedWorktreeId!
+
+    // Clean worktree: removal would be allowed, and the dry run performs none of it.
+    const allowed = await services.worktrees.removeWorktree(id, 'dry', { dryRun: true })
+    expect(allowed.blocked).toBe(false)
+    expect(allowed.removed).toBe(false)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect(services.registry.get(id)).toBeDefined()
+
+    // Uncommitted work: the same block the real call would report.
+    writeFile(prep.checkout.checkoutPath, 'dirty.txt', 'work\n')
+    const blocked = await services.worktrees.removeWorktree(id, 'dry', { dryRun: true })
+    expect(blocked.blocked).toBe(true)
+    expect(blocked.blockedReason).toContain('uncommitted')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+
+    // Confirming force clears the block, still without removing.
+    const forced = await services.worktrees.removeWorktree(id, 'dry', {
+      dryRun: true,
+      force: true,
+    })
+    expect(forced.blocked).toBe(false)
+    expect(forced.removed).toBe(false)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+
+    // The real call, for contrast.
+    const real = await services.worktrees.removeWorktree(id, 'dry', { force: true })
+    expect(real.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+  })
+
+  test('a shared worktree is blocked in a dry run without dropping ownership', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'a', wsRoot)
+    injectSession(sm, 'b', wsRoot)
+
+    const prep = await sm.prepareCheckout('a', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const id = prep.checkout.managedWorktreeId!
+    services.worktrees.addOwner(id, 'b')
+
+    const res = await services.worktrees.removeWorktree(id, 'a', { dryRun: true, force: true })
+    expect(res.blocked).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect(services.registry.get(id)!.ownerSessionIds).toEqual(['a', 'b'])
+  })
+})

@@ -10,16 +10,24 @@
  *    unpushed/unique-commit counts;
  *  - allowed to prune the temporary branch only when it has no unique work.
  *
- * Removal (when chosen) runs before deletion so the server can still resolve the
- * worktree from the owning session. Feature-flag gated; non-Git / current
- * checkouts fall back to the caller's ordinary confirmation path.
+ * Removal is requested as part of the delete call rather than as a separate
+ * client step: the server quiesces the agent, verifies removal is allowed,
+ * deletes the session durably, and only then removes the checkout. Doing it
+ * from here in two calls could discard writes from a still-running turn, and
+ * could leave a session pointing at an already-removed checkout if the delete
+ * failed. Feature-flag gated; non-Git / current checkouts fall back to the
+ * caller's ordinary confirmation path.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { AlertTriangle, GitFork, Loader2 } from 'lucide-react'
-import type { WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
+import type {
+  SessionDeleteOptions,
+  SessionDeleteResult,
+  WorktreeRemovalRisk,
+} from '@kata-sh/shared/protocol'
 import {
   Dialog,
   DialogContent,
@@ -40,8 +48,14 @@ export interface DeleteSessionDialogProps {
   /** Expected managed-worktree branch, for the removal label. */
   branch?: string | null
   onOpenChange: (open: boolean) => void
-  /** Perform the session deletion (drops ownership; never removes the worktree). */
-  onDeleteSession: (sessionId: string) => Promise<void>
+  /**
+   * Perform the session deletion, forwarding the managed-worktree choice to the
+   * server so it owns the ordering of the two irreversible steps.
+   */
+  onDeleteSession: (
+    sessionId: string,
+    options?: SessionDeleteOptions,
+  ) => Promise<SessionDeleteResult>
   /** Notified after a successful deletion so the caller can update UI. */
   onDeleted?: (sessionId: string) => void
 }
@@ -96,27 +110,36 @@ export function DeleteSessionDialog({
     if (!sessionId) return
     setBusy(true)
     try {
-      // Remove the worktree first (while the owning session can still resolve
-      // it), then delete the session. A destructive removal passes force.
-      if (removalChosen && summary) {
-        try {
-          const res = await window.electronAPI.removeGitWorktree(sessionId, summary.destructive)
-          if (res.blocked) {
-            toast.error(t('git.delete.removalBlockedToast'), { description: res.blockedReason })
-            setBusy(false)
-            return
-          }
-        } catch (err) {
-          toast.error(t('git.delete.removalFailedToast'), {
-            description: err instanceof Error ? err.message : String(err),
-          })
-          setBusy(false)
-          return
-        }
+      // One server-owned operation. A destructive removal passes force.
+      const result = await onDeleteSession(
+        sessionId,
+        removalChosen && summary
+          ? { removeManagedWorktree: true, forceWorktreeRemoval: summary.destructive }
+          : undefined,
+      )
+
+      if (!result?.deleted) {
+        // Removal was rejected before anything changed — the session and its
+        // checkout are both intact. Keep the dialog open so the user can retry
+        // without the removal choice.
+        toast.error(t('git.delete.removalBlockedToast'), {
+          description: result?.worktreeRemoval?.blockedReason,
+        })
+        return
       }
-      await onDeleteSession(sessionId)
+
+      // The session is gone. Removal is a best-effort follow-on step, so report
+      // it separately when it did not happen.
+      const removal = result.worktreeRemoval
+      if (removal && !removal.removed) {
+        toast.error(t('git.delete.removalFailedToast'), { description: removal.blockedReason })
+      }
       onDeleted?.(sessionId)
       onOpenChange(false)
+    } catch (err) {
+      toast.error(t('git.delete.deleteFailedToast'), {
+        description: err instanceof Error ? err.message : String(err),
+      })
     } finally {
       setBusy(false)
     }

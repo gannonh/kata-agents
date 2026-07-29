@@ -223,6 +223,8 @@ import type {
   GitStatusChangedEvent,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
+  SessionDeleteOptions,
+  SessionDeleteResult,
   GitCommitInput,
   GitActionResult,
   GitHubCapabilityStatus,
@@ -237,7 +239,16 @@ export interface ElectronAPI {
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
-  deleteSession(sessionId: string): Promise<void>
+  /**
+   * Delete a session. Pass `removeManagedWorktree` to have the server remove
+   * the session's managed worktree in the same operation — the server quiesces
+   * the agent, verifies removal is allowed, deletes the session, and only then
+   * removes the checkout.
+   */
+  deleteSession(
+    sessionId: string,
+    options?: SessionDeleteOptions,
+  ): Promise<SessionDeleteResult>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>

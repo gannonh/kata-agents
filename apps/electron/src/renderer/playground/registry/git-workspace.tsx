@@ -243,7 +243,7 @@ function GitWorkspaceValidation({ view }: { view: ValidationView }) {
         sessionName="Finish managed worktree lifecycle"
         branch="kata-agent/7ac42f19"
         onOpenChange={() => {}}
-        onDeleteSession={async () => {}}
+        onDeleteSession={async () => ({ deleted: true })}
       />
     </div>
   )

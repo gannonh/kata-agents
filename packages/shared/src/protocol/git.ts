@@ -169,6 +169,36 @@ export interface WorktreeRemovalResult {
   blockedReason?: string
 }
 
+/**
+ * Options for the session-delete RPC. Managed-worktree removal is an explicit,
+ * separate choice from deleting the session (spec: AC18–AC19).
+ *
+ * Removal is requested *through* deletion rather than as its own client call so
+ * the server owns the ordering: quiesce the agent, verify removal is allowed,
+ * delete the session durably, and only then remove the checkout. A client that
+ * removed the worktree first could lose in-flight agent writes and, if the
+ * subsequent delete failed, leave a session pointing at a checkout that no
+ * longer exists.
+ */
+export interface SessionDeleteOptions {
+  /** Remove the session's managed worktree once the session is deleted. */
+  removeManagedWorktree?: boolean
+  /** Confirm destructive removal (uncommitted files or unique commits). */
+  forceWorktreeRemoval?: boolean
+}
+
+/** Outcome of the session-delete RPC. */
+export interface SessionDeleteResult {
+  /** Whether the session itself was deleted. */
+  deleted: boolean
+  /**
+   * Outcome of the managed-worktree removal, present only when it was
+   * requested. A `blocked` result here with `deleted: false` means nothing was
+   * changed at all: the guards rejected removal before deletion began.
+   */
+  worktreeRemoval?: WorktreeRemovalResult
+}
+
 /** Result of applying `.worktreeinclude` patterns into a new worktree. */
 export interface WorktreeIncludeResult {
   copiedFileCount: number

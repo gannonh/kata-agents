@@ -16,6 +16,7 @@ import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { DeleteSessionDialog } from '@/components/app-shell/DeleteSessionDialog'
+import { resolveDeleteConfirmation } from '@/components/app-shell/worktree-removal'
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@kata-sh/ui'
@@ -1121,25 +1122,30 @@ export default function App() {
       // Session is empty if it has no lastFinalMessageId (no assistant responses) and no name (set on first user message)
       const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
-      if (!isEmpty) {
+      const managedCheckout = FEATURE_FLAGS.gitWorkspaceV1
+        ? store.get(sessionAtomFamily(sessionId))?.checkout
+        : undefined
+      const confirmation = resolveDeleteConfirmation({
+        isEmpty,
+        checkoutMode: managedCheckout?.mode ?? null,
+      })
+
+      if (confirmation === 'managed-worktree-dialog' && managedCheckout) {
         // Managed-worktree sessions get a richer confirmation that offers the
         // separate managed-worktree removal choice (spec: AC18–AC19). The
         // dialog performs the deletion itself; we bridge its outcome back to
         // this promise so existing callers keep their boolean contract.
-        if (FEATURE_FLAGS.gitWorkspaceV1) {
-          const session = store.get(sessionAtomFamily(sessionId))
-          const checkout = session?.checkout
-          if (checkout?.mode === 'managed-worktree') {
-            return await new Promise<boolean>((resolve) => {
-              setDeleteDialog({
-                sessionId,
-                sessionName: meta?.name || 'Untitled',
-                branch: checkout.expectedBranch ?? checkout.branchAtPreparation ?? null,
-                resolve,
-              })
-            })
-          }
-        }
+        return await new Promise<boolean>((resolve) => {
+          setDeleteDialog({
+            sessionId,
+            sessionName: meta?.name || 'Untitled',
+            branch: managedCheckout.expectedBranch ?? managedCheckout.branchAtPreparation ?? null,
+            resolve,
+          })
+        })
+      }
+
+      if (confirmation === 'native-confirm') {
         const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
         if (!confirmed) return false
       }
@@ -2080,9 +2086,10 @@ export default function App() {
               onOpenChange={(open) => {
                 if (!open) handleDeleteDialogClose(false)
               }}
-              onDeleteSession={async (id) => {
-                await window.electronAPI.deleteSession(id)
-                removeSession(id)
+              onDeleteSession={async (id, options) => {
+                const result = await window.electronAPI.deleteSession(id, options)
+                if (result?.deleted) removeSession(id)
+                return result
               }}
               onDeleted={() => handleDeleteDialogClose(true)}
             />

@@ -74,7 +74,7 @@ import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import { WorkspaceCheckoutBadge, type WorkspaceCheckoutHandle } from './WorkspaceCheckoutBadge'
+import { WorkspaceCheckoutBadge, useCheckoutBound, type WorkspaceCheckoutHandle } from './WorkspaceCheckoutBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/modes'
@@ -621,6 +621,11 @@ export function FreeFormInput({
   // worktree/ref intent on the server BEFORE the first message is accepted (AC4).
   const checkoutBadgeRef = React.useRef<WorkspaceCheckoutHandle>(null)
   const [isPreparingCheckout, setIsPreparingCheckout] = React.useState(false)
+  // A bound checkout owns the working directory (the server rejects changes to
+  // it), so the directory selectors are hidden and the checkout badge shows the
+  // bound identity instead.
+  const checkoutBound = useCheckoutBound(sessionId)
+  const showWorkingDirectoryPicker = !!onWorkingDirectoryChange && !checkoutBound
 
   // Merge refs for RichTextInput
   const internalInputRef = React.useRef<RichTextInputHandle>(null)
@@ -1911,7 +1916,7 @@ export function FreeFormInput({
               />
             </div>
           )}
-          {onWorkingDirectoryChange && (
+          {showWorkingDirectoryPicker && (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
@@ -2028,7 +2033,7 @@ export function FreeFormInput({
           )}
 
           {/* 3. Working Directory Selector Badge */}
-          {onWorkingDirectoryChange && (
+          {showWorkingDirectoryPicker && (
             <WorkingDirectoryBadge
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}

@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "Az ághoz egyedi munka tartozik, ezért megmarad.",
   "git.delete.confirm": "Munkamenet törlése",
   "git.delete.confirmDestructive": "Törlés és worktree eldobása",
+  "git.delete.deleteFailedToast": "A munkamenetet nem sikerült törölni",
   "git.delete.description": "A(z) „{{name}}\" munkamenet és a beszélgetése véglegesen törlődik.",
   "git.delete.destructiveHeading": "Ez véglegesen eldobja a munkát:",
   "git.delete.removalBlockedToast": "A worktree nem lett eltávolítva",

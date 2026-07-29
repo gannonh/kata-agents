@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "The branch has unique work, so it will be kept.",
   "git.delete.confirm": "Delete session",
   "git.delete.confirmDestructive": "Delete & discard worktree",
+  "git.delete.deleteFailedToast": "Could not delete session",
   "git.delete.description": "\"{{name}}\" and its conversation will be permanently deleted.",
   "git.delete.destructiveHeading": "This permanently discards work:",
   "git.delete.removalBlockedToast": "Worktree not removed",

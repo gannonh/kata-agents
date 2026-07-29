@@ -275,3 +275,36 @@ describe('GitActionService.pull / push', () => {
     expect(res.stages[0]!.error).toMatch(/remote/i)
   })
 })
+
+describe('GitActionService.commit — literal pathspecs', () => {
+  // `git add`'s operands are pathspecs, so a legal filename that begins with
+  // pathspec magic would otherwise be interpreted as a pattern and stage
+  // unrelated files. `--` ends option parsing but does not make paths literal.
+  test('a selected file named with pathspec magic does not stage other files', async () => {
+    const dir = tmp()
+    await initRepo(dir)
+    const magic = ':(glob)*.txt'
+    writeFile(dir, magic, 'original\n')
+    writeFile(dir, 'unrelated.txt', 'original\n')
+    await git(dir, ['--literal-pathspecs', 'add', '--', magic, 'unrelated.txt'])
+    await git(dir, ['commit', '-m', 'add both files'])
+
+    // Both files are modified; only the magic-named one is selected.
+    writeFile(dir, magic, 'selected change\n')
+    writeFile(dir, 'unrelated.txt', 'must not be committed\n')
+
+    const res = await svc.commit({ dir, message: 'commit only the magic-named file', paths: [magic] })
+    expect(res.stages[0]!.status).toBe('succeeded')
+
+    // The committed tree contains the selected change and the *original*
+    // unrelated content — proof the pattern did not expand.
+    const committed = await git(dir, ['show', `HEAD:${magic}`])
+    expect(committed).toBe('selected change\n')
+    const untouched = await git(dir, ['show', 'HEAD:unrelated.txt'])
+    expect(untouched).toBe('original\n')
+
+    // And the unrelated file is still pending in the working tree.
+    const status = await svc.commit({ dir, message: 'second', paths: ['unrelated.txt'] })
+    expect(status.stages[0]!.status).toBe('succeeded')
+  })
+})

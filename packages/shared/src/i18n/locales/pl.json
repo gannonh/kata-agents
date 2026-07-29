@@ -522,6 +522,7 @@
   "git.delete.branchKeptNote": "Gałąź zawiera unikalną pracę, więc zostanie zachowana.",
   "git.delete.confirm": "Usuń sesję",
   "git.delete.confirmDestructive": "Usuń i odrzuć worktree",
+  "git.delete.deleteFailedToast": "Nie udało się usunąć sesji",
   "git.delete.description": "„{{name}}\" i jej rozmowa zostaną trwale usunięte.",
   "git.delete.destructiveHeading": "To trwale odrzuca pracę:",
   "git.delete.removalBlockedToast": "Nie usunięto worktree",

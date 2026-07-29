@@ -483,15 +483,23 @@ export class RepositoryService {
    * Attach per-entry and aggregate additions/deletions to a status snapshot.
    * Tracked changes use `git diff --numstat -z HEAD`; untracked files count
    * their own lines (bounded). Binary paths are flagged and excluded from totals.
+   *
+   * The same numstat pass also drops entries with no HEAD→working-tree delta —
+   * see {@link dropEntriesWithoutWorkingTreeDelta}.
    */
   private async attachDiffStats(dir: string, snapshot: GitStatusSnapshot): Promise<void> {
-    let stats: Map<string, { additions: number | null; deletions: number | null }>
+    let stats: Map<string, { additions: number | null; deletions: number | null }> | null
     try {
       stats = await this.getNumstat(dir)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
       return
     }
+    // A null numstat means "unknown" (an unborn branch has no HEAD to diff
+    // against), so entries must be left alone — but untracked line counts below
+    // are still worth attaching.
+    if (stats) this.dropEntriesWithoutWorkingTreeDelta(snapshot, stats)
+    else stats = new Map()
     let totalAdd = 0
     let totalDel = 0
     let haveStats = false
@@ -525,12 +533,44 @@ export class RepositoryService {
     }
   }
 
+  /**
+   * Drop tracked entries that `git status` reports because their *index* entry
+   * differs from HEAD, but whose working-tree content is identical to HEAD (for
+   * example content staged and then reverted in the working tree).
+   *
+   * The Changes surface is defined as a single HEAD→working-tree view — V1 shows
+   * no staged/unstaged sections (spec: "Changes review surface") — and the
+   * selected-file commit stages from the working tree with `git add -A`, so such
+   * an entry has nothing to render and nothing to commit. Leaving it listed
+   * produced a file with a `clean` diff, no counts, and a commit that failed
+   * with "no changes to commit". The index state stays available to action
+   * safety logic, which reads it directly rather than from this snapshot.
+   *
+   * `stats` is the HEAD→working-tree numstat, which is exactly the set of
+   * tracked paths with a working-tree delta (mode-only changes appear as `0 0`,
+   * binary as `- -`). Conflicted and untracked entries are never dropped.
+   */
+  private dropEntriesWithoutWorkingTreeDelta(
+    snapshot: GitStatusSnapshot,
+    stats: Map<string, { additions: number | null; deletions: number | null }>,
+  ): void {
+    snapshot.entries = snapshot.entries.filter(
+      (entry) => entry.conflicted || entry.type === 'untracked' || stats.has(entry.path),
+    )
+  }
+
+  /**
+   * HEAD→working-tree numstat keyed by path, or `null` when the diff could not
+   * be taken at all (an unborn branch has no HEAD). `null` is distinct from an
+   * empty map: it means "unknown", so callers must not read absence from it as
+   * "this path has no working-tree delta".
+   */
   private async getNumstat(
     dir: string,
-  ): Promise<Map<string, { additions: number | null; deletions: number | null }>> {
+  ): Promise<Map<string, { additions: number | null; deletions: number | null }> | null> {
     const map = new Map<string, { additions: number | null; deletions: number | null }>()
     const res = await runGit(['diff', '--numstat', '-z', 'HEAD'], { cwd: dir, okExitCodes: [128] })
-    if (res.exitCode !== 0) return map
+    if (res.exitCode !== 0) return null
     for (const rec of parseNumstatZ(res.stdout)) {
       map.set(rec.path, { additions: rec.additions, deletions: rec.deletions })
     }

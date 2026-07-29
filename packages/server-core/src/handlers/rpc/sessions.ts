@@ -192,10 +192,18 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return session
   })
 
-  // Delete a session
-  server.handle(RPC_CHANNELS.sessions.DELETE, async (_ctx, sessionId: string) => {
-    return sessionManager.deleteSession(sessionId)
-  })
+  // Delete a session, optionally removing its managed worktree in the same
+  // server-owned operation so the ordering is not up to the client.
+  server.handle(
+    RPC_CHANNELS.sessions.DELETE,
+    async (
+      _ctx,
+      sessionId: string,
+      options?: import('@kata-sh/shared/protocol').SessionDeleteOptions,
+    ) => {
+      return sessionManager.deleteSession(sessionId, options)
+    },
+  )
 
   // Send a message to a session (with optional file attachments).
   //

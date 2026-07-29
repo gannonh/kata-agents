@@ -100,7 +100,14 @@ export class GitActionService {
       }
 
       // Step 3: stage only the expanded selected paths into the temp index.
-      await runGit(['add', '-A', '--', ...expanded], { cwd: root, env: idxEnv })
+      // `--literal-pathspecs` is required for correctness, not just hygiene:
+      // these operands are pathspecs, so without it a legal filename that
+      // begins with pathspec magic (`:(glob)*`, `:!x`, …) would be interpreted
+      // as a pattern and stage unrelated files. `--` only ends option parsing.
+      await runGit(['--literal-pathspecs', 'add', '-A', '--', ...expanded], {
+        cwd: root,
+        env: idxEnv,
+      })
 
       // Step 4: require a non-empty cached diff, re-check HEAD, then commit the
       // temp index (running normal hooks).
@@ -126,7 +133,9 @@ export class GitActionService {
         return single(failure('commit', 'Commit did not advance HEAD.'))
       }
 
-      const recovery = `git reset -q HEAD -- ${expanded.map(quoteForDisplay).join(' ')}`
+      // Shell-quoted for the shell, and `--literal-pathspecs` so git treats a
+      // magic-looking filename as a literal path when the user runs this.
+      const recovery = `git --literal-pathspecs reset -q HEAD -- ${expanded.map(quoteForDisplay).join(' ')}`
       const reconciled = await this.reconcileRealIndex(root, newCommit, expanded)
       const commitStage: GitActionStageResult = {
         stage: 'commit',
@@ -234,7 +243,12 @@ export class GitActionService {
   ): Promise<boolean> {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await runGit(['reset', '-q', newCommit, '--', ...expanded], { cwd: root })
+        // Literal pathspecs for the same reason as staging (step 3): reconciling
+        // must touch exactly the committed paths and nothing a magic-looking
+        // filename could expand to.
+        await runGit(['--literal-pathspecs', 'reset', '-q', newCommit, '--', ...expanded], {
+          cwd: root,
+        })
         return true
       } catch {
         /* retry once */

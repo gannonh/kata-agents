@@ -1,4 +1,6 @@
 import { describe, test, expect, afterEach } from 'bun:test'
+import { chmodSync } from 'node:fs'
+import { join } from 'node:path'
 import { RepositoryService, detectProvider, parsePorcelainV2 } from '../repository-service'
 import { runGit } from '../command-runner'
 import { initRepo, makeTmpDir, cleanup, git, writeFile, GIT_ENV } from './test-helpers'
@@ -196,5 +198,69 @@ describe('command-runner', () => {
     await expect(runGit(['not-a-real-subcommand'], { cwd: d, env: GIT_ENV })).rejects.toMatchObject({
       code: 'GIT_COMMAND_FAILED',
     })
+  })
+})
+
+describe('getStatus — HEAD→working-tree consistency', () => {
+  // The Changes surface is a single HEAD→working-tree view and the selected-file
+  // commit stages from the working tree, so an entry whose *index* differs from
+  // HEAD while its working-tree content matches HEAD has nothing to render and
+  // nothing to commit. Listing it produced a file with a `clean` diff, no
+  // counts, and a commit that failed with "no changes to commit".
+  test('omits a staged change that the working tree reverted to HEAD', async () => {
+    const dir = tmp()
+    await initRepo(dir)
+    writeFile(dir, 'reverted.txt', 'head\n')
+    writeFile(dir, 'kept.txt', 'head\n')
+    await git(dir, ['add', '.'])
+    await git(dir, ['commit', '-m', 'add files'])
+
+    // Stage new content for both files...
+    writeFile(dir, 'reverted.txt', 'staged\n')
+    writeFile(dir, 'kept.txt', 'staged\n')
+    await git(dir, ['add', '.'])
+    // ...then restore only one of them in the working tree. Git reports both as
+    // changed (`MM` / `M.`), but only `kept.txt` has a HEAD→working-tree delta.
+    writeFile(dir, 'reverted.txt', 'head\n')
+
+    const status = await svc.getStatus(dir)
+    const paths = status.entries.map((e) => e.path)
+    expect(paths).toContain('kept.txt')
+    expect(paths).not.toContain('reverted.txt')
+
+    // And the omitted path is exactly the one the diff would render as clean.
+    const diff = await svc.getFileDiff(dir, { path: 'reverted.txt', type: 'modified' })
+    expect(diff.state).toBe('clean')
+  })
+
+  test('keeps a working-tree mode change, which has no line delta but is committable', async () => {
+    const dir = tmp()
+    await initRepo(dir)
+    writeFile(dir, 'script.sh', '#!/bin/sh\necho hi\n')
+    await git(dir, ['add', '.'])
+    await git(dir, ['commit', '-m', 'add script'])
+    // A real working-tree mode change: `git diff HEAD` reports it as `0 0`, so
+    // the entry must survive even though it has no added or deleted lines.
+    chmodSync(join(dir, 'script.sh'), 0o755)
+
+    const status = await svc.getStatus(dir)
+    expect(status.entries.map((e) => e.path)).toContain('script.sh')
+  })
+
+  test('keeps entries on an unborn branch, where there is no HEAD to diff', async () => {
+    const dir = tmp()
+    await runGit(['init', '-b', 'main', dir], { cwd: process.cwd(), env: GIT_ENV })
+    await git(dir, ['config', 'user.name', 'Kata Test'])
+    await git(dir, ['config', 'user.email', 'test@kata.sh'])
+    writeFile(dir, 'staged.txt', 'new\n')
+    writeFile(dir, 'untracked.txt', 'one\ntwo\n')
+    await git(dir, ['add', 'staged.txt'])
+
+    const status = await svc.getStatus(dir)
+    const paths = status.entries.map((e) => e.path)
+    expect(paths).toContain('staged.txt')
+    expect(paths).toContain('untracked.txt')
+    // Untracked line counts still attach when the numstat is unavailable.
+    expect(status.entries.find((e) => e.path === 'untracked.txt')?.additions).toBe(2)
   })
 })

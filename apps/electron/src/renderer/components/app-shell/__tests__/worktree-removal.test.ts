@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import type { WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
-import { summarizeWorktreeRemoval, canOfferWorktreeRemoval } from '../worktree-removal'
+import {
+  summarizeWorktreeRemoval,
+  canOfferWorktreeRemoval,
+  resolveDeleteConfirmation,
+} from '../worktree-removal'
 
 function risk(overrides: Partial<WorktreeRemovalRisk> = {}): WorktreeRemovalRisk {
   return {
@@ -62,5 +66,30 @@ describe('canOfferWorktreeRemoval', () => {
     expect(canOfferWorktreeRemoval(risk())).toBe(true)
     expect(canOfferWorktreeRemoval(risk({ exists: false }))).toBe(false)
     expect(canOfferWorktreeRemoval(null)).toBe(false)
+  })
+})
+
+describe('resolveDeleteConfirmation', () => {
+  it('routes a managed-worktree session to the dialog even when the session is empty', () => {
+    // Preparation is only allowed before the first send, so a prepared session
+    // is still "empty". Taking the empty shortcut here would delete the session
+    // and orphan its checkout with no UI left to remove it.
+    expect(
+      resolveDeleteConfirmation({ isEmpty: true, checkoutMode: 'managed-worktree' }),
+    ).toBe('managed-worktree-dialog')
+    expect(
+      resolveDeleteConfirmation({ isEmpty: false, checkoutMode: 'managed-worktree' }),
+    ).toBe('managed-worktree-dialog')
+  })
+
+  it('keeps the ordinary paths for sessions with no managed worktree', () => {
+    expect(resolveDeleteConfirmation({ isEmpty: true, checkoutMode: null })).toBe('skip')
+    expect(resolveDeleteConfirmation({ isEmpty: false, checkoutMode: null })).toBe('native-confirm')
+    // A current checkout is the user's own directory — no Kata-owned checkout to
+    // clean up, so the ordinary paths apply.
+    expect(resolveDeleteConfirmation({ isEmpty: true, checkoutMode: 'current' })).toBe('skip')
+    expect(resolveDeleteConfirmation({ isEmpty: false, checkoutMode: 'current' })).toBe(
+      'native-confirm',
+    )
   })
 })

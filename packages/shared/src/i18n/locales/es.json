@@ -516,6 +516,7 @@
   "git.delete.branchKeptNote": "La rama tiene trabajo propio, así que se conservará.",
   "git.delete.confirm": "Eliminar sesión",
   "git.delete.confirmDestructive": "Eliminar y descartar worktree",
+  "git.delete.deleteFailedToast": "No se pudo eliminar la sesión",
   "git.delete.description": "«{{name}}» y su conversación se eliminarán permanentemente.",
   "git.delete.destructiveHeading": "Esto descarta trabajo de forma permanente:",
   "git.delete.removalBlockedToast": "Worktree no eliminado",
