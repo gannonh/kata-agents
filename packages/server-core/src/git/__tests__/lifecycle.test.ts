@@ -432,7 +432,7 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
     // abort, then goes idle. Removal must not happen until it does.
     let processing = true
     let pollsWhileProcessing = 0
-    let checkoutPresentAtIdle: boolean | null = null
+    const observed: string[] = []
     managed.isProcessing = true
     managed.agent = {
       forceAbort: () => {},
@@ -442,7 +442,9 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
           pollsWhileProcessing += 1
           if (pollsWhileProcessing >= 3) {
             processing = false
-            checkoutPresentAtIdle = existsSync(prep.checkout.checkoutPath)
+            observed.push(
+              existsSync(prep.checkout.checkoutPath) ? 'idle:present' : 'idle:already-removed',
+            )
           }
         }
         return processing
@@ -457,7 +459,7 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
     // It polled rather than assuming, and the checkout was still intact for the
     // whole time the backend claimed to be busy.
     expect(pollsWhileProcessing).toBeGreaterThanOrEqual(3)
-    expect(checkoutPresentAtIdle).toBe(true)
+    expect(observed).toEqual(['idle:present'])
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
