@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-* [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md): Draft V1 design for Current checkout/New worktree sessions, a Changes review panel with line feedback, safe commit/push/GitHub PR actions, and local/remote worktree lifecycle parity. Status: Draft; awaiting user review.
+* [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md): V1 design for Current checkout/New worktree sessions, a Changes review panel with line feedback, safe commit/push/GitHub PR actions, and local/remote worktree lifecycle parity. Status: Approved; **Phase 1 (Start isolated) building** — feature-flagged (`KATA_FEATURE_GIT_WORKSPACE_V1`) server Git domain, empty-session checkout gate, and composer Workspace controls landed behind the flag. See ADR [2026-07-29-server-owned-managed-worktrees.md](../adrs/2026-07-29-server-owned-managed-worktrees.md). Phases 2–4 (Changes panel, commit/push/PR, lifecycle UI) declared in protocol but stubbed.
 
 ## Planned implementation phases
 

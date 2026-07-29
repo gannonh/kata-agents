@@ -9,6 +9,7 @@ No ADRs have been recorded yet for this fork. Add ADRs here for any durable arch
 ## Accepted
 
 * [2026-06-22-kata-identity-hard-cutover.md](2026-06-22-kata-identity-hard-cutover.md) — Canonical Kata identity graph (`@kata-sh/*`, `KATA_*`, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, `agents.kata.sh`) with zero Craft-era compatibility shims.
+* [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) — The workspace-owning server owns all managed-worktree lifecycle and Git mutation; worktrees live under Kata config data, mutations serialize by Git common directory, and checkout preparation is an atomic empty-session gate.
 
 ## Superseded
 

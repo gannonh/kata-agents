@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-07-29
+
+* **Phase 1 building**: [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md) — implemented the Start-isolated vertical slice behind `KATA_FEATURE_GIT_WORKSPACE_V1`: server Git domain (`packages/server-core/src/git/` — command runner, `RepositoryService`, `ManagedWorktreeService` + registry, mutation lock), protocol DTOs/channels/routing for all Phases 1–4 (later phases stubbed), `SessionCheckoutV1` persistence, `SessionManager.prepareCheckout` empty-session gate with conversation-branch shared ownership and import ownership clearing, git RPC handlers wired into `registerCoreRpcHandlers` + HandlerDeps + both hosts, Electron channel-map/ElectronAPI, composer Workspace controls, and i18n across 7 locales. `git:getBranch` now delegates to `RepositoryService`. ADR: [../adrs/2026-07-29-server-owned-managed-worktrees.md](../adrs/2026-07-29-server-owned-managed-worktrees.md). Moved Draft → Approved/Active in [index.md](index.md).
+
 ## 2026-07-26
 
 * **Drafted**: [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md) — planned four user-facing vertical slices for Current checkout/New worktree session setup, active-checkout Changes review with line feedback, Kata Code-style commit/push/GitHub PR controls through `gh`, and conservative local/remote worktree lifecycle. Independent adversarial review cleared all blockers after tightening checkout lock timing, selected-file index preservation, the ordered Git action resolver, no-upstream first-push behavior, and remote ownership. Deferred work: [#16](https://github.com/gannonh/kata-agents/issues/16), [#17](https://github.com/gannonh/kata-agents/issues/17), [#18](https://github.com/gannonh/kata-agents/issues/18), [#19](https://github.com/gannonh/kata-agents/issues/19).
