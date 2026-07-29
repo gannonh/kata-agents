@@ -54,6 +54,56 @@ The **workspace-owning server owns all managed-worktree lifecycle and Git behavi
   (disabled by default). Read-only repository/ref discovery is always available; mutation handlers
   reject while the flag is off.
 
+### Deletion and removal are one ordered server operation
+
+Session deletion and managed-worktree removal are **two irreversible steps that the client may not
+sequence itself**. `SessionManager.deleteSession(sessionId, { removeManagedWorktree,
+forceWorktreeRemoval })` performs them in a fixed order:
+
+1. quiesce the agent (`forceAbort`) — a live turn writes into the checkout, so nothing may inspect or
+   remove it while one is running;
+2. dry-run every removal guard (ownership, `force` requirement, identity revalidation) while the
+   session still resolves its own checkout identity;
+3. delete the session durably;
+4. only then remove the checkout.
+
+A blocked removal is **atomic in the caller's favour**: nothing is deleted and nothing is removed, so
+the client can report why and the user retries or drops the removal choice. A removal that fails
+*after* step 3 leaves an unowned worktree, which is a recoverable state, whereas the reverse order
+could leave a persisted session pointing at a checkout that no longer exists — an unusable state.
+
+Removal is therefore requested *through* deletion. The standalone `git:removeWorktree` channel
+remains for removing a checkout without deleting its session.
+
+Corollary for **unattended** deletes (auto-delete of an empty session, the `delete-session` deep
+link): they request removal without `force`. Nothing removes an unowned checkout later —
+reconciliation only drops dead owner references and records state — so leaving one behind is a leak,
+while forcing would discard work no human confirmed. Non-forced removal resolves both: a clean
+provisional checkout is discarded with its session, and one holding uncommitted or unique work blocks
+the removal and therefore the deletion, keeping the session as the route to that work. Because such
+callers cannot inspect the session first, `removeManagedWorktree` distinguishes *nothing to remove*
+(no managed checkout, no registry record, not an owner, feature disabled → deletion proceeds) from
+*blocked by a guard* (→ abort).
+
+### A bound checkout owns the session's working directory
+
+Once `session.checkout` is bound, the checkout — not the composer — is authoritative for where the
+session works. `updateWorkingDirectory` rejects any change for a bound session, because Git actions,
+the Changes surface, and `sdkCwd` all resolve from the persisted checkout: repointing
+`workingDirectory` would have the agent edit one tree while Kata inspects and commits another. The
+server rejects it rather than relying on the UI, since hiding a control does not close the channel;
+the composer additionally withdraws its directory selectors in favour of the checkout identity.
+
+### The Changes surface is HEAD→working-tree, and status must agree
+
+V1 shows no staged/unstaged sections, and the selected-file commit stages from the working tree
+(`git add -A -- <paths>`). Status entries must therefore describe the same HEAD→working-tree delta the
+diff renders and the commit would write: an entry whose index differs from HEAD while its working
+tree matches HEAD has nothing to show and nothing to commit, and is omitted. Index state remains
+available to action safety logic, which reads it directly. Absence of a HEAD→working-tree diff is
+only meaningful when a diff could be taken at all — on an unborn branch it means "unknown", not "no
+delta".
+
 ## Consequences
 
 - Clients refer to a session or workspace plus typed operation input, never a client-provided
