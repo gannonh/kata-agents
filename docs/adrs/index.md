@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-No ADRs have been recorded yet for this fork. Add ADRs here for any durable architecture decisions made during development.
+Durable architecture decisions for this fork are recorded here. See the Accepted list below; add new ADRs for any durable architecture decisions made during development.
 
 ## Proposed
 

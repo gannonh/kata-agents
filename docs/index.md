@@ -16,7 +16,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — Draft design for checkout-aware sessions, Changes review with agent feedback, safe Git/GitHub actions, and managed-worktree lifecycle.
+* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — Approved; Phase 1 (Start isolated) building. Checkout-aware sessions, server-owned managed worktrees, prepare-before-send gate, resume/restart identity, shared-worktree ownership, and safe removal/startup reconciliation. Later phases (Changes review, Git/GitHub actions, lifecycle) remain planned.
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — completed. Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
 * **ADRs** — [adrs/](adrs/) — one accepted (kata-identity hard-cutover); seed is in place for future decisions
 
