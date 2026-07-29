@@ -10,10 +10,8 @@
 
 import { atom, getDefaultStore } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import {
-  reconcileStaleForPath as reconcilePure,
-  type GitPendingComment,
-} from '@kata-sh/shared/git'
+import { reconcileStaleForPath as reconcilePure } from '@kata-sh/shared/git'
+import type { GitPendingComment } from '@kata-sh/shared/protocol'
 
 /** All pending comments across every session for the current app run. */
 export const pendingCommentsAtom = atom<GitPendingComment[]>([])
