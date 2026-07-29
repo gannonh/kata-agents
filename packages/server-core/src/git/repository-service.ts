@@ -441,27 +441,45 @@ export class RepositoryService {
       const isAdded = changeType === 'added' || changeType === 'untracked'
       const isDeleted = changeType === 'deleted'
 
+      // Bound both sides by size BEFORE loading any bytes (spec: check sizes
+      // first via stat / `git cat-file -s`). Oversized is an explicit render
+      // state, never a generic command-buffer overflow error.
+      const oldSize = isAdded ? 0 : await this.headBlobSize(dir, oldPath)
+
+      let newAbs: string | null = null
+      let newSize = 0
+      if (!isDeleted) {
+        newAbs = resolveInRepo(dir, path)
+        if (!newAbs) return { ...base, state: 'error', fingerprint: 'error', error: 'Path is outside the repository.' }
+        try {
+          const st = await stat(newAbs)
+          newSize = st.size
+        } catch {
+          return { ...base, state: 'missing', fingerprint: fingerprintSizes(oldSize, -1, oldPath, path) }
+        }
+      }
+
+      const sizeBytes = Math.max(oldSize, newSize)
+      if (sizeBytes > GIT_DIFF_MAX_BYTES) {
+        return { ...base, state: 'oversized', sizeBytes, fingerprint: fingerprintSizes(oldSize, newSize, oldPath, path) }
+      }
+
+      // Both sides are within the cap; now it is safe to load their contents.
       const oldBuf = isAdded ? Buffer.alloc(0) : await this.showHeadBlob(dir, oldPath)
 
       let newBuf = Buffer.alloc(0)
-      if (!isDeleted) {
-        const abs = resolveInRepo(dir, path)
-        if (!abs) return { ...base, state: 'error', fingerprint: 'error', error: 'Path is outside the repository.' }
+      if (!isDeleted && newAbs) {
         try {
-          newBuf = await readFile(abs)
+          newBuf = await readFile(newAbs)
         } catch {
           return { ...base, state: 'missing', fingerprint: fingerprintBuffers(oldBuf, Buffer.alloc(0)) }
         }
       }
 
       const fingerprint = fingerprintBuffers(oldBuf, newBuf)
-      const sizeBytes = Math.max(oldBuf.length, newBuf.length)
 
       if (isBinaryBuffer(oldBuf) || isBinaryBuffer(newBuf)) {
-        return { ...base, state: 'binary', sizeBytes, fingerprint }
-      }
-      if (sizeBytes > GIT_DIFF_MAX_BYTES) {
-        return { ...base, state: 'oversized', sizeBytes, fingerprint }
+        return { ...base, state: 'binary', sizeBytes: Math.max(oldBuf.length, newBuf.length), fingerprint }
       }
       const oldContent = oldBuf.toString('utf8')
       const newContent = newBuf.toString('utf8')
@@ -487,6 +505,22 @@ export class RepositoryService {
         fingerprint: 'error',
         error: err instanceof Error ? err.message : String(err),
       }
+    }
+  }
+
+  /**
+   * Size in bytes of a path's committed (HEAD) blob, or 0 when the path is not
+   * present in HEAD. Uses `git cat-file -s` so the diff can enforce the 2 MiB
+   * bound before ever loading the blob contents.
+   */
+  private async headBlobSize(dir: string, relPath: string): Promise<number> {
+    try {
+      const res = await runGit(['cat-file', '-s', `HEAD:${relPath}`], { cwd: dir, okExitCodes: [128] })
+      if (res.exitCode !== 0) return 0
+      return parseInt(res.stdout.trim(), 10) || 0
+    } catch (err) {
+      if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      return 0
     }
   }
 
@@ -615,6 +649,17 @@ function fingerprintBuffers(a: Buffer, b: Buffer): string {
   h.update(a)
   h.update(Buffer.from([0]))
   h.update(b)
+  return h.digest('hex').slice(0, 16)
+}
+
+/**
+ * Stable fingerprint for a diff whose contents were never loaded (oversized or
+ * missing). Keyed on both sides' sizes and paths so a later change in size
+ * still marks anchored comments stale, without reading megabytes of content.
+ */
+function fingerprintSizes(oldSize: number, newSize: number, oldPath: string, newPath: string): string {
+  const h = createHash('sha256')
+  h.update(`${oldSize}\0${newSize}\0${oldPath}\0${newPath}`)
   return h.digest('hex').slice(0, 16)
 }
 

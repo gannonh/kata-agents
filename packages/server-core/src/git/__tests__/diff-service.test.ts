@@ -120,6 +120,25 @@ describe('RepositoryService.getFileDiff', () => {
     expect(diff.sizeBytes).toBeGreaterThan(GIT_DIFF_MAX_BYTES)
   })
 
+  it('reports oversized for a committed blob above the cap without loading it', async () => {
+    // A committed file larger than the 2 MiB cap, then modified. The old (HEAD)
+    // side must be size-checked via `git cat-file -s` before the blob is loaded,
+    // so oversized is an explicit state — not a generic command-buffer error.
+    const big = 'a'.repeat(GIT_DIFF_MAX_BYTES + 10) + '\n'
+    writeFileSync(join(dir, 'big-committed.txt'), big)
+    await git(dir, ['add', '.'])
+    await git(dir, ['commit', '-m', 'add big'])
+    // Shrink the working copy so the new side is tiny; the old side stays huge.
+    writeFileSync(join(dir, 'big-committed.txt'), 'small\n')
+    const diff = await repo.getFileDiff(dir, { path: 'big-committed.txt', type: 'modified' })
+    expect(diff.state).toBe('oversized')
+    expect(diff.sizeBytes).toBeGreaterThan(GIT_DIFF_MAX_BYTES)
+    // Oversized never populates content.
+    expect(diff.oldContent).toBeUndefined()
+    expect(diff.newContent).toBeUndefined()
+    expect(diff.fingerprint).toBeTruthy()
+  })
+
   it('reports a missing state when the working-tree file is unreadable', async () => {
     // Tracked in HEAD, but removed from disk while status still lists it modified.
     writeFile(dir, 'ghost.txt', 'here\n')
