@@ -12,6 +12,7 @@ import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import type {
   CheckoutPrepareIntent,
   CreatePullRequestInput,
+  GitActionResult,
   GitCommitInput,
   GitFileDiff,
   GitStatusChangedEvent,
@@ -20,6 +21,7 @@ import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import { pushTyped } from '../../transport/push'
 import { getDefaultGitServices, GitStatusSubscription } from '../../git'
+import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
 export const GIT_HANDLED_CHANNELS = [
@@ -46,11 +48,11 @@ function assertFeatureEnabled(): void {
   }
 }
 
-class NotImplementedError extends Error {
-  constructor(channel: string) {
-    super(`${channel} is not implemented in this build.`)
-    this.name = 'NotImplementedError'
-  }
+interface ResolvedSession {
+  checkoutPath: string
+  workspaceId: string
+  /** Managed worktree base ref (PR-delta base), when persisted. */
+  baseRef: string | null
 }
 
 /**
@@ -60,14 +62,28 @@ class NotImplementedError extends Error {
  * others fall back to the session working directory.
  */
 function makeSessionResolver(deps: HandlerDeps) {
-  return (sessionId: string): { checkoutPath: string; workspaceId: string } | null => {
+  return (sessionId: string): ResolvedSession | null => {
     const sessions = deps.sessionManager.getSessions()
     const session = sessions.find((s) => s.id === sessionId)
     if (!session) return null
     const checkoutPath = session.checkout?.checkoutPath ?? session.workingDirectory
     if (!checkoutPath) return null
-    return { checkoutPath, workspaceId: session.workspaceId }
+    return {
+      checkoutPath,
+      workspaceId: session.workspaceId,
+      baseRef: session.checkout?.baseRef ?? null,
+    }
   }
+}
+
+/** Strip ref prefixes and a leading remote name to a plain branch name. */
+function normalizeBaseRef(ref: string | null, primaryRemote: string | null): string | null {
+  if (!ref) return null
+  let b = ref
+  if (b.startsWith('refs/heads/')) b = b.slice('refs/heads/'.length)
+  else if (b.startsWith('refs/remotes/')) b = b.slice('refs/remotes/'.length)
+  if (primaryRemote && b.startsWith(`${primaryRemote}/`)) b = b.slice(primaryRemote.length + 1)
+  return b || null
 }
 
 export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -217,36 +233,141 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
 
   // --- Commit / pull / push (Phase 3, mutation) ---
 
-  server.handle(RPC_CHANNELS.git.COMMIT, async (_ctx, _input: GitCommitInput) => {
+  // Mutations resolve identity server-side, serialize by Git common directory
+  // (so linked worktrees never race on shared metadata), and refresh status
+  // afterwards so the header control and Changes panel reflect the result.
+  async function runMutation(
+    sessionId: string,
+    op: (dir: string) => Promise<GitActionResult>,
+  ): Promise<GitActionResult> {
     assertFeatureEnabled()
-    throw new NotImplementedError(RPC_CHANNELS.git.COMMIT)
+    const resolved = resolveSession(sessionId)
+    if (!resolved) throw new Error('Session checkout could not be resolved.')
+    const ctx = await git.repository.getContext(resolved.checkoutPath)
+    if (!ctx.isGitRepository || !ctx.gitCommonDir) {
+      throw new Error('Selected checkout is not a Git repository.')
+    }
+    try {
+      return await git.mutationLock.withLock(ctx.gitCommonDir, () =>
+        op(ctx.repositoryRoot ?? resolved.checkoutPath),
+      )
+    } finally {
+      await statusSubscription.refresh(sessionId, 'app-action')
+    }
+  }
+
+  server.handle(RPC_CHANNELS.git.COMMIT, async (_ctx, input: GitCommitInput) => {
+    return runMutation(input.sessionId, (dir) =>
+      git.actions.commit({ dir, message: input.message, paths: input.paths }),
+    )
   })
 
-  server.handle(RPC_CHANNELS.git.PULL, async (_ctx, _sessionId: string) => {
-    assertFeatureEnabled()
-    throw new NotImplementedError(RPC_CHANNELS.git.PULL)
+  server.handle(RPC_CHANNELS.git.PULL, async (_ctx, sessionId: string) => {
+    return runMutation(sessionId, (dir) => git.actions.pull(dir))
   })
 
-  server.handle(RPC_CHANNELS.git.PUSH, async (_ctx, _sessionId: string) => {
-    assertFeatureEnabled()
-    throw new NotImplementedError(RPC_CHANNELS.git.PUSH)
+  server.handle(RPC_CHANNELS.git.PUSH, async (_ctx, sessionId: string) => {
+    return runMutation(sessionId, (dir) => git.actions.push(dir))
   })
 
   // --- GitHub capability + pull requests (Phase 3) ---
 
-  server.handle(RPC_CHANNELS.git.GITHUB_STATUS, async () => {
-    throw new NotImplementedError(RPC_CHANNELS.git.GITHUB_STATUS)
+  // Capability + PR lookup are read-only; PR lookup never throws so it cannot
+  // block commit/push (spec: AC15).
+  server.handle(RPC_CHANNELS.git.GITHUB_STATUS, async (_ctx, sessionId: string) => {
+    const resolved = resolveSession(sessionId)
+    if (!resolved) throw new Error('Session checkout could not be resolved.')
+    return git.github.getCapability(resolved.checkoutPath)
   })
 
-  server.handle(RPC_CHANNELS.git.FIND_PULL_REQUEST, async (_ctx, _sessionId: string) => {
-    throw new NotImplementedError(RPC_CHANNELS.git.FIND_PULL_REQUEST)
+  server.handle(RPC_CHANNELS.git.FIND_PULL_REQUEST, async (_ctx, sessionId: string) => {
+    const resolved = resolveSession(sessionId)
+    if (!resolved) return null
+    return git.github.findPullRequest(resolved.checkoutPath)
   })
 
   server.handle(
     RPC_CHANNELS.git.CREATE_PULL_REQUEST,
-    async (_ctx, _input: CreatePullRequestInput) => {
+    async (_ctx, input: CreatePullRequestInput) => {
       assertFeatureEnabled()
-      throw new NotImplementedError(RPC_CHANNELS.git.CREATE_PULL_REQUEST)
+      return createPullRequest(git, statusSubscription, resolveSession, input)
     },
   )
+}
+
+/**
+ * Create a pull request as an ordered, partial-success sequence: verify GitHub
+ * capability, push first when the branch has no upstream / unpushed commits,
+ * resolve the base ref (managed worktree base else default), then `gh pr
+ * create`. Completed stages are never rolled back (spec: AC16).
+ */
+async function createPullRequest(
+  git: GitServices,
+  statusSubscription: GitStatusSubscription,
+  resolveSession: (sessionId: string) => ResolvedSession | null,
+  input: CreatePullRequestInput,
+): Promise<GitActionResult> {
+  const resolved = resolveSession(input.sessionId)
+  if (!resolved) throw new Error('Session checkout could not be resolved.')
+  const ctx = await git.repository.getContext(resolved.checkoutPath)
+  if (!ctx.isGitRepository || !ctx.gitCommonDir) {
+    throw new Error('Selected checkout is not a Git repository.')
+  }
+  const dir = ctx.repositoryRoot ?? resolved.checkoutPath
+  const result: GitActionResult = { stages: [] }
+
+  try {
+    await git.mutationLock.withLock(ctx.gitCommonDir, async () => {
+      const cap = await git.github.getCapability(dir)
+      if (!cap.installed || !cap.authenticated) {
+        result.stages.push({
+          stage: 'create-pr',
+          status: 'failed',
+          error: cap.detail ?? 'GitHub CLI is not installed or authenticated.',
+        })
+        return
+      }
+
+      // Push first when there is no upstream or unpushed commits.
+      const status = await git.repository.getStatus(dir, { baseRef: resolved.baseRef })
+      if (status.upstream == null || status.ahead > 0 || status.publishableCommitCount > 0) {
+        const pushRes = await git.actions.push(dir)
+        result.stages.push(...pushRes.stages)
+        if (pushRes.stages.some((s) => s.status === 'failed')) return
+      }
+
+      const base = normalizeBaseRef(
+        input.baseRef ?? resolved.baseRef ?? status.defaultRef,
+        ctx.primaryRemote,
+      )
+      if (!base) {
+        result.stages.push({
+          stage: 'create-pr',
+          status: 'failed',
+          error: 'Could not resolve a base branch for the pull request.',
+        })
+        return
+      }
+
+      try {
+        const pr = await git.github.createPullRequest({
+          dir,
+          title: input.title,
+          body: input.body,
+          baseRef: base,
+        })
+        result.stages.push({ stage: 'create-pr', status: 'succeeded', detail: pr.url })
+        result.pullRequestUrl = pr.url
+      } catch (err) {
+        result.stages.push({
+          stage: 'create-pr',
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })
+  } finally {
+    await statusSubscription.refresh(input.sessionId, 'app-action')
+  }
+  return result
 }
