@@ -73,6 +73,7 @@ import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
+import { WorkspaceCheckoutBadge } from './WorkspaceCheckoutBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/modes'
@@ -1897,6 +1898,14 @@ export function FreeFormInput({
               workspaceId={workspaceId}
             />
           )}
+          {onWorkingDirectoryChange && (
+            <WorkspaceCheckoutBadge
+              sessionId={sessionId}
+              workingDirectory={workingDirectory}
+              isEmptySession={isEmptySession}
+              onWorkingDirectoryChange={onWorkingDirectoryChange}
+            />
+          )}
           </div>
           )}
 
@@ -2003,6 +2012,16 @@ export function FreeFormInput({
               sessionFolderPath={sessionFolderPath}
               isEmptySession={isEmptySession}
               workspaceId={workspaceId}
+            />
+          )}
+
+          {/* 4. Workspace checkout controls (Git/GitHub V1, feature-flagged) */}
+          {onWorkingDirectoryChange && (
+            <WorkspaceCheckoutBadge
+              sessionId={sessionId}
+              workingDirectory={workingDirectory}
+              isEmptySession={isEmptySession}
+              onWorkingDirectoryChange={onWorkingDirectoryChange}
             />
           )}
           </div>
