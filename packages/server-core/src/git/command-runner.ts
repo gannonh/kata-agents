@@ -106,8 +106,8 @@ export function runGit(args: string[], options: RunGitOptions): Promise<GitComma
         signal,
       },
       (error, stdout, stderr) => {
-        const stdoutStr = typeof stdout === 'string' ? stdout : stdout?.toString('utf8') ?? ''
-        const stderrStr = typeof stderr === 'string' ? stderr : stderr?.toString('utf8') ?? ''
+        const stdoutStr = typeof stdout === 'string' ? stdout : String(stdout ?? '')
+        const stderrStr = typeof stderr === 'string' ? stderr : String(stderr ?? '')
 
         if (!error) {
           resolve({ stdout: stdoutStr, stderr: stderrStr, exitCode: 0 })

@@ -69,6 +69,20 @@ export interface ISessionManager {
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
+
+  /**
+   * Prepare a session's Git checkout (empty-session gate).
+   *
+   * Rejects unless the session has no messages, no SDK session ID, and no live
+   * agent. For managed-worktree intent, creates a managed worktree + temporary
+   * `kata-agent/<token>` branch on the workspace-owning server and binds
+   * checkout metadata, `workingDirectory`, and initial `sdkCwd` atomically.
+   * Idempotent only when the intent matches the persisted ready record.
+   */
+  prepareCheckout(
+    sessionId: string,
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
