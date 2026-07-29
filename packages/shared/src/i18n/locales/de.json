@@ -513,6 +513,8 @@
   "git.confirm.continue": "Fortfahren",
   "git.confirm.defaultBranchBody": "{{branch}} ist der Standard-Branch. Fortfahren?",
   "git.confirm.defaultBranchTitle": "Auf den Standard-Branch pushen?",
+  "git.github.authRequired": "Bei GitHub anmelden",
+  "git.github.installRequired": "GitHub CLI installieren",
   "git.pr.base": "Basis: {{ref}}",
   "git.pr.bodyLabel": "Beschreibung",
   "git.pr.bodyPlaceholder": "Beschreibe deine Änderungen (optional)",

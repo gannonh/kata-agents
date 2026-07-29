@@ -12,7 +12,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { ChevronDown, GitCommitHorizontal, Loader2 } from 'lucide-react'
+import { ChevronDown, GitCommitHorizontal, Github, Loader2 } from 'lucide-react'
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import {
   resolveGitAction,
@@ -48,7 +48,11 @@ import { refreshGitStatus } from '@/atoms/git-status'
 import { useGitStatusSubscription } from './useGitStatusSubscription'
 import { CommitDialog } from './CommitDialog'
 import { PullRequestDialog } from './PullRequestDialog'
-import { primaryActionLabelKey, disabledExplanation } from './git-action-labels'
+import { primaryActionLabelKey, disabledExplanation, githubSetupGuidance } from './git-action-labels'
+
+/** Docs opened when the user clicks the GitHub setup affordance (read-only). */
+const GH_INSTALL_DOCS = 'https://cli.github.com/'
+const GH_AUTH_DOCS = 'https://cli.github.com/manual/gh_auth_login'
 
 export interface GitActionControlProps {
   sessionId: string
@@ -139,6 +143,18 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
 
   const pullRequestsAvailable =
     provider === 'github' && !!capability?.installed && !!capability?.authenticated
+
+  // Surface actionable `gh` setup guidance instead of silently hiding PR
+  // actions (spec: AC15). Only shown when there is work worth publishing so a
+  // clean repo without `gh` stays quiet.
+  const setupGuidance = githubSetupGuidance(provider, capability)
+  const hasShareableWork =
+    !!status &&
+    (status.entries.length > 0 ||
+      status.baseDeltaCount > 0 ||
+      status.publishableCommitCount > 0 ||
+      status.ahead > 0)
+  const showSetupGuidance = !!setupGuidance && hasShareableWork
 
   const resolverInput: GitActionResolverInput = {
     busy,
@@ -379,6 +395,32 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
               )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
+        )}
+
+        {showSetupGuidance && setupGuidance && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                data-git-github-setup
+                aria-label={t(setupGuidance.labelKey)}
+                onClick={() =>
+                  void window.electronAPI.openUrl(
+                    capability?.installed ? GH_AUTH_DOCS : GH_INSTALL_DOCS,
+                  )
+                }
+                className={cn(
+                  'panel-header-btn inline-flex items-center gap-1.5 h-7 px-2 ml-1 rounded-[6px] text-[12px] font-medium',
+                  'bg-background shadow-minimal border border-amber-500/40 text-amber-600 dark:text-amber-400',
+                  'opacity-90 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                )}
+              >
+                <Github className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t(setupGuidance.labelKey)}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[280px]">{setupGuidance.detail}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 

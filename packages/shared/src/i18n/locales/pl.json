@@ -519,6 +519,8 @@
   "git.confirm.continue": "Kontynuuj",
   "git.confirm.defaultBranchBody": "{{branch}} to gałąź domyślna. Kontynuować?",
   "git.confirm.defaultBranchTitle": "Wypchnąć do gałęzi domyślnej?",
+  "git.github.authRequired": "Zaloguj się do GitHub",
+  "git.github.installRequired": "Zainstaluj GitHub CLI",
   "git.pr.base": "Baza: {{ref}}",
   "git.pr.bodyLabel": "Opis",
   "git.pr.bodyPlaceholder": "Opisz swoje zmiany (opcjonalnie)",

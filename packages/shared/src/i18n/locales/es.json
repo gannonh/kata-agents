@@ -513,6 +513,8 @@
   "git.confirm.continue": "Continuar",
   "git.confirm.defaultBranchBody": "{{branch}} es la rama predeterminada. ¿Continuar?",
   "git.confirm.defaultBranchTitle": "¿Hacer push a la rama predeterminada?",
+  "git.github.authRequired": "Inicia sesión en GitHub",
+  "git.github.installRequired": "Instalar GitHub CLI",
   "git.pr.base": "Base: {{ref}}",
   "git.pr.bodyLabel": "Descripción",
   "git.pr.bodyPlaceholder": "Describe tus cambios (opcional)",

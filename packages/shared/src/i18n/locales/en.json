@@ -513,6 +513,8 @@
   "git.confirm.continue": "Continue",
   "git.confirm.defaultBranchBody": "{{branch}} is the default branch. Continue?",
   "git.confirm.defaultBranchTitle": "Push to default branch?",
+  "git.github.authRequired": "Sign in to GitHub",
+  "git.github.installRequired": "Install GitHub CLI",
   "git.pr.base": "Base: {{ref}}",
   "git.pr.bodyLabel": "Description",
   "git.pr.bodyPlaceholder": "Describe your changes (optional)",

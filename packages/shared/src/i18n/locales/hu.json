@@ -513,6 +513,8 @@
   "git.confirm.continue": "Folytatás",
   "git.confirm.defaultBranchBody": "A(z) {{branch}} az alapértelmezett ág. Folytatod?",
   "git.confirm.defaultBranchTitle": "Push az alapértelmezett ágra?",
+  "git.github.authRequired": "Bejelentkezés a GitHubra",
+  "git.github.installRequired": "GitHub CLI telepítése",
   "git.pr.base": "Alap: {{ref}}",
   "git.pr.bodyLabel": "Leírás",
   "git.pr.bodyPlaceholder": "Írd le a változtatásaidat (nem kötelező)",

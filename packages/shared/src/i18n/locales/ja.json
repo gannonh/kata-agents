@@ -513,6 +513,8 @@
   "git.confirm.continue": "続行",
   "git.confirm.defaultBranchBody": "{{branch}} はデフォルトブランチです。続行しますか？",
   "git.confirm.defaultBranchTitle": "デフォルトブランチにプッシュしますか？",
+  "git.github.authRequired": "GitHub にサインイン",
+  "git.github.installRequired": "GitHub CLI をインストール",
   "git.pr.base": "ベース: {{ref}}",
   "git.pr.bodyLabel": "説明",
   "git.pr.bodyPlaceholder": "変更内容を記述（任意）",

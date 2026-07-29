@@ -513,6 +513,8 @@
   "git.confirm.continue": "继续",
   "git.confirm.defaultBranchBody": "{{branch}} 是默认分支。是否继续？",
   "git.confirm.defaultBranchTitle": "推送到默认分支？",
+  "git.github.authRequired": "登录 GitHub",
+  "git.github.installRequired": "安装 GitHub CLI",
   "git.pr.base": "基础分支：{{ref}}",
   "git.pr.bodyLabel": "描述",
   "git.pr.bodyPlaceholder": "描述你的更改（可选）",
