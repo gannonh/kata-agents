@@ -11,6 +11,7 @@ const ORIGINAL = process.env[FLAG]
 function makeGitServices(overrides?: Partial<{
   getContext: unknown
   listRefs: unknown
+  status: { repositoryRoot?: string | null; entries?: Array<{ path: string; previousPath?: string; type: string }> }
 }>): { git: GitServices; calls: string[] } {
   const calls: string[] = []
   const git = {
@@ -25,7 +26,12 @@ function makeGitServices(overrides?: Partial<{
       },
       getStatus: async (dir: string) => {
         calls.push(`getStatus:${dir}`)
-        return { isGitRepository: true, checkoutPath: dir, entries: [] }
+        return {
+          isGitRepository: true,
+          checkoutPath: dir,
+          repositoryRoot: overrides?.status?.repositoryRoot ?? dir,
+          entries: overrides?.status?.entries ?? [],
+        }
       },
       getFileDiff: async (dir: string, req: { path: string }) => {
         calls.push(`getFileDiff:${dir}:${req.path}`)
@@ -37,7 +43,12 @@ function makeGitServices(overrides?: Partial<{
   return { git, calls }
 }
 
-function makeHarness(gitServices: GitServices) {
+function makeHarness(
+  gitServices: GitServices,
+  sessions: Array<{ id: string; workspaceId: string; workingDirectory: string; checkout?: unknown }> = [
+    { id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' },
+  ],
+) {
   const handlers = new Map<string, HandlerFn>()
   const prepareCalls: Array<[string, unknown]> = []
   const removeCalls: Array<[string, boolean | undefined]> = []
@@ -63,9 +74,7 @@ function makeHarness(gitServices: GitServices) {
   const deps: HandlerDeps = {
     sessionManager: {
       getSessions() {
-        return [
-          { id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' },
-        ]
+        return sessions
       },
       setGitServices(services: GitServices) {
         setGitServicesArg = services
@@ -192,6 +201,28 @@ describe('registerGitHandlers', () => {
     expect(calls).toContain('getStatus:/repo')
     expect(diff.state).toBe('clean')
     expect(diff.path).toBe('src/a.ts')
+  })
+
+  it('resolves diffs against the repository root for a nested legacy checkout', async () => {
+    // Legacy/unprepared session whose working directory is a nested subdir. Git
+    // porcelain paths are repo-root relative, so the diff must be read from the
+    // repository root — not the nested working directory.
+    const { git, calls } = makeGitServices({
+      status: {
+        repositoryRoot: '/repo',
+        entries: [{ path: 'src/a.ts', type: 'modified' }],
+      },
+    })
+    const { handlers, ctx } = makeHarness(git, [
+      { id: 's1', workspaceId: 'ws1', workingDirectory: '/repo/apps/nested' },
+    ])
+
+    const diff = await handlers.get(RPC_CHANNELS.git.GET_DIFF)!(ctx, 's1', 'src/a.ts')
+    // Status is read from the persisted (nested) checkout, but the diff itself
+    // is resolved against the repository root.
+    expect(calls).toContain('getStatus:/repo/apps/nested')
+    expect(calls).toContain('getFileDiff:/repo:src/a.ts')
+    expect(diff.state).toBe('text')
   })
 
   it('subscribes and unsubscribes status by session (client-scoped)', async () => {

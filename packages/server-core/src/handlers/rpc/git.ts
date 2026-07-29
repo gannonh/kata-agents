@@ -170,6 +170,11 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
     if (!status.isGitRepository) {
       throw new Error('Selected checkout is not a Git repository.')
     }
+    // Status paths from Git porcelain are always repository-root relative. For a
+    // legacy/unprepared session whose checkout is a nested subdirectory, the
+    // diff must be resolved against the repository root — not the nested
+    // working directory — or HEAD blobs and working-tree files won't be found.
+    const diffRoot = status.repositoryRoot ?? resolved.checkoutPath
     const entry = status.entries.find((e) => e.path === path || e.previousPath === path)
     if (!entry) {
       // Path is no longer part of the uncommitted changes (e.g. reverted).
@@ -184,7 +189,7 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
         newContent: '',
       } satisfies GitFileDiff
     }
-    return git.repository.getFileDiff(resolved.checkoutPath, {
+    return git.repository.getFileDiff(diffRoot, {
       path: entry.path,
       previousPath: entry.previousPath,
       type: entry.type,
