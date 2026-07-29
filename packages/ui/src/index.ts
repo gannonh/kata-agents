@@ -163,6 +163,8 @@ export {
   truncateFilePath,
   type ShikiCodeViewerProps,
   type ShikiDiffViewerProps,
+  type DiffAnnotationSide,
+  type DiffLinePointer,
   type UnifiedDiffViewerProps,
   type DiffViewerControlsProps,
 } from './components/code-viewer'

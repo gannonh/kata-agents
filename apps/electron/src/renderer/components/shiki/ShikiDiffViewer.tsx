@@ -11,15 +11,26 @@ import * as React from 'react'
 import { ShikiDiffViewer as BaseShikiDiffViewer, type ShikiDiffViewerProps as BaseProps } from '@kata-sh/ui'
 import { useTheme } from '@/hooks/useTheme'
 
-export interface ShikiDiffViewerProps extends Omit<BaseProps, 'theme' | 'shikiTheme'> {}
+export type ShikiDiffViewerProps<TAnnotation = undefined> = Omit<
+  BaseProps<TAnnotation>,
+  'theme' | 'shikiTheme'
+>
 
 /**
  * ShikiDiffViewer - Shiki-based diff viewer component
  * Connected to Electron's theme context. Passes the app's Shiki theme
  * so the diff viewer uses the matching syntax theme (e.g. dracula, nord).
  */
-export function ShikiDiffViewer(props: ShikiDiffViewerProps) {
+export function ShikiDiffViewer<TAnnotation = undefined>(
+  props: ShikiDiffViewerProps<TAnnotation>,
+) {
   const { isDark, shikiTheme } = useTheme()
 
-  return <BaseShikiDiffViewer {...props} theme={isDark ? 'dark' : 'light'} shikiTheme={shikiTheme} />
+  return (
+    <BaseShikiDiffViewer<TAnnotation>
+      {...props}
+      theme={isDark ? 'dark' : 'light'}
+      shikiTheme={shikiTheme}
+    />
+  )
 }
