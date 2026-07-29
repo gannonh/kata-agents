@@ -131,6 +131,52 @@ describe('RepositoryService.getStatus', () => {
   })
 })
 
+describe('RepositoryService.getStatus — publish state', () => {
+  test('computes publishable/baseDelta counts and honors an explicit base ref', async () => {
+    // Bare remote with an initial main commit.
+    const remote = tmp()
+    await runGit(['init', '--bare', '-b', 'main', remote], { cwd: process.cwd(), env: GIT_ENV })
+
+    const work = tmp()
+    await runGit(['clone', remote, work], { cwd: process.cwd(), env: GIT_ENV })
+    await runGit(['config', 'user.name', 'Kata Test'], { cwd: work, env: GIT_ENV })
+    await runGit(['config', 'user.email', 'test@kata.sh'], { cwd: work, env: GIT_ENV })
+    writeFile(work, 'README.md', '# base\n')
+    await git(work, ['add', '.'])
+    await git(work, ['commit', '-m', 'base'])
+    await git(work, ['push', '-u', 'origin', 'main'])
+
+    // Feature branch with two commits, no upstream configured yet.
+    await git(work, ['checkout', '-b', 'feature'])
+    writeFile(work, 'a.txt', 'a\n')
+    await git(work, ['add', '.'])
+    await git(work, ['commit', '-m', 'a'])
+    writeFile(work, 'b.txt', 'b\n')
+    await git(work, ['add', '.'])
+    await git(work, ['commit', '-m', 'b'])
+
+    const before = await svc.getStatus(work)
+    expect(before.upstream).toBeNull()
+    // Two commits not yet on the remote → publishable, and two commits ahead of
+    // origin/main → base delta.
+    expect(before.publishableCommitCount).toBe(2)
+    expect(before.baseDeltaCount).toBe(2)
+
+    // After pushing + tracking, publishable clears but base delta remains.
+    await git(work, ['push', '-u', 'origin', 'feature'])
+    const after = await svc.getStatus(work)
+    expect(after.upstream).toBe('origin/feature')
+    expect(after.publishableCommitCount).toBe(0)
+    expect(after.baseDeltaCount).toBe(2)
+    expect(after.ahead).toBe(0)
+
+    // An explicit base ref overrides the default-ref delta base.
+    const vsFeature = await svc.getStatus(work, { baseRef: 'feature' })
+    expect(vsFeature.baseRef).toBe('feature')
+    expect(vsFeature.baseDeltaCount).toBe(0)
+  })
+})
+
 describe('command-runner', () => {
   test('throws structured error for unknown git subcommand', async () => {
     const d = tmp()

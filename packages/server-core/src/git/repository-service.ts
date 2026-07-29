@@ -307,8 +307,16 @@ export class RepositoryService {
     return { refs, currentBranch: branchState.detached ? null : branchState.branch, defaultRef }
   }
 
-  /** Parse machine-readable status for a checkout. */
-  async getStatus(dir: string): Promise<GitStatusSnapshot> {
+  /**
+   * Parse machine-readable status for a checkout. `options.baseRef` is the
+   * managed worktree's persisted base ref (when present) used to compute
+   * `baseDeltaCount` for pull-request eligibility; it falls back to the
+   * detected default ref.
+   */
+  async getStatus(
+    dir: string,
+    options?: { baseRef?: string | null },
+  ): Promise<GitStatusSnapshot> {
     const ctx = await this.getContext(dir)
     const snapshot: GitStatusSnapshot = {
       repositoryRoot: ctx.repositoryRoot,
@@ -317,7 +325,7 @@ export class RepositoryService {
       currentBranch: ctx.currentBranch,
       detached: ctx.detached,
       defaultRef: ctx.defaultRef,
-      baseRef: null,
+      baseRef: options?.baseRef ?? null,
       upstream: null,
       ahead: 0,
       behind: 0,
@@ -342,10 +350,81 @@ export class RepositoryService {
       snapshot.behind = behind
       snapshot.upstream = upstream
       await this.attachDiffStats(dir, snapshot)
+      await this.attachPublishState(dir, snapshot, ctx)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
     }
     return snapshot
+  }
+
+  /**
+   * Compute `publishableCommitCount` (commits on HEAD not present on the
+   * primary remote — first-push eligibility when no upstream is configured) and
+   * `baseDeltaCount` (commits on HEAD not reachable from the PR base/default
+   * ref — pull-request eligibility). Both are best-effort; failures leave the
+   * counts at zero so the action resolver simply offers fewer actions.
+   */
+  private async attachPublishState(
+    dir: string,
+    snapshot: GitStatusSnapshot,
+    ctx: RepositoryContext,
+  ): Promise<void> {
+    if (snapshot.detached || !snapshot.currentBranch) return
+
+    // Publishable = commits reachable from HEAD but not from any remote-tracking
+    // branch of the primary remote. Only relevant with no configured upstream.
+    if (ctx.primaryRemote && !snapshot.upstream) {
+      try {
+        const res = await runGit(
+          ['rev-list', '--count', 'HEAD', '--not', `--remotes=${ctx.primaryRemote}`],
+          { cwd: dir, okExitCodes: [128] },
+        )
+        if (res.exitCode === 0) snapshot.publishableCommitCount = parseInt(res.stdout.trim(), 10) || 0
+      } catch {
+        /* leave at 0 */
+      }
+    }
+
+    // Base delta = commits ahead of the resolved PR base (managed worktree base
+    // ref, else default ref). Prefer the remote-tracking base so an unpulled
+    // local base does not understate the delta.
+    const baseName = snapshot.baseRef ?? snapshot.defaultRef
+    if (baseName) {
+      const base = await this.resolveDeltaBase(dir, baseName, ctx.primaryRemote)
+      if (base) snapshot.baseDeltaCount = await this.countCommitsAhead(dir, base)
+    }
+  }
+
+  /** True when a Git ref resolves to a commit. */
+  private async refExists(dir: string, ref: string): Promise<boolean> {
+    try {
+      const res = await runGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+        cwd: dir,
+        okExitCodes: [1, 128],
+      })
+      return res.exitCode === 0
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Resolve a base branch name to an existing ref for delta counting. Prefers
+   * the primary remote's copy (`<remote>/<base>`) so the PR delta reflects what
+   * is actually on the remote base, then falls back to a local ref.
+   */
+  private async resolveDeltaBase(
+    dir: string,
+    baseName: string,
+    primaryRemote: string | null,
+  ): Promise<string | null> {
+    const candidates: string[] = []
+    if (primaryRemote && !baseName.includes('/')) candidates.push(`${primaryRemote}/${baseName}`)
+    candidates.push(baseName)
+    for (const candidate of candidates) {
+      if (await this.refExists(dir, candidate)) return candidate
+    }
+    return null
   }
 
   /**

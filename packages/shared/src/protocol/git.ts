@@ -357,6 +357,13 @@ export interface GitActionStageResult {
   status: GitActionStageStatus
   detail?: string
   error?: string
+  /**
+   * Manual recovery command surfaced when a stage partially succeeded and left
+   * work in a state the user may want to finish by hand — e.g. the path-limited
+   * real-index reconciliation after a selected-file commit
+   * (`git reset -q HEAD -- <paths>`). Presented as guidance, never auto-run.
+   */
+  recoveryCommand?: string
 }
 
 export interface GitActionResult {

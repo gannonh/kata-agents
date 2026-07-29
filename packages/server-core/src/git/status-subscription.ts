@@ -29,9 +29,11 @@ export type TimerFactory = (fn: () => void, ms: number) => CancelTimer
 
 export interface GitStatusSubscriptionDeps {
   /** Read a status snapshot for a checkout directory. */
-  getStatus: (dir: string) => Promise<GitStatusSnapshot>
+  getStatus: (dir: string, options?: { baseRef?: string | null }) => Promise<GitStatusSnapshot>
   /** Resolve a session ID to its active checkout path + owning workspace. */
-  resolveSession: (sessionId: string) => { checkoutPath: string; workspaceId: string } | null
+  resolveSession: (
+    sessionId: string,
+  ) => { checkoutPath: string; workspaceId: string; baseRef?: string | null } | null
   /** Publish a workspace-routed status-change event. */
   publish: (event: GitStatusChangedEvent, workspaceId: string) => void
   /** Poll interval; must be ≤ 3000ms per the acceptance bound. Default 3000. */
@@ -42,6 +44,8 @@ export interface GitStatusSubscriptionDeps {
 
 interface CheckoutState {
   checkoutPath: string
+  /** Managed worktree base ref for PR-delta counting, if known for this checkout. */
+  baseRef: string | null
   /** clientId → set of session IDs subscribed by that client on this checkout. */
   subscribers: Map<string, Set<string>>
   /** sessionId → owning workspace, used to route change events. */
@@ -68,6 +72,15 @@ export function statusSignature(s: GitStatusSnapshot): string {
     u: s.upstream,
     a: s.ahead,
     be: s.behind,
+    // Publish-state fields drive the header action resolver, so a change in any
+    // of them must emit a status event even when the file list is unchanged
+    // (e.g. after a push clears the publishable/ahead counts).
+    pc: s.publishableCommitCount,
+    bd: s.baseDeltaCount,
+    def: s.defaultRef,
+    baseR: s.baseRef,
+    rem: s.primaryRemote,
+    prov: s.provider,
     add: s.additions ?? null,
     del: s.deletions ?? null,
     op: s.operationInProgress,
@@ -114,6 +127,7 @@ export class GitStatusSubscription {
       throw new Error(`Cannot resolve checkout for session ${sessionId}.`)
     }
     const { checkoutPath, workspaceId } = resolved
+    const baseRef = resolved.baseRef ?? null
 
     // If the session moved to a different checkout, drop the stale mapping first.
     const prev = this.sessionToCheckout.get(sessionId)
@@ -126,6 +140,7 @@ export class GitStatusSubscription {
     if (!state) {
       state = {
         checkoutPath,
+        baseRef,
         subscribers: new Map(),
         sessionWorkspace: new Map(),
         lastSignature: null,
@@ -145,7 +160,7 @@ export class GitStatusSubscription {
     state.sessionWorkspace.set(sessionId, workspaceId)
     this.sessionToCheckout.set(sessionId, checkoutPath)
 
-    const status = await this.getStatus(checkoutPath)
+    const status = await this.getStatus(checkoutPath, { baseRef: state.baseRef })
     state.lastSignature = statusSignature(status)
     if (isNew) this.startTimer(state)
     return status
@@ -240,7 +255,7 @@ export class GitStatusSubscription {
     }
     state.polling = true
     try {
-      const status = await this.getStatus(state.checkoutPath)
+      const status = await this.getStatus(state.checkoutPath, { baseRef: state.baseRef })
       const sig = statusSignature(status)
       if (sig !== state.lastSignature) {
         state.lastSignature = sig
