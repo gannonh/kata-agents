@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { createGitServices } from '../index'
 import type { ManagedWorktreeRecord } from '@kata-sh/shared/protocol'
-import { initRepo, makeTmpDir, cleanup, git } from './test-helpers'
+import { initRepo, makeTmpDir, cleanup, git, writeFile } from './test-helpers'
 
 const cleanups: string[] = []
 function tmp(): string {
@@ -152,5 +152,37 @@ describe('SessionManager.removeManagedWorktree — session-resolved identity', (
     const wsRoot = tmp()
     injectSession(sm, 'plain', wsRoot)
     await expect(sm.removeManagedWorktree('plain')).rejects.toThrow(/no managed worktree/i)
+  })
+
+  test('blocks removal of a worktree with uncommitted work unless a destructive force is confirmed (AC19)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'dirty', wsRoot)
+
+    const prep = await sm.prepareCheckout('dirty', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Leave uncommitted work in the worktree.
+    writeFile(prep.checkout.checkoutPath, 'scratch.txt', 'work in progress\n')
+
+    // The inspection the delete dialog reads flags a destructive removal.
+    const risk = await sm.inspectManagedWorktreeRemoval('dirty')
+    expect(risk.uncommittedFileCount).toBeGreaterThan(0)
+    expect(risk.blocked).toBe(false)
+
+    // Without force the removal is refused and the checkout is preserved.
+    const blocked = await sm.removeManagedWorktree('dirty')
+    expect(blocked.removed).toBe(false)
+    expect(blocked.blocked).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+
+    // With the explicit destructive confirmation (force) it is removed.
+    const forced = await sm.removeManagedWorktree('dirty', { force: true })
+    expect(forced.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })
 })
