@@ -1,7 +1,8 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAtomValue } from 'jotai'
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, GitBranch, GitFork, Loader2 } from 'lucide-react'
+import { Check, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
 
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import type {
@@ -11,10 +12,12 @@ import type {
   RepositoryContext,
 } from '@kata-sh/shared/protocol'
 
+import { sessionAtomFamily } from '@/atoms/sessions'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
+import { resolveCheckoutIdentity, resolveSendGate } from './checkout-controls'
 
 /**
  * WorkspaceCheckoutBadge — composer Workspace control for Git checkouts.
@@ -22,11 +25,19 @@ import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
  * Feature-flag gated by {@link FEATURE_FLAGS.gitWorkspaceV1}. Before the first
  * message in a Git repository it offers a Workspace menu with **Current
  * checkout** and **New worktree**; selecting New worktree reveals a searchable
- * **From `<ref>`** picker defaulting to the current branch. Preparing a managed
- * worktree happens on the workspace-owning server via `prepareGitCheckout`; on
- * success the controls lock and show the checkout identity even if the
- * subsequent message send fails. Non-Git directories render nothing so the
- * ordinary working-directory experience is retained.
+ * **From `<ref>`** picker defaulting to the current branch.
+ *
+ * A selected New worktree/ref intent stays renderer state until it is prepared.
+ * Preparation happens on the workspace-owning server via `prepareGitCheckout`
+ * and is triggered on the first Send through the imperative
+ * {@link WorkspaceCheckoutHandle.prepareIfNeeded} so a message can never bypass
+ * preparation and land in the Current checkout (AC4). On success the controls
+ * lock and show the checkout identity even if the subsequent message send fails.
+ *
+ * Identity for a resumed/restarted session is derived from the persisted
+ * `session.checkout` (+ derived `sharedOwnerCount`) so it never resets to
+ * Current (AC5), and a worktree shared by more than one owner shows the
+ * **Shared worktree** label (AC8).
  */
 export interface WorkspaceCheckoutBadgeProps {
   sessionId?: string
@@ -35,6 +46,24 @@ export interface WorkspaceCheckoutBadgeProps {
   onWorkingDirectoryChange: (path: string) => void
   /** Notified once a checkout is prepared and the controls lock. */
   onCheckoutPrepared?: (result: CheckoutPrepareResult) => void
+}
+
+/** Result of a prepare-before-send attempt. */
+export interface PrepareOutcome {
+  status: 'ready' | 'not-needed' | 'error'
+  error?: string
+}
+
+/** Imperative handle used by the FreeFormInput submit path (AC4). */
+export interface WorkspaceCheckoutHandle {
+  /**
+   * Ensure any pending New worktree/ref intent is prepared before the message
+   * is accepted. Returns `not-needed` when the current selection can send
+   * directly, `ready` after a successful preparation, or `error` (with a
+   * message) when preparation is required but failed — in which case the caller
+   * must NOT send the message.
+   */
+  prepareIfNeeded(): Promise<PrepareOutcome>
 }
 
 const MENU_CONTAINER_STYLE =
@@ -55,13 +84,16 @@ function dedupeRefs(refs: GitRef[]): GitRef[] {
   return out
 }
 
-export function WorkspaceCheckoutBadge({
-  sessionId,
-  workingDirectory,
-  isEmptySession = false,
-  onWorkingDirectoryChange,
-  onCheckoutPrepared,
-}: WorkspaceCheckoutBadgeProps) {
+function WorkspaceCheckoutBadgeInner(
+  {
+    sessionId,
+    workingDirectory,
+    isEmptySession = false,
+    onWorkingDirectoryChange,
+    onCheckoutPrepared,
+  }: WorkspaceCheckoutBadgeProps,
+  ref: React.ForwardedRef<WorkspaceCheckoutHandle>,
+) {
   const { t } = useTranslation()
   const [context, setContext] = React.useState<RepositoryContext | null>(null)
   const [mode, setMode] = React.useState<CheckoutMode>('current')
@@ -74,6 +106,13 @@ export function WorkspaceCheckoutBadge({
   const [prepared, setPrepared] = React.useState<CheckoutPrepareResult | null>(null)
 
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
+
+  // Persisted checkout + shared-owner count from the session DTO. Present after
+  // preparation and on resume/restart — this is what keeps a resumed session
+  // locked to its worktree/shared identity instead of resetting to Current.
+  const session = useAtomValue(sessionAtomFamily(sessionId ?? '__no_session__'))
+  const persistedCheckout = session?.checkout ?? null
+  const sharedOwnerCount = session?.sharedOwnerCount
 
   // Resolve repository identity for the active working directory. Reset any
   // pending New worktree intent whenever the directory changes (spec: switching
@@ -125,44 +164,103 @@ export function WorkspaceCheckoutBadge({
     [refs.length, loadRefs],
   )
 
-  const handlePrepare = React.useCallback(async () => {
-    if (!sessionId || !workingDirectory || !baseRef) return
+  // Prepare-before-send gate (AC4). Idempotent: once prepared or already bound
+  // to a persisted checkout, sending proceeds directly.
+  const prepareIfNeeded = React.useCallback(async (): Promise<PrepareOutcome> => {
+    const gate = resolveSendGate({
+      mode,
+      baseRef,
+      workingDirectory: workingDirectory ?? null,
+      prepared: !!prepared,
+      hasPersistedCheckout: !!persistedCheckout,
+      isGitRepository: !!context?.isGitRepository,
+    })
+
+    if (gate.action === 'send') return { status: 'not-needed' }
+    if (gate.action === 'block') {
+      const msg = t('git.workspace.baseRefRequired')
+      setError(msg)
+      setOpen(true)
+      return { status: 'error', error: msg }
+    }
+    if (!sessionId) {
+      return { status: 'error', error: 'Missing session.' }
+    }
+
     setPreparing(true)
     setError(null)
     try {
-      const result = await window.electronAPI.prepareGitCheckout(sessionId, {
-        mode: 'managed-worktree',
-        workingDirectory,
-        baseRef,
-      })
+      const result = await window.electronAPI.prepareGitCheckout(sessionId, gate.intent)
       setPrepared(result)
       setOpen(false)
       onWorkingDirectoryChange(result.workingDirectory)
       onCheckoutPrepared?.(result)
+      return { status: 'ready' }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg)
+      setOpen(true)
+      return { status: 'error', error: msg }
     } finally {
       setPreparing(false)
     }
-  }, [sessionId, workingDirectory, baseRef, onWorkingDirectoryChange, onCheckoutPrepared])
+  }, [
+    mode,
+    baseRef,
+    workingDirectory,
+    prepared,
+    persistedCheckout,
+    context,
+    sessionId,
+    onWorkingDirectoryChange,
+    onCheckoutPrepared,
+    t,
+  ])
+
+  React.useImperativeHandle(ref, () => ({ prepareIfNeeded }), [prepareIfNeeded])
+
+  const handlePrepare = React.useCallback(() => {
+    void prepareIfNeeded()
+  }, [prepareIfNeeded])
 
   if (!flagEnabled) return null
 
-  // Locked identity after a managed worktree is prepared. Persists for the
-  // lifetime of this composer mount even if the message send later fails.
-  if (prepared) {
-    const branch = prepared.checkout.expectedBranch ?? prepared.checkout.branchAtPreparation
+  const identity = resolveCheckoutIdentity({
+    isGitRepository: !!context?.isGitRepository,
+    isEmptySession,
+    hasSessionId: !!sessionId,
+    persistedCheckout,
+    locallyPrepared: prepared?.checkout ?? null,
+    sharedOwnerCount,
+  })
+
+  if (identity.kind === 'none') return null
+
+  // Locked managed-worktree identity (prepared, resumed, or conversation-branch
+  // shared). Persists for the composer lifetime even if a later send fails.
+  if (identity.kind === 'worktree' || identity.kind === 'shared-worktree') {
+    const shared = identity.kind === 'shared-worktree'
+    const branch = identity.branch ?? t('git.workspace.worktree')
     return (
       <FreeFormInputContextBadge
-        icon={<GitFork className="h-4 w-4" />}
-        label={branch ?? t('git.workspace.worktree')}
+        icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}
+        label={shared ? t('git.workspace.sharedWorktree') : branch}
         isExpanded
         hasSelection
         showChevron={false}
         tooltip={
           <span className="flex flex-col gap-0.5">
-            <span className="font-medium">{t('git.workspace.worktreeReady')}</span>
-            {branch && <span className="text-xs opacity-70">{t('chat.onBranch', { branch })}</span>}
+            <span className="font-medium">
+              {shared ? t('git.workspace.sharedWorktree') : t('git.workspace.worktreeReady')}
+            </span>
+            {shared && (
+              <span className="text-xs opacity-70">{t('git.workspace.sharedWorktreeNote')}</span>
+            )}
+            {identity.branch && (
+              <span className="text-xs opacity-70">
+                {t('chat.onBranch', { branch: identity.branch })}
+              </span>
+            )}
           </span>
         }
         disabled
@@ -170,15 +268,13 @@ export function WorkspaceCheckoutBadge({
     )
   }
 
-  if (!context?.isGitRepository) return null
-
-  const liveBranch = context.detached
+  const liveBranch = context?.detached
     ? t('git.workspace.detached')
-    : context.currentBranch ?? context.defaultRef ?? t('git.workspace.currentCheckout')
+    : context?.currentBranch ?? context?.defaultRef ?? identity.branch ?? t('git.workspace.currentCheckout')
 
-  // Once the session has messages the checkout is fixed; show live branch
-  // identity passively rather than the interactive menu.
-  if (!isEmptySession || !sessionId) {
+  // Locked / passive Current checkout identity: either a persisted current
+  // checkout, or a session that already has messages.
+  if (identity.kind === 'current') {
     return (
       <FreeFormInputContextBadge
         icon={<GitBranch className="h-4 w-4" />}
@@ -197,6 +293,7 @@ export function WorkspaceCheckoutBadge({
     )
   }
 
+  // identity.kind === 'menu' — interactive Workspace/ref selection.
   const triggerLabel =
     mode === 'managed-worktree'
       ? t('git.workspace.fromRef', { ref: baseRef ?? liveBranch })
@@ -208,13 +305,15 @@ export function WorkspaceCheckoutBadge({
         <span className="shrink min-w-0 overflow-hidden">
           <FreeFormInputContextBadge
             icon={
-              mode === 'managed-worktree' ? (
+              preparing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : mode === 'managed-worktree' ? (
                 <GitFork className="h-4 w-4" />
               ) : (
                 <GitBranch className="h-4 w-4" />
               )
             }
-            label={triggerLabel}
+            label={preparing ? t('git.workspace.preparing') : triggerLabel}
             isExpanded={isEmptySession}
             hasSelection
             showChevron
@@ -311,3 +410,6 @@ export function WorkspaceCheckoutBadge({
     </Popover>
   )
 }
+
+export const WorkspaceCheckoutBadge = React.forwardRef(WorkspaceCheckoutBadgeInner)
+WorkspaceCheckoutBadge.displayName = 'WorkspaceCheckoutBadge'
