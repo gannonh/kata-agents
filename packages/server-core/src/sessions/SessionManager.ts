@@ -5157,6 +5157,20 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Callback that requests an immediate Git status refresh for a session.
+   * Installed by the git RPC handlers so agent turn completion (and, later,
+   * app-issued Git actions) can refresh the Changes surface without waiting for
+   * the coalesced poll tick (spec: refresh immediately after agent turn
+   * completion). No-op when the session's checkout is not subscribed.
+   */
+  private gitStatusRefresher: ((sessionId: string) => void) | null = null
+
+  /** Install the agent-turn / app-action Git status refresher. */
+  setGitStatusRefresher(refresh: (sessionId: string) => void): void {
+    this.gitStatusRefresher = refresh
+  }
+
+  /**
    * Empty-session checkout preparation gate. See ISessionManager.prepareCheckout.
    *
    * Ordering (managed worktree):
@@ -6510,6 +6524,16 @@ export class SessionManager implements ISessionManager {
     if (!managed) return
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+
+    // Agent turn just ended — request an immediate Git status refresh so the
+    // Changes surface reflects any files the agent touched without waiting for
+    // the coalesced poll tick. Best-effort and a no-op when the checkout is not
+    // subscribed; never blocks turn cleanup.
+    try {
+      this.gitStatusRefresher?.(sessionId)
+    } catch (err) {
+      sessionLog.warn(`Git status refresh after turn failed for ${sessionId}:`, err)
+    }
 
     // 1. Cleanup state
     this.setProcessing(managed, false)

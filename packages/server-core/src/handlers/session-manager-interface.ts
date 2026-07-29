@@ -90,6 +90,12 @@ export interface ISessionManager {
    */
   setGitServices?(services: import('../git').GitServices): void
   /**
+   * Install a callback that requests an immediate Git status refresh for a
+   * session. The git RPC handlers wire this so agent turn completion refreshes
+   * the Changes surface without waiting for the coalesced poll tick.
+   */
+  setGitStatusRefresher?(refresh: (sessionId: string) => void): void
+  /**
    * Inspect managed-worktree removal risk for the requesting session. Identity
    * is resolved server-side from the session's persisted checkout — the client
    * never supplies a worktree path or ID.

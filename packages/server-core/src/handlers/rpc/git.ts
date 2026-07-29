@@ -93,6 +93,13 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
   // turn completion can trigger an immediate refresh.
   deps.gitStatusSubscription = statusSubscription
 
+  // Wire agent-turn completion to an immediate status refresh. SessionManager
+  // invokes this when a turn stops; the subscription no-ops for checkouts no
+  // surface is watching, and only publishes when the status actually changed.
+  deps.sessionManager.setGitStatusRefresher?.((sessionId: string) => {
+    void statusSubscription.refresh(sessionId, 'app-action')
+  })
+
   // Startup reconciliation: once the session manager has finished loading
   // sessions, compare the managed-worktree registry against persisted session
   // ownership and `git worktree list --porcelain`. Best-effort — a failure must

@@ -54,6 +54,7 @@ function makeHarness(
   const removeCalls: Array<[string, boolean | undefined]> = []
   const inspectCalls: string[] = []
   let setGitServicesArg: GitServices | null = null
+  let gitStatusRefresher: ((sessionId: string) => void) | null = null
 
   const server: RpcServer = {
     handle(channel, handler) {
@@ -78,6 +79,9 @@ function makeHarness(
       },
       setGitServices(services: GitServices) {
         setGitServicesArg = services
+      },
+      setGitStatusRefresher(refresh: (sessionId: string) => void) {
+        gitStatusRefresher = refresh
       },
       async prepareCheckout(sessionId: string, intent: unknown) {
         prepareCalls.push([sessionId, intent])
@@ -107,6 +111,7 @@ function makeHarness(
     removeCalls,
     inspectCalls,
     getSetGitServicesArg: () => setGitServicesArg,
+    getGitStatusRefresher: () => gitStatusRefresher,
   }
 }
 
@@ -223,6 +228,23 @@ describe('registerGitHandlers', () => {
     expect(calls).toContain('getStatus:/repo/apps/nested')
     expect(calls).toContain('getFileDiff:/repo:src/a.ts')
     expect(diff.state).toBe('text')
+  })
+
+  it('installs an agent-turn refresher that re-polls a subscribed checkout', async () => {
+    const { git, calls } = makeGitServices()
+    const { handlers, ctx, getGitStatusRefresher } = makeHarness(git)
+
+    // The refresher is installed at registration time (agent turn completion).
+    const refresh = getGitStatusRefresher()
+    expect(typeof refresh).toBe('function')
+
+    // Subscribe a session, then simulate an agent turn completing.
+    await handlers.get(RPC_CHANNELS.git.SUBSCRIBE_STATUS)!(ctx, 's1')
+    const before = calls.filter((c) => c === 'getStatus:/repo').length
+    refresh!('s1')
+    await new Promise((r) => setTimeout(r, 0))
+    const after = calls.filter((c) => c === 'getStatus:/repo').length
+    expect(after).toBeGreaterThan(before)
   })
 
   it('subscribes and unsubscribes status by session (client-scoped)', async () => {
