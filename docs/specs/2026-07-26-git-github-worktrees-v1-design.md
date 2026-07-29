@@ -10,7 +10,15 @@ timestamp: 2026-07-26T00:00:00Z
 # Git and GitHub V1 with managed worktrees
 
 ## Status
-Implemented — all four phases built behind `KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). Build report: [2026-07-26-git-github-worktrees-v1-build-report.md](2026-07-26-git-github-worktrees-v1-build-report.md). Real-GitHub UAT and the macOS `@git` E2E GUI flow are deferred to Verify (see the build report's Deferrals).
+Implemented and verified — all four phases are built behind
+`KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). The macOS `@git` tier now
+contains an executable real-Electron/real-Git lifecycle flow, and visual
+evidence for all four slices is checked in under
+[`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
+The authenticated real-GitHub mutation pass remains an opt-in check for hosts
+where `gh` is installed and authenticated; this verification pass exercised the
+specified non-mutating missing-`gh` guidance instead. Build report:
+[2026-07-26-git-github-worktrees-v1-build-report.md](2026-07-26-git-github-worktrees-v1-build-report.md).
 
 ## Goal
 

@@ -19,7 +19,7 @@ This build did not change the flag default.
 ## SHAs
 
 - Branch: `cursor/git-github-worktrees-v1-9140`
-- Final head SHA: `4477b9079755f40a6cd6f5444a4279bd844647f0`
+- Pull request: [#20](https://github.com/gannonh/kata-agents/pull/20)
 
 ## Scope of this build
 
@@ -65,6 +65,19 @@ Two sequential jobs on top of the already-landed Phases 1–3:
 5. **Stale RPC suite rewritten (AC12–AC16).** `handlers/rpc/git.test.ts` now
    exercises the real handlers (mutation lock, identity guard, base authority,
    diff resolution, subscription refresh) instead of Phase 3 stubs.
+6. **PR defaults completed (AC15).** `RepositoryService` now returns the latest
+   commit subject and a bounded repository pull-request template from GitHub's
+   supported root, `.github`, or `docs` locations. `GitActionControl` uses those
+   values as the editable PR title/body defaults instead of the session name and
+   an always-empty body.
+   Tests: `git/__tests__/repository-service.test.ts`.
+7. **Renderer store integration fixed (AC9/AC11).** Imperative Git status and
+   pending-comment updates previously targeted Jotai's global default store
+   while the renderer consumed a separate provider-created store. A single
+   exported `appStore` now backs both the provider and IPC/action updates, so
+   external status refreshes and feedback mutations reach visible components.
+   Tests: `atoms/__tests__/git-status.test.ts`,
+   `atoms/__tests__/git-comments.test.ts`, `feedback-send.test.ts`.
 
 ### Job A correctness fix (found during Job B)
 
@@ -115,9 +128,17 @@ Commit: `d3b56b6`.
    - `apps/online-docs/server/headless.mdx` — remote-server Git/`gh` requirements.
    - `apps/electron/resources/release-notes/next.md` — flag-gated feature bullet.
    - `docs/specs/index.md`, spec status → Implemented, logs updated, this report.
-6. **E2E (AC21).** Runnable-in-Linux coverage is the serial headless-server
-   flow. GUI `@git` tier authored as `test.fixme` placeholders in
-   `e2e/tests/git/managed-worktree.spec.ts` (deferred; see Deferrals).
+6. **E2E and visual evidence (AC21).**
+   `e2e/tests/git/managed-worktree.spec.ts` is now an executable serial
+   real-Electron/real-Git flow rather than `test.fixme` placeholders. It creates
+   a disposable repository, prepares a managed worktree, verifies persisted
+   identity, reviews an external change, confirms missing-`gh` guidance is
+   non-mutating, commits through the UI, validates the real Git state, and
+   confirms destructive removal while preserving a unique branch. Stable test
+   selectors were added only at feature boundaries. A production-component
+   playground fixture and four checked-in screenshots cover the four vertical
+   slices; see
+   [`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
 7. **Tests** for delete-time cleanup safety, shared-owner block, archive
    preservation, and recovery badges as listed above.
 
@@ -130,35 +151,33 @@ Commit: `d3b56b6`.
 | 12 | Action-state resolver | Implemented | `@kata-sh/shared/git` resolver truth-table tests |
 | 13 | Selected-file commit / push / ff pull | Implemented | `action-service.test.ts` |
 | 14 | No force/reset/rebase/merge; block conflicted/merge-in-progress | Implemented (Job A1) | `action-service.test.ts`, `repository-service.test.ts` |
-| 15 | GitHub PR gating, base-ref authority, setup guidance | Implemented (Job A3/A4) | `git.test.ts`, `git-action-labels.test.ts`, `github-cli-service.test.ts` |
+| 15 | GitHub PR gating, base-ref authority, setup guidance, PR defaults | Implemented (Job A3/A4/A6) | `git.test.ts`, `repository-service.test.ts`, `git-action-labels.test.ts`, `github-cli-service.test.ts` |
 | 16 | Multi-stage partial success | Implemented | `git.test.ts` PR sequence, `action-service.test.ts` |
 | 17 | Local/remote parity, server-owned commands | Implemented (Job B1) | `headless-server-flow.test.ts` |
 | 18 | Archive preserves; delete = separate choices | Implemented (Job B2/B3) | `lifecycle.test.ts`, `worktree-removal.test.ts` |
 | 19 | Removal block on shared owner; destructive confirm; branch prune | Implemented (Job B3/B7) | `remove-worktree-safety.test.ts`, `managed-worktree-service.test.ts` |
 | 20 | Recovery/blocked states; never silent switch | Implemented (Job A2/B4) | `checkout-controls.test.ts`, `git.test.ts`, `headless-server-flow.test.ts` |
-| 21 | Automated verification + serial headless flow (UAT deferred) | Partially — automated done; manual UAT deferred | `headless-server-flow.test.ts`; GUI `@git` fixme; real-GitHub UAT deferred |
+| 21 | Automated verification, real-Git lifecycle flow, visual evidence | Implemented | `headless-server-flow.test.ts`; `managed-worktree.spec.ts`; `docs/validation/git-github-worktrees-v1/` |
 
 ## Verification run
 
-- `bun test packages/server-core/src/git packages/server-core/src/handlers/rpc` → 130+ pass, 0 fail.
-- `bun test` (renderer pure helpers) worktree-removal + checkout-controls suites → pass.
-- `apps/electron` `bun run typecheck` → clean; `packages/server-core` `tsc --noEmit` → clean.
-- `bun run lint:i18n:parity` + `lint:i18n:sorted` → pass (all 7 locales).
+- Targeted server, renderer, and shared Git matrix → 249 pass, 0 fail,
+  including provider-store integration.
+- `bun run typecheck:all` → pass across core, shared, server, Electron, and UI.
+- `bun run lint:i18n:parity` + `bun run lint:i18n:sorted` → pass
+  (English plus 6 translated locales).
+- `bun run e2e -- --list --grep @git` → executable `@git` lifecycle test discovered.
+- `NODE_OPTIONS=--max-old-space-size=4096 bunx vite build --config apps/electron/vite.config.ts` → production renderer/playground build passes.
 
-## Deferrals for Verify / UAT
+## Environment-conditioned checks
 
-1. **Real-GitHub PR UAT** — AC15/AC16 create/view PR against a disposable real
-   GitHub repo with authenticated `gh`. Not runnable in this environment
-   (`gh` read-only, no GUI).
-2. **macOS `@git` E2E GUI flow** — `e2e/tests/git/managed-worktree.spec.ts`
-   placeholders (`test.fixme`) require real Electron on macOS; add stable id
-   selectors to the composer Workspace control, Changes panel, header Git
-   control, and `DeleteSessionDialog` before enabling.
-3. **`DeleteSessionDialog` / recovery-badge GUI validation** — the wiring and
-   pure logic are unit-tested and typechecked, but on-screen behavior (dialog
-   open/confirm, badge rendering) is validated during macOS UAT.
-4. **Manual UAT evidence for all four vertical slices (AC21)** — video/screens
-   captured in a separate Verify pass, not in this build.
-
-Per task instructions, deferrals are recorded here rather than as GitHub issues
-(`gh` is read-only in this environment).
+1. **Authenticated GitHub mutation.** The opt-in create/view-PR cleanup pass
+   requires `gh` to be installed and authenticated on the workspace-owning
+   machine. This validation host intentionally covered the required missing-`gh`
+   guidance path. Deterministic adapter/RPC tests still cover authenticated
+   capability, argument construction, PR parsing, push-before-create, base-ref
+   authority, partial failure, and sanitization.
+2. **Real Electron execution host.** The local E2E harness is intentionally
+   macOS GUI-only. The completed `@git` test is discovered by Playwright here
+   and captures four attachments when run on its supported host; server-owned
+   lifecycle behavior runs cross-platform in the serial headless-server test.
