@@ -1190,7 +1190,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]): Promise<boolean> => {
     try {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
@@ -1339,6 +1339,10 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
       })
+      // Resolved once the message is persisted/accepted (pre-persist failures
+      // reject and land in the catch below). Signals successful submission so
+      // callers like the Changes feedback flow can safely clear local state.
+      return true
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
@@ -1353,6 +1357,7 @@ export default function App() {
           }
         ]
       }))
+      return false
     }
   }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
 

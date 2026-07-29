@@ -74,7 +74,12 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@kata-sh/core').ContentBadge[]) => void
+  /**
+   * Submit a message through the session pipeline. Resolves to `true` once the
+   * message is accepted/persisted and `false` if submission failed, so callers
+   * (e.g. the Changes feedback flow) can clear local state only on success.
+   */
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@kata-sh/core').ContentBadge[]) => Promise<boolean>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

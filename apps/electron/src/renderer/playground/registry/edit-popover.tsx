@@ -281,8 +281,9 @@ const mockAppShellContext = {
     isProcessing: false,
     lastMessageAt: Date.now(),
   }),
-  onSendMessage: (sessionId: string, message: string) => {
+  onSendMessage: async (sessionId: string, message: string) => {
     console.log('[Playground] Send message to session:', sessionId, message)
+    return true
   },
   onRenameSession: () => {},
   onFlagSession: () => {},

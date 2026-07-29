@@ -44,7 +44,10 @@ const playgroundValue: AppShellContextType = {
   onCreateSession: (async () => {
     throw new Error('[Playground] onCreateSession is not available')
   }) as AppShellContextType['onCreateSession'],
-  onSendMessage: logCall('onSendMessage'),
+  onSendMessage: async (...args: unknown[]) => {
+    logCall('onSendMessage')(...args)
+    return true
+  },
   onRenameSession: logCall('onRenameSession'),
   onFlagSession: logCall('onFlagSession'),
   onUnflagSession: logCall('onUnflagSession'),

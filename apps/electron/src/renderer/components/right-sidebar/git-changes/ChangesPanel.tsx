@@ -29,16 +29,19 @@ import {
   sortStatusEntries,
   changeIndicator,
   summarizePendingComments,
-  serializeFeedback,
 } from '@kata-sh/shared/git'
 import type { GitWorkingTreeEntry } from '@kata-sh/shared/protocol'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
 import { useNavigation } from '@/contexts/NavigationContext'
-import { sessionPendingCommentsAtomFamily, clearSessionComments } from '@/atoms/git-comments'
+import {
+  sessionPendingCommentsAtomFamily,
+  clearStaleSessionComments,
+} from '@/atoms/git-comments'
 import { useGitStatusSubscription } from './useGitStatusSubscription'
 import { ChangesDiffView } from './ChangesDiffView'
+import { submitPendingFeedback } from './feedback-send'
 
 export interface ChangesPanelProps {
   sessionId: string | null
@@ -126,13 +129,26 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
 
   const comments = useAtomValue(sessionPendingCommentsAtomFamily(sessionId ?? '__no_session__'))
   const feedback = summarizePendingComments(comments)
+  const [sending, setSending] = React.useState(false)
 
-  const handleSend = React.useCallback(() => {
-    if (!sessionId || !feedback.canSend) return
-    const message = serializeFeedback(comments)
-    onSendMessage(sessionId, message)
-    clearSessionComments(sessionId)
-  }, [sessionId, feedback.canSend, comments, onSendMessage])
+  const handleSend = React.useCallback(async () => {
+    if (!sessionId || sending) return
+    setSending(true)
+    try {
+      // Refresh affected diffs, gate on stale review, send, and clear only on
+      // success (AC11). See submitPendingFeedback for the full pipeline.
+      await submitPendingFeedback(sessionId, {
+        getDiff: (id, path) => window.electronAPI.getGitDiff(id, path),
+        send: (id, message) => onSendMessage(id, message),
+      })
+    } finally {
+      setSending(false)
+    }
+  }, [sessionId, sending, onSendMessage])
+
+  const handleClearStale = React.useCallback(() => {
+    if (sessionId) clearStaleSessionComments(sessionId)
+  }, [sessionId])
 
   const close = React.useCallback(() => updateRightSidebar({ type: 'none' }), [updateRightSidebar])
 
@@ -287,21 +303,40 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
     sessionId && feedback.pendingCount > 0 ? (
       <div className="shrink-0 border-t border-border/50 p-2">
         {feedback.requiresReview && (
-          <p className="px-1 pb-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-            {t('git.changes.reviewStale', { count: feedback.staleCount })}
-          </p>
+          <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
+            <p className="min-w-0 flex-1 text-[11px] text-amber-600 dark:text-amber-400">
+              {t('git.changes.reviewStale', { count: feedback.staleCount })}
+            </p>
+            <button
+              type="button"
+              onClick={handleClearStale}
+              disabled={sending}
+              className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+            >
+              {t('git.changes.clearStale')}
+            </button>
+          </div>
         )}
         <button
           type="button"
           onClick={handleSend}
-          disabled={!feedback.canSend}
+          disabled={!feedback.canSend || sending}
           className={cn(
             'flex w-full items-center justify-center gap-2 rounded-[6px] bg-foreground px-3 py-1.5 text-[13px] font-medium text-background transition-opacity',
-            !feedback.canSend && 'opacity-50',
+            (!feedback.canSend || sending) && 'opacity-50',
           )}
         >
-          <Send className="h-3.5 w-3.5" />
-          {t('git.changes.sendFeedback', { count: feedback.pendingCount })}
+          {sending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t('git.changes.sending')}
+            </>
+          ) : (
+            <>
+              <Send className="h-3.5 w-3.5" />
+              {t('git.changes.sendFeedback', { count: feedback.pendingCount })}
+            </>
+          )}
         </button>
       </div>
     ) : null
