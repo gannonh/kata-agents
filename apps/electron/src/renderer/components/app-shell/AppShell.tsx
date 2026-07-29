@@ -141,6 +141,11 @@ import {
 } from "./panel-constants"
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
+import { FEATURE_FLAGS } from "@kata-sh/shared/feature-flags"
+import { ChangesPanel } from "@/components/right-sidebar/git-changes/ChangesPanel"
+
+/** Fixed width of the Changes right-sidebar on regular (non-compact) layouts. */
+const RIGHT_SIDEBAR_WIDTH = 380
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
 
 /**
@@ -581,7 +586,7 @@ function AppShellContent({
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
   const { resolvedMode, isDark, setMode } = useTheme()
-  const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
+  const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession, updateRightSidebar } = useNavigation()
 
   // Double-Esc interrupt feature: first Esc shows warning, second Esc interrupts
   const { handleEscapePress } = useEscapeInterrupt()
@@ -594,6 +599,11 @@ function AppShellContent({
   const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
+
+  // Changes right-sidebar (Git/GitHub V1). Feature-flag gated; binds to the
+  // focused session panel. Uses the dedicated right-side chrome on regular
+  // layouts and an overlay drawer at narrow widths.
+  const showChangesPanel = FEATURE_FLAGS.gitWorkspaceV1 && navState.rightSidebar?.type === 'changes'
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -3266,10 +3276,41 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={false}
+          isRightSidebarVisible={showChangesPanel && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
+
+        {/* === RIGHT SIDEBAR: Changes (Git/GitHub V1, feature-flag gated) ===
+         * Regular layouts: a fixed-width right-side panel that participates in
+         * the flex row. Narrow layouts: an overlay drawer above the stack. Binds
+         * to the focused session so status/feedback never leak between panels. */}
+        {showChangesPanel && !isAutoCompact && (
+          <div
+            data-panel-role="right-sidebar"
+            className="h-full shrink-0 overflow-hidden bg-background shadow-middle"
+            style={{
+              width: RIGHT_SIDEBAR_WIDTH,
+              borderTopLeftRadius: RADIUS_INNER,
+              borderBottomLeftRadius: RADIUS_INNER,
+              borderTopRightRadius: RADIUS_INNER,
+              borderBottomRightRadius: RADIUS_EDGE,
+            }}
+          >
+            <ChangesPanel sessionId={focusedSessionId ?? session.selected} />
+          </div>
+        )}
+        {showChangesPanel && isAutoCompact && (
+          <div className="absolute inset-0 z-panel flex" role="dialog" aria-modal="true">
+            <div
+              className="flex-1 bg-black/30"
+              onClick={() => updateRightSidebar({ type: 'none' })}
+            />
+            <div className="h-full w-[88%] max-w-[420px] overflow-hidden bg-background shadow-modal">
+              <ChangesPanel sessionId={focusedSessionId ?? session.selected} />
+            </div>
+          </div>
+        )}
 
         {/* Sidebar Resize Handle (absolute, hidden in focused mode) */}
         {!effectiveSidebarAndNavigatorHidden && (
