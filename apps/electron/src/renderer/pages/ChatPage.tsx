@@ -27,6 +27,7 @@ import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { getSessionTitle } from '@/utils/session'
 import { ChangesAffordance } from '@/components/right-sidebar/git-changes/ChangesAffordance'
+import { GitActionControl } from '@/components/right-sidebar/git-changes/GitActionControl'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
 
@@ -603,6 +604,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const headerActions = (
     <>
+      <GitActionControl sessionId={sessionId} />
       <ChangesAffordance sessionId={sessionId} />
       {isCompactMode ? compactInfoButton : shareButton}
     </>
