@@ -52,6 +52,26 @@ export class GitActionService {
 
     // Resolve the selected paths + expand renames from the current status.
     const status = await this.repository.getStatus(root)
+    // V1 never creates merge commits. Refuse while an operation (merge, rebase,
+    // cherry-pick, revert) is in progress — even after conflicts are staged, a
+    // commit here would produce a merge commit — or while any path is still
+    // conflicted (spec: AC14, "V1 never performs ... merge ...").
+    if (status.operationInProgress) {
+      return single(
+        failure(
+          'commit',
+          `Cannot commit while a ${status.operationInProgress} is in progress. Resolve or abort it outside Kata first; V1 will not create a merge commit.`,
+        ),
+      )
+    }
+    if (status.entries.some((e) => e.conflicted)) {
+      return single(
+        failure(
+          'commit',
+          'Cannot commit with unresolved merge conflicts. Resolve them outside Kata first; V1 will not create a merge commit.',
+        ),
+      )
+    }
     if (status.entries.length === 0) {
       return single(failure('commit', 'There are no changes to commit.'))
     }

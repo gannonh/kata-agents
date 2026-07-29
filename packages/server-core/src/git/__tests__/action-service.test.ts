@@ -141,6 +141,57 @@ describe('GitActionService.commit — selected-file transaction', () => {
   })
 })
 
+describe('GitActionService.commit — conflicted / merge-in-progress states', () => {
+  /** Create a repo left mid-merge with a textual conflict on `conflict.txt`. */
+  async function repoInMergeConflict(): Promise<string> {
+    const d = tmp()
+    await initRepo(d)
+    writeFile(d, 'conflict.txt', 'base\n')
+    await git(d, ['add', '.'])
+    await git(d, ['commit', '-m', 'base'])
+    await git(d, ['checkout', '-b', 'feature'])
+    writeFile(d, 'conflict.txt', 'feature\n')
+    await git(d, ['commit', '-am', 'feature change'])
+    await git(d, ['checkout', 'main'])
+    writeFile(d, 'conflict.txt', 'main\n')
+    await git(d, ['commit', '-am', 'main change'])
+    // Merge produces a conflict and leaves MERGE_HEAD in place.
+    await runGit(['merge', 'feature'], { cwd: d, env: GIT_ENV, okExitCodes: [1] })
+    return d
+  }
+
+  test('rejects a commit while a merge is in progress with unresolved conflicts', async () => {
+    const d = await repoInMergeConflict()
+    const status = await repo.getStatus(d)
+    expect(status.operationInProgress).toBe('merge')
+    expect(status.entries.some((e) => e.conflicted)).toBe(true)
+
+    const res = await svc.commit({ dir: d, message: 'should not merge' })
+    expect(res.stages[0]!.status).toBe('failed')
+    expect(res.stages[0]!.error).toMatch(/merge|conflict/i)
+    // No merge commit created: HEAD still has a single parent.
+    const parents = (await git(d, ['rev-list', '--parents', '-n', '1', 'HEAD'])).trim().split(' ')
+    expect(parents).toHaveLength(2)
+  })
+
+  test('rejects a commit while a merge is in progress even after conflicts are resolved', async () => {
+    const d = await repoInMergeConflict()
+    // Resolve the conflict and stage it — MERGE_HEAD is still present, so a
+    // commit here would create a merge commit, which V1 must refuse.
+    writeFile(d, 'conflict.txt', 'resolved\n')
+    await git(d, ['add', 'conflict.txt'])
+    const status = await repo.getStatus(d)
+    expect(status.operationInProgress).toBe('merge')
+    expect(status.entries.some((e) => e.conflicted)).toBe(false)
+
+    const res = await svc.commit({ dir: d, message: 'should not merge', paths: ['conflict.txt'] })
+    expect(res.stages[0]!.status).toBe('failed')
+    expect(res.stages[0]!.error).toMatch(/merge/i)
+    const parents = (await git(d, ['rev-list', '--parents', '-n', '1', 'HEAD'])).trim().split(' ')
+    expect(parents).toHaveLength(2)
+  })
+})
+
 describe('GitActionService.pull / push', () => {
   async function bareRemote(): Promise<string> {
     const remote = tmp()

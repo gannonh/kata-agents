@@ -8,6 +8,7 @@
  */
 
 import { resolve as resolvePath, relative as relativePath, isAbsolute } from 'node:path'
+import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import type {
@@ -349,6 +350,12 @@ export class RepositoryService {
       snapshot.ahead = ahead
       snapshot.behind = behind
       snapshot.upstream = upstream
+      snapshot.operationInProgress = await this.detectOperationInProgress(dir)
+      if (snapshot.operationInProgress) {
+        snapshot.blockedReason = `A ${snapshot.operationInProgress} is in progress.`
+      } else if (entries.some((e) => e.conflicted)) {
+        snapshot.blockedReason = 'Unresolved merge conflicts.'
+      }
       await this.attachDiffStats(dir, snapshot)
       await this.attachPublishState(dir, snapshot, ctx)
     } catch (err) {
@@ -611,6 +618,37 @@ export class RepositoryService {
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
       return Buffer.alloc(0)
+    }
+  }
+
+  /**
+   * Detect an in-progress Git operation (merge, rebase, cherry-pick, revert) by
+   * probing the worktree-specific Git dir for its sentinel files. Returns a
+   * short label or null. V1 never creates merge commits, so mutations block on
+   * a non-null result (spec: AC14 — unsupported states remain inspectable and
+   * block unsafe actions).
+   */
+  async detectOperationInProgress(dir: string): Promise<string | null> {
+    const probes: Array<{ name: string; label: string }> = [
+      { name: 'MERGE_HEAD', label: 'merge' },
+      { name: 'rebase-merge', label: 'rebase' },
+      { name: 'rebase-apply', label: 'rebase' },
+      { name: 'CHERRY_PICK_HEAD', label: 'cherry-pick' },
+      { name: 'REVERT_HEAD', label: 'revert' },
+    ]
+    const args = ['rev-parse']
+    for (const p of probes) args.push('--git-path', p.name)
+    try {
+      const res = await runGit(args, { cwd: dir, okExitCodes: [128] })
+      if (res.exitCode !== 0) return null
+      const lines = res.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+      for (let i = 0; i < lines.length && i < probes.length; i++) {
+        if (existsSync(resolvePath(dir, lines[i]!))) return probes[i]!.label
+      }
+      return null
+    } catch (err) {
+      if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      return null
     }
   }
 
