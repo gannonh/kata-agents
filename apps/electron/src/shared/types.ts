@@ -219,6 +219,8 @@ import type {
   CheckoutPrepareIntent,
   CheckoutPrepareResult,
   GitStatusSnapshot,
+  GitFileDiff,
+  GitStatusChangedEvent,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
 } from '@kata-sh/shared/protocol'
@@ -598,6 +600,14 @@ export interface ElectronAPI {
   listGitRefs(dirPath: string): Promise<ListRefsResult>
   prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
   getGitStatus(dirPath: string): Promise<GitStatusSnapshot>
+  /** Bounded diff for a repository-relative path; identity resolved server-side by session ID. */
+  getGitDiff(sessionId: string, path: string): Promise<GitFileDiff>
+  /** Subscribe the calling client's Changes surface to a session checkout; returns the current snapshot. */
+  subscribeGitStatus(sessionId: string): Promise<GitStatusSnapshot>
+  /** Release a status subscription for a session (or all sessions when omitted). */
+  unsubscribeGitStatus(sessionId?: string): Promise<void>
+  /** Workspace-routed status change events carrying the session ID + snapshot. */
+  onGitStatusChanged(callback: (event: GitStatusChangedEvent) => void): () => void
   // Identity is resolved server-side from the session's persisted checkout;
   // callers pass only the session ID (never a worktree path or ID).
   inspectGitWorktreeRemoval(sessionId: string): Promise<WorktreeRemovalRisk>
@@ -784,6 +794,7 @@ export type WhatsAppUiEvent =
 export type RightSidebarPanel =
   | { type: 'files'; path?: string }
   | { type: 'history' }
+  | { type: 'changes'; path?: string }
   | { type: 'none' }
 
 /**

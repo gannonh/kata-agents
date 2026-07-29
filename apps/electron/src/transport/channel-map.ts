@@ -330,6 +330,10 @@ export const CHANNEL_MAP = {
   listGitRefs: invoke(RPC_CHANNELS.git.LIST_REFS),
   prepareGitCheckout: invoke(RPC_CHANNELS.git.PREPARE_CHECKOUT),
   getGitStatus: invoke(RPC_CHANNELS.git.GET_STATUS),
+  getGitDiff: invoke(RPC_CHANNELS.git.GET_DIFF),
+  subscribeGitStatus: invoke(RPC_CHANNELS.git.SUBSCRIBE_STATUS),
+  unsubscribeGitStatus: invoke(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS),
+  onGitStatusChanged: listener(RPC_CHANNELS.git.STATUS_CHANGED),
   inspectGitWorktreeRemoval: invoke(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL),
   removeGitWorktree: invoke(RPC_CHANNELS.git.REMOVE_WORKTREE),
 
