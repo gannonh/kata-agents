@@ -128,3 +128,64 @@ export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutI
   }
   return { kind: 'current' }
 }
+
+// ---------------------------------------------------------------------------
+// Checkout recovery (AC20 — restart/reconnect/missing/externally changed)
+// ---------------------------------------------------------------------------
+
+/** Registry/reconcile lifecycle status for a managed worktree, when known. */
+export type WorktreeLifecycleStatus = 'active' | 'missing' | 'blocked'
+
+export interface CheckoutRecoveryState {
+  /** Persisted managed-worktree checkout; recovery only applies to these. */
+  checkout: SessionCheckoutV1 | null
+  /**
+   * Whether repository context finished loading. Recovery is suppressed while
+   * loading so a resumed/restarted session keeps its locked identity and does
+   * not flash a false drift warning before the live branch is known.
+   */
+  contextLoaded: boolean
+  /** Live current branch in the resolved checkout, null when detached/unknown. */
+  liveBranch: string | null
+  /** Live HEAD is detached. */
+  liveDetached: boolean
+  /** Whether the checkout path still resolves to a Git repository. */
+  checkoutExists: boolean
+  /** Registry/reconcile status for the managed worktree, when known. */
+  worktreeStatus?: WorktreeLifecycleStatus
+}
+
+export type CheckoutRecovery =
+  | { kind: 'ok' }
+  /** The managed worktree directory/registry entry is gone — must recreate. */
+  | { kind: 'missing' }
+  /** The worktree was externally switched to another branch or detached. */
+  | { kind: 'branch-drift'; expected: string; found: string | null }
+  /** The server marked the worktree blocked (e.g. a Git command failed). */
+  | { kind: 'blocked'; reason?: string }
+
+/**
+ * Decide whether a persisted managed-worktree checkout needs a visible recovery
+ * or blocked state (spec: AC20). Mirrors the server-side mutation identity guard
+ * (`checkManagedCheckoutIdentity`) so the composer badge surfaces the same drift
+ * the server would refuse to mutate on — Kata never silently switches directory.
+ *
+ * Precedence: blocked → missing → branch-drift. A current checkout, an absent
+ * checkout, or an unloaded repository context returns `ok`.
+ */
+export function resolveCheckoutRecovery(state: CheckoutRecoveryState): CheckoutRecovery {
+  const { checkout } = state
+  if (!checkout || checkout.mode !== 'managed-worktree') return { kind: 'ok' }
+  if (!state.contextLoaded) return { kind: 'ok' }
+
+  if (state.worktreeStatus === 'blocked') return { kind: 'blocked' }
+  if (!state.checkoutExists || state.worktreeStatus === 'missing') return { kind: 'missing' }
+
+  if (checkout.expectedBranch) {
+    const found = state.liveDetached ? null : state.liveBranch
+    if (found !== checkout.expectedBranch) {
+      return { kind: 'branch-drift', expected: checkout.expectedBranch, found }
+    }
+  }
+  return { kind: 'ok' }
+}

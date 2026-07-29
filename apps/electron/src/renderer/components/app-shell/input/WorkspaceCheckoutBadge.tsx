@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue } from 'jotai'
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
 
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import type {
@@ -17,7 +17,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { cn } from '@/lib/utils'
 
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import { resolveCheckoutIdentity, resolveSendGate } from './checkout-controls'
+import { resolveCheckoutIdentity, resolveCheckoutRecovery, resolveSendGate } from './checkout-controls'
 
 /**
  * WorkspaceCheckoutBadge — composer Workspace control for Git checkouts.
@@ -241,6 +241,55 @@ function WorkspaceCheckoutBadgeInner(
   if (identity.kind === 'worktree' || identity.kind === 'shared-worktree') {
     const shared = identity.kind === 'shared-worktree'
     const branch = identity.branch ?? t('git.workspace.worktree')
+
+    // AC20 — surface a visible recovery/blocked state when the managed worktree
+    // was moved, removed, or externally switched. Kata never silently switches
+    // directory; the user must restore the branch or delete the session.
+    const recovery = resolveCheckoutRecovery({
+      checkout: prepared?.checkout ?? persistedCheckout,
+      contextLoaded: context !== null,
+      liveBranch: context?.detached ? null : context?.currentBranch ?? null,
+      liveDetached: !!context?.detached,
+      checkoutExists: !!context?.isGitRepository,
+    })
+    if (recovery.kind !== 'ok') {
+      const foundLabel =
+        recovery.kind === 'branch-drift'
+          ? recovery.found ?? t('git.workspace.detached')
+          : ''
+      const label =
+        recovery.kind === 'missing'
+          ? t('git.workspace.recovery.missing')
+          : recovery.kind === 'blocked'
+            ? t('git.workspace.recovery.blocked')
+            : t('git.workspace.recovery.drift')
+      const note =
+        recovery.kind === 'missing'
+          ? t('git.workspace.recovery.missingNote')
+          : recovery.kind === 'blocked'
+            ? t('git.workspace.recovery.blockedNote')
+            : t('git.workspace.recovery.driftNote', {
+                expected: recovery.kind === 'branch-drift' ? recovery.expected : '',
+                found: foundLabel,
+              })
+      return (
+        <FreeFormInputContextBadge
+          icon={<AlertTriangle className="h-4 w-4" />}
+          label={label}
+          isExpanded
+          hasSelection
+          showChevron={false}
+          className="text-destructive"
+          tooltip={
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium">{label}</span>
+              <span className="text-xs opacity-70">{note}</span>
+            </span>
+          }
+          disabled
+        />
+      )
+    }
     return (
       <FreeFormInputContextBadge
         icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}

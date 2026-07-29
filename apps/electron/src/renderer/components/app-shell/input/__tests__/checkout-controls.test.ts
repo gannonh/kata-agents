@@ -9,7 +9,11 @@
 
 import { describe, test, expect } from 'bun:test'
 import type { SessionCheckoutV1 } from '@kata-sh/shared/protocol'
-import { resolveSendGate, resolveCheckoutIdentity } from '../checkout-controls'
+import {
+  resolveSendGate,
+  resolveCheckoutIdentity,
+  resolveCheckoutRecovery,
+} from '../checkout-controls'
 
 const worktreeCheckout: SessionCheckoutV1 = {
   schemaVersion: 1,
@@ -204,5 +208,123 @@ describe('resolveCheckoutIdentity', () => {
       sharedOwnerCount: undefined,
     })
     expect(id.kind).toBe('none')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolveCheckoutRecovery (AC20 — recovery / blocked states)
+// ---------------------------------------------------------------------------
+
+describe('resolveCheckoutRecovery', () => {
+  test('is ok for a current checkout (recovery only applies to managed worktrees)', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: currentCheckout,
+      contextLoaded: true,
+      liveBranch: 'feature',
+      liveDetached: false,
+      checkoutExists: true,
+    })
+    expect(r.kind).toBe('ok')
+  })
+
+  test('is ok when there is no persisted checkout', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: null,
+      contextLoaded: true,
+      liveBranch: null,
+      liveDetached: false,
+      checkoutExists: false,
+    })
+    expect(r.kind).toBe('ok')
+  })
+
+  test('stays ok while repository context is still loading (avoid false drift on resume)', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: false,
+      liveBranch: null,
+      liveDetached: false,
+      checkoutExists: true,
+    })
+    expect(r.kind).toBe('ok')
+  })
+
+  test('is ok when the live branch matches the expected branch', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: 'kata-agent/aabbccdd',
+      liveDetached: false,
+      checkoutExists: true,
+    })
+    expect(r.kind).toBe('ok')
+  })
+
+  test('reports missing when the checkout no longer resolves to a Git repository', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: null,
+      liveDetached: false,
+      checkoutExists: false,
+    })
+    expect(r.kind).toBe('missing')
+  })
+
+  test('reports missing when the registry marks the worktree missing', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: 'kata-agent/aabbccdd',
+      liveDetached: false,
+      checkoutExists: true,
+      worktreeStatus: 'missing',
+    })
+    expect(r.kind).toBe('missing')
+  })
+
+  test('reports branch-drift when the worktree was externally switched to another branch', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: 'main',
+      liveDetached: false,
+      checkoutExists: true,
+    })
+    expect(r).toEqual({ kind: 'branch-drift', expected: 'kata-agent/aabbccdd', found: 'main' })
+  })
+
+  test('reports branch-drift when the worktree HEAD was externally detached', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: null,
+      liveDetached: true,
+      checkoutExists: true,
+    })
+    expect(r).toEqual({ kind: 'branch-drift', expected: 'kata-agent/aabbccdd', found: null })
+  })
+
+  test('reports blocked when the registry marks the worktree blocked', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: 'kata-agent/aabbccdd',
+      liveDetached: false,
+      checkoutExists: true,
+      worktreeStatus: 'blocked',
+    })
+    expect(r.kind).toBe('blocked')
+  })
+
+  test('prioritizes missing over branch-drift when both would apply', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: 'main',
+      liveDetached: false,
+      checkoutExists: false,
+    })
+    expect(r.kind).toBe('missing')
   })
 })
