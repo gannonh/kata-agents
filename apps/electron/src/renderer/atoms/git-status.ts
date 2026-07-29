@@ -11,9 +11,10 @@
  * changes render within the five-second acceptance bound (AC9).
  */
 
-import { atom, getDefaultStore } from 'jotai'
+import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import type { GitStatusSnapshot } from '@kata-sh/shared/protocol'
+import { appStore } from './store'
 
 export interface GitStatusState {
   status: GitStatusSnapshot | null
@@ -38,13 +39,12 @@ const refcounts = new Map<string, number>()
 let globalUnsubscribe: (() => void) | null = null
 
 function setState(sessionId: string, next: GitStatusState): void {
-  getDefaultStore().set(gitStatusAtomFamily(sessionId), next)
+  appStore.set(gitStatusAtomFamily(sessionId), next)
 }
 
 function patchState(sessionId: string, patch: Partial<GitStatusState>): void {
-  const store = getDefaultStore()
-  const current = store.get(gitStatusAtomFamily(sessionId))
-  store.set(gitStatusAtomFamily(sessionId), { ...current, ...patch })
+  const current = appStore.get(gitStatusAtomFamily(sessionId))
+  appStore.set(gitStatusAtomFamily(sessionId), { ...current, ...patch })
 }
 
 function ensureGlobalListener(): void {

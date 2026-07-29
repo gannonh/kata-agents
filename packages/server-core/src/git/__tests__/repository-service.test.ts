@@ -175,6 +175,18 @@ describe('RepositoryService.getStatus — publish state', () => {
     expect(vsFeature.baseRef).toBe('feature')
     expect(vsFeature.baseDeltaCount).toBe(0)
   })
+
+  test('returns the latest commit subject and repository pull-request template', async () => {
+    const work = tmp()
+    await initRepo(work)
+    writeFile(work, '.github/pull_request_template.md', '## Summary\n\nDescribe the change.\n')
+    await git(work, ['add', '.github/pull_request_template.md'])
+    await git(work, ['commit', '-m', 'feat: add PR defaults'])
+
+    const status = await svc.getStatus(work)
+    expect(status.latestCommitSubject).toBe('feat: add PR defaults')
+    expect(status.pullRequestTemplate).toBe('## Summary\n\nDescribe the change.\n')
+  })
 })
 
 describe('command-runner', () => {

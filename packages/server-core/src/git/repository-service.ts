@@ -358,10 +358,55 @@ export class RepositoryService {
       }
       await this.attachDiffStats(dir, snapshot)
       await this.attachPublishState(dir, snapshot, ctx)
+      await this.attachPullRequestDefaults(dir, snapshot, ctx.repositoryRoot)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
     }
     return snapshot
+  }
+
+  /**
+   * Read the two repository-owned defaults used by the PR dialog. Both are
+   * best-effort status metadata: a missing commit/template never blocks Git
+   * actions, and templates are bounded before being sent to the renderer.
+   */
+  private async attachPullRequestDefaults(
+    dir: string,
+    snapshot: GitStatusSnapshot,
+    repositoryRoot: string | null,
+  ): Promise<void> {
+    try {
+      const res = await runGit(['log', '-1', '--format=%s'], {
+        cwd: dir,
+        okExitCodes: [128],
+      })
+      const subject = res.exitCode === 0 ? res.stdout.trim() : ''
+      if (subject) snapshot.latestCommitSubject = subject
+    } catch {
+      /* leave unset */
+    }
+
+    if (!repositoryRoot) return
+    const candidates = [
+      '.github/pull_request_template.md',
+      '.github/PULL_REQUEST_TEMPLATE.md',
+      'pull_request_template.md',
+      'PULL_REQUEST_TEMPLATE.md',
+      'docs/pull_request_template.md',
+      'docs/PULL_REQUEST_TEMPLATE.md',
+    ]
+    for (const candidate of candidates) {
+      const path = resolvePath(repositoryRoot, candidate)
+      try {
+        const info = await stat(path)
+        if (!info.isFile() || info.size > 256 * 1024) continue
+        const template = await readFile(path, 'utf8')
+        if (template) snapshot.pullRequestTemplate = template
+        return
+      } catch {
+        /* try the next supported location */
+      }
+    }
   }
 
   /**

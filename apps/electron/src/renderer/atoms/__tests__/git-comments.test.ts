@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
-import { getDefaultStore } from 'jotai'
 import { createPendingComment } from '@kata-sh/shared/git'
+import { appStore } from '../store'
 import {
   pendingCommentsAtom,
   sessionPendingCommentsAtomFamily,
@@ -14,7 +14,7 @@ import {
   reconcileSessionPathForDiff,
 } from '../git-comments'
 
-const store = getDefaultStore()
+const store = appStore
 
 function comment(id: string, sessionId: string, path: string, fingerprint = 'fp') {
   return createPendingComment({

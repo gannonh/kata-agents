@@ -8,7 +8,7 @@
  * the live store and the mutation actions the UI dispatches.
  */
 
-import { atom, getDefaultStore } from 'jotai'
+import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import {
   reconcileStaleForPath as reconcilePure,
@@ -17,6 +17,7 @@ import {
   type CommentDiffView,
 } from '@kata-sh/shared/git'
 import type { GitPendingComment } from '@kata-sh/shared/protocol'
+import { appStore } from './store'
 
 /** All pending comments across every session for the current app run. */
 export const pendingCommentsAtom = atom<GitPendingComment[]>([])
@@ -27,8 +28,7 @@ export const sessionPendingCommentsAtomFamily = atomFamily((sessionId: string) =
 )
 
 function update(mutator: (comments: GitPendingComment[]) => GitPendingComment[]): void {
-  const store = getDefaultStore()
-  store.set(pendingCommentsAtom, mutator(store.get(pendingCommentsAtom)))
+  appStore.set(pendingCommentsAtom, mutator(appStore.get(pendingCommentsAtom)))
 }
 
 /** Append a new pending comment. */
@@ -55,7 +55,7 @@ export function clearSessionComments(sessionId: string): void {
 
 /** Read a synchronous snapshot of a session's pending comments. */
 export function getSessionComments(sessionId: string): GitPendingComment[] {
-  return getDefaultStore()
+  return appStore
     .get(pendingCommentsAtom)
     .filter((c) => c.sessionId === sessionId)
 }

@@ -291,29 +291,31 @@ function WorkspaceCheckoutBadgeInner(
       )
     }
     return (
-      <FreeFormInputContextBadge
-        icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}
-        label={shared ? t('git.workspace.sharedWorktree') : branch}
-        isExpanded
-        hasSelection
-        showChevron={false}
-        tooltip={
-          <span className="flex flex-col gap-0.5">
-            <span className="font-medium">
-              {shared ? t('git.workspace.sharedWorktree') : t('git.workspace.worktreeReady')}
-            </span>
-            {shared && (
-              <span className="text-xs opacity-70">{t('git.workspace.sharedWorktreeNote')}</span>
-            )}
-            {identity.branch && (
-              <span className="text-xs opacity-70">
-                {t('chat.onBranch', { branch: identity.branch })}
+      <span data-testid="git-workspace-identity">
+        <FreeFormInputContextBadge
+          icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}
+          label={shared ? t('git.workspace.sharedWorktree') : branch}
+          isExpanded
+          hasSelection
+          showChevron={false}
+          tooltip={
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium">
+                {shared ? t('git.workspace.sharedWorktree') : t('git.workspace.worktreeReady')}
               </span>
-            )}
-          </span>
-        }
-        disabled
-      />
+              {shared && (
+                <span className="text-xs opacity-70">{t('git.workspace.sharedWorktreeNote')}</span>
+              )}
+              {identity.branch && (
+                <span className="text-xs opacity-70">
+                  {t('chat.onBranch', { branch: identity.branch })}
+                </span>
+              )}
+            </span>
+          }
+          disabled
+        />
+      </span>
     )
   }
 
@@ -351,7 +353,7 @@ function WorkspaceCheckoutBadgeInner(
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <span className="shrink min-w-0 overflow-hidden">
+        <span data-testid="git-workspace-control" className="shrink min-w-0 overflow-hidden">
           <FreeFormInputContextBadge
             icon={
               preparing ? (
@@ -375,6 +377,7 @@ function WorkspaceCheckoutBadgeInner(
         <div className="p-1">
           <button
             type="button"
+            data-testid="git-workspace-current"
             onClick={() => {
               handleSelectMode('current')
               setOpen(false)
@@ -387,6 +390,7 @@ function WorkspaceCheckoutBadgeInner(
           </button>
           <button
             type="button"
+            data-testid="git-workspace-new-worktree"
             onClick={() => handleSelectMode('managed-worktree')}
             className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-foreground/5')}
           >
@@ -404,6 +408,7 @@ function WorkspaceCheckoutBadgeInner(
             <CommandPrimitive>
               <div className="border-b border-border/50 px-3 py-2">
                 <CommandPrimitive.Input
+                  data-testid="git-workspace-ref-search"
                   placeholder={t('git.workspace.searchRefs')}
                   className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
                 />
@@ -442,6 +447,7 @@ function WorkspaceCheckoutBadgeInner(
               {error && <p className="px-1 pb-2 text-[11px] text-destructive">{error}</p>}
               <button
                 type="button"
+                data-testid="git-workspace-create"
                 onClick={handlePrepare}
                 disabled={!baseRef || preparing}
                 className={cn(

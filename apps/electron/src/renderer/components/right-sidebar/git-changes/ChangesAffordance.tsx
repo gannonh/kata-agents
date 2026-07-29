@@ -53,6 +53,7 @@ export function ChangesAffordance({ sessionId }: ChangesAffordanceProps) {
           aria-label={t('git.changes.title')}
           aria-pressed={isOpen}
           data-changes-affordance
+          data-testid="git-changes-affordance"
           className={cn(
             'panel-header-btn inline-flex items-center gap-1.5 shrink-0 titlebar-no-drag',
             'h-7 rounded-[6px] px-2 text-[12px] font-medium',

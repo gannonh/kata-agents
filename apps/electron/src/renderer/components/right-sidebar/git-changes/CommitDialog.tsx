@@ -85,7 +85,11 @@ export function CommitDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent
+        data-testid="git-commit-dialog"
+        className="sm:max-w-[480px]"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{t('git.commit.title')}</DialogTitle>
         </DialogHeader>
@@ -96,6 +100,7 @@ export function CommitDialog({
               {t('git.commit.messageLabel')}
             </label>
             <Textarea
+              data-testid="git-commit-message"
               autoFocus
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -164,7 +169,7 @@ export function CommitDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t('common.cancel')}
           </Button>
-          <Button onClick={handleCommit} disabled={!canCommit}>
+          <Button data-testid="git-commit-submit" onClick={handleCommit} disabled={!canCommit}>
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {busy ? t('git.commit.submitting') : t('git.commit.submit')}
           </Button>

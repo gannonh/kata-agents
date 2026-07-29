@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
-import { getDefaultStore } from 'jotai'
 import { createPendingComment } from '@kata-sh/shared/git'
 import type { GitFileDiff } from '@kata-sh/shared/protocol'
+import { appStore } from '@/atoms/store'
 import {
   pendingCommentsAtom,
   sessionPendingCommentsAtomFamily,
@@ -9,7 +9,7 @@ import {
 } from '@/atoms/git-comments'
 import { submitPendingFeedback } from '../feedback-send'
 
-const store = getDefaultStore()
+const store = appStore
 
 function comment(id: string, path: string, fingerprint = 'fp', line = 1) {
   return createPendingComment({

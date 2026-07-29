@@ -221,6 +221,10 @@ export interface GitStatusSnapshot {
   publishableCommitCount: number
   /** Commits ahead of the PR base/default ref for pull-request eligibility. */
   baseDeltaCount: number
+  /** Latest commit subject, used as the editable pull-request title default. */
+  latestCommitSubject?: string
+  /** Repository pull-request template, used as the editable PR body default. */
+  pullRequestTemplate?: string
   primaryRemote: string | null
   provider: GitProvider
   entries: GitWorkingTreeEntry[]

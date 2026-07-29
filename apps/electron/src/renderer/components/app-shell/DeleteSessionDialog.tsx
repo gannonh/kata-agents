@@ -124,7 +124,7 @@ export function DeleteSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[460px]">
+      <DialogContent data-testid="git-delete-session-dialog" className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle>{t('git.delete.title')}</DialogTitle>
           <DialogDescription>{t('git.delete.description', { name: sessionName })}</DialogDescription>
@@ -147,6 +147,7 @@ export function DeleteSessionDialog({
             >
               <input
                 type="checkbox"
+                data-testid="git-delete-remove-worktree"
                 className="mt-0.5 h-4 w-4 shrink-0 accent-destructive"
                 checked={removalChosen}
                 disabled={summary.blocked || busy}
@@ -170,7 +171,10 @@ export function DeleteSessionDialog({
                       {t('git.delete.worktreeKeptNote')}
                     </span>
                     {removalChosen && summary.destructive && (
-                      <span className="mt-1 flex flex-col gap-0.5 rounded-[6px] bg-destructive/10 p-2 text-[12px] text-destructive">
+                      <span
+                        data-testid="git-delete-destructive-warning"
+                        className="mt-1 flex flex-col gap-0.5 rounded-[6px] bg-destructive/10 p-2 text-[12px] text-destructive"
+                      >
                         <span className="inline-flex items-center gap-1.5 font-medium">
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                           {t('git.delete.destructiveHeading')}
@@ -208,6 +212,7 @@ export function DeleteSessionDialog({
             {t('common.cancel')}
           </Button>
           <Button
+            data-testid="git-delete-confirm"
             variant="destructive"
             onClick={handleConfirm}
             disabled={busy || loading}

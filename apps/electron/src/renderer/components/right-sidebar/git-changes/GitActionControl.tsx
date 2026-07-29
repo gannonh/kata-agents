@@ -214,10 +214,12 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
   }, [])
 
   const openPr = React.useCallback(() => {
-    const latest = pullRequest?.title
-    setPrDefaults({ title: latest || firstLine(session?.name ?? '') || (branch ?? ''), body: '' })
+    setPrDefaults({
+      title: status?.latestCommitSubject || firstLine(session?.name ?? '') || (branch ?? ''),
+      body: status?.pullRequestTemplate ?? '',
+    })
     setPrOpen(true)
-  }, [pullRequest, session?.name, branch])
+  }, [status?.latestCommitSubject, status?.pullRequestTemplate, session?.name, branch])
 
   const doPush = React.useCallback(
     () => window.electronAPI.pushGit(sessionId),

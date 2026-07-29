@@ -71,6 +71,8 @@ function FileRow({
   return (
     <button
       type="button"
+      data-testid="git-change-file"
+      data-git-path={entry.path}
       onClick={onSelect}
       title={entry.previousPath ? `${entry.previousPath} → ${entry.path}` : entry.path}
       className={cn(
@@ -342,7 +344,7 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
     ) : null
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-testid="git-changes-panel" className="flex h-full min-h-0 flex-col">
       {header}
       <div className="min-h-0 flex-1 overflow-hidden">{body}</div>
       {feedbackBar}
