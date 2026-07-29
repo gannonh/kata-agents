@@ -89,6 +89,23 @@ export interface ISessionManager {
    * to the lazily-constructed default services when never called.
    */
   setGitServices?(services: import('../git').GitServices): void
+  /**
+   * Inspect managed-worktree removal risk for the requesting session. Identity
+   * is resolved server-side from the session's persisted checkout — the client
+   * never supplies a worktree path or ID.
+   */
+  inspectManagedWorktreeRemoval(
+    sessionId: string,
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk>
+  /**
+   * Remove the managed worktree owned by the requesting session. Identity is
+   * resolved server-side from persisted checkout ownership; blocked while
+   * another session owns it. `force` governs uncommitted/unique work only.
+   */
+  removeManagedWorktree(
+    sessionId: string,
+    options?: { force?: boolean },
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>

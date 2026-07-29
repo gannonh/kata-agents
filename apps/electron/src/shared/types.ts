@@ -598,8 +598,10 @@ export interface ElectronAPI {
   listGitRefs(dirPath: string): Promise<ListRefsResult>
   prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
   getGitStatus(dirPath: string): Promise<GitStatusSnapshot>
-  inspectGitWorktreeRemoval(managedWorktreeId: string, sessionId: string): Promise<WorktreeRemovalRisk>
-  removeGitWorktree(managedWorktreeId: string, sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
+  // Identity is resolved server-side from the session's persisted checkout;
+  // callers pass only the session ID (never a worktree path or ID).
+  inspectGitWorktreeRemoval(sessionId: string): Promise<WorktreeRemovalRisk>
+  removeGitWorktree(sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>

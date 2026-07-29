@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join, relative, isAbsolute, resolve as resolvePath } from 'node:path'
 import type {
   ManagedWorktreeRecord,
+  SessionCheckoutV1,
   WorktreeIncludeResult,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
@@ -45,6 +46,59 @@ export interface CreateWorktreeParams {
 export interface CreateWorktreeResult {
   record: ManagedWorktreeRecord
   include: WorktreeIncludeResult
+}
+
+export interface ReconcileParams {
+  /** IDs of sessions that currently exist (persisted). */
+  knownSessionIds: Set<string>
+  /**
+   * Persisted checkout metadata by session ID, used to repair derivable owner
+   * references (a session whose checkout points at a worktree it no longer
+   * owns in the registry).
+   */
+  sessionCheckouts?: Map<string, SessionCheckoutV1>
+}
+
+export interface ReconcileReport {
+  recordsInspected: number
+  /** Owner references removed because the owning session no longer exists. */
+  droppedOwnerRefs: number
+  /** Owner references restored from persisted session checkout metadata. */
+  repairedOwnerRefs: number
+  /** Records marked `missing` (checkout absent from disk and Git). */
+  markedMissing: number
+  /** Records marked `blocked` (ambiguous state that must not be auto-deleted). */
+  markedBlocked: number
+}
+
+/** A single entry from `git worktree list --porcelain`. */
+export interface WorktreeListEntry {
+  path: string
+  /** Short branch name, or null when detached. */
+  branch: string | null
+}
+
+/**
+ * Parse `git worktree list --porcelain` output into path/branch entries.
+ * Records are separated by a blank line; each has a `worktree <path>` line and
+ * either a `branch refs/heads/<name>` line or a `detached` line.
+ */
+export function parseWorktreeListPorcelain(output: string): WorktreeListEntry[] {
+  const entries: WorktreeListEntry[] = []
+  let current: { path: string; branch: string | null } | null = null
+  for (const raw of output.split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    if (line.startsWith('worktree ')) {
+      if (current) entries.push(current)
+      current = { path: line.slice('worktree '.length).trim(), branch: null }
+    } else if (line.startsWith('branch ') && current) {
+      const full = line.slice('branch '.length).trim()
+      current.branch = full.startsWith('refs/heads/') ? full.slice('refs/heads/'.length) : full
+    }
+    // `detached` leaves branch null; other lines (HEAD/bare/locked) are ignored.
+  }
+  if (current) entries.push(current)
+  return entries
 }
 
 export class ManagedWorktreeService {
@@ -253,6 +307,20 @@ export class ManagedWorktreeService {
       }
     }
 
+    // Identity revalidation: never delete a checkout unless it is a genuine
+    // managed worktree under the Kata worktree root, on the expected branch,
+    // and sharing the recorded Git common directory. A `force` flag governs
+    // uncommitted/unique work — it does NOT bypass identity safety.
+    const identity = await this.validateRemovalIdentity(rec)
+    if (!identity.ok) {
+      return {
+        removed: false,
+        branchPruned: false,
+        blocked: true,
+        blockedReason: identity.reason,
+      }
+    }
+
     return this.mutationLock.withLock(rec.gitCommonDir, async () => {
       this.registry.setState(managedWorktreeId, 'removing')
       // Remove the worktree registration + directory.
@@ -288,6 +356,157 @@ export class ManagedWorktreeService {
       this.registry.remove(managedWorktreeId)
       return { removed: true, branchPruned, blocked: false }
     })
+  }
+
+  /**
+   * Startup reconciliation. Compares registry records against persisted session
+   * ownership and the live `git worktree list --porcelain` for each repository.
+   *
+   * - Drops owner references for sessions that no longer exist.
+   * - Repairs derivable owner references from persisted session checkout metadata.
+   * - Marks a record `missing` when its checkout is absent from disk and Git.
+   * - Marks a record `blocked` when the on-disk branch diverges from the expected
+   *   branch (ambiguous external change).
+   *
+   * Never deletes a registry record or a checkout directory; ambiguous state is
+   * left for explicit recovery.
+   */
+  async reconcile(params: ReconcileParams): Promise<ReconcileReport> {
+    const report: ReconcileReport = {
+      recordsInspected: 0,
+      droppedOwnerRefs: 0,
+      repairedOwnerRefs: 0,
+      markedMissing: 0,
+      markedBlocked: 0,
+    }
+    const records = this.registry.list()
+    report.recordsInspected = records.length
+    if (records.length === 0) return report
+
+    // Cache `git worktree list` per repository root so we run it once per repo.
+    const worktreeListCache = new Map<string, Map<string, WorktreeListEntry>>()
+    const getWorktreeList = async (
+      repositoryRoot: string,
+    ): Promise<Map<string, WorktreeListEntry> | null> => {
+      if (worktreeListCache.has(repositoryRoot)) {
+        return worktreeListCache.get(repositoryRoot)!
+      }
+      try {
+        const res = await runGit(['worktree', 'list', '--porcelain'], {
+          cwd: repositoryRoot,
+          okExitCodes: [128],
+        })
+        if (res.exitCode !== 0) {
+          worktreeListCache.set(repositoryRoot, new Map())
+          return null
+        }
+        const byPath = new Map<string, WorktreeListEntry>()
+        for (const entry of parseWorktreeListPorcelain(res.stdout)) {
+          byPath.set(resolvePath(entry.path), entry)
+          byPath.set(safeRealpath(entry.path), entry)
+        }
+        worktreeListCache.set(repositoryRoot, byPath)
+        return byPath
+      } catch {
+        worktreeListCache.set(repositoryRoot, new Map())
+        return null
+      }
+    }
+
+    for (const rec of records) {
+      // 1. Drop dead owner references.
+      const beforeOwners = rec.ownerSessionIds.length
+      const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
+      report.droppedOwnerRefs += beforeOwners - liveOwners.length
+
+      // 2. Repair derivable owner references from persisted session checkouts.
+      if (params.sessionCheckouts) {
+        for (const [sessionId, checkout] of params.sessionCheckouts) {
+          if (
+            checkout.managedWorktreeId === rec.managedWorktreeId &&
+            params.knownSessionIds.has(sessionId) &&
+            !liveOwners.includes(sessionId)
+          ) {
+            liveOwners.push(sessionId)
+            report.repairedOwnerRefs += 1
+          }
+        }
+      }
+      if (liveOwners.length !== beforeOwners || report.repairedOwnerRefs > 0) {
+        rec.ownerSessionIds = liveOwners
+      }
+
+      // 3. Compare against disk + git worktree list.
+      const worktreePresentOnDisk = existsSync(rec.checkoutPath)
+      const list = await getWorktreeList(rec.repositoryRoot)
+      const listedEntry =
+        list?.get(resolvePath(rec.checkoutPath)) ?? list?.get(safeRealpath(rec.checkoutPath))
+
+      let nextState = rec.state
+      if (!worktreePresentOnDisk && !listedEntry) {
+        nextState = 'missing'
+        report.markedMissing += 1
+      } else if (listedEntry && listedEntry.branch && listedEntry.branch !== rec.expectedBranch) {
+        // The checkout exists but is on an unexpected branch — ambiguous.
+        nextState = 'blocked'
+        report.markedBlocked += 1
+      } else if (worktreePresentOnDisk && !listedEntry) {
+        // On disk but not a registered worktree — ambiguous, do not touch it.
+        nextState = 'blocked'
+        report.markedBlocked += 1
+      } else if (listedEntry && rec.state !== 'ready') {
+        // Healthy again after being marked missing/preparing.
+        nextState = 'ready'
+      }
+      rec.state = nextState
+      this.registry.upsert(rec)
+    }
+
+    return report
+  }
+
+  /**
+   * Revalidate a managed-worktree record before deletion. The checkout must be
+   * contained under the configured Kata worktree root; when it still exists on
+   * disk it must be a live worktree of the recorded Git common directory and on
+   * the expected `kata-agent/<token>` branch. A checkout already gone from disk
+   * is safe to reconcile away (registry + branch prune only).
+   */
+  private async validateRemovalIdentity(
+    rec: ManagedWorktreeRecord,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!this.isUnderWorktreeRoot(rec.checkoutPath)) {
+      return {
+        ok: false,
+        reason: 'Refusing to remove a checkout outside the Kata managed-worktree root.',
+      }
+    }
+    if (!existsSync(rec.checkoutPath)) {
+      // Nothing to delete on disk; registry cleanup / branch prune only.
+      return { ok: true }
+    }
+    let ctx
+    try {
+      ctx = await this.repositoryService.getContext(rec.checkoutPath)
+    } catch {
+      return { ok: false, reason: 'Unable to verify the worktree identity before removal.' }
+    }
+    if (!ctx.isGitRepository || !ctx.gitCommonDir) {
+      return { ok: false, reason: 'Checkout path is not a Git worktree; refusing removal.' }
+    }
+    if (safeRealpath(ctx.gitCommonDir) !== safeRealpath(rec.gitCommonDir)) {
+      return {
+        ok: false,
+        reason: 'Worktree Git common directory does not match the recorded repository.',
+      }
+    }
+    if (ctx.currentBranch !== rec.expectedBranch) {
+      return {
+        ok: false,
+        reason: `Worktree is on an unexpected branch (${ctx.currentBranch ?? 'detached'} != ${rec.expectedBranch}); refusing removal.`,
+      }
+    }
+    return { ok: true }
   }
 
   private async cleanupProvisional(

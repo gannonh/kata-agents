@@ -56,6 +56,26 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
   // instance as these handlers so ownership state never diverges.
   deps.sessionManager.setGitServices?.(git)
 
+  // Startup reconciliation: once the session manager has finished loading
+  // sessions, compare the managed-worktree registry against persisted session
+  // ownership and `git worktree list --porcelain`. Best-effort — a failure must
+  // not block handler registration or server startup, and it never deletes.
+  void (async () => {
+    try {
+      await deps.sessionManager.waitForInit?.()
+      const sessions = deps.sessionManager.getSessions()
+      const knownSessionIds = new Set(sessions.map((s) => s.id))
+      const sessionCheckouts = new Map(
+        sessions
+          .filter((s) => s.checkout)
+          .map((s) => [s.id, s.checkout!] as const),
+      )
+      await git.worktrees.reconcile({ knownSessionIds, sessionCheckouts })
+    } catch {
+      /* best-effort startup reconciliation */
+    }
+  })()
+
   // --- Repository context and ref listing (Phase 1, read-only) ---
 
   server.handle(RPC_CHANNELS.git.GET_CONTEXT, async (_ctx, dir: string) => {
@@ -78,18 +98,21 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
 
   // --- Managed-worktree risk inspection (read-only) and removal (mutation) ---
 
+  // Identity is resolved server-side from the requesting session's persisted
+  // checkout and registry ownership — the client never supplies a worktree
+  // path or ID (spec: ownership boundary / path and identity safety).
   server.handle(
     RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL,
-    async (_ctx, managedWorktreeId: string, sessionId: string) => {
-      return git.worktrees.inspectRemoval(managedWorktreeId, sessionId)
+    async (_ctx, sessionId: string) => {
+      return deps.sessionManager.inspectManagedWorktreeRemoval(sessionId)
     },
   )
 
   server.handle(
     RPC_CHANNELS.git.REMOVE_WORKTREE,
-    async (_ctx, managedWorktreeId: string, sessionId: string, force?: boolean) => {
+    async (_ctx, sessionId: string, force?: boolean) => {
       assertFeatureEnabled()
-      return git.worktrees.removeWorktree(managedWorktreeId, sessionId, { force })
+      return deps.sessionManager.removeManagedWorktree(sessionId, { force })
     },
   )
 

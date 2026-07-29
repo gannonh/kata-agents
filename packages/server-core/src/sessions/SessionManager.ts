@@ -5189,11 +5189,25 @@ export class SessionManager implements ISessionManager {
       throw new Error('Selected directory is not inside a Git repository.')
     }
 
-    // Idempotence: a repeated request only succeeds when it matches the
-    // persisted ready record; any different intent is rejected.
+    // Idempotence: a repeated request only succeeds when its full intent
+    // (mode + repository + base ref) matches the persisted ready record; any
+    // different intent is rejected. `ctx.repositoryRoot` is compared against
+    // both the recorded repository root and checkout path so a re-request made
+    // from inside a prepared worktree still resolves as the same intent.
     const existing = managed.checkout
     if (existing) {
-      if (existing.mode === intent.mode && existing.checkoutPath && managed.workingDirectory === existing.checkoutPath) {
+      const sameMode = existing.mode === intent.mode
+      const sameRepo =
+        existing.repositoryRoot === ctx.repositoryRoot ||
+        existing.checkoutPath === ctx.repositoryRoot
+      let sameIntent = false
+      if (intent.mode === 'current') {
+        sameIntent = sameMode && sameRepo
+      } else {
+        const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
+        sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
+      }
+      if (sameIntent) {
         return {
           checkout: existing,
           workingDirectory: existing.checkoutPath,
@@ -5215,6 +5229,10 @@ export class SessionManager implements ISessionManager {
         expectedBranch: null,
       }
       this.bindCheckout(managed, checkout, workingDirectory)
+      // Prefer a durable persist before returning success: `bindCheckout`
+      // enqueues a debounced write, so flush it so a restart/resume immediately
+      // after preparation restores the same checkout (AC5).
+      await this.flushSession(sessionId)
       return { checkout, workingDirectory, sdkCwd: managed.sdkCwd ?? workingDirectory }
     }
 
@@ -5255,6 +5273,9 @@ export class SessionManager implements ISessionManager {
     try {
       this.bindCheckout(managed, checkout, record.checkoutPath)
       git.registry.setState(record.managedWorktreeId, 'ready')
+      // Durable persist so restart/resume immediately after preparation returns
+      // to the same managed worktree (AC5).
+      await this.flushSession(sessionId)
     } catch (bindErr) {
       // Session update failed — attempt clean provisional cleanup.
       await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId, { force: true }).catch(() => {})
@@ -5269,6 +5290,57 @@ export class SessionManager implements ISessionManager {
         ? [`Skipped ${include.skippedSymlinks} symlink(s) while applying .worktreeinclude.`]
         : undefined,
     }
+  }
+
+  /**
+   * Resolve the managed-worktree identity for a session from its persisted
+   * checkout metadata and the registry — never a client-supplied path/id. The
+   * requesting session must be a recorded owner of the worktree.
+   */
+  private resolveOwnedWorktreeId(sessionId: string): string {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    const managedWorktreeId = managed.checkout?.managedWorktreeId
+    if (managed.checkout?.mode !== 'managed-worktree' || !managedWorktreeId) {
+      throw new Error('Session has no managed worktree to remove.')
+    }
+    const git = this.getGitServices()
+    const record = git.registry.get(managedWorktreeId)
+    if (!record) {
+      throw new Error('Managed worktree record not found for this session.')
+    }
+    if (!record.ownerSessionIds.includes(sessionId)) {
+      throw new Error('Session does not own this managed worktree.')
+    }
+    return managedWorktreeId
+  }
+
+  /**
+   * Inspect managed-worktree removal risk for the requesting session. Identity
+   * is resolved server-side from the session's persisted checkout.
+   */
+  async inspectManagedWorktreeRemoval(
+    sessionId: string,
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk> {
+    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    return this.getGitServices().worktrees.inspectRemoval(managedWorktreeId, sessionId)
+  }
+
+  /**
+   * Remove the managed worktree owned by the requesting session. Identity is
+   * resolved server-side from the session's persisted checkout; the client
+   * never supplies a worktree path or ID. Blocked while another session owns
+   * it. `force` governs uncommitted/unique work only, not identity safety.
+   */
+  async removeManagedWorktree(
+    sessionId: string,
+    options?: { force?: boolean },
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult> {
+    if (!isGitWorkspaceV1Enabled()) {
+      throw new Error('Git workspace feature is not enabled.')
+    }
+    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    return this.getGitServices().worktrees.removeWorktree(managedWorktreeId, sessionId, options)
   }
 
   /** Throw unless the session is empty (no messages, no SDK session, no agent). */

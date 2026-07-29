@@ -11,8 +11,6 @@ const ORIGINAL = process.env[FLAG]
 function makeGitServices(overrides?: Partial<{
   getContext: unknown
   listRefs: unknown
-  removeResult: unknown
-  inspectRisk: unknown
 }>): { git: GitServices; calls: string[] } {
   const calls: string[] = []
   const git = {
@@ -30,16 +28,7 @@ function makeGitServices(overrides?: Partial<{
         return { isGitRepository: false, checkoutPath: dir }
       },
     },
-    worktrees: {
-      inspectRemoval: async (id: string, sessionId: string) => {
-        calls.push(`inspectRemoval:${id}:${sessionId}`)
-        return overrides?.inspectRisk ?? { managedWorktreeId: id, exists: false }
-      },
-      removeWorktree: async (id: string, sessionId: string) => {
-        calls.push(`removeWorktree:${id}:${sessionId}`)
-        return overrides?.removeResult ?? { removed: true, branchPruned: true, blocked: false }
-      },
-    },
+    worktrees: {},
   } as unknown as GitServices
   return { git, calls }
 }
@@ -47,6 +36,8 @@ function makeGitServices(overrides?: Partial<{
 function makeHarness(gitServices: GitServices) {
   const handlers = new Map<string, HandlerFn>()
   const prepareCalls: Array<[string, unknown]> = []
+  const removeCalls: Array<[string, boolean | undefined]> = []
+  const inspectCalls: string[] = []
   let setGitServicesArg: GitServices | null = null
 
   const server: RpcServer = {
@@ -74,6 +65,14 @@ function makeHarness(gitServices: GitServices) {
         prepareCalls.push([sessionId, intent])
         return { checkout: {}, workingDirectory: '/wt', sdkCwd: '/wt' }
       },
+      async inspectManagedWorktreeRemoval(sessionId: string) {
+        inspectCalls.push(sessionId)
+        return { managedWorktreeId: 'resolved', exists: true }
+      },
+      async removeManagedWorktree(sessionId: string, options?: { force?: boolean }) {
+        removeCalls.push([sessionId, options?.force])
+        return { removed: true, branchPruned: true, blocked: false }
+      },
     } as unknown as HandlerDeps['sessionManager'],
     oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
     platform: {} as HandlerDeps['platform'],
@@ -83,7 +82,14 @@ function makeHarness(gitServices: GitServices) {
   registerGitHandlers(server, deps)
 
   const ctx: RequestContext = { clientId: 'c1', workspaceId: 'ws1', webContentsId: 1 }
-  return { handlers, ctx, prepareCalls, getSetGitServicesArg: () => setGitServicesArg }
+  return {
+    handlers,
+    ctx,
+    prepareCalls,
+    removeCalls,
+    inspectCalls,
+    getSetGitServicesArg: () => setGitServicesArg,
+  }
 }
 
 describe('registerGitHandlers', () => {
@@ -137,20 +143,22 @@ describe('registerGitHandlers', () => {
     expect(prepareCalls).toEqual([['s1', intent]])
   })
 
-  it('allows worktree removal inspection without the flag but gates removal on it', async () => {
-    const { git, calls } = makeGitServices()
-    const { handlers, ctx } = makeHarness(git)
+  it('resolves worktree removal from the session (never a client path) and gates it on the flag', async () => {
+    const { git } = makeGitServices()
+    const { handlers, ctx, inspectCalls, removeCalls } = makeHarness(git)
 
-    await handlers.get(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL)!(ctx, 'w1', 's1')
-    expect(calls).toContain('inspectRemoval:w1:s1')
+    // Inspection is read-only and resolves identity from the session ID alone.
+    await handlers.get(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL)!(ctx, 's1')
+    expect(inspectCalls).toEqual(['s1'])
 
     await expect(
-      handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 'w1', 's1'),
+      handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 's1'),
     ).rejects.toThrow(/not enabled/)
+    expect(removeCalls).toHaveLength(0)
 
     process.env[FLAG] = 'true'
-    await handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 'w1', 's1')
-    expect(calls).toContain('removeWorktree:w1:s1')
+    await handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 's1', true)
+    expect(removeCalls).toEqual([['s1', true]])
   })
 
   it('stubs later-phase channels with a not-implemented rejection', async () => {

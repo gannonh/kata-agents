@@ -1,6 +1,7 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { loadSession as loadStoredSession } from '@kata-sh/shared/sessions'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { createGitServices } from '../index'
 import { initRepo, makeTmpDir, cleanup, git } from './test-helpers'
@@ -117,6 +118,50 @@ describe('SessionManager.prepareCheckout — managed worktree', () => {
     await expect(
       sm.prepareCheckout('sess4', { mode: 'current', workingDirectory: repo }),
     ).rejects.toThrow(/already prepared/i)
+  })
+
+  test('rejects a repeated managed-worktree request with a different base ref', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    await git(repo, ['branch', 'feature'])
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sess4b', wsRoot)
+
+    await sm.prepareCheckout('sess4b', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Same mode + repo but a different base ref is a different intent.
+    await expect(
+      sm.prepareCheckout('sess4b', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'feature',
+      }),
+    ).rejects.toThrow(/already prepared/i)
+  })
+
+  test('durably persists checkout metadata before returning success (AC5)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessDurable', wsRoot)
+
+    const result = await sm.prepareCheckout('sessDurable', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    // The checkout is on disk immediately after prepareCheckout resolves,
+    // without any additional flush — a restart/resume restores the same one.
+    const stored = loadStoredSession(wsRoot, 'sessDurable')
+    expect(stored?.checkout?.mode).toBe('managed-worktree')
+    expect(stored?.checkout?.checkoutPath).toBe(result.checkout.checkoutPath)
+    expect(stored?.checkout?.managedWorktreeId).toBe(result.checkout.managedWorktreeId)
   })
 
   test('rejects a non-Git directory', async () => {
