@@ -337,6 +337,14 @@ export const CHANNEL_MAP = {
   inspectGitWorktreeRemoval: invoke(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL),
   removeGitWorktree: invoke(RPC_CHANNELS.git.REMOVE_WORKTREE),
 
+  // Git / GitHub V1 — commit / pull / push + pull requests (Phase 3)
+  commitGit: invoke(RPC_CHANNELS.git.COMMIT),
+  pullGit: invoke(RPC_CHANNELS.git.PULL),
+  pushGit: invoke(RPC_CHANNELS.git.PUSH),
+  getGitHubCapability: invoke(RPC_CHANNELS.git.GITHUB_STATUS),
+  getPullRequest: invoke(RPC_CHANNELS.git.FIND_PULL_REQUEST),
+  createPullRequest: invoke(RPC_CHANNELS.git.CREATE_PULL_REQUEST),
+
   checkGitBash: invoke(RPC_CHANNELS.gitbash.CHECK),
   browseForGitBash: invoke(RPC_CHANNELS.gitbash.BROWSE),
   setGitBashPath: invoke(RPC_CHANNELS.gitbash.SET_PATH),

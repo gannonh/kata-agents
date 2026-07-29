@@ -223,6 +223,11 @@ import type {
   GitStatusChangedEvent,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
+  GitCommitInput,
+  GitActionResult,
+  GitHubCapabilityStatus,
+  PullRequestSummary,
+  CreatePullRequestInput,
 } from '@kata-sh/shared/protocol'
 
 export interface ElectronAPI {
@@ -612,6 +617,22 @@ export interface ElectronAPI {
   // callers pass only the session ID (never a worktree path or ID).
   inspectGitWorktreeRemoval(sessionId: string): Promise<WorktreeRemovalRisk>
   removeGitWorktree(sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
+
+  // Git / GitHub V1 — commit / pull / push + GitHub pull requests (Phase 3).
+  // Identity is resolved server-side from the session's persisted checkout;
+  // callers pass only the session ID and typed operation input.
+  /** Commit selected files; returns structured per-stage progress. */
+  commitGit(input: GitCommitInput): Promise<GitActionResult>
+  /** Fast-forward-only pull. */
+  pullGit(sessionId: string): Promise<GitActionResult>
+  /** Push the current branch, configuring upstream when absent. */
+  pushGit(sessionId: string): Promise<GitActionResult>
+  /** GitHub `gh` capability/auth status for the session's checkout. */
+  getGitHubCapability(sessionId: string): Promise<GitHubCapabilityStatus>
+  /** Look up an open pull request for the current branch, or null. */
+  getPullRequest(sessionId: string): Promise<PullRequestSummary | null>
+  /** Create a pull request; returns structured per-stage progress + URL. */
+  createPullRequest(input: CreatePullRequestInput): Promise<GitActionResult>
 
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>
