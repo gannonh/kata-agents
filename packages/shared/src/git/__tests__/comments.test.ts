@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import {
   createPendingComment,
   reconcileStaleForPath,
+  reconcileCommentsForDiff,
   hasStaleComments,
+  clearStaleComments,
   commentsForSession,
   serializeFeedback,
   sortCommentsForSerialization,
@@ -71,6 +73,83 @@ describe('reconcileStaleForPath', () => {
     const comments = [make({ id: 'c1', path: 'a.ts', diffFingerprint: 'fp' })]
     const next = reconcileStaleForPath(comments, 'a.ts', 'fp')
     expect(next).toBe(comments)
+  })
+})
+
+describe('reconcileCommentsForDiff', () => {
+  const newContent = 'l1\nl2\nl3\n'
+
+  it('marks a still-present line stale when the fingerprint changed', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 2, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent,
+    })
+    expect(next).toHaveLength(1)
+    expect(next[0]!.stale).toBe(true)
+  })
+
+  it('keeps a still-present line non-stale when the fingerprint matches', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 2, diffFingerprint: 'fp', stale: true })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'fp',
+      newContent,
+    })
+    expect(next[0]!.stale).toBe(false)
+  })
+
+  it('auto-drops a comment whose anchored line no longer exists', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 9, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent, // only 3 lines
+    })
+    expect(next).toHaveLength(0)
+  })
+
+  it('auto-drops all comments on a path that is now clean or reverted', () => {
+    const comments = [
+      make({ id: 'c1', path: 'a.ts', side: 'new', line: 1 }),
+      make({ id: 'c2', path: 'b.ts', side: 'new', line: 1 }),
+    ]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'clean',
+      fingerprint: 'clean',
+    })
+    expect(next.map((c) => c.id)).toEqual(['c2'])
+  })
+
+  it('marks comments stale (not dropped) when the diff is now oversized/binary', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 1, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'oversized',
+      fingerprint: 'size-fp',
+    })
+    expect(next).toHaveLength(1)
+    expect(next[0]!.stale).toBe(true)
+  })
+
+  it('does not touch comments on other paths', () => {
+    const comments = [
+      make({ id: 'c1', path: 'a.ts', side: 'new', line: 1, diffFingerprint: 'old' }),
+      make({ id: 'c2', path: 'b.ts', side: 'new', line: 1, diffFingerprint: 'keep' }),
+    ]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent,
+    })
+    expect(next.find((c) => c.id === 'c2')!.stale).toBeUndefined()
+  })
+})
+
+describe('clearStaleComments', () => {
+  it('removes only stale comments', () => {
+    const comments = [make({ id: 'c1', stale: true }), make({ id: 'c2', stale: false })]
+    expect(clearStaleComments(comments).map((c) => c.id)).toEqual(['c2'])
   })
 })
 

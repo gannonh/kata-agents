@@ -8,7 +8,10 @@ import {
   updatePendingCommentText,
   removePendingComment,
   clearSessionComments,
+  clearStaleSessionComments,
+  getSessionComments,
   reconcileStaleForSessionPath,
+  reconcileSessionPathForDiff,
 } from '../git-comments'
 
 const store = getDefaultStore()
@@ -68,5 +71,35 @@ describe('git-comments store', () => {
     addPendingComment(comment('c1', 's1', 'a.ts', 'fp'))
     reconcileStaleForSessionPath('s1', 'a.ts', 'fp')
     expect(store.get(sessionPendingCommentsAtomFamily('s1'))[0]!.stale).toBe(false)
+  })
+
+  it('reads a session snapshot synchronously', () => {
+    addPendingComment(comment('c1', 's1', 'a.ts'))
+    addPendingComment(comment('c2', 's2', 'b.ts'))
+    expect(getSessionComments('s1').map((c) => c.id)).toEqual(['c1'])
+  })
+
+  it('reconciles a session path against a fresh diff (drop clean, mark stale)', () => {
+    addPendingComment(comment('c1', 's1', 'a.ts', 'old-fp'))
+    addPendingComment(comment('c2', 's1', 'gone.ts', 'fp'))
+    // a.ts still changed but fingerprint moved → stale
+    reconcileSessionPathForDiff('s1', 'a.ts', {
+      state: 'text',
+      fingerprint: 'new-fp',
+      newContent: 'l1\n',
+    })
+    // gone.ts reverted to clean → its comment is auto-dropped
+    reconcileSessionPathForDiff('s1', 'gone.ts', { state: 'clean', fingerprint: 'clean' })
+    const scoped = store.get(sessionPendingCommentsAtomFamily('s1'))
+    expect(scoped.map((c) => c.id)).toEqual(['c1'])
+    expect(scoped[0]!.stale).toBe(true)
+  })
+
+  it('clears only stale comments for a session', () => {
+    addPendingComment(comment('c1', 's1', 'a.ts', 'old'))
+    addPendingComment(comment('c2', 's1', 'b.ts', 'fp'))
+    reconcileSessionPathForDiff('s1', 'a.ts', { state: 'text', fingerprint: 'new', newContent: 'l1\n' })
+    clearStaleSessionComments('s1')
+    expect(store.get(sessionPendingCommentsAtomFamily('s1')).map((c) => c.id)).toEqual(['c2'])
   })
 })

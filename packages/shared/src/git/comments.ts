@@ -10,7 +10,7 @@
  * - serializing reviewed comments into one deterministic follow-up message.
  */
 
-import type { GitCommentSide, GitPendingComment } from '../protocol/git'
+import type { GitCommentSide, GitFileDiff, GitPendingComment } from '../protocol/git'
 
 export interface CreatePendingCommentInput {
   id: string
@@ -64,9 +64,78 @@ export function reconcileStaleForPath(
   return changed ? next : comments
 }
 
+/** Minimal diff view needed to reconcile pending comments before sending. */
+export type CommentDiffView = Pick<
+  GitFileDiff,
+  'state' | 'fingerprint' | 'oldContent' | 'newContent'
+>
+
+/** Count of addressable 1-based lines on a diff side's content. */
+function lineCount(content: string | undefined): number {
+  if (!content) return 0
+  return content.split('\n').length
+}
+
+/**
+ * Reconcile a path's pending comments against a freshly-fetched diff. This is
+ * the "review before sending" rule (spec AC11):
+ *
+ * - When the path is now clean or missing (its uncommitted change went away),
+ *   every comment on it is auto-dropped — there is nothing left to review.
+ * - When the diff has line content (`text`), a comment whose anchored line no
+ *   longer exists is auto-dropped; a still-present line whose fingerprint no
+ *   longer matches is marked stale (requires explicit review before send).
+ * - When the diff cannot expose line content (`binary`/`oversized`/`error`),
+ *   comments are kept but marked stale on any fingerprint change so the user
+ *   must review them rather than silently sending outdated context.
+ *
+ * Returns the same array reference when nothing changed.
+ */
+export function reconcileCommentsForDiff(
+  comments: GitPendingComment[],
+  path: string,
+  diff: CommentDiffView,
+): GitPendingComment[] {
+  let changed = false
+  const next: GitPendingComment[] = []
+  for (const c of comments) {
+    if (c.path !== path) {
+      next.push(c)
+      continue
+    }
+    // The path no longer has uncommitted changes — nothing to review.
+    if (diff.state === 'clean' || diff.state === 'missing') {
+      changed = true
+      continue
+    }
+    if (diff.state === 'text') {
+      const content = c.side === 'old' ? diff.oldContent : diff.newContent
+      const max = lineCount(content)
+      if (c.line < 1 || c.line > max) {
+        // The anchored line no longer exists — safe to drop.
+        changed = true
+        continue
+      }
+    }
+    const stale = c.diffFingerprint !== diff.fingerprint
+    if (stale === Boolean(c.stale)) {
+      next.push(c)
+    } else {
+      changed = true
+      next.push({ ...c, stale })
+    }
+  }
+  return changed ? next : comments
+}
+
 /** True when any comment in the list is marked stale. */
 export function hasStaleComments(comments: GitPendingComment[]): boolean {
   return comments.some((c) => c.stale)
+}
+
+/** Remove every stale comment (the "clear stale" review action). */
+export function clearStaleComments(comments: GitPendingComment[]): GitPendingComment[] {
+  return comments.filter((c) => !c.stale)
 }
 
 /**

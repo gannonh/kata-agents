@@ -10,7 +10,12 @@
 
 import { atom, getDefaultStore } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import { reconcileStaleForPath as reconcilePure } from '@kata-sh/shared/git'
+import {
+  reconcileStaleForPath as reconcilePure,
+  reconcileCommentsForDiff,
+  clearStaleComments,
+  type CommentDiffView,
+} from '@kata-sh/shared/git'
 import type { GitPendingComment } from '@kata-sh/shared/protocol'
 
 /** All pending comments across every session for the current app run. */
@@ -46,6 +51,55 @@ export function removePendingComment(id: string): void {
 /** Clear every pending comment for a session (after a successful send). */
 export function clearSessionComments(sessionId: string): void {
   update((comments) => comments.filter((c) => c.sessionId !== sessionId))
+}
+
+/** Read a synchronous snapshot of a session's pending comments. */
+export function getSessionComments(sessionId: string): GitPendingComment[] {
+  return getDefaultStore()
+    .get(pendingCommentsAtom)
+    .filter((c) => c.sessionId === sessionId)
+}
+
+/** Remove a session's stale comments (the "clear stale" review action, AC11). */
+export function clearStaleSessionComments(sessionId: string): void {
+  update((comments) => {
+    const scoped = comments.filter((c) => c.sessionId === sessionId)
+    const kept = clearStaleComments(scoped)
+    if (kept.length === scoped.length) return comments
+    const keptIds = new Set(kept.map((c) => c.id))
+    return comments.filter((c) => c.sessionId !== sessionId || keptIds.has(c.id))
+  })
+}
+
+/**
+ * Reconcile a session's comments on a single path against a freshly-fetched
+ * diff: auto-drop comments whose anchored line no longer exists (or whose path
+ * is now clean), and mark still-present comments stale when the fingerprint
+ * changed (AC11 — review before sending).
+ */
+export function reconcileSessionPathForDiff(
+  sessionId: string,
+  path: string,
+  diff: CommentDiffView,
+): void {
+  update((comments) => {
+    const scoped = comments.filter((c) => c.sessionId === sessionId)
+    const reconciled = reconcileCommentsForDiff(scoped, path, diff)
+    if (reconciled === scoped) return comments
+    const byId = new Map(reconciled.map((c) => [c.id, c]))
+    // Preserve ordering; drop scoped comments no longer present, apply updates.
+    const result: GitPendingComment[] = []
+    for (const c of comments) {
+      if (c.sessionId !== sessionId) {
+        result.push(c)
+        continue
+      }
+      const updated = byId.get(c.id)
+      if (updated) result.push(updated)
+      // else: this comment was auto-dropped by reconciliation.
+    }
+    return result
+  })
 }
 
 /**
