@@ -15,6 +15,8 @@ import type { AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
+import { DeleteSessionDialog } from '@/components/app-shell/DeleteSessionDialog'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@kata-sh/ui'
 import { FocusProvider } from '@/context/FocusContext'
@@ -316,6 +318,16 @@ export default function App() {
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
+  // Delete-session dialog with the separate managed-worktree removal choice
+  // (spec: AC18–AC19). Only used for managed-worktree sessions; other sessions
+  // keep the lightweight native confirmation path. The captured `resolve`
+  // bridges the dialog outcome back to the awaited handleDeleteSession promise.
+  const [deleteDialog, setDeleteDialog] = useState<{
+    sessionId: string
+    sessionName: string
+    branch: string | null
+    resolve: (deleted: boolean) => void
+  } | null>(null)
 
   // Splash screen state - tracks when app is fully ready (all data loaded)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
@@ -1110,6 +1122,24 @@ export default function App() {
       const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
       if (!isEmpty) {
+        // Managed-worktree sessions get a richer confirmation that offers the
+        // separate managed-worktree removal choice (spec: AC18–AC19). The
+        // dialog performs the deletion itself; we bridge its outcome back to
+        // this promise so existing callers keep their boolean contract.
+        if (FEATURE_FLAGS.gitWorkspaceV1) {
+          const session = store.get(sessionAtomFamily(sessionId))
+          const checkout = session?.checkout
+          if (checkout?.mode === 'managed-worktree') {
+            return await new Promise<boolean>((resolve) => {
+              setDeleteDialog({
+                sessionId,
+                sessionName: meta?.name || 'Untitled',
+                branch: checkout.expectedBranch ?? checkout.branchAtPreparation ?? null,
+                resolve,
+              })
+            })
+          }
+        }
         const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
         if (!confirmed) return false
       }
@@ -1120,6 +1150,15 @@ export default function App() {
     removeSession(sessionId)
     return true
   }, [store, removeSession])
+
+  // Resolve the pending delete-session promise and dismiss the dialog. Called
+  // with `true` after the dialog completes deletion, `false` on cancel.
+  const handleDeleteDialogClose = useCallback((deleted: boolean) => {
+    setDeleteDialog((cur) => {
+      cur?.resolve(deleted)
+      return null
+    })
+  }, [])
 
   // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
@@ -2032,6 +2071,20 @@ export default function App() {
               open={showResetDialog}
               onConfirm={executeReset}
               onCancel={() => setShowResetDialog(false)}
+            />
+            <DeleteSessionDialog
+              open={!!deleteDialog}
+              sessionId={deleteDialog?.sessionId ?? null}
+              sessionName={deleteDialog?.sessionName ?? ''}
+              branch={deleteDialog?.branch ?? null}
+              onOpenChange={(open) => {
+                if (!open) handleDeleteDialogClose(false)
+              }}
+              onDeleteSession={async (id) => {
+                await window.electronAPI.deleteSession(id)
+                removeSession(id)
+              }}
+              onDeleted={() => handleDeleteDialogClose(true)}
             />
           </div>
 
