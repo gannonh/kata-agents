@@ -25,7 +25,11 @@ function makeGitServices(overrides?: Partial<{
       },
       getStatus: async (dir: string) => {
         calls.push(`getStatus:${dir}`)
-        return { isGitRepository: false, checkoutPath: dir }
+        return { isGitRepository: true, checkoutPath: dir, entries: [] }
+      },
+      getFileDiff: async (dir: string, req: { path: string }) => {
+        calls.push(`getFileDiff:${dir}:${req.path}`)
+        return { path: req.path, changeType: 'modified', state: 'text', fingerprint: 'fp' }
       },
     },
     worktrees: {},
@@ -58,6 +62,11 @@ function makeHarness(gitServices: GitServices) {
 
   const deps: HandlerDeps = {
     sessionManager: {
+      getSessions() {
+        return [
+          { id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' },
+        ]
+      },
       setGitServices(services: GitServices) {
         setGitServicesArg = services
       },
@@ -161,17 +170,37 @@ describe('registerGitHandlers', () => {
     expect(removeCalls).toEqual([['s1', true]])
   })
 
-  it('stubs later-phase channels with a not-implemented rejection', async () => {
+  it('stubs later-phase (Phase 3) channels with a not-implemented rejection', async () => {
     process.env[FLAG] = 'true'
     const { git } = makeGitServices()
     const { handlers, ctx } = makeHarness(git)
 
-    await expect(handlers.get(RPC_CHANNELS.git.GET_DIFF)!(ctx)).rejects.toThrow(/not implemented/)
     await expect(
       handlers.get(RPC_CHANNELS.git.COMMIT)!(ctx, { sessionId: 's1', message: 'x' }),
     ).rejects.toThrow(/not implemented/)
     await expect(handlers.get(RPC_CHANNELS.git.GITHUB_STATUS)!(ctx)).rejects.toThrow(
       /not implemented/,
     )
+  })
+
+  it('serves a bounded diff resolved from the session checkout', async () => {
+    const { git, calls } = makeGitServices()
+    const { handlers, ctx } = makeHarness(git)
+
+    const diff = await handlers.get(RPC_CHANNELS.git.GET_DIFF)!(ctx, 's1', 'src/a.ts')
+    // getStatus (path validation) returns no entries → path treated as clean.
+    expect(calls).toContain('getStatus:/repo')
+    expect(diff.state).toBe('clean')
+    expect(diff.path).toBe('src/a.ts')
+  })
+
+  it('subscribes and unsubscribes status by session (client-scoped)', async () => {
+    const { git } = makeGitServices()
+    const { handlers, ctx } = makeHarness(git)
+
+    const snapshot = await handlers.get(RPC_CHANNELS.git.SUBSCRIBE_STATUS)!(ctx, 's1')
+    expect(snapshot.checkoutPath).toBe('/repo')
+    // Unsubscribing a session must not throw.
+    await handlers.get(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS)!(ctx, 's1')
   })
 })

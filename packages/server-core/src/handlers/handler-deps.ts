@@ -1,5 +1,5 @@
 import type { PlatformServices } from '../runtime/platform'
-import type { GitServices } from '../git'
+import type { GitServices, GitStatusSubscription } from '../git'
 import type { ISessionManager } from './session-manager-interface'
 import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
@@ -35,4 +35,10 @@ export interface HandlerDeps<
    * both the git RPC handlers and SessionManager share one registry instance.
    */
   gitServices?: GitServices
+  /**
+   * Coalesced Git status subscription, populated by `registerGitHandlers`.
+   * Exposed so app-issued Git mutations (Phase 3) and agent turn completion can
+   * request an immediate status refresh instead of waiting for the poll tick.
+   */
+  gitStatusSubscription?: GitStatusSubscription
 }

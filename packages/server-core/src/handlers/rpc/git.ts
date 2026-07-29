@@ -13,10 +13,13 @@ import type {
   CheckoutPrepareIntent,
   CreatePullRequestInput,
   GitCommitInput,
+  GitFileDiff,
+  GitStatusChangedEvent,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
-import { getDefaultGitServices } from '../../git'
+import { pushTyped } from '../../transport/push'
+import { getDefaultGitServices, GitStatusSubscription } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
 export const GIT_HANDLED_CHANNELS = [
@@ -50,11 +53,45 @@ class NotImplementedError extends Error {
   }
 }
 
+/**
+ * Resolve a session's active checkout directory + owning workspace from
+ * persisted session state — never a client-supplied path (spec: ownership
+ * boundary). Managed-worktree sessions resolve to the worktree checkout path;
+ * others fall back to the session working directory.
+ */
+function makeSessionResolver(deps: HandlerDeps) {
+  return (sessionId: string): { checkoutPath: string; workspaceId: string } | null => {
+    const sessions = deps.sessionManager.getSessions()
+    const session = sessions.find((s) => s.id === sessionId)
+    if (!session) return null
+    const checkoutPath = session.checkout?.checkoutPath ?? session.workingDirectory
+    if (!checkoutPath) return null
+    return { checkoutPath, workspaceId: session.workspaceId }
+  }
+}
+
 export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void {
   const git = deps.gitServices ?? getDefaultGitServices()
   // Ensure the SessionManager's checkout gate operates on the same registry
   // instance as these handlers so ownership state never diverges.
   deps.sessionManager.setGitServices?.(git)
+
+  const resolveSession = makeSessionResolver(deps)
+
+  // Coalesced status subscription: one poll loop per checkout, workspace-routed
+  // change events carrying the session ID. Injected getStatus/publish keep the
+  // subscription transport-agnostic and testable.
+  const statusSubscription = new GitStatusSubscription({
+    getStatus: (dir) => git.repository.getStatus(dir),
+    resolveSession,
+    publish: (event: GitStatusChangedEvent, workspaceId: string) => {
+      pushTyped(server, RPC_CHANNELS.git.STATUS_CHANGED, { to: 'workspace', workspaceId }, event)
+    },
+    pollIntervalMs: 3000,
+  })
+  // Expose the subscription so future app-issued mutations (Phase 3) and agent
+  // turn completion can trigger an immediate refresh.
+  deps.gitStatusSubscription = statusSubscription
 
   // Startup reconciliation: once the session manager has finished loading
   // sessions, compare the managed-worktree registry against persisted session
@@ -123,16 +160,47 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
     return git.repository.getStatus(dir)
   })
 
-  server.handle(RPC_CHANNELS.git.GET_DIFF, async () => {
-    throw new NotImplementedError(RPC_CHANNELS.git.GET_DIFF)
+  // Bounded diff by session ID + repository-relative path. Identity is resolved
+  // server-side; the path is validated against the current status snapshot
+  // before any file is read (spec: Changes panel data flow, path safety).
+  server.handle(RPC_CHANNELS.git.GET_DIFF, async (_ctx, sessionId: string, path: string) => {
+    const resolved = resolveSession(sessionId)
+    if (!resolved) throw new Error('Session checkout could not be resolved.')
+    const status = await git.repository.getStatus(resolved.checkoutPath)
+    if (!status.isGitRepository) {
+      throw new Error('Selected checkout is not a Git repository.')
+    }
+    const entry = status.entries.find((e) => e.path === path || e.previousPath === path)
+    if (!entry) {
+      // Path is no longer part of the uncommitted changes (e.g. reverted).
+      return {
+        path,
+        changeType: 'unknown',
+        state: 'clean',
+        fingerprint: 'clean',
+        additions: 0,
+        deletions: 0,
+        oldContent: '',
+        newContent: '',
+      } satisfies GitFileDiff
+    }
+    return git.repository.getFileDiff(resolved.checkoutPath, {
+      path: entry.path,
+      previousPath: entry.previousPath,
+      type: entry.type,
+    })
   })
 
-  server.handle(RPC_CHANNELS.git.SUBSCRIBE_STATUS, async () => {
-    throw new NotImplementedError(RPC_CHANNELS.git.SUBSCRIBE_STATUS)
+  server.handle(RPC_CHANNELS.git.SUBSCRIBE_STATUS, async (ctx, sessionId: string) => {
+    return statusSubscription.subscribe(ctx.clientId, sessionId)
   })
 
-  server.handle(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS, async () => {
-    throw new NotImplementedError(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS)
+  server.handle(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS, async (ctx, sessionId?: string) => {
+    if (sessionId) {
+      statusSubscription.unsubscribe(ctx.clientId, sessionId)
+    } else {
+      statusSubscription.unsubscribeClient(ctx.clientId)
+    }
   })
 
   // --- Commit / pull / push (Phase 3, mutation) ---
