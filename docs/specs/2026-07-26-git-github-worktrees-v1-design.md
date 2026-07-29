@@ -2,7 +2,7 @@
 type: Spec
 title: Git and GitHub V1 with managed worktrees
 description: Add checkout-aware sessions, managed Git worktrees, change review with agent feedback, and safe commit, push, and GitHub pull-request actions.
-status: Approved
+status: Implemented
 tags: [git, github, worktrees, electron, server, sessions, review]
 timestamp: 2026-07-26T00:00:00Z
 ---
@@ -10,7 +10,7 @@ timestamp: 2026-07-26T00:00:00Z
 # Git and GitHub V1 with managed worktrees
 
 ## Status
-Approved
+Implemented — all four phases built behind `KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). Build report: [2026-07-26-git-github-worktrees-v1-build-report.md](2026-07-26-git-github-worktrees-v1-build-report.md). Real-GitHub UAT and the macOS `@git` E2E GUI flow are deferred to Verify (see the build report's Deferrals).
 
 ## Goal
 
