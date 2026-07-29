@@ -171,6 +171,90 @@ export function runGit(args: string[], options: RunGitOptions): Promise<GitComma
   })
 }
 
+/**
+ * Run a git command and capture stdout as a raw {@link Buffer}. Needed for
+ * binary-safe reads (e.g. `git show HEAD:<path>`) where utf8 decoding would
+ * corrupt the bytes used for binary detection.
+ */
+export function runGitBuffer(
+  args: string[],
+  options: RunGitOptions,
+): Promise<{ stdout: Buffer; exitCode: number }> {
+  const {
+    cwd,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    maxBufferBytes = DEFAULT_MAX_BUFFER,
+    okExitCodes = [],
+    env,
+    signal,
+  } = options
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      args,
+      {
+        cwd,
+        timeout: timeoutMs,
+        maxBuffer: maxBufferBytes,
+        encoding: 'buffer',
+        windowsHide: true,
+        env: env ? { ...process.env, ...env } : process.env,
+        signal,
+      },
+      (error, stdout) => {
+        const out = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '')
+        if (!error) {
+          resolve({ stdout: out, exitCode: 0 })
+          return
+        }
+        const err = error as NodeJS.ErrnoException & { code?: string | number; killed?: boolean; signal?: string }
+        if (err.code === 'ENOENT') {
+          reject(
+            new GitCommandError({
+              message: 'Git executable not found. Install Git on the workspace-owning machine.',
+              code: 'GIT_NOT_FOUND',
+              exitCode: null,
+              stderr: '',
+              stdout: '',
+              args,
+            }),
+          )
+          return
+        }
+        if (err.killed || err.signal) {
+          reject(
+            new GitCommandError({
+              message: `Git command timed out after ${timeoutMs}ms: git ${args[0] ?? ''}`,
+              code: 'GIT_TIMEOUT',
+              exitCode: null,
+              stderr: '',
+              stdout: '',
+              args,
+            }),
+          )
+          return
+        }
+        const exitCode = typeof err.code === 'number' ? err.code : 1
+        if (okExitCodes.includes(exitCode)) {
+          resolve({ stdout: out, exitCode })
+          return
+        }
+        reject(
+          new GitCommandError({
+            message: `git ${args[0] ?? ''} failed (exit ${exitCode})`,
+            code: 'GIT_COMMAND_FAILED',
+            exitCode,
+            stderr: '',
+            stdout: '',
+            args,
+          }),
+        )
+      },
+    )
+  })
+}
+
 /** Split NUL-delimited git output into non-empty records. */
 export function splitNul(output: string): string[] {
   return output.split('\0').filter((s) => s.length > 0)

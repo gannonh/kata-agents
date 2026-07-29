@@ -21,6 +21,8 @@ export * from './managed-worktree-service'
 export * from './worktree-registry'
 export * from './worktree-include'
 export * from './mutation-lock'
+export * from './diff-language'
+export * from './status-subscription'
 
 export interface GitServices {
   repository: RepositoryService

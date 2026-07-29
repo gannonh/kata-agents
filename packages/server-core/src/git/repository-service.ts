@@ -7,8 +7,11 @@
  * localized human output.
  */
 
-import { resolve as resolvePath } from 'node:path'
+import { resolve as resolvePath, relative as relativePath, isAbsolute } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import type {
+  GitFileDiff,
   GitProvider,
   GitRef,
   GitRemoteInfo,
@@ -18,7 +21,9 @@ import type {
   ListRefsResult,
   RepositoryContext,
 } from '@kata-sh/shared/protocol'
-import { runGit, splitNul, GitCommandError } from './command-runner'
+import { GIT_DIFF_MAX_BYTES } from '@kata-sh/shared/protocol'
+import { runGit, runGitBuffer, splitNul, GitCommandError } from './command-runner'
+import { detectDiffLanguage } from './diff-language'
 
 export function detectProvider(url: string | null): GitProvider {
   if (!url) return 'unknown'
@@ -336,10 +341,164 @@ export class RepositoryService {
       snapshot.ahead = ahead
       snapshot.behind = behind
       snapshot.upstream = upstream
+      await this.attachDiffStats(dir, snapshot)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
     }
     return snapshot
+  }
+
+  /**
+   * Attach per-entry and aggregate additions/deletions to a status snapshot.
+   * Tracked changes use `git diff --numstat -z HEAD`; untracked files count
+   * their own lines (bounded). Binary paths are flagged and excluded from totals.
+   */
+  private async attachDiffStats(dir: string, snapshot: GitStatusSnapshot): Promise<void> {
+    let stats: Map<string, { additions: number | null; deletions: number | null }>
+    try {
+      stats = await this.getNumstat(dir)
+    } catch (err) {
+      if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      return
+    }
+    let totalAdd = 0
+    let totalDel = 0
+    let haveStats = false
+    for (const entry of snapshot.entries) {
+      const s = stats.get(entry.path)
+      if (s) {
+        if (s.additions === null || s.deletions === null) {
+          entry.binary = true
+          continue
+        }
+        entry.additions = s.additions
+        entry.deletions = s.deletions
+        totalAdd += s.additions
+        totalDel += s.deletions
+        haveStats = true
+      } else if (entry.type === 'untracked') {
+        const lines = await this.countUntrackedLines(dir, entry.path)
+        if (lines === null) {
+          entry.binary = true
+        } else {
+          entry.additions = lines
+          entry.deletions = 0
+          totalAdd += lines
+          haveStats = true
+        }
+      }
+    }
+    if (haveStats) {
+      snapshot.additions = totalAdd
+      snapshot.deletions = totalDel
+    }
+  }
+
+  private async getNumstat(
+    dir: string,
+  ): Promise<Map<string, { additions: number | null; deletions: number | null }>> {
+    const map = new Map<string, { additions: number | null; deletions: number | null }>()
+    const res = await runGit(['diff', '--numstat', '-z', 'HEAD'], { cwd: dir, okExitCodes: [128] })
+    if (res.exitCode !== 0) return map
+    for (const rec of parseNumstatZ(res.stdout)) {
+      map.set(rec.path, { additions: rec.additions, deletions: rec.deletions })
+    }
+    return map
+  }
+
+  private async countUntrackedLines(dir: string, relPath: string): Promise<number | null> {
+    try {
+      const abs = resolvePath(dir, relPath)
+      const st = await stat(abs)
+      if (st.size > GIT_DIFF_MAX_BYTES) return null
+      const buf = await readFile(abs)
+      if (isBinaryBuffer(buf)) return null
+      if (buf.length === 0) return 0
+      const text = buf.toString('utf8')
+      let n = text.split('\n').length
+      if (text.endsWith('\n')) n -= 1
+      return n
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Produce a bounded diff for a single repository-relative path in the given
+   * checkout. Old side is the committed (HEAD) blob; new side is the working
+   * tree. Returns explicit binary/oversized/missing/clean/error states so the
+   * Changes panel never renders a corrupt diff.
+   */
+  async getFileDiff(
+    dir: string,
+    request: { path: string; previousPath?: string; type: GitWorkingTreeEntryType },
+  ): Promise<GitFileDiff> {
+    const { path, previousPath, type: changeType } = request
+    const language = detectDiffLanguage(path)
+    const base: GitFileDiff = { path, previousPath, changeType, state: 'text', fingerprint: '', language }
+    try {
+      const oldPath = previousPath ?? path
+      const isAdded = changeType === 'added' || changeType === 'untracked'
+      const isDeleted = changeType === 'deleted'
+
+      const oldBuf = isAdded ? Buffer.alloc(0) : await this.showHeadBlob(dir, oldPath)
+
+      let newBuf = Buffer.alloc(0)
+      if (!isDeleted) {
+        const abs = resolveInRepo(dir, path)
+        if (!abs) return { ...base, state: 'error', fingerprint: 'error', error: 'Path is outside the repository.' }
+        try {
+          newBuf = await readFile(abs)
+        } catch {
+          return { ...base, state: 'missing', fingerprint: fingerprintBuffers(oldBuf, Buffer.alloc(0)) }
+        }
+      }
+
+      const fingerprint = fingerprintBuffers(oldBuf, newBuf)
+      const sizeBytes = Math.max(oldBuf.length, newBuf.length)
+
+      if (isBinaryBuffer(oldBuf) || isBinaryBuffer(newBuf)) {
+        return { ...base, state: 'binary', sizeBytes, fingerprint }
+      }
+      if (sizeBytes > GIT_DIFF_MAX_BYTES) {
+        return { ...base, state: 'oversized', sizeBytes, fingerprint }
+      }
+      const oldContent = oldBuf.toString('utf8')
+      const newContent = newBuf.toString('utf8')
+      if (oldContent === newContent) {
+        return {
+          ...base,
+          state: 'clean',
+          oldContent,
+          newContent,
+          additions: 0,
+          deletions: 0,
+          sizeBytes,
+          fingerprint,
+        }
+      }
+      const { additions, deletions } = countLineDiff(oldContent, newContent)
+      return { ...base, state: 'text', oldContent, newContent, additions, deletions, sizeBytes, fingerprint }
+    } catch (err) {
+      if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      return {
+        ...base,
+        state: 'error',
+        fingerprint: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  private async showHeadBlob(dir: string, relPath: string): Promise<Buffer> {
+    try {
+      const res = await runGitBuffer(['show', `HEAD:${relPath}`], { cwd: dir, okExitCodes: [128] })
+      if (res.exitCode !== 0) return Buffer.alloc(0)
+      return res.stdout
+    } catch (err) {
+      if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      return Buffer.alloc(0)
+    }
   }
 
   /** Count commits on the current branch not reachable from the given ref. */
@@ -400,4 +559,91 @@ function pickPrimaryRemote(remotes: GitRemoteInfo[]): string | null {
   if (remotes.length === 0) return null
   const origin = remotes.find((r) => r.name === 'origin')
   return origin ? origin.name : remotes[0]!.name
+}
+
+interface NumstatRecord {
+  additions: number | null
+  deletions: number | null
+  path: string
+  previousPath?: string
+}
+
+/** Parse `git diff --numstat -z` output, handling NUL-separated rename records. */
+export function parseNumstatZ(output: string): NumstatRecord[] {
+  const parts = output.split('\0')
+  const records: NumstatRecord[] = []
+  let i = 0
+  while (i < parts.length) {
+    const rec = parts[i]
+    if (!rec) {
+      i++
+      continue
+    }
+    const m = rec.match(/^(-|\d+)\t(-|\d+)\t(.*)$/)
+    if (!m) {
+      i++
+      continue
+    }
+    const additions = m[1] === '-' ? null : parseInt(m[1]!, 10)
+    const deletions = m[2] === '-' ? null : parseInt(m[2]!, 10)
+    let path = m[3]!
+    let previousPath: string | undefined
+    if (path === '') {
+      // Rename/copy: the two following NUL-separated tokens are old + new paths.
+      previousPath = parts[i + 1]
+      path = parts[i + 2] ?? ''
+      i += 3
+    } else {
+      i += 1
+    }
+    records.push({ additions, deletions, path, previousPath })
+  }
+  return records
+}
+
+/** True when a buffer contains a NUL byte in its leading window (binary heuristic). */
+export function isBinaryBuffer(buf: Buffer): boolean {
+  const len = Math.min(buf.length, 8000)
+  for (let i = 0; i < len; i++) {
+    if (buf[i] === 0) return true
+  }
+  return false
+}
+
+function fingerprintBuffers(a: Buffer, b: Buffer): string {
+  const h = createHash('sha256')
+  h.update(a)
+  h.update(Buffer.from([0]))
+  h.update(b)
+  return h.digest('hex').slice(0, 16)
+}
+
+/**
+ * Count changed lines by trimming common prefix/suffix. Deterministic and cheap;
+ * the diff renderer computes its own precise hunk counts for display.
+ */
+export function countLineDiff(oldContent: string, newContent: string): {
+  additions: number
+  deletions: number
+} {
+  const a = oldContent === '' ? [] : oldContent.split('\n')
+  const b = newContent === '' ? [] : newContent.split('\n')
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let endA = a.length
+  let endB = b.length
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--
+    endB--
+  }
+  return { deletions: Math.max(0, endA - start), additions: Math.max(0, endB - start) }
+}
+
+/** Lexical containment check: resolve a repo-relative path and reject escapes. */
+export function resolveInRepo(dir: string, relPath: string): string | null {
+  const root = resolvePath(dir)
+  const abs = resolvePath(root, relPath)
+  const rel = relativePath(root, abs)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
+  return abs
 }
