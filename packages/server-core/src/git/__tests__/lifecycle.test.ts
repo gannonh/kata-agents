@@ -320,3 +320,93 @@ describe('SessionManager.updateWorkingDirectory — bound checkouts are authorit
     expect(managed.workingDirectory).toBe(target)
   })
 })
+
+describe('SessionManager.deleteSession — removeManagedWorktree is safe for any caller', () => {
+  // Unattended cleanup (auto-delete of an empty session, the delete-session deep
+  // link) cannot inspect the session first, so it always passes the option. A
+  // session with nothing to clean up must still be deleted — a client hint must
+  // never block that.
+  test('deletes a session with no checkout even when removal is requested', async () => {
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'plain', wsRoot)
+
+    const result = await sm.deleteSession('plain', { removeManagedWorktree: true })
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval).toBeUndefined()
+    expect((sm as any).sessions.has('plain')).toBe(false)
+  })
+
+  test('cleans up an unused managed worktree prepared but never sent to', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'abandoned', wsRoot)
+
+    const prep = await sm.prepareCheckout('abandoned', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const id = prep.checkout.managedWorktreeId!
+
+    // No force: a clean provisional checkout needs none.
+    const result = await sm.deleteSession('abandoned', { removeManagedWorktree: true })
+
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+    expect(services.registry.get(id)).toBeUndefined()
+  })
+
+  test('keeps both the session and the checkout when the worktree holds work', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'hasWork', wsRoot)
+
+    const prep = await sm.prepareCheckout('hasWork', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    writeFileSync(join(prep.checkout.checkoutPath, 'draft.txt'), 'not committed\n')
+
+    // Unattended cleanup never forces, so this is blocked — and because removal
+    // is blocked the session survives too, staying the route to that work
+    // rather than leaving an unreachable checkout on disk.
+    const result = await sm.deleteSession('hasWork', { removeManagedWorktree: true })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('hasWork')).toBe(true)
+  })
+
+  test('does not block deletion when another session owns the worktree', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'primary', wsRoot)
+    injectSession(sm, 'secondary', wsRoot)
+
+    const prep = await sm.prepareCheckout('primary', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const id = prep.checkout.managedWorktreeId!
+    services.worktrees.addOwner(id, 'secondary')
+
+    // `secondary` shares the worktree but is not its recorded checkout owner in
+    // its own session record, so it has nothing to remove: it is deleted and the
+    // shared worktree is untouched.
+    const result = await sm.deleteSession('secondary', { removeManagedWorktree: true })
+    expect(result.deleted).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect(services.registry.get(id)!.ownerSessionIds).toContain('primary')
+  })
+})

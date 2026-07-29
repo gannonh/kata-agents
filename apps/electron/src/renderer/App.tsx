@@ -1166,10 +1166,22 @@ export default function App() {
     })
   }, [])
 
-  // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
+  // Auto-delete handler for empty sessions (fire-and-forget, no confirmation).
+  //
+  // Unattended cleanup must also clean up a managed worktree the session
+  // prepared but never used — nothing removes an unowned checkout later, so
+  // dropping only the owner reference would leave it and its temporary branch on
+  // disk with no session through which to remove them. `force` is deliberately
+  // NOT passed: if the worktree holds uncommitted or unique work, removal is
+  // blocked, which also cancels the deletion, so the session stays and remains
+  // the way to reach that work. Only a clean provisional checkout is discarded.
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
-    window.electronAPI.deleteSession(sessionId)
-    removeSession(sessionId)
+    void (async () => {
+      const result = await window.electronAPI.deleteSession(sessionId, {
+        removeManagedWorktree: true,
+      })
+      if (result?.deleted) removeSession(sessionId)
+    })()
   }, [removeSession])
 
   const handleFlagSession = useCallback((sessionId: string) => {

@@ -196,6 +196,19 @@ specified behavior and the code.
 | The composer let a prepared session change its working directory while Git actions stayed bound to the worktree | `updateWorkingDirectory` rejects the change for any bound checkout, and the composer withdraws its directory selectors in favor of the checkout identity. |
 | The empty-session delete shortcut skipped the managed-worktree dialog, orphaning checkouts prepared before a first send | `resolveDeleteConfirmation` gives the managed-worktree dialog precedence over the empty-session shortcut. |
 
+A seventh finding from the follow-up review is also resolved: unattended
+deletion paths (auto-delete of an empty session, and the `delete-session` deep
+link) called `deleteSession` without the removal option, so a worktree prepared
+but never used kept its checkout and temporary branch on disk with no session
+through which to remove them — nothing removes an unowned checkout later, since
+reconciliation only drops dead owner references and records state. Both paths now
+request removal *without* `force`: a clean provisional checkout is discarded with
+the session, while one holding uncommitted or unique work blocks the removal and
+therefore the deletion, so the session stays as the route to that work.
+`removeManagedWorktree` was made safe for any caller to pass by distinguishing
+"nothing to remove" (feature disabled, no managed checkout, no registry record,
+not an owner → deletion proceeds) from "blocked by a removal guard" (→ abort).
+
 Evidence: `docs/validation/git-github-worktrees-v1/README.md` (six playground
 captures plus the test mapping for the non-visual invariants).
 

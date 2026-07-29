@@ -76,6 +76,7 @@ Each has real-repository coverage:
 | A selected file named with pathspec magic cannot stage unrelated files | `packages/server-core/src/git/__tests__/action-service.test.ts` — "literal pathspecs" |
 | A prepared-but-empty session still gets the managed-worktree confirmation | `apps/electron/src/renderer/components/app-shell/__tests__/worktree-removal.test.ts` — `resolveDeleteConfirmation` |
 | A bound checkout rejects working-directory changes | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "bound checkouts are authoritative" |
+| Unattended deletion cleans up an unused worktree, and keeps both session and checkout when it holds work | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removeManagedWorktree is safe for any caller" |
 
 ## Automated coverage
 

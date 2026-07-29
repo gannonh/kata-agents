@@ -5377,29 +5377,35 @@ export class SessionManager implements ISessionManager {
    * removal decision while the session can still resolve its own checkout, so
    * the irreversible step can safely run after the session is deleted.
    *
-   * A rejected feature flag, a session with no managed checkout, or a failed
-   * guard all come back as `blocked` rather than throwing — the caller reports
-   * the reason and leaves everything untouched.
+   * Three outcomes, deliberately distinct so `removeManagedWorktree` is safe for
+   * any caller to pass — including unattended cleanup that cannot inspect the
+   * session first:
+   *
+   *  - `nothing-to-remove`: there is no Kata-owned checkout to remove (feature
+   *    disabled, no managed checkout, no registry record, or this session is not
+   *    a recorded owner). Deletion proceeds normally; a client hint about
+   *    removal must never block deleting a session that has nothing to clean up.
+   *  - `blocked`: a real removal guard rejected it — another session still owns
+   *    the worktree, it holds uncommitted or unique work and `force` was not
+   *    given, or identity revalidation failed. The caller aborts entirely.
+   *  - `allowed`: removal will be permitted once the session is gone.
    */
   private async precheckManagedWorktreeRemoval(
     sessionId: string,
     options?: { force?: boolean },
   ): Promise<
-    import('@kata-sh/shared/protocol').WorktreeRemovalResult & { managedWorktreeId: string | null }
+    | { outcome: 'nothing-to-remove' }
+    | { outcome: 'allowed'; managedWorktreeId: string }
+    | { outcome: 'blocked'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
   > {
-    const blocked = (blockedReason: string) => ({
-      removed: false,
-      branchPruned: false,
-      blocked: true,
-      blockedReason,
-      managedWorktreeId: null,
-    })
-    if (!isGitWorkspaceV1Enabled()) return blocked('Git workspace feature is not enabled.')
+    if (!isGitWorkspaceV1Enabled()) return { outcome: 'nothing-to-remove' }
     let managedWorktreeId: string
     try {
       managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
-    } catch (err) {
-      return blocked(err instanceof Error ? err.message : String(err))
+    } catch {
+      // No managed checkout, no registry record, or not an owner — all mean
+      // there is nothing this session may remove.
+      return { outcome: 'nothing-to-remove' }
     }
     try {
       const result = await this.getGitServices().worktrees.removeWorktree(
@@ -5407,9 +5413,18 @@ export class SessionManager implements ISessionManager {
         sessionId,
         { force: options?.force, dryRun: true },
       )
-      return { ...result, managedWorktreeId: result.blocked ? null : managedWorktreeId }
+      if (result.blocked) return { outcome: 'blocked', result }
+      return { outcome: 'allowed', managedWorktreeId }
     } catch (err) {
-      return blocked(err instanceof Error ? err.message : String(err))
+      return {
+        outcome: 'blocked',
+        result: {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: err instanceof Error ? err.message : String(err),
+        },
+      }
     }
   }
 
@@ -5714,8 +5729,10 @@ export class SessionManager implements ISessionManager {
       const precheck = await this.precheckManagedWorktreeRemoval(sessionId, {
         force: options.forceWorktreeRemoval,
       })
-      if (precheck.blocked) return { deleted: false, worktreeRemoval: precheck }
-      worktreeIdToRemove = precheck.managedWorktreeId
+      if (precheck.outcome === 'blocked') {
+        return { deleted: false, worktreeRemoval: precheck.result }
+      }
+      if (precheck.outcome === 'allowed') worktreeIdToRemove = precheck.managedWorktreeId
     }
 
     // Drop managed-worktree ownership for this session. Deleting a session never
