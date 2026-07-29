@@ -198,6 +198,12 @@ export interface GitWorkingTreeEntry {
   /** Worktree (unstaged) XY status char, when known. */
   worktreeState?: string
   conflicted?: boolean
+  /** Line additions for this path, when computable (binary entries omit these). */
+  additions?: number
+  /** Line deletions for this path, when computable. */
+  deletions?: number
+  /** True when Git reports this path as binary (no line-level diff). */
+  binary?: boolean
 }
 
 export interface GitStatusSnapshot {
@@ -222,6 +228,115 @@ export interface GitStatusSnapshot {
   deletions?: number
   operationInProgress: string | null
   blockedReason: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Bounded file diff (Phase 2)
+// ---------------------------------------------------------------------------
+
+/** Hard cap on either side of a text diff. Larger files render an oversized state. */
+export const GIT_DIFF_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * Explicit render state for a single file diff. The Changes panel maps each of
+ * these to a distinct UI treatment (spec: explicit clean/non-Git/binary/
+ * oversized/missing/loading/error states).
+ */
+export type GitFileDiffState =
+  | 'text' // old/new text content present; render unified/split diff
+  | 'binary' // binary file; no line-level diff
+  | 'oversized' // one side exceeds GIT_DIFF_MAX_BYTES
+  | 'missing' // expected file could not be read
+  | 'clean' // path has no uncommitted changes
+  | 'error' // read/parse failure (see `error`)
+
+/**
+ * Bounded diff for one repository-relative path. The Changes panel shows all
+ * uncommitted changes in the active checkout, so `oldContent` is the committed
+ * (HEAD) side and `newContent` is the current working-tree side.
+ */
+export interface GitFileDiff {
+  path: string
+  previousPath?: string
+  changeType: GitWorkingTreeEntryType
+  state: GitFileDiffState
+  /** Committed (HEAD) content; empty string for added/untracked files. */
+  oldContent?: string
+  /** Working-tree content; empty string for deleted files. */
+  newContent?: string
+  additions?: number
+  deletions?: number
+  /** Byte size of the larger of the two sides. */
+  sizeBytes?: number
+  /**
+   * Stable fingerprint of the diff content. A comment captured against a
+   * fingerprint becomes stale when a later diff for the same path reports a
+   * different fingerprint (spec: changed diff marks affected comments stale).
+   */
+  fingerprint: string
+  /** Detected language token for syntax highlighting, when known. */
+  language?: string
+  /** Human-readable failure detail when `state` is `error`. */
+  error?: string
+}
+
+/** Request a bounded diff by session ID and repository-relative path. */
+export interface GitDiffRequest {
+  sessionId: string
+  path: string
+}
+
+// ---------------------------------------------------------------------------
+// Diff line feedback (Phase 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which diff side a comment is anchored to. `old` maps to Pierre's `deletions`
+ * annotation side (the committed/HEAD line), `new` maps to `additions` (the
+ * working-tree line).
+ */
+export type GitCommentSide = 'old' | 'new'
+
+/**
+ * A pending diff-line comment. Scoped to a session; survives Changes-panel close
+ * during the app run. Cleared only after the batched feedback message is
+ * successfully submitted.
+ */
+export interface GitPendingComment {
+  id: string
+  sessionId: string
+  /** Repository-relative path the comment is anchored to. */
+  path: string
+  previousPath?: string
+  side: GitCommentSide
+  /** 1-based line number on the chosen side. */
+  line: number
+  text: string
+  /** Diff fingerprint captured when the comment was created. */
+  diffFingerprint: string
+  /** Short surrounding context (the anchored line's text) for the follow-up. */
+  context: string
+  createdAt: number
+  /** True when the underlying diff fingerprint changed after creation. */
+  stale?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Status subscription (Phase 2)
+// ---------------------------------------------------------------------------
+
+/** Change kind reported by a status-change push event. */
+export type GitStatusChangeReason = 'poll' | 'app-action' | 'external' | 'initial'
+
+/**
+ * Workspace-routed push payload emitted when a subscribed checkout's status
+ * changes. Carries the session ID so multi-panel clients can bind the event to
+ * the focused session panel.
+ */
+export interface GitStatusChangedEvent {
+  sessionId: string
+  status: GitStatusSnapshot
+  reason: GitStatusChangeReason
 }
 
 // ---------------------------------------------------------------------------
