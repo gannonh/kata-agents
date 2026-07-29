@@ -16,6 +16,9 @@ import type {
   GitCommitInput,
   GitFileDiff,
   GitStatusChangedEvent,
+  ManagedWorktreeRecord,
+  RepositoryContext,
+  SessionCheckoutV1,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
@@ -53,6 +56,47 @@ interface ResolvedSession {
   workspaceId: string
   /** Managed worktree base ref (PR-delta base), when persisted. */
   baseRef: string | null
+  /** Persisted checkout metadata (null for legacy sessions). */
+  checkout: SessionCheckoutV1 | null
+}
+
+/**
+ * Validate a managed worktree's live identity against its persisted checkout
+ * before a mutation (spec: "Path and identity safety" — every mutation verifies
+ * repository root, Git common directory, checkout path, and expected managed
+ * branch). Returns a user-facing recoverable message on mismatch, else null.
+ *
+ * Current-checkout / legacy sessions are exempt: the spec explicitly says
+ * Current checkout sessions do not assume the branch remains unchanged.
+ */
+export function checkManagedCheckoutIdentity(input: {
+  checkout: SessionCheckoutV1 | null | undefined
+  liveContext: Pick<RepositoryContext, 'repositoryRoot' | 'gitCommonDir' | 'currentBranch' | 'detached'>
+  record: ManagedWorktreeRecord | null | undefined
+}): string | null {
+  const { checkout, liveContext, record } = input
+  if (!checkout || checkout.mode !== 'managed-worktree') return null
+  const problems: string[] = []
+  if (liveContext.repositoryRoot !== checkout.repositoryRoot) problems.push('repository root')
+  if (record) {
+    if (liveContext.gitCommonDir !== record.gitCommonDir) problems.push('git directory')
+    if (record.checkoutPath !== checkout.checkoutPath) problems.push('checkout path')
+  }
+  if (checkout.expectedBranch) {
+    const live = liveContext.detached ? null : liveContext.currentBranch
+    if (live !== checkout.expectedBranch) {
+      problems.push(
+        `branch (expected "${checkout.expectedBranch}", found ${live ? `"${live}"` : 'a detached HEAD'})`,
+      )
+    }
+  }
+  if (problems.length === 0) return null
+  return (
+    `This session's managed worktree changed unexpectedly (${problems.join(', ')}). ` +
+    'Kata will not run Git actions on a worktree that was switched, moved, or removed ' +
+    `outside the app. Restore branch "${checkout.expectedBranch ?? ''}" at ${checkout.checkoutPath}, ` +
+    'or delete the session to recover.'
+  )
 }
 
 /**
@@ -72,8 +116,33 @@ function makeSessionResolver(deps: HandlerDeps) {
       checkoutPath,
       workspaceId: session.workspaceId,
       baseRef: session.checkout?.baseRef ?? null,
+      checkout: session.checkout ?? null,
     }
   }
+}
+
+/**
+ * Resolve a session's live repository context and assert managed-worktree
+ * identity before a mutation. Throws a visible recoverable error when the
+ * checkout is not a Git repository or its managed identity drifted.
+ */
+async function resolveMutationContext(
+  git: GitServices,
+  resolved: ResolvedSession,
+): Promise<RepositoryContext & { gitCommonDir: string }> {
+  const ctx = await git.repository.getContext(resolved.checkoutPath)
+  if (!ctx.isGitRepository || !ctx.gitCommonDir) {
+    throw new Error('Selected checkout is not a Git repository.')
+  }
+  const identityError = checkManagedCheckoutIdentity({
+    checkout: resolved.checkout,
+    liveContext: ctx,
+    record: resolved.checkout?.managedWorktreeId
+      ? git.registry.get(resolved.checkout.managedWorktreeId) ?? null
+      : null,
+  })
+  if (identityError) throw new Error(identityError)
+  return ctx as RepositoryContext & { gitCommonDir: string }
 }
 
 /** Strip ref prefixes and a leading remote name to a plain branch name. */
@@ -243,10 +312,7 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
     assertFeatureEnabled()
     const resolved = resolveSession(sessionId)
     if (!resolved) throw new Error('Session checkout could not be resolved.')
-    const ctx = await git.repository.getContext(resolved.checkoutPath)
-    if (!ctx.isGitRepository || !ctx.gitCommonDir) {
-      throw new Error('Selected checkout is not a Git repository.')
-    }
+    const ctx = await resolveMutationContext(git, resolved)
     try {
       return await git.mutationLock.withLock(ctx.gitCommonDir, () =>
         op(ctx.repositoryRoot ?? resolved.checkoutPath),
@@ -309,10 +375,7 @@ async function createPullRequest(
 ): Promise<GitActionResult> {
   const resolved = resolveSession(input.sessionId)
   if (!resolved) throw new Error('Session checkout could not be resolved.')
-  const ctx = await git.repository.getContext(resolved.checkoutPath)
-  if (!ctx.isGitRepository || !ctx.gitCommonDir) {
-    throw new Error('Selected checkout is not a Git repository.')
-  }
+  const ctx = await resolveMutationContext(git, resolved)
   const dir = ctx.repositoryRoot ?? resolved.checkoutPath
   const result: GitActionResult = { stages: [] }
 
@@ -336,10 +399,16 @@ async function createPullRequest(
         if (pushRes.stages.some((s) => s.status === 'failed')) return
       }
 
-      const base = normalizeBaseRef(
-        input.baseRef ?? resolved.baseRef ?? status.defaultRef,
-        ctx.primaryRemote,
-      )
+      // PR base authority (spec: AC15): a managed worktree with a persisted
+      // base ref is authoritative — the client baseRef is ignored so a stale or
+      // spoofed renderer cannot retarget the PR. Current-checkout / legacy
+      // sessions may pass a base ref, else the detected default ref is used.
+      const isManagedWithBase =
+        resolved.checkout?.mode === 'managed-worktree' && !!resolved.baseRef
+      const chosenBase = isManagedWithBase
+        ? resolved.baseRef
+        : input.baseRef ?? status.defaultRef
+      const base = normalizeBaseRef(chosenBase, ctx.primaryRemote)
       if (!base) {
         result.stages.push({
           stage: 'create-pr',

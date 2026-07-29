@@ -1,24 +1,64 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import type {
+  GitActionResult,
+  GitHubCapabilityStatus,
+  ManagedWorktreeRecord,
+  PullRequestSummary,
+  RepositoryContext,
+  SessionCheckoutV1,
+} from '@kata-sh/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '@kata-sh/server-core/transport'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
-import { registerGitHandlers } from './git'
+import { registerGitHandlers, checkManagedCheckoutIdentity } from './git'
 
 const FLAG = 'KATA_FEATURE_GIT_WORKSPACE_V1'
 const ORIGINAL = process.env[FLAG]
 
-function makeGitServices(overrides?: Partial<{
-  getContext: unknown
-  listRefs: unknown
-  status: { repositoryRoot?: string | null; entries?: Array<{ path: string; previousPath?: string; type: string }> }
-}>): { git: GitServices; calls: string[] } {
+interface MockOverrides {
+  getContext?: Partial<RepositoryContext>
+  listRefs?: unknown
+  status?: {
+    repositoryRoot?: string | null
+    entries?: Array<{ path: string; previousPath?: string; type: string }>
+    upstream?: string | null
+    ahead?: number
+    publishableCommitCount?: number
+    defaultRef?: string | null
+  }
+  capability?: GitHubCapabilityStatus
+  pullRequest?: PullRequestSummary | null
+  registryRecord?: ManagedWorktreeRecord | null
+  createdPr?: PullRequestSummary
+}
+
+interface MockGit {
+  git: GitServices
+  calls: string[]
+  createPrArgs: Array<{ baseRef: string }>
+}
+
+function makeGitServices(overrides?: MockOverrides): MockGit {
   const calls: string[] = []
+  const createPrArgs: Array<{ baseRef: string }> = []
+  const defaultContext: RepositoryContext = {
+    isGitRepository: false,
+    repositoryRoot: null,
+    gitCommonDir: null,
+    currentBranch: null,
+    detached: false,
+    headSha: null,
+    defaultRef: null,
+    remotes: [],
+    primaryRemote: null,
+    provider: 'unknown',
+  }
   const git = {
     repository: {
       getContext: async (dir: string) => {
         calls.push(`getContext:${dir}`)
-        return overrides?.getContext ?? { isGitRepository: false }
+        return { ...defaultContext, ...(overrides?.getContext ?? {}) }
       },
       listRefs: async (dir: string) => {
         calls.push(`listRefs:${dir}`)
@@ -31,6 +71,10 @@ function makeGitServices(overrides?: Partial<{
           checkoutPath: dir,
           repositoryRoot: overrides?.status?.repositoryRoot ?? dir,
           entries: overrides?.status?.entries ?? [],
+          upstream: overrides?.status?.upstream ?? null,
+          ahead: overrides?.status?.ahead ?? 0,
+          publishableCommitCount: overrides?.status?.publishableCommitCount ?? 0,
+          defaultRef: overrides?.status?.defaultRef ?? 'main',
         }
       },
       getFileDiff: async (dir: string, req: { path: string }) => {
@@ -38,16 +82,70 @@ function makeGitServices(overrides?: Partial<{
         return { path: req.path, changeType: 'modified', state: 'text', fingerprint: 'fp' }
       },
     },
+    registry: {
+      get: (id: string) => {
+        calls.push(`registry.get:${id}`)
+        return overrides?.registryRecord ?? undefined
+      },
+    },
+    mutationLock: {
+      withLock: async (_dir: string, fn: () => Promise<unknown>) => fn(),
+    },
+    actions: {
+      commit: async (params: { dir: string }) => {
+        calls.push(`actions.commit:${params.dir}`)
+        return { stages: [{ stage: 'commit', status: 'succeeded' }], commitSha: 'abc123' } as GitActionResult
+      },
+      pull: async (dir: string) => {
+        calls.push(`actions.pull:${dir}`)
+        return { stages: [{ stage: 'pull', status: 'succeeded' }] } as GitActionResult
+      },
+      push: async (dir: string) => {
+        calls.push(`actions.push:${dir}`)
+        return { stages: [{ stage: 'push', status: 'succeeded' }] } as GitActionResult
+      },
+    },
+    github: {
+      getCapability: async (dir: string): Promise<GitHubCapabilityStatus> => {
+        calls.push(`github.getCapability:${dir}`)
+        return (
+          overrides?.capability ?? { installed: true, authenticated: true, host: 'github.com' }
+        )
+      },
+      findPullRequest: async (dir: string) => {
+        calls.push(`github.findPullRequest:${dir}`)
+        return overrides?.pullRequest ?? null
+      },
+      createPullRequest: async (params: { baseRef: string }) => {
+        calls.push(`github.createPullRequest:${params.baseRef}`)
+        createPrArgs.push({ baseRef: params.baseRef })
+        return (
+          overrides?.createdPr ?? {
+            number: 7,
+            url: 'https://github.com/o/r/pull/7',
+            title: 't',
+            state: 'open',
+            baseRef: params.baseRef,
+            headRef: 'kata-agent/abcd1234',
+          }
+        )
+      },
+    },
     worktrees: {},
   } as unknown as GitServices
-  return { git, calls }
+  return { git, calls, createPrArgs }
+}
+
+interface SessionShape {
+  id: string
+  workspaceId: string
+  workingDirectory: string
+  checkout?: SessionCheckoutV1 | null
 }
 
 function makeHarness(
   gitServices: GitServices,
-  sessions: Array<{ id: string; workspaceId: string; workingDirectory: string; checkout?: unknown }> = [
-    { id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' },
-  ],
+  sessions: SessionShape[] = [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }],
 ) {
   const handlers = new Map<string, HandlerFn>()
   const prepareCalls: Array<[string, unknown]> = []
@@ -115,6 +213,107 @@ function makeHarness(
   }
 }
 
+function managedCheckout(overrides?: Partial<SessionCheckoutV1>): SessionCheckoutV1 {
+  return {
+    schemaVersion: 1,
+    mode: 'managed-worktree',
+    repositoryRoot: '/repo',
+    checkoutPath: '/wt/abcd1234',
+    branchAtPreparation: 'main',
+    baseRef: 'main',
+    managedWorktreeId: 'mw1',
+    expectedBranch: 'kata-agent/abcd1234',
+    ...overrides,
+  }
+}
+
+function managedRecord(overrides?: Partial<ManagedWorktreeRecord>): ManagedWorktreeRecord {
+  return {
+    managedWorktreeId: 'mw1',
+    repositoryRoot: '/repo',
+    gitCommonDir: '/repo/.git',
+    checkoutPath: '/wt/abcd1234',
+    baseRef: 'main',
+    expectedBranch: 'kata-agent/abcd1234',
+    createdAt: 0,
+    ownerSessionIds: ['s1'],
+    state: 'ready',
+    ...overrides,
+  }
+}
+
+describe('checkManagedCheckoutIdentity', () => {
+  const liveOk = {
+    repositoryRoot: '/repo',
+    gitCommonDir: '/repo/.git',
+    currentBranch: 'kata-agent/abcd1234',
+    detached: false,
+  }
+
+  it('passes when the managed worktree identity matches', () => {
+    expect(
+      checkManagedCheckoutIdentity({
+        checkout: managedCheckout(),
+        liveContext: liveOk,
+        record: managedRecord(),
+      }),
+    ).toBeNull()
+  })
+
+  it('exempts current-checkout sessions from branch validation', () => {
+    const current: SessionCheckoutV1 = {
+      ...managedCheckout(),
+      mode: 'current',
+      managedWorktreeId: null,
+      expectedBranch: null,
+      baseRef: null,
+    }
+    expect(
+      checkManagedCheckoutIdentity({
+        checkout: current,
+        liveContext: { ...liveOk, currentBranch: 'anything' },
+        record: null,
+      }),
+    ).toBeNull()
+  })
+
+  it('blocks when the managed branch was switched externally', () => {
+    const msg = checkManagedCheckoutIdentity({
+      checkout: managedCheckout(),
+      liveContext: { ...liveOk, currentBranch: 'some-other-branch' },
+      record: managedRecord(),
+    })
+    expect(msg).toMatch(/branch/i)
+    expect(msg).toMatch(/kata-agent\/abcd1234/)
+  })
+
+  it('blocks on a detached HEAD in a managed worktree', () => {
+    const msg = checkManagedCheckoutIdentity({
+      checkout: managedCheckout(),
+      liveContext: { ...liveOk, currentBranch: null, detached: true },
+      record: managedRecord(),
+    })
+    expect(msg).toMatch(/detached/i)
+  })
+
+  it('blocks when the repository root or git dir drifted', () => {
+    expect(
+      checkManagedCheckoutIdentity({
+        checkout: managedCheckout(),
+        liveContext: { ...liveOk, repositoryRoot: '/elsewhere' },
+        record: managedRecord(),
+      }),
+    ).toMatch(/repository root/i)
+    expect(
+      checkManagedCheckoutIdentity({
+        checkout: managedCheckout(),
+        liveContext: { ...liveOk, gitCommonDir: '/elsewhere/.git' },
+        record: managedRecord(),
+      }),
+    ).toMatch(/git directory/i)
+  })
+})
+
 describe('registerGitHandlers', () => {
   beforeEach(() => {
     delete process.env[FLAG]
@@ -170,13 +369,12 @@ describe('registerGitHandlers', () => {
     const { git } = makeGitServices()
     const { handlers, ctx, inspectCalls, removeCalls } = makeHarness(git)
 
-    // Inspection is read-only and resolves identity from the session ID alone.
     await handlers.get(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL)!(ctx, 's1')
     expect(inspectCalls).toEqual(['s1'])
 
-    await expect(
-      handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 's1'),
-    ).rejects.toThrow(/not enabled/)
+    await expect(handlers.get(RPC_CHANNELS.git.REMOVE_WORKTREE)!(ctx, 's1')).rejects.toThrow(
+      /not enabled/,
+    )
     expect(removeCalls).toHaveLength(0)
 
     process.env[FLAG] = 'true'
@@ -184,17 +382,118 @@ describe('registerGitHandlers', () => {
     expect(removeCalls).toEqual([['s1', true]])
   })
 
-  it('stubs later-phase (Phase 3) channels with a not-implemented rejection', async () => {
-    process.env[FLAG] = 'true'
-    const { git } = makeGitServices()
+  it('rejects commit / pull / push while the feature flag is disabled', async () => {
+    const { git, calls } = makeGitServices({ getContext: { isGitRepository: true, gitCommonDir: '/repo/.git', repositoryRoot: '/repo' } })
     const { handlers, ctx } = makeHarness(git)
 
     await expect(
       handlers.get(RPC_CHANNELS.git.COMMIT)!(ctx, { sessionId: 's1', message: 'x' }),
-    ).rejects.toThrow(/not implemented/)
-    await expect(handlers.get(RPC_CHANNELS.git.GITHUB_STATUS)!(ctx)).rejects.toThrow(
-      /not implemented/,
-    )
+    ).rejects.toThrow(/not enabled/)
+    await expect(handlers.get(RPC_CHANNELS.git.PULL)!(ctx, 's1')).rejects.toThrow(/not enabled/)
+    await expect(handlers.get(RPC_CHANNELS.git.PUSH)!(ctx, 's1')).rejects.toThrow(/not enabled/)
+    expect(calls.some((c) => c.startsWith('actions.'))).toBe(false)
+  })
+
+  it('runs a real commit for a valid current-checkout session and refreshes status', async () => {
+    process.env[FLAG] = 'true'
+    const { git, calls } = makeGitServices({
+      getContext: { isGitRepository: true, gitCommonDir: '/repo/.git', repositoryRoot: '/repo' },
+    })
+    const { handlers, ctx } = makeHarness(git)
+
+    const res = (await handlers.get(RPC_CHANNELS.git.COMMIT)!(ctx, {
+      sessionId: 's1',
+      message: 'do it',
+    })) as GitActionResult
+    expect(res.commitSha).toBe('abc123')
+    expect(calls).toContain('actions.commit:/repo')
+  })
+
+  it('blocks a mutation when a managed worktree branch was switched externally', async () => {
+    process.env[FLAG] = 'true'
+    // Live branch differs from the persisted expectedBranch.
+    const { git, calls } = makeGitServices({
+      getContext: {
+        isGitRepository: true,
+        gitCommonDir: '/repo/.git',
+        repositoryRoot: '/repo',
+        currentBranch: 'someone-elses-branch',
+      },
+      registryRecord: managedRecord(),
+    })
+    const { handlers, ctx } = makeHarness(git, [
+      { id: 's1', workspaceId: 'ws1', workingDirectory: '/wt/abcd1234', checkout: managedCheckout() },
+    ])
+
+    await expect(
+      handlers.get(RPC_CHANNELS.git.PUSH)!(ctx, 's1'),
+    ).rejects.toThrow(/changed unexpectedly|switched/i)
+    // The mutation never reached the action service.
+    expect(calls.some((c) => c.startsWith('actions.'))).toBe(false)
+  })
+
+  it('allows a mutation when the managed worktree identity matches', async () => {
+    process.env[FLAG] = 'true'
+    const { git, calls } = makeGitServices({
+      getContext: {
+        isGitRepository: true,
+        gitCommonDir: '/repo/.git',
+        repositoryRoot: '/repo',
+        currentBranch: 'kata-agent/abcd1234',
+      },
+      registryRecord: managedRecord(),
+    })
+    const { handlers, ctx } = makeHarness(git, [
+      { id: 's1', workspaceId: 'ws1', workingDirectory: '/wt/abcd1234', checkout: managedCheckout() },
+    ])
+
+    const res = (await handlers.get(RPC_CHANNELS.git.PUSH)!(ctx, 's1')) as GitActionResult
+    expect(res.stages[0]!.status).toBe('succeeded')
+    expect(calls).toContain('actions.push:/repo')
+  })
+
+  it('serves GitHub capability status read-only (no flag required)', async () => {
+    const { git } = makeGitServices({
+      getContext: { isGitRepository: true, gitCommonDir: '/repo/.git', repositoryRoot: '/repo' },
+      capability: { installed: false, authenticated: false, host: null, detail: 'gh is not installed.' },
+    })
+    const { handlers, ctx } = makeHarness(git)
+
+    const cap = (await handlers.get(RPC_CHANNELS.git.GITHUB_STATUS)!(ctx, 's1')) as GitHubCapabilityStatus
+    expect(cap.installed).toBe(false)
+    expect(cap.detail).toMatch(/not installed/)
+  })
+
+  it('uses the managed worktree persisted base ref for a PR and ignores a client override', async () => {
+    process.env[FLAG] = 'true'
+    const { git, createPrArgs } = makeGitServices({
+      getContext: {
+        isGitRepository: true,
+        gitCommonDir: '/repo/.git',
+        repositoryRoot: '/repo',
+        currentBranch: 'kata-agent/abcd1234',
+        primaryRemote: 'origin',
+      },
+      status: { upstream: 'origin/kata-agent/abcd1234', ahead: 0, defaultRef: 'main' },
+      registryRecord: managedRecord({ baseRef: 'release-1.0' }),
+    })
+    const { handlers, ctx } = makeHarness(git, [
+      {
+        id: 's1',
+        workspaceId: 'ws1',
+        workingDirectory: '/wt/abcd1234',
+        checkout: managedCheckout({ baseRef: 'release-1.0' }),
+      },
+    ])
+
+    // Client tries to override the base with `main`; server must ignore it.
+    await handlers.get(RPC_CHANNELS.git.CREATE_PULL_REQUEST)!(ctx, {
+      sessionId: 's1',
+      title: 'My PR',
+      baseRef: 'main',
+    })
+    expect(createPrArgs).toHaveLength(1)
+    expect(createPrArgs[0]!.baseRef).toBe('release-1.0')
   })
 
   it('serves a bounded diff resolved from the session checkout', async () => {
@@ -202,16 +501,12 @@ describe('registerGitHandlers', () => {
     const { handlers, ctx } = makeHarness(git)
 
     const diff = await handlers.get(RPC_CHANNELS.git.GET_DIFF)!(ctx, 's1', 'src/a.ts')
-    // getStatus (path validation) returns no entries → path treated as clean.
     expect(calls).toContain('getStatus:/repo')
     expect(diff.state).toBe('clean')
     expect(diff.path).toBe('src/a.ts')
   })
 
   it('resolves diffs against the repository root for a nested legacy checkout', async () => {
-    // Legacy/unprepared session whose working directory is a nested subdir. Git
-    // porcelain paths are repo-root relative, so the diff must be read from the
-    // repository root — not the nested working directory.
     const { git, calls } = makeGitServices({
       status: {
         repositoryRoot: '/repo',
@@ -223,8 +518,6 @@ describe('registerGitHandlers', () => {
     ])
 
     const diff = await handlers.get(RPC_CHANNELS.git.GET_DIFF)!(ctx, 's1', 'src/a.ts')
-    // Status is read from the persisted (nested) checkout, but the diff itself
-    // is resolved against the repository root.
     expect(calls).toContain('getStatus:/repo/apps/nested')
     expect(calls).toContain('getFileDiff:/repo:src/a.ts')
     expect(diff.state).toBe('text')
@@ -234,11 +527,9 @@ describe('registerGitHandlers', () => {
     const { git, calls } = makeGitServices()
     const { handlers, ctx, getGitStatusRefresher } = makeHarness(git)
 
-    // The refresher is installed at registration time (agent turn completion).
     const refresh = getGitStatusRefresher()
     expect(typeof refresh).toBe('function')
 
-    // Subscribe a session, then simulate an agent turn completing.
     await handlers.get(RPC_CHANNELS.git.SUBSCRIBE_STATUS)!(ctx, 's1')
     const before = calls.filter((c) => c === 'getStatus:/repo').length
     refresh!('s1')
@@ -253,7 +544,6 @@ describe('registerGitHandlers', () => {
 
     const snapshot = await handlers.get(RPC_CHANNELS.git.SUBSCRIBE_STATUS)!(ctx, 's1')
     expect(snapshot.checkoutPath).toBe('/repo')
-    // Unsubscribing a session must not throw.
     await handlers.get(RPC_CHANNELS.git.UNSUBSCRIBE_STATUS)!(ctx, 's1')
   })
 })
