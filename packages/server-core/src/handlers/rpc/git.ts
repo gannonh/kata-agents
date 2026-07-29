@@ -98,7 +98,7 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
   // change events carrying the session ID. Injected getStatus/publish keep the
   // subscription transport-agnostic and testable.
   const statusSubscription = new GitStatusSubscription({
-    getStatus: (dir) => git.repository.getStatus(dir),
+    getStatus: (dir, options) => git.repository.getStatus(dir, options),
     resolveSession,
     publish: (event: GitStatusChangedEvent, workspaceId: string) => {
       pushTyped(server, RPC_CHANNELS.git.STATUS_CHANGED, { to: 'workspace', workspaceId }, event)
