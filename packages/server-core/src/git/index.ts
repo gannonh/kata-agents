@@ -14,6 +14,8 @@ import { RepositoryService } from './repository-service'
 import { ManagedWorktreeService } from './managed-worktree-service'
 import { WorktreeRegistry } from './worktree-registry'
 import { MutationLock } from './mutation-lock'
+import { GitActionService } from './action-service'
+import { GitHubCliService } from './github-cli-service'
 
 export * from './command-runner'
 export * from './repository-service'
@@ -23,12 +25,18 @@ export * from './worktree-include'
 export * from './mutation-lock'
 export * from './diff-language'
 export * from './status-subscription'
+export * from './action-service'
+export * from './github-cli-service'
 
 export interface GitServices {
   repository: RepositoryService
   worktrees: ManagedWorktreeService
   registry: WorktreeRegistry
   mutationLock: MutationLock
+  /** Commit / pull / push mutations (spec: AC13, AC14, AC16). */
+  actions: GitActionService
+  /** GitHub `gh` adapter for capability + pull requests (spec: AC15). */
+  github: GitHubCliService
   worktreeRoot: string
 }
 
@@ -49,7 +57,17 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     repository,
     mutationLock,
   )
-  return { repository, worktrees, registry, mutationLock, worktreeRoot: config.worktreeRoot }
+  const actions = new GitActionService(repository)
+  const github = new GitHubCliService(repository)
+  return {
+    repository,
+    worktrees,
+    registry,
+    mutationLock,
+    actions,
+    github,
+    worktreeRoot: config.worktreeRoot,
+  }
 }
 
 let defaultServices: GitServices | null = null
