@@ -60,8 +60,12 @@ Session deletion and managed-worktree removal are **two irreversible steps that 
 sequence itself**. `SessionManager.deleteSession(sessionId, { removeManagedWorktree,
 forceWorktreeRemoval })` performs them in a fixed order:
 
-1. quiesce the agent (`forceAbort`) — a live turn writes into the checkout, so nothing may inspect or
-   remove it while one is running;
+1. quiesce the agent — a live turn writes into the checkout, so nothing may inspect or remove it
+   while one is running. `forceAbort` only *requests* teardown, so deletion then waits for the
+   backend's own `isProcessing()` to report idle, bounded by a timeout so a wedged subprocess cannot
+   make a session undeletable. If the backend never confirms, removal is refused (and with it the
+   deletion) rather than raced: deleting the session *without* the removal option never touches the
+   checkout and stays available;
 2. dry-run every removal guard (ownership, `force` requirement, identity revalidation) while the
    session still resolves its own checkout identity;
 3. delete the session durably;

@@ -410,3 +410,95 @@ describe('SessionManager.deleteSession — removeManagedWorktree is safe for any
     expect(services.registry.get(id)!.ownerSessionIds).toContain('primary')
   })
 })
+
+describe('SessionManager.deleteSession — removal waits for real agent quiescence', () => {
+  // `forceAbort` only requests teardown. A fixed sleep was a guess: a subprocess
+  // still mid-write can land files afterwards, and a forced removal would then
+  // discard work no destructive confirmation ever counted.
+  test('waits for the backend to report idle before removing the checkout', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 'slowStop', wsRoot)
+
+    const prep = await sm.prepareCheckout('slowStop', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    // The backend keeps reporting "processing" for several polls after the
+    // abort, then goes idle. Removal must not happen until it does.
+    let processing = true
+    let pollsWhileProcessing = 0
+    let checkoutPresentAtIdle: boolean | null = null
+    managed.isProcessing = true
+    managed.agent = {
+      forceAbort: () => {},
+      dispose: () => {},
+      isProcessing: () => {
+        if (processing) {
+          pollsWhileProcessing += 1
+          if (pollsWhileProcessing >= 3) {
+            processing = false
+            checkoutPresentAtIdle = existsSync(prep.checkout.checkoutPath)
+          }
+        }
+        return processing
+      },
+    } as any
+
+    const result = await sm.deleteSession('slowStop', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+    })
+
+    // It polled rather than assuming, and the checkout was still intact for the
+    // whole time the backend claimed to be busy.
+    expect(pollsWhileProcessing).toBeGreaterThanOrEqual(3)
+    expect(checkoutPresentAtIdle).toBe(true)
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+  })
+
+  test('refuses removal — and the deletion — when the agent never stops', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 'wedged', wsRoot)
+
+    const prep = await sm.prepareCheckout('wedged', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    managed.isProcessing = true
+    managed.agent = {
+      forceAbort: () => {},
+      dispose: () => {},
+      isProcessing: () => true,
+    } as any
+
+    const result = await (sm as any).deleteSession(
+      'wedged',
+      { removeManagedWorktree: true, forceWorktreeRemoval: true },
+    )
+
+    // A wedged backend must never let a force removal race it. Nothing is
+    // deleted, so the session stays and can be deleted again — without the
+    // removal option it never touches the checkout at all.
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('has not finished stopping')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('wedged')).toBe(true)
+
+    const plain = await sm.deleteSession('wedged')
+    expect(plain.deleted).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+  }, 20000)
+})

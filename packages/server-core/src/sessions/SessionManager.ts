@@ -177,6 +177,14 @@ const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
 // are ignored, so the watcher does not roll back the in-memory mutation we
 // just persisted. See onSessionMetadataChange.
 const METADATA_WRITE_GUARD_MS = 5000
+/**
+ * How long deletion waits for an aborted agent to report that it stopped before
+ * treating its checkout as still live. Bounded so a wedged subprocess cannot
+ * make a session undeletable.
+ */
+const AGENT_QUIESCE_TIMEOUT_MS = 5000
+/** Poll interval, and the floor delay that lets an in-flight write land. */
+const AGENT_QUIESCE_POLL_MS = 100
 
 /**
  * Text sent to the session when a plan is approved from outside the desktop
@@ -5428,6 +5436,57 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Wait for an aborted agent to actually stop before its checkout is inspected
+   * or removed.
+   *
+   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: a
+   * subprocess mid-write can still land files afterwards, and a forced worktree
+   * removal would then discard work the destructive confirmation never counted.
+   * This polls the backend's own `isProcessing()` and returns as soon as it
+   * reports idle, with a ceiling so a wedged subprocess cannot block deletion
+   * forever.
+   *
+   * Returns whether the agent confirmed it stopped. `false` means "unknown, and
+   * we stopped waiting" — callers must treat the checkout as still live rather
+   * than assume it is safe to remove. Note that a confirmed-idle backend is a
+   * much stronger signal than a timer, but not a filesystem barrier; the floor
+   * delay below gives an already-issued write time to land.
+   */
+  private async waitForAgentQuiescence(
+    sessionId: string,
+    managed: ManagedSession,
+    timeoutMs = AGENT_QUIESCE_TIMEOUT_MS,
+  ): Promise<boolean> {
+    const agent = managed.agent
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    // Floor delay, kept from the original fixed wait: it protects session-file
+    // writes during rapid deletes and lets an in-flight write land. It is now a
+    // minimum rather than the whole guarantee.
+    await sleep(AGENT_QUIESCE_POLL_MS)
+    if (!agent) return true
+
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      let processing: boolean
+      try {
+        processing = agent.isProcessing()
+      } catch {
+        // A backend that cannot report its state gives us nothing better to wait
+        // on; treat the abort as all the confirmation available.
+        return true
+      }
+      if (!processing) return true
+      if (Date.now() >= deadline) {
+        sessionLog.warn(
+          `Agent for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
+        )
+        return false
+      }
+      await sleep(AGENT_QUIESCE_POLL_MS)
+    }
+  }
+
   /** Throw unless the session is empty (no messages, no SDK session, no agent). */
   private assertEmptySessionGate(managed: ManagedSession): void {
     if (
@@ -5713,9 +5772,10 @@ export class SessionManager implements ISessionManager {
     // checkout while it runs could discard files the destructive confirmation
     // never counted (spec: AC19). Also prevents overlapping writes from
     // corrupting session files during rapid deletes.
+    let agentQuiesced = true
     if (managed.isProcessing && managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
-      await new Promise(resolve => setTimeout(resolve, 100))
+      agentQuiesced = await this.waitForAgentQuiescence(sessionId, managed)
     }
 
     // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Decide
@@ -5726,6 +5786,27 @@ export class SessionManager implements ISessionManager {
     // stays, and the caller reports why.
     let worktreeIdToRemove: string | null = null
     if (options?.removeManagedWorktree) {
+      // Removal requires a backend that has *confirmed* it stopped. Inspecting
+      // and force-removing a checkout that a subprocess may still be writing to
+      // would discard work no confirmation ever counted, so a wedged agent
+      // blocks removal — and therefore this deletion — rather than racing it.
+      // Deleting the session without the removal option never touches the
+      // checkout and stays available.
+      if (!agentQuiesced) {
+        sessionLog.warn(
+          `Refusing managed-worktree removal for ${sessionId}: agent did not confirm it stopped`,
+        )
+        return {
+          deleted: false,
+          worktreeRemoval: {
+            removed: false,
+            branchPruned: false,
+            blocked: true,
+            blockedReason:
+              'The agent has not finished stopping, so its worktree cannot be removed safely yet. Try again in a moment.',
+          },
+        }
+      }
       const precheck = await this.precheckManagedWorktreeRemoval(sessionId, {
         force: options.forceWorktreeRemoval,
       })
