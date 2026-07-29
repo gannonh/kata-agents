@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
   KATA_DEBUG: process.env.KATA_DEBUG,
   KATA_FEATURE_DEVELOPER_FEEDBACK: process.env.KATA_FEATURE_DEVELOPER_FEEDBACK,
   KATA_FEATURE_EMBEDDED_SERVER: process.env.KATA_FEATURE_EMBEDDED_SERVER,
+  KATA_FEATURE_GIT_WORKSPACE_V1: process.env.KATA_FEATURE_GIT_WORKSPACE_V1,
 };
 
 afterEach(() => {
@@ -20,6 +21,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.KATA_FEATURE_EMBEDDED_SERVER;
   else process.env.KATA_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.KATA_FEATURE_EMBEDDED_SERVER;
+
+  if (ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
+  else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1;
 
   delete globalThis.__KATA_FEATURE_FLAGS__;
 });
@@ -98,5 +102,32 @@ describe('feature-flags runtime helpers', () => {
 
     expect(getFeatureFlagEnv('KATA_FEATURE_EMBEDDED_SERVER')).toBe('0');
     expect(isEmbeddedServerEnabled()).toBe(false);
+  });
+
+  it('isGitWorkspaceV1Enabled defaults to false when no override is set', () => {
+    delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
+
+    expect(isGitWorkspaceV1Enabled()).toBe(false);
+  });
+
+  it('isGitWorkspaceV1Enabled honors explicit override true', () => {
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1';
+
+    expect(isGitWorkspaceV1Enabled()).toBe(true);
+  });
+
+  it('isGitWorkspaceV1Enabled honors explicit override false', () => {
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '0';
+
+    expect(isGitWorkspaceV1Enabled()).toBe(false);
+  });
+
+  it('isGitWorkspaceV1Enabled reads injected globals in renderer context', () => {
+    delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
+    globalThis.__KATA_FEATURE_FLAGS__ = {
+      KATA_FEATURE_GIT_WORKSPACE_V1: '1',
+    };
+
+    expect(isGitWorkspaceV1Enabled()).toBe(true);
   });
 });
