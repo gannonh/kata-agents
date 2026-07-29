@@ -9,6 +9,7 @@ import { appStore } from '@/atoms/store'
 import { sessionAtomFamily } from '@/atoms/sessions'
 import { WorkspaceCheckoutBadge } from '@/components/app-shell/input/WorkspaceCheckoutBadge'
 import { DeleteSessionDialog } from '@/components/app-shell/DeleteSessionDialog'
+import { FreeFormInput } from '@/components/app-shell/input/FreeFormInput'
 import { ChangesAffordance } from '@/components/right-sidebar/git-changes/ChangesAffordance'
 import { ChangesPanel } from '@/components/right-sidebar/git-changes/ChangesPanel'
 import { GitActionControl } from '@/components/right-sidebar/git-changes/GitActionControl'
@@ -116,11 +117,15 @@ const removalRisk: WorktreeRemovalRisk = {
 appStore.set(sessionAtomFamily(SESSION_ID), session)
 
 Object.assign(window.electronAPI, {
-  getGitContext: async () => ({
+  // Branch identity is per-checkout: the managed worktree is on its own
+  // `kata-agent/…` branch while the source checkout is on `main`. Reporting
+  // `main` for both would make the composer's drift guard fire on the bound
+  // session, which is a fixture artifact rather than real behavior.
+  getGitContext: async (dir?: string) => ({
     isGitRepository: true,
     repositoryRoot: '/workspace/kata-agents',
     gitCommonDir: '/workspace/kata-agents/.git',
-    currentBranch: 'main',
+    currentBranch: dir === WORKTREE_PATH ? 'kata-agent/7ac42f19' : 'main',
     detached: false,
     headSha: '0'.repeat(40),
     defaultRef: 'main',
@@ -172,7 +177,19 @@ Object.assign(window.electronAPI, {
   }),
 })
 
-type ValidationView = 'start' | 'review' | 'share' | 'remove'
+// An unbound sibling session, for the side-by-side directory-lock comparison.
+const UNBOUND_SESSION_ID = 'git-workspace-unbound'
+const unboundSession: Session = {
+  ...session,
+  id: UNBOUND_SESSION_ID,
+  name: 'No checkout prepared yet',
+  workingDirectory: '/workspace/kata-agents',
+  checkout: undefined,
+  sharedOwnerCount: undefined,
+}
+appStore.set(sessionAtomFamily(UNBOUND_SESSION_ID), unboundSession)
+
+type ValidationView = 'start' | 'review' | 'share' | 'remove' | 'directory-lock'
 
 function GitWorkspaceValidation({ view }: { view: ValidationView }) {
   if (view === 'start') {
@@ -235,6 +252,59 @@ function GitWorkspaceValidation({ view }: { view: ValidationView }) {
     )
   }
 
+  if (view === 'directory-lock') {
+    // Two real composers. The unbound session can still pick a directory; the
+    // session bound to a managed worktree cannot — the checkout owns where it
+    // works, and the server rejects working-directory changes for it.
+    return (
+      <div className="flex h-full flex-col gap-6 overflow-auto bg-muted/20 p-8">
+        <div className="mx-auto w-full max-w-[760px]">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            No checkout bound — directory is selectable
+          </p>
+          <div className="rounded-xl border border-border bg-background p-3 shadow-sm">
+            <FreeFormInput
+              sessionId={UNBOUND_SESSION_ID}
+              placeholder="Ask anything…"
+              currentModel="claude-sonnet-4-20250514"
+              onModelChange={() => {}}
+              permissionMode="ask"
+              onPermissionModeChange={() => {}}
+              inputValue=""
+              onInputChange={() => {}}
+              workingDirectory="/workspace/kata-agents"
+              onWorkingDirectoryChange={() => {}}
+              onSubmit={() => {}}
+              onStop={() => {}}
+            />
+          </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-[760px]">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Managed worktree bound — directory selector withdrawn
+          </p>
+          <div className="rounded-xl border border-border bg-background p-3 shadow-sm">
+            <FreeFormInput
+              sessionId={SESSION_ID}
+              placeholder="Ask anything…"
+              currentModel="claude-sonnet-4-20250514"
+              onModelChange={() => {}}
+              permissionMode="ask"
+              onPermissionModeChange={() => {}}
+              inputValue=""
+              onInputChange={() => {}}
+              workingDirectory={WORKTREE_PATH}
+              onWorkingDirectoryChange={() => {}}
+              onSubmit={() => {}}
+              onStop={() => {}}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="grid h-full place-items-center bg-muted/20">
       <DeleteSessionDialog
@@ -283,6 +353,7 @@ export const gitWorkspaceComponents: ComponentEntry[] = [
             { label: 'Review changes', value: 'review' },
             { label: 'Share work', value: 'share' },
             { label: 'Manage lifecycle', value: 'remove' },
+            { label: 'Checkout directory lock', value: 'directory-lock' },
           ],
         },
         defaultValue: 'review',
@@ -293,6 +364,7 @@ export const gitWorkspaceComponents: ComponentEntry[] = [
       { name: 'Review changes', props: { view: 'review' } },
       { name: 'Share work', props: { view: 'share' } },
       { name: 'Manage lifecycle', props: { view: 'remove' } },
+      { name: 'Checkout directory lock', props: { view: 'directory-lock' } },
     ],
   },
 ]

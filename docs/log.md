@@ -2,6 +2,8 @@
 
 ## 2026-07-29
 
+* **Git/GitHub V1 post-review hardening**: appended a "Post-review hardening" section to the [build report](specs/2026-07-26-git-github-worktrees-v1-build-report.md) mapping the six resolved review findings to their fixes, logged the detail in [specs/log.md](specs/log.md), and refreshed [validation/git-github-worktrees-v1/README.md](validation/git-github-worktrees-v1/README.md) with six playground captures (adding the checkout directory-lock comparison and a dark-theme delete dialog), reproduction steps, a table mapping non-visual invariants to their tests, and the host limitations that shaped the evidence.
+
 * **Git/GitHub V1 implemented (Phase 4)**: marked [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) status **Implemented**, added the [build report](specs/2026-07-26-git-github-worktrees-v1-build-report.md) mapping AC1–AC21 to implementation/tests, updated the specs roadmap ([specs/index.md](specs/index.md)) and [docs index](index.md), and logged the change in [specs/log.md](specs/log.md). Extended [architecture/system-overview.md](architecture/system-overview.md) with a "Git & GitHub worktrees (preview)" section, added the user-facing [git-worktrees](../apps/online-docs/core-concepts/git-worktrees.mdx) Mintlify page (nav + docs.json), documented remote-server Git/`gh` requirements in [server/headless](../apps/online-docs/server/headless.mdx), and appended a flag-gated release-note bullet. Real-GitHub UAT and the macOS `@git` E2E GUI flow are deferred to Verify (recorded in the build report).
 
 ## 2026-07-26

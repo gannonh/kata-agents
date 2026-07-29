@@ -181,3 +181,24 @@ Commit: `d3b56b6`.
    macOS GUI-only. The completed `@git` test is discovered by Playwright here
    and captures four attachments when run on its supported host; server-owned
    lifecycle behavior runs cross-platform in the serial headless-server test.
+
+## Post-review hardening (2026-07-29)
+
+Six review findings were raised against the completed implementation and are all
+resolved. None changed the acceptance criteria; each closed a gap between the
+specified behavior and the code.
+
+| Finding | Resolution |
+|---|---|
+| Session deletion removed the checkout before deleting the session, so a still-running turn could write into a worktree being removed, and a failed delete left a session with a dangling checkout | `SessionManager.deleteSession(sessionId, options)` owns the whole sequence: quiesce the agent, dry-run every removal guard, delete the session durably, then remove the checkout. A blocked removal changes nothing. The `git:removeWorktree` RPC remains for standalone removal. |
+| Staged content the working tree had reverted was listed as a change but rendered `clean`, showed no counts, and failed to commit | Status drops tracked, non-conflicted entries with no HEAD→working-tree delta — the surface is a single HEAD→working-tree view (AC9) and the selected-file commit stages from the working tree (AC13). An unborn branch has no HEAD to diff, so entries are left alone there. |
+| `git add` / `git reset` received selected paths as pathspecs, so a filename beginning with pathspec magic staged unrelated files | Both calls and the suggested recovery command pass `--literal-pathspecs`. |
+| The composer let a prepared session change its working directory while Git actions stayed bound to the worktree | `updateWorkingDirectory` rejects the change for any bound checkout, and the composer withdraws its directory selectors in favor of the checkout identity. |
+| The empty-session delete shortcut skipped the managed-worktree dialog, orphaning checkouts prepared before a first send | `resolveDeleteConfirmation` gives the managed-worktree dialog precedence over the empty-session shortcut. |
+
+Evidence: `docs/validation/git-github-worktrees-v1/README.md` (six playground
+captures plus the test mapping for the non-visual invariants).
+
+Verification: 159 server Git/handler tests and 505 renderer tests pass;
+`tsc --noEmit` clean for `@kata-sh/shared`, `@kata-sh/server-core`, and
+`apps/electron`; `lint:i18n:parity` (1,590 keys) and `lint:i18n:sorted` pass.
