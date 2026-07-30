@@ -364,6 +364,28 @@ export class ManagedWorktreeService {
         /* ignore */
       }
 
+      // Removal is only complete when the checkout is actually gone. Both the
+      // git command and the manual fallback can fail — a locked worktree, a
+      // permission problem, a process holding the directory — and neither
+      // surfaces as a throw here.
+      //
+      // Dropping the registry record in that case would be the worst outcome
+      // available: reconciliation reclaims leaked checkouts *from registry
+      // records*, so a directory with no record is invisible to every recovery
+      // path and leaks permanently. Keep the record, mark it for attention, and
+      // report the failure honestly instead of claiming a removal that did not
+      // happen. The temporary branch is left alone too — it is still checked out
+      // in the surviving worktree.
+      if (existsSync(rec.checkoutPath)) {
+        this.registry.setState(managedWorktreeId, 'blocked')
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: `The checkout at ${rec.checkoutPath} could not be removed. It is still tracked, so it can be retried or cleaned up later.`,
+        }
+      }
+
       // Prune the temporary branch only when it has no unique work.
       let branchPruned = false
       if (!risk.branchHasUniqueWork) {

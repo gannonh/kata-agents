@@ -81,6 +81,12 @@ the client can report why and the user retries or drops the removal choice. A re
 *after* step 3 leaves an unowned worktree, whereas the reverse order could leave a persisted session
 pointing at a checkout that no longer exists — an unusable state.
 
+Reclamation works from registry records, so a removal that fails must **keep its record**. Both the
+git removal and the manual directory fallback can fail without throwing; dropping the record then
+would leave a directory on disk that no recovery path can see. A failed removal therefore reports
+`removed: false`, marks the record `blocked`, and leaves the temporary branch alone (it is still
+checked out in the surviving worktree).
+
 An unowned worktree is recoverable because **reconciliation reclaims it**, not because it is
 harmless. Steps 2 and 4 are separated by a durable delete, so the worktree's state can change in
 between (an external writer adding files, or a crash); step 4 then re-checks and refuses, which

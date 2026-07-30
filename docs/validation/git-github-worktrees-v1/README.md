@@ -80,6 +80,7 @@ Each has real-repository coverage:
 | Removal waits for the turn to unwind (not the backend flag, which `forceAbort` clears immediately) and refuses rather than racing a turn that never finishes | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removal waits for real agent quiescence" and "the backend flag alone cannot wave removal through" |
 | Reconciliation reclaims unowned clean checkouts and retains unowned ones holding work | `packages/server-core/src/git/__tests__/reconcile.test.ts` — "reclaiming leaked (unowned) checkouts" |
 | A destructive confirmation authorizes only the work it displayed; a checkout that gained work since is refused | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "a destructive confirmation is not blanket authorization" |
+| A removal that fails keeps its registry record, so the checkout stays discoverable instead of leaking silently | `packages/server-core/src/git/__tests__/remove-worktree-cleanup-failure.test.ts` |
 
 ## Automated coverage
 
