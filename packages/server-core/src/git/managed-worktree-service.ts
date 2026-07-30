@@ -26,6 +26,14 @@ import { applyWorktreeInclude } from './worktree-include'
 
 const MAX_TOKEN_RETRIES = 5
 
+/**
+ * Requesting-session placeholder for reconciliation-driven removal. Only records
+ * with no live owners are reclaimed, so the ownership guard in `inspectRemoval`
+ * (which excludes the requester from the other-owner count) sees an empty owner
+ * set either way — this identifies the actor without impersonating a session.
+ */
+const RECONCILE_ACTOR = '__reconcile__'
+
 export class WorktreeCreationError extends Error {
   readonly code: string
   constructor(message: string, code = 'WORKTREE_CREATE_FAILED') {
@@ -69,6 +77,10 @@ export interface ReconcileReport {
   markedMissing: number
   /** Records marked `blocked` (ambiguous state that must not be auto-deleted). */
   markedBlocked: number
+  /** Unowned, clean checkouts reclaimed (removed with their temporary branch). */
+  reclaimedUnowned: number
+  /** Unowned checkouts retained because they still hold work. */
+  retainedUnownedWithWork: number
 }
 
 /** A single entry from `git worktree list --porcelain`. */
@@ -391,6 +403,8 @@ export class ManagedWorktreeService {
       repairedOwnerRefs: 0,
       markedMissing: 0,
       markedBlocked: 0,
+      reclaimedUnowned: 0,
+      retainedUnownedWithWork: 0,
     }
     const records = this.registry.list()
     report.recordsInspected = records.length
@@ -473,6 +487,31 @@ export class ManagedWorktreeService {
       }
       rec.state = nextState
       this.registry.upsert(rec)
+
+      // Reclaim leaked checkouts. A record with no live owners can no longer be
+      // reached through any session, and nothing else removes one — so without
+      // this it would sit on disk forever. Reachable when the removal step of a
+      // session deletion is blocked or interrupted after the session is already
+      // gone (see the deletion ordering in SessionManager).
+      //
+      // `removeWorktree` is reused rather than reimplemented so identity safety
+      // cannot diverge between the two callers, and `force` is deliberately NOT
+      // passed: that guard is exactly what separates a clean leak from a
+      // checkout still holding work. Records already `blocked` or `missing` are
+      // skipped by the `ready` condition.
+      if (liveOwners.length === 0 && nextState === 'ready') {
+        const result = await this.removeWorktree(rec.managedWorktreeId, RECONCILE_ACTOR)
+        if (result.removed) {
+          report.reclaimedUnowned += 1
+        } else {
+          // Never removed silently: the work stays on disk and the record is
+          // marked so the state is visible rather than inferred from a
+          // directory nobody can reach.
+          report.retainedUnownedWithWork += 1
+          rec.state = 'blocked'
+          this.registry.upsert(rec)
+        }
+      }
     }
 
     return report

@@ -73,8 +73,17 @@ forceWorktreeRemoval })` performs them in a fixed order:
 
 A blocked removal is **atomic in the caller's favour**: nothing is deleted and nothing is removed, so
 the client can report why and the user retries or drops the removal choice. A removal that fails
-*after* step 3 leaves an unowned worktree, which is a recoverable state, whereas the reverse order
-could leave a persisted session pointing at a checkout that no longer exists — an unusable state.
+*after* step 3 leaves an unowned worktree, whereas the reverse order could leave a persisted session
+pointing at a checkout that no longer exists — an unusable state.
+
+An unowned worktree is recoverable because **reconciliation reclaims it**, not because it is
+harmless. Steps 2 and 4 are separated by a durable delete, so the worktree's state can change in
+between (an external writer adding files, or a crash); step 4 then re-checks and refuses, which
+protects that work but leaves the checkout with no session pointing at it. Startup reconciliation
+therefore removes unowned checkouts that are clean — reusing `removeWorktree`'s guards, never with
+`force` — and retains unowned checkouts that hold work, marking them `blocked` so the state is
+visible rather than inferred from a directory nobody can reach. Without that pass the leak would be
+permanent, since nothing else removes an unowned checkout.
 
 Removal is therefore requested *through* deletion. The standalone `git:removeWorktree` channel
 remains for removing a checkout without deleting its session.

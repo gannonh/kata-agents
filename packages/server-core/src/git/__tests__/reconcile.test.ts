@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices } from '../index'
 import { parseWorktreeListPorcelain } from '../managed-worktree-service'
@@ -53,7 +53,7 @@ describe('parseWorktreeListPorcelain', () => {
 })
 
 describe('ManagedWorktreeService.reconcile', () => {
-  test('drops owner references for sessions that no longer exist, keeps the record', async () => {
+  test('drops owner references for sessions that no longer exist', async () => {
     const repo = tmp()
     await initRepo(repo)
     const svc = servicesFor()
@@ -65,6 +65,10 @@ describe('ManagedWorktreeService.reconcile', () => {
       gitCommonDir: gcd,
       baseRef: 'main',
     })
+    // Give the checkout work so reclamation retains it — this test is about the
+    // owner-drop bookkeeping, not about what happens to a clean leak (covered
+    // in "reclaiming leaked (unowned) checkouts").
+    writeFileSync(join(record.checkoutPath, 'work.txt'), 'unsaved\n')
 
     const report = await svc.worktrees.reconcile({ knownSessionIds: new Set<string>() })
 
@@ -135,7 +139,10 @@ describe('ManagedWorktreeService.reconcile', () => {
     expect(svc.registry.get(record.managedWorktreeId)!.state).toBe('missing')
   })
 
-  test('never auto-deletes a record during reconcile', async () => {
+  // Reconcile used to guarantee it never deleted anything. That guarantee is now
+  // narrower: it reclaims a checkout only when the checkout has no live owner
+  // AND is clean. Anything still owned, or holding work, is never auto-deleted.
+  test('never auto-deletes a record that still has a live owner', async () => {
     const repo = tmp()
     await initRepo(repo)
     const svc = servicesFor()
@@ -147,7 +154,136 @@ describe('ManagedWorktreeService.reconcile', () => {
       gitCommonDir: gcd,
       baseRef: 'main',
     })
-    await svc.worktrees.reconcile({ knownSessionIds: new Set<string>() })
+    await svc.worktrees.reconcile({ knownSessionIds: new Set<string>(['owner']) })
     expect(svc.registry.get(record.managedWorktreeId)).toBeTruthy()
+    expect(existsSync(record.checkoutPath)).toBe(true)
+  })
+})
+
+describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
+  // Nothing else removes an unowned checkout, so before this it sat on disk
+  // forever with no session through which to reach it. Reachable when the
+  // removal step of a session deletion is blocked or interrupted after the
+  // session is already gone.
+  async function makeWorktree(services: ReturnType<typeof servicesFor>, repo: string, sessionId: string) {
+    const { record } = await services.worktrees.createWorktree({
+      workspaceId: 'ws',
+      sessionId,
+      repositoryRoot: repo,
+      gitCommonDir: await commonDir(repo),
+      baseRef: 'main',
+    })
+    services.registry.setState(record.managedWorktreeId, 'ready')
+    return record
+  }
+
+  test('removes an unowned clean checkout and prunes its temporary branch', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'gone')
+
+    // The owning session no longer exists.
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set() })
+
+    expect(report.reclaimedUnowned).toBe(1)
+    expect(report.retainedUnownedWithWork).toBe(0)
+    expect(existsSync(rec.checkoutPath)).toBe(false)
+    expect(services.registry.get(rec.managedWorktreeId)).toBeUndefined()
+    const branches = await git(repo, ['branch', '--list', rec.expectedBranch])
+    expect(branches.trim()).toBe('')
+  })
+
+  test('keeps an unowned checkout that holds uncommitted work, and marks it', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'gone')
+    writeFileSync(join(rec.checkoutPath, 'unsaved.txt'), 'work in progress\n')
+
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set() })
+
+    // Reclamation never forces, so work is never destroyed silently.
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(report.retainedUnownedWithWork).toBe(1)
+    expect(existsSync(rec.checkoutPath)).toBe(true)
+    expect(services.registry.get(rec.managedWorktreeId)!.state).toBe('blocked')
+  })
+
+  test('keeps an unowned checkout that holds unique commits', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'gone')
+    writeFileSync(join(rec.checkoutPath, 'feature.txt'), 'committed but unmerged\n')
+    await git(rec.checkoutPath, ['add', '.'])
+    await git(rec.checkoutPath, ['commit', '-m', 'unique work'])
+
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set() })
+
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(report.retainedUnownedWithWork).toBe(1)
+    expect(existsSync(rec.checkoutPath)).toBe(true)
+  })
+
+  test('never touches a checkout that still has a live owner', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'alive')
+
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set(['alive']) })
+
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(existsSync(rec.checkoutPath)).toBe(true)
+    expect(services.registry.get(rec.managedWorktreeId)!.ownerSessionIds).toEqual(['alive'])
+  })
+
+  test('does not reclaim a checkout whose owner reference is repaired from session metadata', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'owner')
+    // Registry lost the owner reference, but the session's persisted checkout
+    // still points at this worktree — the repair pass must win over reclamation.
+    services.registry.removeOwner(rec.managedWorktreeId, 'owner')
+
+    const report = await services.worktrees.reconcile({
+      knownSessionIds: new Set(['owner']),
+      sessionCheckouts: new Map([
+        [
+          'owner',
+          {
+            schemaVersion: 1,
+            mode: 'managed-worktree',
+            repositoryRoot: repo,
+            checkoutPath: rec.checkoutPath,
+            branchAtPreparation: rec.expectedBranch,
+            baseRef: 'main',
+            managedWorktreeId: rec.managedWorktreeId,
+            expectedBranch: rec.expectedBranch,
+          },
+        ],
+      ]) as any,
+    })
+
+    expect(report.repairedOwnerRefs).toBe(1)
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(existsSync(rec.checkoutPath)).toBe(true)
+  })
+
+  test('leaves an unowned checkout on an unexpected branch alone', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const rec = await makeWorktree(services, repo, 'gone')
+    // Identity drift: someone switched the worktree off its expected branch.
+    await git(rec.checkoutPath, ['checkout', '-b', 'someone-elses-branch'])
+
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set() })
+
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(report.markedBlocked).toBe(1)
+    expect(existsSync(rec.checkoutPath)).toBe(true)
   })
 })

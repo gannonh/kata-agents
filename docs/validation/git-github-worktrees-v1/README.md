@@ -78,6 +78,7 @@ Each has real-repository coverage:
 | A bound checkout rejects working-directory changes | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "bound checkouts are authoritative" |
 | Unattended deletion cleans up an unused worktree, and keeps both session and checkout when it holds work | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removeManagedWorktree is safe for any caller" |
 | Removal waits for the backend to report idle, and refuses rather than racing an agent that never stops | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removal waits for real agent quiescence" |
+| Reconciliation reclaims unowned clean checkouts and retains unowned ones holding work | `packages/server-core/src/git/__tests__/reconcile.test.ts` — "reclaiming leaked (unowned) checkouts" |
 
 ## Automated coverage
 
