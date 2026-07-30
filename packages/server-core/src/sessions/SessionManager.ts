@@ -5437,21 +5437,30 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Wait for an aborted agent to actually stop before its checkout is inspected
+   * Wait for an aborted turn to actually finish before its checkout is inspected
    * or removed.
    *
-   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: a
-   * subprocess mid-write can still land files afterwards, and a forced worktree
-   * removal would then discard work the destructive confirmation never counted.
-   * This polls the backend's own `isProcessing()` and returns as soon as it
-   * reports idle, with a ceiling so a wedged subprocess cannot block deletion
-   * forever.
+   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: work
+   * still in flight can land files afterwards, and a forced worktree removal
+   * would then discard work the destructive confirmation never counted.
    *
-   * Returns whether the agent confirmed it stopped. `false` means "unknown, and
+   * The backend's own `isProcessing()` cannot be the barrier here — `forceAbort`
+   * clears the exact state it reads (`ClaudeAgent` nulls `currentQuery`,
+   * `PiAgent` sets `_isProcessing = false`), so it reports idle the instant the
+   * abort is requested and would wave us through immediately. The meaningful
+   * signal is the session-level `isProcessing` flag, which is cleared by
+   * `onProcessingStopped` only after the abort has propagated out of the send
+   * loop and the turn has unwound. Both are checked, so neither can report idle
+   * on its own.
+   *
+   * Returns whether the turn confirmed it stopped. `false` means "unknown, and
    * we stopped waiting" — callers must treat the checkout as still live rather
-   * than assume it is safe to remove. Note that a confirmed-idle backend is a
-   * much stronger signal than a timer, but not a filesystem barrier; the floor
-   * delay below gives an already-issued write time to land.
+   * than assume it is safe to remove.
+   *
+   * This is a turn-loop barrier, not a filesystem one: it does not prove the
+   * spawned subprocess has exited or that its last write landed. Closing that
+   * needs a real quiescence contract on the backend interface (see #21); the
+   * floor delay below only gives an already-issued write time to land.
    */
   private async waitForAgentQuiescence(
     sessionId: string,
@@ -5468,18 +5477,22 @@ export class SessionManager implements ISessionManager {
 
     const deadline = Date.now() + timeoutMs
     for (;;) {
-      let processing: boolean
+      // Both are evaluated every iteration, never short-circuited: the session
+      // flag is the one `forceAbort` does not clear, and the backend flag can
+      // still report work the session layer has not observed yet.
+      const sessionBusy = managed.isProcessing === true
+      let backendBusy = false
       try {
-        processing = agent.isProcessing()
+        backendBusy = agent.isProcessing()
       } catch {
-        // A backend that cannot report its state gives us nothing better to wait
-        // on; treat the abort as all the confirmation available.
-        return true
+        // A backend that cannot report its state leaves the session flag as the
+        // whole signal.
+        backendBusy = false
       }
-      if (!processing) return true
+      if (!sessionBusy && !backendBusy) return true
       if (Date.now() >= deadline) {
         sessionLog.warn(
-          `Agent for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
+          `Turn for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
         )
         return false
       }

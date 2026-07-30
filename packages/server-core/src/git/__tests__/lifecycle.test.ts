@@ -231,6 +231,9 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
             ? 'forceAbort:checkout-present'
             : 'forceAbort:checkout-removed',
         )
+        // Real backends clear their own flag here; the turn loop clears the
+        // session-level one as it unwinds.
+        managed.isProcessing = false
       },
       dispose: () => {
         order.push('dispose')
@@ -442,6 +445,8 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
           pollsWhileProcessing += 1
           if (pollsWhileProcessing >= 3) {
             processing = false
+            // The turn loop unwinding is what clears the session-level flag.
+            managed.isProcessing = false
             observed.push(
               existsSync(prep.checkout.checkoutPath) ? 'idle:present' : 'idle:already-removed',
             )
@@ -503,4 +508,50 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
     expect(plain.deleted).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
   }, 20000)
+})
+
+describe('SessionManager.deleteSession — the backend flag alone cannot wave removal through', () => {
+  // `forceAbort` synchronously clears the state `isProcessing()` reads on both
+  // backends (ClaudeAgent nulls `currentQuery`, PiAgent sets `_isProcessing =
+  // false`), so it reports idle the instant the abort is requested. If that were
+  // the barrier, removal would proceed while the turn was still unwinding.
+  test('keeps waiting while the turn is unwinding even though the backend claims idle', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 'abortLies', wsRoot)
+
+    const prep = await sm.prepareCheckout('abortLies', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    const observed: string[] = []
+    managed.isProcessing = true
+    managed.agent = {
+      // Mirrors real backend behaviour: idle immediately on abort.
+      forceAbort: () => {},
+      dispose: () => {},
+      isProcessing: () => false,
+    } as any
+
+    // The turn loop finishes a little later, as `onProcessingStopped` would.
+    setTimeout(() => {
+      observed.push(existsSync(prep.checkout.checkoutPath) ? 'unwound:present' : 'unwound:removed')
+      managed.isProcessing = false
+    }, 400)
+
+    const result = await sm.deleteSession('abortLies', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+    })
+
+    // The checkout must still have been intact when the turn finally unwound —
+    // proof the wait outlasted the backend's immediate "idle".
+    expect(observed).toEqual(['unwound:present'])
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+  })
 })
