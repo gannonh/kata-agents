@@ -158,8 +158,26 @@ export interface WorktreeRemovalRisk {
   unpushedCommitCount: number
   /** Whether the temporary branch has unique work not present elsewhere. */
   branchHasUniqueWork: boolean
+  /**
+   * Opaque digest of the exact checkout identity, dirty paths and contents,
+   * and unique commit identities inspected by the server.
+   */
+  confirmationFingerprint: string
   blocked: boolean
   blockedReason?: string
+}
+
+/**
+ * The destructive-work summary displayed before a managed worktree is
+ * removed. The server checks it against a fresh inspection before removal so
+ * a stale confirmation cannot authorize newer work.
+ */
+export interface WorktreeRemovalConfirmation {
+  uncommittedFileCount: number
+  unpushedCommitCount: number
+  branchHasUniqueWork: boolean
+  /** Exact server-issued snapshot the destructive confirmation was shown for. */
+  confirmationFingerprint: string
 }
 
 export interface WorktreeRemovalResult {
@@ -185,19 +203,8 @@ export interface SessionDeleteOptions {
   removeManagedWorktree?: boolean
   /** Confirm destructive removal (uncommitted files or unique commits). */
   forceWorktreeRemoval?: boolean
-  /**
-   * The risk counts the user actually saw when they confirmed a destructive
-   * removal. `forceWorktreeRemoval` on its own is blanket authorization — it
-   * would license destroying whatever the server finds at removal time, which
-   * may be more than the confirmation named. Sending what was displayed turns
-   * it into "force up to this much": if the checkout has gained uncommitted
-   * files or unique commits since, the confirmation is stale and removal is
-   * refused so the user can re-confirm against current numbers.
-   */
-  confirmedRisk?: {
-    uncommittedFileCount: number
-    unpushedCommitCount: number
-  }
+  /** The destructive-work summary shown when forceWorktreeRemoval was chosen. */
+  worktreeRemovalConfirmation?: WorktreeRemovalConfirmation
 }
 
 /** Outcome of the session-delete RPC. */

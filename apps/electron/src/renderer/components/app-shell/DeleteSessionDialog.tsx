@@ -119,14 +119,14 @@ export function DeleteSessionDialog({
           ? {
               removeManagedWorktree: true,
               forceWorktreeRemoval: summary.destructive,
-              // Send the counts actually rendered above, so `force` authorizes
-              // discarding *this much* work rather than whatever the server
-              // finds later. If the checkout gained work since, the server
-              // refuses and we re-inspect so the user re-confirms real numbers.
-              confirmedRisk: {
-                uncommittedFileCount: summary.uncommittedFileCount,
-                unpushedCommitCount: summary.unpushedCommitCount,
-              },
+              worktreeRemovalConfirmation: summary.destructive
+                ? {
+                    uncommittedFileCount: summary.uncommittedFileCount,
+                    unpushedCommitCount: summary.unpushedCommitCount,
+                    branchHasUniqueWork: summary.branchHasUniqueWork,
+                    confirmationFingerprint: summary.confirmationFingerprint,
+                  }
+                : undefined,
             }
           : undefined,
       )
@@ -141,6 +141,7 @@ export function DeleteSessionDialog({
         // Re-inspect so the displayed counts match the state that caused the
         // block; leaving the stale summary up would invite confirming the same
         // out-of-date numbers again.
+        setRemoveWorktree(false)
         setRefreshToken((n) => n + 1)
         return
       }

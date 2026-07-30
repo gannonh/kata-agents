@@ -71,15 +71,35 @@ forceWorktreeRemoval })` performs them in a fixed order:
    than raced: deleting the session *without* the removal option never touches the checkout and stays
    available. This is a turn-loop barrier, not a filesystem one — proving the spawned subprocess has
    exited needs a real quiescence contract on the backend interface (deferred, see issue #21);
-2. dry-run every removal guard (ownership, `force` requirement, identity revalidation) while the
-   session still resolves its own checkout identity;
-3. delete the session durably;
-4. only then remove the checkout.
+2. flush persistence and atomically rename the complete session directory to a reversible
+   tombstone;
+3. perform strict status inspection, the authoritative fingerprint/ownership comparison, and
+   checkout removal under the repository mutation lock while the runtime session still exists;
+4. if removal blocks, rename the tombstone back; if removal succeeds, remove the runtime session
+   and finalize the tombstone.
+
+The deletion transaction lives outside the normal `sessions/` discovery tree.
+On startup, a transaction whose registry record and checkout still exist is
+restored before sessions are loaded; if checkout removal completed, the hidden
+transaction is purged. A crash or finalization failure therefore cannot
+resurrect a session that points at a removed checkout.
+
+For a destructive removal, `forceWorktreeRemoval` is bound to an opaque
+server-issued fingerprint of the checkout identity (including the HEAD OID),
+dirty paths, exact index entries, file modes and working-tree contents, and
+unique commit identities inspected for the confirmation dialog. The file and
+commit counts remain user-facing copy, but they are not the authorization:
+different work can have identical counts. The server re-inspects under the
+repository mutation lock as part of removal, fails closed if status cannot be
+read, and rechecks ownership after inspection. Any changed fingerprint blocks
+the whole deletion, restores the staged session directory, keeps the session
+and checkout reachable, and makes the client refresh before a person can
+confirm the current state. A stale Boolean `force` flag or count-only summary
+is never sufficient.
 
 A blocked removal is **atomic in the caller's favour**: nothing is deleted and nothing is removed, so
-the client can report why and the user retries or drops the removal choice. A removal that fails
-*after* step 3 leaves an unowned worktree, whereas the reverse order could leave a persisted session
-pointing at a checkout that no longer exists — an unusable state.
+the client can report why and the user retries or drops the removal choice. There is no
+dry-run-to-final-removal gap in which a mismatch can be found only after the session was deleted.
 
 Reclamation works from registry records, so a removal that fails must **keep its record**. Both the
 git removal and the manual directory fallback can fail without throwing; dropping the record then
@@ -88,20 +108,14 @@ would leave a directory on disk that no recovery path can see. A failed removal 
 checked out in the surviving worktree).
 
 An unowned worktree is recoverable because **reconciliation reclaims it**, not because it is
-harmless. Steps 2 and 4 are separated by a durable delete, so the worktree's state can change in
-between (an external writer adding files, or a crash); step 4 then re-checks and refuses, which
-protects that work but leaves the checkout with no session pointing at it. Startup reconciliation
-therefore removes unowned checkouts that are clean — reusing `removeWorktree`'s guards, never with
-`force` — and retains unowned checkouts that hold work, marking them `blocked` so the state is
-visible rather than inferred from a directory nobody can reach. Without that pass the leak would be
-permanent, since nothing else removes an unowned checkout.
+harmless. Startup reconciliation removes unowned checkouts that are clean — reusing
+`removeWorktree`'s guards, never with `force` — and retains unowned checkouts that hold work,
+marking them `blocked` so crash residue or older registry state remains visible rather than inferred
+from a directory nobody can reach.
 
-A destructive confirmation authorizes **only the work it displayed**. `force` on its own is blanket
-authorization — it would license discarding whatever the server finds when removal finally runs,
-which may be more than the user was shown. The client therefore sends the counts it rendered
-(`confirmedRisk`), and removal is refused if the checkout has since gained uncommitted files or
-unique commits, so the user re-confirms against current numbers. A checkout that *shrank* is not
-stale: the user already authorized at least that much.
+A destructive confirmation authorizes **only the exact work it displayed**. Added, removed, or
+substituted dirty work, a different unique commit with the same count, or changed checkout identity
+all invalidate the fingerprint and require a fresh confirmation.
 
 Removal is therefore requested *through* deletion. The standalone `git:removeWorktree` channel
 remains for removing a checkout without deleting its session.

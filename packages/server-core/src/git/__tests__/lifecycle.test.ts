@@ -9,10 +9,13 @@
  *  - a shared worktree survives deletion of one owner while another remains.
  */
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { createGitServices } from '../index'
+import { runGit } from '../command-runner'
+import type { WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
+import { listSessions as listStoredSessions } from '@kata-sh/shared/sessions'
 import { initRepo, makeTmpDir, cleanup } from './test-helpers'
 
 const cleanups: string[] = []
@@ -50,6 +53,15 @@ function injectSession(sm: SessionManager, id: string, workspaceRootPath: string
   )
   ;(sm as any).sessions.set(id, managed)
   return managed
+}
+
+function confirmationFor(risk: WorktreeRemovalRisk) {
+  return {
+    uncommittedFileCount: risk.uncommittedFileCount,
+    unpushedCommitCount: risk.unpushedCommitCount,
+    branchHasUniqueWork: risk.branchHasUniqueWork,
+    confirmationFingerprint: risk.confirmationFingerprint,
+  }
 }
 
 describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
@@ -126,7 +138,7 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
 })
 
 describe('SessionManager.deleteSession — server-owned removal ordering (AC18–AC19)', () => {
-  test('removes the checkout only after the session is durably deleted', async () => {
+  test('authoritatively removes the checkout while the session still exists', async () => {
     const repo = tmp()
     await initRepo(repo)
     const { sm, services } = makeManager()
@@ -139,9 +151,16 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
       baseRef: 'main',
     })
     const id = prep.checkout.managedWorktreeId!
+    const originalRemove = services.worktrees.removeWorktree.bind(services.worktrees)
+    let sessionPresentAtRemoval = false
+    services.worktrees.removeWorktree = (async (...args: Parameters<typeof originalRemove>) => {
+      sessionPresentAtRemoval = (sm as any).sessions.has('combo')
+      return originalRemove(...args)
+    }) as typeof services.worktrees.removeWorktree
 
     const result = await sm.deleteSession('combo', { removeManagedWorktree: true })
 
+    expect(sessionPresentAtRemoval).toBe(true)
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
@@ -178,6 +197,94 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     expect(services.registry.get(id)!.ownerSessionIds).toContain('owner')
   })
 
+  test('a session-storage staging failure blocks checkout removal and preserves the session', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'storage-failure', wsRoot)
+
+    const prep = await sm.prepareCheckout('storage-failure', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    let removalCalled = false
+    const originalRemove = services.worktrees.removeWorktree.bind(services.worktrees)
+    services.worktrees.removeWorktree = (async (...args: Parameters<typeof originalRemove>) => {
+      removalCalled = true
+      return originalRemove(...args)
+    }) as typeof services.worktrees.removeWorktree
+    ;(sm as any).stageSessionStorageForDeletion = async () => {
+      throw new Error('injected storage failure')
+    }
+
+    const result = await sm.deleteSession('storage-failure', {
+      removeManagedWorktree: true,
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blockedReason).toContain('staged for safe deletion')
+    expect(removalCalled).toBe(false)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('storage-failure')).toBe(true)
+  })
+
+  test('startup recovery restores a staged session when checkout removal did not complete', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'recover-staged', wsRoot)
+
+    const prep = await sm.prepareCheckout('recover-staged', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const originalPath = join(wsRoot, 'sessions', 'recover-staged')
+    const staged = await (sm as any).stageSessionStorageForDeletion(
+      wsRoot,
+      'recover-staged',
+      prep.checkout.managedWorktreeId,
+    )
+    expect(existsSync(originalPath)).toBe(false)
+    expect(listStoredSessions(wsRoot).some(session => session.id === 'recover-staged')).toBe(false)
+
+    ;(sm as any).recoverStagedSessionDeletions(wsRoot)
+
+    expect(existsSync(originalPath)).toBe(true)
+    expect(existsSync(staged.transactionPath)).toBe(false)
+    expect(listStoredSessions(wsRoot).some(session => session.id === 'recover-staged')).toBe(true)
+  })
+
+  test('a leftover finalized transaction cannot resurrect a session after checkout removal', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'purge-staged', wsRoot)
+
+    const prep = await sm.prepareCheckout('purge-staged', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const id = prep.checkout.managedWorktreeId!
+    const staged = await (sm as any).stageSessionStorageForDeletion(
+      wsRoot,
+      'purge-staged',
+      id,
+    )
+    services.registry.remove(id)
+
+    expect(listStoredSessions(wsRoot).some(session => session.id === 'purge-staged')).toBe(false)
+    ;(sm as any).recoverStagedSessionDeletions(wsRoot)
+
+    expect(existsSync(staged.transactionPath)).toBe(false)
+    expect(listStoredSessions(wsRoot).some(session => session.id === 'purge-staged')).toBe(false)
+  })
+
   test('uncommitted work blocks removal unless the destructive choice is confirmed', async () => {
     const repo = tmp()
     await initRepo(repo)
@@ -197,13 +304,286 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     expect(unconfirmed.worktreeRemoval?.blocked).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
 
+    const risk = await sm.inspectManagedWorktreeRemoval('dirty')
+    const missingConfirmation = await sm.deleteSession('dirty', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+    })
+    expect(missingConfirmation.deleted).toBe(false)
+    expect(missingConfirmation.worktreeRemoval?.blockedReason).toContain('confirmation is missing')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+
     const confirmed = await sm.deleteSession('dirty', {
       removeManagedWorktree: true,
       forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(risk),
     })
     expect(confirmed.deleted).toBe(true)
     expect(confirmed.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+  })
+
+  test('rejects destructive removal when work appears after its confirmation was shown', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'stale-confirmation', wsRoot)
+
+    const prep = await sm.prepareCheckout('stale-confirmation', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    writeFileSync(join(prep.checkout.checkoutPath, 'shown-to-user.txt'), 'first file\n')
+
+    // This is the snapshot displayed by DeleteSessionDialog. The checkout then
+    // changes before the delete request reaches the server.
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('stale-confirmation')
+    expect(displayedRisk.uncommittedFileCount).toBe(1)
+    writeFileSync(join(prep.checkout.checkoutPath, 'appeared-later.txt'), 'second file\n')
+
+    const result = await sm.deleteSession('stale-confirmation', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    // A force flag is only authorization for the exact displayed summary. New
+    // work leaves both the session and checkout intact for a fresh inspection.
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('stale-confirmation')).toBe(true)
+  })
+
+  test('rejects destructive removal when different work replaces the confirmed work at the same counts', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'substituted-confirmation', wsRoot)
+
+    const prep = await sm.prepareCheckout('substituted-confirmation', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const inspectedPath = join(prep.checkout.checkoutPath, 'inspected.txt')
+    writeFileSync(inspectedPath, 'work the user inspected\n')
+
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('substituted-confirmation')
+    expect(displayedRisk.uncommittedFileCount).toBe(1)
+
+    unlinkSync(inspectedPath)
+    writeFileSync(
+      join(prep.checkout.checkoutPath, 'replacement-secret.txt'),
+      'different work with the same aggregate count\n',
+    )
+
+    const result = await sm.deleteSession('substituted-confirmation', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('substituted-confirmation')).toBe(true)
+  })
+
+  test('rejects destructive removal when staged content changes but the worktree file and counts do not', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'substituted-index', wsRoot)
+
+    const prep = await sm.prepareCheckout('substituted-index', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const checkoutPath = prep.checkout.checkoutPath
+    writeFileSync(join(checkoutPath, 'README.md'), 'first staged content\n')
+    await runGit(['add', '--', 'README.md'], { cwd: checkoutPath })
+    writeFileSync(join(checkoutPath, 'README.md'), 'unchanged working-tree content\n')
+
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('substituted-index')
+    expect(displayedRisk.uncommittedFileCount).toBe(1)
+
+    const replacementObject = await runGit(['hash-object', '-w', '--stdin'], {
+      cwd: checkoutPath,
+      input: 'replacement staged content\n',
+    })
+    await runGit(
+      ['update-index', '--cacheinfo', `100644,${replacementObject.stdout.trim()},README.md`],
+      { cwd: checkoutPath },
+    )
+
+    const result = await sm.deleteSession('substituted-index', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(join(checkoutPath, 'README.md'))).toBe(true)
+    expect((sm as any).sessions.has('substituted-index')).toBe(true)
+  })
+
+  test('rejects destructive removal when a different unique commit replaces the confirmed commit', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'substituted-commit', wsRoot)
+
+    const prep = await sm.prepareCheckout('substituted-commit', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    writeFileSync(join(prep.checkout.checkoutPath, 'first.txt'), 'first unique commit\n')
+    await runGit(['add', '--', 'first.txt'], { cwd: prep.checkout.checkoutPath })
+    await runGit(['commit', '-m', 'first unique commit'], { cwd: prep.checkout.checkoutPath })
+
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('substituted-commit')
+    expect(displayedRisk.unpushedCommitCount).toBe(1)
+
+    await runGit(['reset', '--hard', 'main'], { cwd: prep.checkout.checkoutPath })
+    writeFileSync(join(prep.checkout.checkoutPath, 'replacement.txt'), 'replacement commit\n')
+    await runGit(['add', '--', 'replacement.txt'], { cwd: prep.checkout.checkoutPath })
+    await runGit(['commit', '-m', 'replacement unique commit'], {
+      cwd: prep.checkout.checkoutPath,
+    })
+
+    const result = await sm.deleteSession('substituted-commit', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('substituted-commit')).toBe(true)
+  })
+
+  test('rejects destructive removal when the checkout branch changes after confirmation', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'changed-branch', wsRoot)
+
+    const prep = await sm.prepareCheckout('changed-branch', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    writeFileSync(join(prep.checkout.checkoutPath, 'inspected.txt'), 'confirmed work\n')
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('changed-branch')
+
+    await runGit(['switch', '-c', 'external-replacement-branch'], {
+      cwd: prep.checkout.checkoutPath,
+    })
+
+    const result = await sm.deleteSession('changed-branch', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('changed-branch')).toBe(true)
+  })
+
+  test('rejects destructive removal when HEAD changes but the unique-work count remains zero', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'changed-head', wsRoot)
+
+    const prep = await sm.prepareCheckout('changed-head', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const checkoutPath = prep.checkout.checkoutPath
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('changed-head')
+    expect(displayedRisk.unpushedCommitCount).toBe(0)
+
+    writeFileSync(join(checkoutPath, 'replacement-head.txt'), 'new checkout identity\n')
+    await runGit(['add', '--', 'replacement-head.txt'], { cwd: checkoutPath })
+    await runGit(['commit', '-m', 'replace checkout head'], { cwd: checkoutPath })
+    const replacementHead = await runGit(['rev-parse', 'HEAD'], { cwd: checkoutPath })
+    await runGit(['update-ref', 'refs/heads/main', replacementHead.stdout.trim()], {
+      cwd: repo,
+    })
+
+    const currentRisk = await sm.inspectManagedWorktreeRemoval('changed-head')
+    expect(currentRisk.unpushedCommitCount).toBe(0)
+    expect(currentRisk.uncommittedFileCount).toBe(0)
+
+    const result = await sm.deleteSession('changed-head', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('changed-head')).toBe(true)
+  })
+
+  test('has no dry-run gap that can delete the session after a late checkout change', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'late-change', wsRoot)
+
+    const prep = await sm.prepareCheckout('late-change', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const checkoutPath = prep.checkout.checkoutPath
+    writeFileSync(join(checkoutPath, 'displayed.txt'), 'displayed work\n')
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('late-change')
+
+    const originalRemove = services.worktrees.removeWorktree.bind(services.worktrees)
+    let removalCalls = 0
+    services.worktrees.removeWorktree = (async (...args: Parameters<typeof originalRemove>) => {
+      removalCalls += 1
+      writeFileSync(join(checkoutPath, 'late-write.txt'), 'arrived at authoritative removal\n')
+      return originalRemove(...args)
+    }) as typeof services.worktrees.removeWorktree
+
+    const result = await sm.deleteSession('late-change', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
+    })
+
+    expect(removalCalls).toBe(1)
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(checkoutPath)).toBe(true)
+    expect((sm as any).sessions.has('late-change')).toBe(true)
   })
 
   test('stops a processing agent before the checkout is inspected or removed', async () => {
@@ -242,7 +622,6 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
 
     const result = await sm.deleteSession('busy', {
       removeManagedWorktree: true,
-      forceWorktreeRemoval: true,
     })
 
     expect(order[0]).toBe('forceAbort:checkout-present')
@@ -458,7 +837,6 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
 
     const result = await sm.deleteSession('slowStop', {
       removeManagedWorktree: true,
-      forceWorktreeRemoval: true,
     })
 
     // It polled rather than assuming, and the checkout was still intact for the
@@ -492,7 +870,7 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
 
     const result = await (sm as any).deleteSession(
       'wedged',
-      { removeManagedWorktree: true, forceWorktreeRemoval: true },
+      { removeManagedWorktree: true },
     )
 
     // A wedged backend must never let a force removal race it. Nothing is
@@ -545,7 +923,6 @@ describe('SessionManager.deleteSession — the backend flag alone cannot wave re
 
     const result = await sm.deleteSession('abortLies', {
       removeManagedWorktree: true,
-      forceWorktreeRemoval: true,
     })
 
     // The checkout must still have been intact when the turn finally unwound —
@@ -558,9 +935,8 @@ describe('SessionManager.deleteSession — the backend flag alone cannot wave re
 
 describe('SessionManager.deleteSession — a destructive confirmation is not blanket authorization', () => {
   // `forceWorktreeRemoval` alone would license discarding whatever the server
-  // finds at removal time. The user only ever consented to the counts the
-  // dialog displayed, so work that appeared afterwards must not ride along on
-  // that confirmation.
+  // finds at removal time. The user only ever consented to the exact work the
+  // dialog displayed, so any later change must require a fresh confirmation.
   test('refuses when the checkout gained uncommitted files since the confirmation', async () => {
     const repo = tmp()
     await initRepo(repo)
@@ -575,17 +951,18 @@ describe('SessionManager.deleteSession — a destructive confirmation is not bla
     })
     // The user saw one file and confirmed. A second appeared afterwards.
     writeFileSync(join(prep.checkout.checkoutPath, 'seen.txt'), 'shown in the dialog\n')
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('stale')
     writeFileSync(join(prep.checkout.checkoutPath, 'unseen.txt'), 'appeared after the dialog\n')
 
     const result = await sm.deleteSession('stale', {
       removeManagedWorktree: true,
       forceWorktreeRemoval: true,
-      confirmedRisk: { uncommittedFileCount: 1, unpushedCommitCount: 0 },
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
     })
 
     expect(result.deleted).toBe(false)
     expect(result.worktreeRemoval?.blocked).toBe(true)
-    expect(result.worktreeRemoval?.blockedReason).toContain('gained work since you confirmed')
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
     // Nothing destroyed, including the file the user never saw.
     expect(existsSync(join(prep.checkout.checkoutPath, 'unseen.txt'))).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
@@ -604,11 +981,12 @@ describe('SessionManager.deleteSession — a destructive confirmation is not bla
       baseRef: 'main',
     })
     writeFileSync(join(prep.checkout.checkoutPath, 'seen.txt'), 'shown in the dialog\n')
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('fresh')
 
     const result = await sm.deleteSession('fresh', {
       removeManagedWorktree: true,
       forceWorktreeRemoval: true,
-      confirmedRisk: { uncommittedFileCount: 1, unpushedCommitCount: 0 },
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
     })
 
     expect(result.deleted).toBe(true)
@@ -616,7 +994,7 @@ describe('SessionManager.deleteSession — a destructive confirmation is not bla
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })
 
-  test('a shrinking checkout is not treated as stale', async () => {
+  test('refuses when work disappears after the confirmation', async () => {
     const repo = tmp()
     await initRepo(repo)
     const { sm } = makeManager()
@@ -628,17 +1006,23 @@ describe('SessionManager.deleteSession — a destructive confirmation is not bla
       workingDirectory: repo,
       baseRef: 'main',
     })
-    // Confirmed against more work than is actually there now — the user already
-    // authorized at least this much, so removal proceeds.
-    writeFileSync(join(prep.checkout.checkoutPath, 'only.txt'), 'one file\n')
+    const keptPath = join(prep.checkout.checkoutPath, 'kept.txt')
+    const removedPath = join(prep.checkout.checkoutPath, 'removed-after-confirmation.txt')
+    writeFileSync(keptPath, 'one file\n')
+    writeFileSync(removedPath, 'second file\n')
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('shrank')
+    unlinkSync(removedPath)
 
     const result = await sm.deleteSession('shrank', {
       removeManagedWorktree: true,
       forceWorktreeRemoval: true,
-      confirmedRisk: { uncommittedFileCount: 5, unpushedCommitCount: 3 },
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
     })
 
-    expect(result.deleted).toBe(true)
-    expect(result.worktreeRemoval?.removed).toBe(true)
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(keptPath)).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
   })
 })

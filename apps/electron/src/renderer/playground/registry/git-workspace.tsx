@@ -111,6 +111,7 @@ const removalRisk: WorktreeRemovalRisk = {
   uncommittedFileCount: 2,
   unpushedCommitCount: 1,
   branchHasUniqueWork: true,
+  confirmationFingerprint: 'playground-removal-confirmation',
   blocked: false,
 }
 

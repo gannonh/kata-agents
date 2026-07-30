@@ -108,7 +108,7 @@ export class RepositoryService {
    * Discover repository identity and live branch/remote context for a directory.
    * Returns a non-git result (all null) when the directory is not inside a repo.
    */
-  async getContext(dir: string): Promise<RepositoryContext> {
+  async getContext(dir: string, options?: { strict?: boolean }): Promise<RepositoryContext> {
     const nonGit: RepositoryContext = {
       isGitRepository: false,
       repositoryRoot: null,
@@ -130,11 +130,17 @@ export class RepositoryService {
         { cwd: dir },
       )
       const lines = res.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
-      if (lines.length < 2) return nonGit
+      if (lines.length < 2) {
+        if (options?.strict) {
+          throw new Error('Git repository identity response was incomplete.')
+        }
+        return nonGit
+      }
       root = resolvePath(lines[0]!)
       commonDir = resolvePath(lines[1]!)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      if (options?.strict) throw err
       return nonGit
     }
 
@@ -316,9 +322,9 @@ export class RepositoryService {
    */
   async getStatus(
     dir: string,
-    options?: { baseRef?: string | null },
+    options?: { baseRef?: string | null; strict?: boolean },
   ): Promise<GitStatusSnapshot> {
-    const ctx = await this.getContext(dir)
+    const ctx = await this.getContext(dir, { strict: options?.strict })
     const snapshot: GitStatusSnapshot = {
       repositoryRoot: ctx.repositoryRoot,
       checkoutPath: resolvePath(dir),
@@ -338,7 +344,12 @@ export class RepositoryService {
       operationInProgress: null,
       blockedReason: null,
     }
-    if (!ctx.isGitRepository) return snapshot
+    if (!ctx.isGitRepository) {
+      if (options?.strict) {
+        throw new Error('The managed checkout could not be resolved as a Git repository.')
+      }
+      return snapshot
+    }
 
     try {
       const res = await runGit(
@@ -361,6 +372,7 @@ export class RepositoryService {
       await this.attachPullRequestDefaults(dir, snapshot, ctx.repositoryRoot)
     } catch (err) {
       if (err instanceof GitCommandError && err.code === 'GIT_NOT_FOUND') throw err
+      if (options?.strict) throw err
     }
     return snapshot
   }

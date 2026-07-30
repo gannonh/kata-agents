@@ -22,6 +22,7 @@ export interface WorktreeRemovalSummary {
   uncommittedFileCount: number
   unpushedCommitCount: number
   branchHasUniqueWork: boolean
+  confirmationFingerprint: string
   /** The temporary branch is pruned only when it has no unique work. */
   branchWillBePruned: boolean
   /** Number of other sessions still owning the worktree (drives the block copy). */
@@ -36,6 +37,7 @@ export function summarizeWorktreeRemoval(risk: WorktreeRemovalRisk): WorktreeRem
     uncommittedFileCount: risk.uncommittedFileCount,
     unpushedCommitCount: risk.unpushedCommitCount,
     branchHasUniqueWork: risk.branchHasUniqueWork,
+    confirmationFingerprint: risk.confirmationFingerprint,
     branchWillBePruned: !risk.branchHasUniqueWork,
     otherOwnerCount: risk.otherOwnerCount,
   }

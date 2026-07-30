@@ -69,7 +69,8 @@ Each has real-repository coverage:
 
 | Behavior | Test |
 |---|---|
-| Session deletion quiesces the agent, then deletes, then removes the checkout | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "stops a processing agent before the checkout is inspected or removed" |
+| Session deletion quiesces the agent, stages session storage reversibly, then strictly compares and removes under the Git lock while the runtime session exists | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "authoritatively removes the checkout while the session still exists", "session-storage staging failure", and "has no dry-run gap" |
+| Startup recovery restores an interrupted pre-removal transaction and purges a completed transaction without rediscovering its session header | same file — "startup recovery restores" and "cannot resurrect a session" |
 | A blocked removal changes nothing: session and checkout both survive | same file — "a blocked removal changes nothing at all" |
 | Every removal guard can be evaluated without mutating anything | `packages/server-core/src/git/__tests__/remove-worktree-safety.test.ts` — "dry run" |
 | Status omits staged changes the working tree has reverted, keeps working-tree mode changes, and keeps entries on an unborn branch | `packages/server-core/src/git/__tests__/repository-service.test.ts` — "HEAD→working-tree consistency" |
@@ -79,8 +80,9 @@ Each has real-repository coverage:
 | Unattended deletion cleans up an unused worktree, and keeps both session and checkout when it holds work | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removeManagedWorktree is safe for any caller" |
 | Removal waits for the turn to unwind (not the backend flag, which `forceAbort` clears immediately) and refuses rather than racing a turn that never finishes | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removal waits for real agent quiescence" and "the backend flag alone cannot wave removal through" |
 | Reconciliation reclaims unowned clean checkouts and retains unowned ones holding work | `packages/server-core/src/git/__tests__/reconcile.test.ts` — "reclaiming leaked (unowned) checkouts" |
-| A destructive confirmation authorizes only the work it displayed; a checkout that gained work since is refused | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "a destructive confirmation is not blanket authorization" |
+| A destructive confirmation authorizes only the exact HEAD, index, file modes, working-tree content, and commits displayed; added, removed, same-count substitutions and identity drift are refused | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "server-owned removal ordering" and "a destructive confirmation is not blanket authorization" |
 | A removal that fails keeps its registry record, so the checkout stays discoverable instead of leaking silently | `packages/server-core/src/git/__tests__/remove-worktree-cleanup-failure.test.ts` |
+| Status-inspection failure and an owner added during inspection both fail closed | `packages/server-core/src/git/__tests__/remove-worktree-safety.test.ts` — "fails closed" and "rechecks ownership" |
 
 ## Automated coverage
 

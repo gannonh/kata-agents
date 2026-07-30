@@ -9,11 +9,14 @@
  * `kata-agent/<token>` branch. Mutations serialize by Git common directory.
  */
 
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs'
 import { join, relative, isAbsolute, resolve as resolvePath } from 'node:path'
+import { createHash } from 'node:crypto'
 import type {
+  GitWorkingTreeEntry,
   ManagedWorktreeRecord,
   SessionCheckoutV1,
+  WorktreeRemovalConfirmation,
   WorktreeIncludeResult,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
@@ -25,6 +28,18 @@ import { WorktreeRegistry, computeRepoKey, generateToken, removeDir } from './wo
 import { applyWorktreeInclude } from './worktree-include'
 
 const MAX_TOKEN_RETRIES = 5
+
+function matchesRemovalConfirmation(
+  risk: WorktreeRemovalRisk,
+  confirmation: WorktreeRemovalConfirmation,
+): boolean {
+  return (
+    risk.uncommittedFileCount === confirmation.uncommittedFileCount &&
+    risk.unpushedCommitCount === confirmation.unpushedCommitCount &&
+    risk.branchHasUniqueWork === confirmation.branchHasUniqueWork &&
+    risk.confirmationFingerprint === confirmation.confirmationFingerprint
+  )
+}
 
 /**
  * Requesting-session placeholder for reconciliation-driven removal. Only records
@@ -223,11 +238,101 @@ export class ManagedWorktreeService {
   }
 
   addOwner(managedWorktreeId: string, sessionId: string): void {
+    const rec = this.registry.get(managedWorktreeId)
+    if (!rec) {
+      throw new Error('Managed worktree record not found.')
+    }
+    if (rec.state !== 'ready') {
+      throw new Error(`Managed worktree cannot add an owner while it is ${rec.state}.`)
+    }
     this.registry.addOwner(managedWorktreeId, sessionId)
   }
 
   removeOwner(managedWorktreeId: string, sessionId: string): void {
     this.registry.removeOwner(managedWorktreeId, sessionId)
+  }
+
+  /**
+   * Bind destructive confirmation to the exact work the server inspected.
+   *
+   * Aggregate counts are only display copy: a different dirty file or commit
+   * can replace the displayed work without changing either count. This digest
+   * includes checkout identity, live HEAD/branch, each dirty path and its exact
+   * index + working-tree state, and every commit unique to the persisted base
+   * ref.
+   */
+  private async createRemovalConfirmationFingerprint(
+    rec: ManagedWorktreeRecord,
+    entries: GitWorkingTreeEntry[],
+  ): Promise<string> {
+    const hash = createHash('sha256')
+    hash.update('kata-worktree-removal-v1\0')
+    hash.update(
+      `${rec.managedWorktreeId}\0${rec.checkoutPath}\0${rec.gitCommonDir}\0${rec.expectedBranch}\0${rec.baseRef ?? ''}\0`,
+    )
+
+    const repositoryIdentity = await runGit(
+      ['rev-parse', '--show-toplevel', '--git-common-dir'],
+      { cwd: rec.checkoutPath },
+    )
+    const headIdentity = await runGit(['rev-parse', 'HEAD'], { cwd: rec.checkoutPath })
+    const branchIdentity = await runGit(['symbolic-ref', '--quiet', 'HEAD'], {
+      cwd: rec.checkoutPath,
+      okExitCodes: [1],
+    })
+    hash.update(repositoryIdentity.stdout)
+    hash.update(headIdentity.stdout)
+    hash.update(branchIdentity.stdout)
+    hash.update('\0')
+
+    // Bind the complete index, not only paths surfaced by the HEAD→working-tree
+    // Changes view. This catches staged-only substitutions and preserves
+    // unmerged stage entries and executable/symlink modes.
+    const indexState = await runGit(['ls-files', '--stage', '-z'], {
+      cwd: rec.checkoutPath,
+    })
+    hash.update(indexState.stdout)
+    hash.update('\0')
+
+    const orderedEntries = [...entries].sort((a, b) => {
+      const pathOrder = a.path.localeCompare(b.path)
+      if (pathOrder !== 0) return pathOrder
+      return (a.previousPath ?? '').localeCompare(b.previousPath ?? '')
+    })
+    for (const entry of orderedEntries) {
+      hash.update(
+        `${entry.path}\0${entry.previousPath ?? ''}\0${entry.type}\0${entry.indexState ?? ''}\0${entry.worktreeState ?? ''}\0${entry.conflicted ? '1' : '0'}\0`,
+      )
+      const absolutePath = join(rec.checkoutPath, entry.path)
+      try {
+        hash.update(lstatSync(absolutePath).mode.toString(8))
+        hash.update('\0')
+        const object = await runGit(
+          ['hash-object', '--no-filters', '--', entry.path],
+          { cwd: rec.checkoutPath },
+        )
+        hash.update(object.stdout.trim())
+      } catch (err) {
+        if (
+          !(err instanceof Error) ||
+          !('code' in err) ||
+          (err as NodeJS.ErrnoException).code !== 'ENOENT'
+        ) {
+          throw err
+        }
+      }
+      hash.update('\0')
+    }
+
+    if (rec.baseRef) {
+      const uniqueCommits = await runGit(
+        ['rev-list', '--reverse', `${rec.baseRef}..HEAD`],
+        { cwd: rec.checkoutPath },
+      )
+      hash.update(uniqueCommits.stdout)
+    }
+
+    return hash.digest('hex')
   }
 
   /** Inspect removal risk for a worktree from the perspective of a session. */
@@ -245,6 +350,9 @@ export class ManagedWorktreeService {
         uncommittedFileCount: 0,
         unpushedCommitCount: 0,
         branchHasUniqueWork: false,
+        confirmationFingerprint: createHash('sha256')
+          .update(`kata-worktree-removal-v1\0missing\0${managedWorktreeId}`)
+          .digest('hex'),
         blocked: false,
       }
     }
@@ -255,13 +363,12 @@ export class ManagedWorktreeService {
     let uncommittedFileCount = 0
     let unpushedCommitCount = 0
     let branchHasUniqueWork = false
+    let confirmationFingerprint = createHash('sha256')
+      .update(`kata-worktree-removal-v1\0absent\0${managedWorktreeId}`)
+      .digest('hex')
     if (exists) {
-      try {
-        const status = await this.repositoryService.getStatus(rec.checkoutPath)
-        uncommittedFileCount = status.entries.length
-      } catch {
-        /* ignore */
-      }
+      const status = await this.repositoryService.getStatus(rec.checkoutPath, { strict: true })
+      uncommittedFileCount = status.entries.length
       if (rec.baseRef) {
         unpushedCommitCount = await this.repositoryService.countCommitsAhead(
           rec.checkoutPath,
@@ -269,6 +376,10 @@ export class ManagedWorktreeService {
         )
         branchHasUniqueWork = unpushedCommitCount > 0
       }
+      confirmationFingerprint = await this.createRemovalConfirmationFingerprint(
+        rec,
+        status.entries,
+      )
     }
 
     const blocked = otherOwners.length > 0
@@ -280,6 +391,7 @@ export class ManagedWorktreeService {
       uncommittedFileCount,
       unpushedCommitCount,
       branchHasUniqueWork,
+      confirmationFingerprint,
       blocked,
       blockedReason: blocked ? 'Another session still owns this worktree.' : undefined,
     }
@@ -300,53 +412,114 @@ export class ManagedWorktreeService {
   async removeWorktree(
     managedWorktreeId: string,
     requestingSessionId: string,
-    options?: { force?: boolean; dryRun?: boolean },
+    options?: {
+      force?: boolean
+      dryRun?: boolean
+      expectedConfirmation?: WorktreeRemovalConfirmation
+    },
   ): Promise<WorktreeRemovalResult> {
     const rec = this.registry.get(managedWorktreeId)
     if (!rec) {
       return { removed: false, branchPruned: false, blocked: false }
     }
 
-    const risk = await this.inspectRemoval(managedWorktreeId, requestingSessionId)
-    if (risk.blocked) {
-      return {
-        removed: false,
-        branchPruned: false,
-        blocked: true,
-        blockedReason: risk.blockedReason,
-      }
-    }
-    if (!options?.force && (risk.uncommittedFileCount > 0 || risk.branchHasUniqueWork)) {
-      return {
-        removed: false,
-        branchPruned: false,
-        blocked: true,
-        blockedReason:
-          'Worktree has uncommitted or unique work. Confirm destructive removal to proceed.',
-      }
-    }
-
-    // Identity revalidation: never delete a checkout unless it is a genuine
-    // managed worktree under the Kata worktree root, on the expected branch,
-    // and sharing the recorded Git common directory. A `force` flag governs
-    // uncommitted/unique work — it does NOT bypass identity safety.
-    const identity = await this.validateRemovalIdentity(rec)
-    if (!identity.ok) {
-      return {
-        removed: false,
-        branchPruned: false,
-        blocked: true,
-        blockedReason: identity.reason,
-      }
-    }
-
-    // Every guard passed. A dry run stops here, reporting that removal would be
-    // allowed without performing it.
-    if (options?.dryRun) {
-      return { removed: false, branchPruned: false, blocked: false }
-    }
-
     return this.mutationLock.withLock(rec.gitCommonDir, async () => {
+      // This is the authoritative inspection. A session-delete dry run may
+      // have happened earlier, while the confirmation dialog was open.
+      let risk: WorktreeRemovalRisk
+      try {
+        risk = await this.inspectRemoval(managedWorktreeId, requestingSessionId)
+      } catch (err) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: `The worktree could not be inspected safely: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+      if (risk.blocked) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: risk.blockedReason,
+        }
+      }
+      if (!options?.force && (risk.uncommittedFileCount > 0 || risk.branchHasUniqueWork)) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'Worktree has uncommitted or unique work. Confirm destructive removal to proceed.',
+        }
+      }
+      if (options?.force && !options.expectedConfirmation) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'The worktree removal confirmation is missing. Inspect the worktree again before removing it.',
+        }
+      }
+      if (
+        options?.force &&
+        options.expectedConfirmation &&
+        !matchesRemovalConfirmation(risk, options.expectedConfirmation)
+      ) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'The worktree changed after the removal confirmation. Inspect it again before removing it.',
+        }
+      }
+
+      // Identity revalidation: never delete a checkout unless it is a genuine
+      // managed worktree under the Kata worktree root, on the expected branch,
+      // and sharing the recorded Git common directory. A `force` flag governs
+      // uncommitted/unique work — it does NOT bypass identity safety.
+      const identity = await this.validateRemovalIdentity(rec)
+      if (!identity.ok) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: identity.reason,
+        }
+      }
+
+      // Ownership is mutable registry state and inspection performs async Git
+      // work. Re-read it after the last guard await so an owner added during
+      // inspection cannot lose its checkout.
+      const currentRecord = this.registry.get(managedWorktreeId)
+      const currentOwners = currentRecord?.ownerSessionIds ?? []
+      const currentOtherOwners = currentOwners.filter(
+        owner => owner !== requestingSessionId,
+      )
+      const requesterStillOwns =
+        requestingSessionId === RECONCILE_ACTOR ||
+        currentOwners.includes(requestingSessionId)
+      if (!currentRecord || !requesterStillOwns || currentOtherOwners.length > 0) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            currentOtherOwners.length > 0
+              ? 'Another session still owns this worktree.'
+              : 'Worktree ownership changed during removal. Inspect it again before removing it.',
+        }
+      }
+
+      // Every guard passed. A dry run stops here, reporting that removal would
+      // be allowed without performing it.
+      if (options?.dryRun) {
+        return { removed: false, branchPruned: false, blocked: false }
+      }
+
       this.registry.setState(managedWorktreeId, 'removing')
       // Remove the worktree registration + directory.
       try {

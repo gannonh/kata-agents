@@ -15,6 +15,7 @@ function risk(overrides: Partial<WorktreeRemovalRisk> = {}): WorktreeRemovalRisk
     uncommittedFileCount: 0,
     unpushedCommitCount: 0,
     branchHasUniqueWork: false,
+    confirmationFingerprint: 'fixture-confirmation-fingerprint',
     blocked: false,
     ...overrides,
   }

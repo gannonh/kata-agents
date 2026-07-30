@@ -104,6 +104,124 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
     expect(res.blocked).toBe(true)
     expect(existsSync(repo)).toBe(true)
   })
+
+  test('fails closed when strict status inspection errors', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'only',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    ;(svc.worktrees as any).repositoryService.getStatus = async () => {
+      throw new Error('injected status failure')
+    }
+
+    const res = await svc.worktrees.removeWorktree(record.managedWorktreeId, 'only')
+
+    expect(res.removed).toBe(false)
+    expect(res.blocked).toBe(true)
+    expect(res.blockedReason).toContain('could not be inspected safely')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+    expect(svc.registry.get(record.managedWorktreeId)).toBeDefined()
+  })
+
+  test('fails closed when strict context discovery transiently reports non-Git', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'only',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    const repositoryService = (svc.worktrees as any).repositoryService
+    const originalContext = repositoryService.getContext.bind(repositoryService)
+    let contextCalls = 0
+    repositoryService.getContext = async (...args: unknown[]) => {
+      contextCalls += 1
+      if (contextCalls === 1) {
+        return {
+          isGitRepository: false,
+          repositoryRoot: null,
+          gitCommonDir: null,
+          currentBranch: null,
+          detached: false,
+          headSha: null,
+          defaultRef: null,
+          remotes: [],
+          primaryRemote: null,
+          provider: 'unknown',
+        }
+      }
+      return originalContext(...args)
+    }
+
+    const res = await svc.worktrees.removeWorktree(record.managedWorktreeId, 'only')
+
+    expect(res.removed).toBe(false)
+    expect(res.blocked).toBe(true)
+    expect(res.blockedReason).toContain('could not be inspected safely')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+  })
+
+  test('rechecks ownership after inspection before removing the checkout', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'first',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    const originalInspect = svc.worktrees.inspectRemoval.bind(svc.worktrees)
+    svc.worktrees.inspectRemoval = (async (...args: Parameters<typeof originalInspect>) => {
+      const risk = await originalInspect(...args)
+      svc.worktrees.addOwner(record.managedWorktreeId, 'late-owner')
+      return risk
+    }) as typeof svc.worktrees.inspectRemoval
+
+    const res = await svc.worktrees.removeWorktree(record.managedWorktreeId, 'first')
+
+    expect(res.removed).toBe(false)
+    expect(res.blocked).toBe(true)
+    expect(res.blockedReason).toContain('Another session')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+    expect(svc.registry.get(record.managedWorktreeId)!.ownerSessionIds).toEqual([
+      'first',
+      'late-owner',
+    ])
+  })
+
+  test('rejects owner additions after removal enters the removing state', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'first',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    svc.registry.setState(record.managedWorktreeId, 'removing')
+
+    expect(() =>
+      svc.worktrees.addOwner(record.managedWorktreeId, 'late-owner'),
+    ).toThrow(/while it is removing/)
+    expect(svc.registry.get(record.managedWorktreeId)!.ownerSessionIds).toEqual(['first'])
+  })
 })
 
 describe('SessionManager.removeManagedWorktree — session-resolved identity', () => {
@@ -180,8 +298,16 @@ describe('SessionManager.removeManagedWorktree — session-resolved identity', (
     expect(blocked.blocked).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
 
-    // With the explicit destructive confirmation (force) it is removed.
-    const forced = await sm.removeManagedWorktree('dirty', { force: true })
+    // With the exact destructive-work summary the user saw, it is removed.
+    const forced = await sm.removeManagedWorktree('dirty', {
+      force: true,
+      expectedConfirmation: {
+        uncommittedFileCount: risk.uncommittedFileCount,
+        unpushedCommitCount: risk.unpushedCommitCount,
+        branchHasUniqueWork: risk.branchHasUniqueWork,
+        confirmationFingerprint: risk.confirmationFingerprint,
+      },
+    })
     expect(forced.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })
@@ -217,16 +343,31 @@ describe('ManagedWorktreeService.removeWorktree — dry run', () => {
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
 
     // Confirming force clears the block, still without removing.
+    const risk = await services.worktrees.inspectRemoval(id, 'dry')
     const forced = await services.worktrees.removeWorktree(id, 'dry', {
       dryRun: true,
       force: true,
+      expectedConfirmation: {
+        uncommittedFileCount: risk.uncommittedFileCount,
+        unpushedCommitCount: risk.unpushedCommitCount,
+        branchHasUniqueWork: risk.branchHasUniqueWork,
+        confirmationFingerprint: risk.confirmationFingerprint,
+      },
     })
     expect(forced.blocked).toBe(false)
     expect(forced.removed).toBe(false)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
 
     // The real call, for contrast.
-    const real = await services.worktrees.removeWorktree(id, 'dry', { force: true })
+    const real = await services.worktrees.removeWorktree(id, 'dry', {
+      force: true,
+      expectedConfirmation: {
+        uncommittedFileCount: risk.uncommittedFileCount,
+        unpushedCommitCount: risk.unpushedCommitCount,
+        branchHasUniqueWork: risk.branchHasUniqueWork,
+        confirmationFingerprint: risk.confirmationFingerprint,
+      },
+    })
     expect(real.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })

@@ -64,9 +64,7 @@ describe('removeWorktree — cleanup that did not happen is reported as failure'
       removeDir: () => false,
     }))
 
-    const result = await services.worktrees.removeWorktree(record.managedWorktreeId, 'owner', {
-      force: true,
-    })
+    const result = await services.worktrees.removeWorktree(record.managedWorktreeId, 'owner')
 
     // Honest failure rather than a false success.
     expect(result.removed).toBe(false)

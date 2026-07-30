@@ -5,7 +5,15 @@ import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
 import { basename, dirname, join, resolve } from 'path'
-import { existsSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@kata-sh/shared/agent'
@@ -83,7 +91,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -1862,6 +1870,7 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
+        this.recoverStagedSessionDeletions(workspaceRootPath)
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
@@ -5291,7 +5300,7 @@ export class SessionManager implements ISessionManager {
     try {
       this.assertEmptySessionGate(managed)
     } catch (gateErr) {
-      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId, { force: true })
+      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId)
       throw gateErr
     }
 
@@ -5314,7 +5323,7 @@ export class SessionManager implements ISessionManager {
       await this.flushSession(sessionId)
     } catch (bindErr) {
       // Session update failed — attempt clean provisional cleanup.
-      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId, { force: true }).catch(() => {})
+      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId).catch(() => {})
       throw bindErr
     }
 
@@ -5370,7 +5379,7 @@ export class SessionManager implements ISessionManager {
    */
   async removeManagedWorktree(
     sessionId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
   ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult> {
     if (!isGitWorkspaceV1Enabled()) {
       throw new Error('Git workspace feature is not enabled.')
@@ -5380,10 +5389,10 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Ask whether removing this session's managed worktree would be permitted,
-   * without changing anything. Used by {@link deleteSession} to make the
-   * removal decision while the session can still resolve its own checkout, so
-   * the irreversible step can safely run after the session is deleted.
+   * Remove this session's managed worktree before deleting the session. The
+   * authoritative fingerprint comparison and removal happen together under the
+   * repository mutation lock, so a mismatch cannot be discovered only after
+   * the session has already been lost.
    *
    * Three outcomes, deliberately distinct so `removeManagedWorktree` is safe for
    * any caller to pass — including unattended cleanup that cannot inspect the
@@ -5396,17 +5405,14 @@ export class SessionManager implements ISessionManager {
    *  - `blocked`: a real removal guard rejected it — another session still owns
    *    the worktree, it holds uncommitted or unique work and `force` was not
    *    given, or identity revalidation failed. The caller aborts entirely.
-   *  - `allowed`: removal will be permitted once the session is gone.
+   *  - `removed`: removal completed and session deletion may proceed.
    */
-  private async precheckManagedWorktreeRemoval(
+  private async removeManagedWorktreeBeforeSessionDeletion(
     sessionId: string,
-    options?: {
-      force?: boolean
-      confirmedRisk?: import('@kata-sh/shared/protocol').SessionDeleteOptions['confirmedRisk']
-    },
+    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
   ): Promise<
     | { outcome: 'nothing-to-remove' }
-    | { outcome: 'allowed'; managedWorktreeId: string }
+    | { outcome: 'removed'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
     | { outcome: 'blocked'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
   > {
     if (!isGitWorkspaceV1Enabled()) return { outcome: 'nothing-to-remove' }
@@ -5419,55 +5425,17 @@ export class SessionManager implements ISessionManager {
       return { outcome: 'nothing-to-remove' }
     }
 
-    // A destructive confirmation authorizes discarding the work the user was
-    // shown, not whatever exists by the time removal runs. If the checkout has
-    // gained uncommitted files or unique commits since those counts were
-    // displayed, `force` would silently cover the newer work too — so refuse and
-    // let the user re-confirm against current numbers.
-    if (options?.force && options.confirmedRisk) {
-      try {
-        const current = await this.getGitServices().worktrees.inspectRemoval(
-          managedWorktreeId,
-          sessionId,
-        )
-        const grewFiles = current.uncommittedFileCount > options.confirmedRisk.uncommittedFileCount
-        const grewCommits = current.unpushedCommitCount > options.confirmedRisk.unpushedCommitCount
-        if (grewFiles || grewCommits) {
-          const parts: string[] = []
-          if (grewFiles) {
-            parts.push(
-              `${current.uncommittedFileCount} uncommitted file(s) now vs ${options.confirmedRisk.uncommittedFileCount} confirmed`,
-            )
-          }
-          if (grewCommits) {
-            parts.push(
-              `${current.unpushedCommitCount} unpushed commit(s) now vs ${options.confirmedRisk.unpushedCommitCount} confirmed`,
-            )
-          }
-          return {
-            outcome: 'blocked',
-            result: {
-              removed: false,
-              branchPruned: false,
-              blocked: true,
-              blockedReason: `This worktree gained work since you confirmed (${parts.join('; ')}). Nothing was removed — review the new state and confirm again.`,
-            },
-          }
-        }
-      } catch {
-        // Inspection failed; fall through to the guards below, which re-inspect
-        // and will block on their own if the state cannot be established.
-      }
-    }
-
     try {
       const result = await this.getGitServices().worktrees.removeWorktree(
         managedWorktreeId,
         sessionId,
-        { force: options?.force, dryRun: true },
+        {
+          force: options?.force,
+          expectedConfirmation: options?.expectedConfirmation,
+        },
       )
       if (result.blocked) return { outcome: 'blocked', result }
-      return { outcome: 'allowed', managedWorktreeId }
+      return { outcome: 'removed', result }
     } catch (err) {
       return {
         outcome: 'blocked',
@@ -5477,6 +5445,94 @@ export class SessionManager implements ISessionManager {
           blocked: true,
           blockedReason: err instanceof Error ? err.message : String(err),
         },
+      }
+    }
+  }
+
+  /**
+   * Atomically hide the persisted session without destroying it. A blocked
+   * checkout removal renames this directory back, while a successful combined
+   * deletion removes the tombstone only after runtime cleanup completes.
+   */
+  private async stageSessionStorageForDeletion(
+    workspaceRootPath: string,
+    sessionId: string,
+    managedWorktreeId: string,
+  ): Promise<{ originalPath: string; stagedPath: string; transactionPath: string } | null> {
+    await sessionPersistenceQueue.flush(sessionId)
+    sessionPersistenceQueue.cancel(sessionId)
+    const originalPath = getSessionStoragePath(workspaceRootPath, sessionId)
+    if (!existsSync(originalPath)) return null
+    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
+    const transactionPath = join(transactionRoot, randomUUID())
+    const stagedPath = join(transactionPath, 'session')
+    mkdirSync(transactionPath, { recursive: true })
+    writeFileSync(
+      join(transactionPath, 'transaction.json'),
+      JSON.stringify({ sessionId, managedWorktreeId }),
+      'utf8',
+    )
+    renameSync(originalPath, stagedPath)
+    return { originalPath, stagedPath, transactionPath }
+  }
+
+  private restoreStagedSessionStorage(
+    staged:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null,
+  ): void {
+    if (!staged || !existsSync(staged.stagedPath)) return
+    renameSync(staged.stagedPath, staged.originalPath)
+    rmSync(staged.transactionPath, { recursive: true, force: true })
+  }
+
+  private finalizeStagedSessionStorage(
+    staged:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null,
+  ): void {
+    if (!staged) return
+    rmSync(staged.transactionPath, { recursive: true, force: true })
+  }
+
+  /**
+   * Recover a crash-interrupted combined delete before normal session
+   * discovery. A still-tracked, still-present checkout means removal never
+   * completed and the session is restored. Otherwise the hidden transaction is
+   * finalized so no stale header can resurrect a dangling session.
+   */
+  private recoverStagedSessionDeletions(workspaceRootPath: string): void {
+    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
+    if (!existsSync(transactionRoot)) return
+    for (const entry of readdirSync(transactionRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const transactionPath = join(transactionRoot, entry.name)
+      const markerPath = join(transactionPath, 'transaction.json')
+      const stagedPath = join(transactionPath, 'session')
+      try {
+        if (!existsSync(markerPath) || !existsSync(stagedPath)) {
+          rmSync(transactionPath, { recursive: true, force: true })
+          continue
+        }
+        const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
+          sessionId?: string
+          managedWorktreeId?: string
+        }
+        if (!marker.sessionId || !marker.managedWorktreeId) {
+          rmSync(transactionPath, { recursive: true, force: true })
+          continue
+        }
+        const originalPath = getSessionStoragePath(workspaceRootPath, marker.sessionId)
+        const rec = this.getGitServices().registry.get(marker.managedWorktreeId)
+        if (rec && existsSync(rec.checkoutPath) && !existsSync(originalPath)) {
+          renameSync(stagedPath, originalPath)
+        }
+        rmSync(transactionPath, { recursive: true, force: true })
+      } catch (err) {
+        sessionLog.error(
+          `Failed to recover staged session deletion at ${transactionPath}:`,
+          err,
+        )
       }
     }
   }
@@ -5836,13 +5892,17 @@ export class SessionManager implements ISessionManager {
       agentQuiesced = await this.waitForAgentQuiescence(sessionId, managed)
     }
 
-    // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Decide
-    // now, while the session still exists and can resolve its own checkout
-    // identity, whether removal will be permitted — a dry run applies the
-    // ownership, force, and identity guards without touching anything. If it is
-    // blocked we abort the whole operation: the session stays, the checkout
-    // stays, and the caller reports why.
-    let worktreeIdToRemove: string | null = null
+    // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Its
+    // authoritative confirmation check and removal complete while the session
+    // still exists. If anything changed after the dialog inspection, the
+    // operation stops before ownership or session state is touched.
+    let completedWorktreeRemoval:
+      | import('@kata-sh/shared/protocol').WorktreeRemovalResult
+      | undefined
+    let stagedSessionStorage:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null
+      | undefined
     if (options?.removeManagedWorktree) {
       // Removal requires a backend that has *confirmed* it stopped. Inspecting
       // and force-removing a checkout that a subprocess may still be writing to
@@ -5865,20 +5925,56 @@ export class SessionManager implements ISessionManager {
           },
         }
       }
-      const precheck = await this.precheckManagedWorktreeRemoval(sessionId, {
-        force: options.forceWorktreeRemoval,
-        confirmedRisk: options.confirmedRisk,
-      })
-      if (precheck.outcome === 'blocked') {
-        return { deleted: false, worktreeRemoval: precheck.result }
+      let ownedWorktreeId: string | null = null
+      if (isGitWorkspaceV1Enabled()) {
+        try {
+          ownedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+        } catch {
+          // The removal hint is harmless when this session owns no checkout.
+        }
       }
-      if (precheck.outcome === 'allowed') worktreeIdToRemove = precheck.managedWorktreeId
+      if (ownedWorktreeId) {
+        try {
+          stagedSessionStorage = await this.stageSessionStorageForDeletion(
+            workspaceRootPath,
+            sessionId,
+            ownedWorktreeId,
+          )
+        } catch (err) {
+          return {
+            deleted: false,
+            worktreeRemoval: {
+              removed: false,
+              branchPruned: false,
+              blocked: true,
+              blockedReason: `The session could not be staged for safe deletion: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          }
+        }
+      }
+
+      const removal = await this.removeManagedWorktreeBeforeSessionDeletion(sessionId, {
+        force: options.forceWorktreeRemoval,
+        expectedConfirmation: options.worktreeRemovalConfirmation,
+      })
+      if (removal.outcome === 'blocked') {
+        try {
+          this.restoreStagedSessionStorage(stagedSessionStorage ?? null)
+        } catch (err) {
+          sessionLog.error(
+            `Failed to restore session storage after blocked worktree removal for ${sessionId}:`,
+            err,
+          )
+        }
+        return { deleted: false, worktreeRemoval: removal.result }
+      }
+      if (removal.outcome === 'removed') completedWorktreeRemoval = removal.result
     }
 
     // Drop managed-worktree ownership for this session. Deleting a session never
     // removes the checkout on its own; it only releases the owner reference so
-    // shared-owner counts stay correct. Actual removal (when requested) happens
-    // after the session is durably deleted, below.
+    // shared-owner counts stay correct. When explicit removal was requested,
+    // the registry record is already gone and this is a harmless no-op.
     if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
       try {
         this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
@@ -5957,8 +6053,18 @@ export class SessionManager implements ISessionManager {
       automationSystem.removeSessionMetadata(sessionId)
     }
 
-    // Delete from disk too
-    deleteStoredSession(workspaceRootPath, sessionId)
+    // Delete from disk too. Managed-worktree deletion staged the complete
+    // directory before removal, so finalization cannot leave a discoverable
+    // persisted session pointing at a checkout that is already gone.
+    if (stagedSessionStorage !== undefined) {
+      try {
+        this.finalizeStagedSessionStorage(stagedSessionStorage)
+      } catch (err) {
+        sessionLog.warn(`Failed to remove staged session storage for ${sessionId}:`, err)
+      }
+    } else if (!deleteStoredSession(workspaceRootPath, sessionId)) {
+      sessionLog.warn(`Failed to delete stored session ${sessionId}`)
+    }
 
     // Notify all windows for this workspace that the session was deleted
     this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
@@ -5967,31 +6073,9 @@ export class SessionManager implements ISessionManager {
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
     sessionLog.info(`Deleted session ${sessionId}`)
 
-    // The session is gone from memory and disk. Only now perform the
-    // irreversible checkout removal, so a failure here can never leave a
-    // persisted session pointing at a checkout that no longer exists. The
-    // worst case is an unowned worktree, which the registry still tracks and
-    // startup reconciliation can clean up.
-    if (!worktreeIdToRemove) return { deleted: true }
-    try {
-      const worktreeRemoval = await this.getGitServices().worktrees.removeWorktree(
-        worktreeIdToRemove,
-        sessionId,
-        { force: options?.forceWorktreeRemoval },
-      )
-      return { deleted: true, worktreeRemoval }
-    } catch (err) {
-      sessionLog.warn(`Failed to remove managed worktree for deleted session ${sessionId}:`, err)
-      return {
-        deleted: true,
-        worktreeRemoval: {
-          removed: false,
-          branchPruned: false,
-          blocked: true,
-          blockedReason: err instanceof Error ? err.message : String(err),
-        },
-      }
-    }
+    return completedWorktreeRemoval
+      ? { deleted: true, worktreeRemoval: completedWorktreeRemoval }
+      : { deleted: true }
   }
 
   async sendMessage(
