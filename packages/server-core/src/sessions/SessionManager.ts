@@ -5400,7 +5400,10 @@ export class SessionManager implements ISessionManager {
    */
   private async precheckManagedWorktreeRemoval(
     sessionId: string,
-    options?: { force?: boolean },
+    options?: {
+      force?: boolean
+      confirmedRisk?: import('@kata-sh/shared/protocol').SessionDeleteOptions['confirmedRisk']
+    },
   ): Promise<
     | { outcome: 'nothing-to-remove' }
     | { outcome: 'allowed'; managedWorktreeId: string }
@@ -5415,6 +5418,48 @@ export class SessionManager implements ISessionManager {
       // there is nothing this session may remove.
       return { outcome: 'nothing-to-remove' }
     }
+
+    // A destructive confirmation authorizes discarding the work the user was
+    // shown, not whatever exists by the time removal runs. If the checkout has
+    // gained uncommitted files or unique commits since those counts were
+    // displayed, `force` would silently cover the newer work too — so refuse and
+    // let the user re-confirm against current numbers.
+    if (options?.force && options.confirmedRisk) {
+      try {
+        const current = await this.getGitServices().worktrees.inspectRemoval(
+          managedWorktreeId,
+          sessionId,
+        )
+        const grewFiles = current.uncommittedFileCount > options.confirmedRisk.uncommittedFileCount
+        const grewCommits = current.unpushedCommitCount > options.confirmedRisk.unpushedCommitCount
+        if (grewFiles || grewCommits) {
+          const parts: string[] = []
+          if (grewFiles) {
+            parts.push(
+              `${current.uncommittedFileCount} uncommitted file(s) now vs ${options.confirmedRisk.uncommittedFileCount} confirmed`,
+            )
+          }
+          if (grewCommits) {
+            parts.push(
+              `${current.unpushedCommitCount} unpushed commit(s) now vs ${options.confirmedRisk.unpushedCommitCount} confirmed`,
+            )
+          }
+          return {
+            outcome: 'blocked',
+            result: {
+              removed: false,
+              branchPruned: false,
+              blocked: true,
+              blockedReason: `This worktree gained work since you confirmed (${parts.join('; ')}). Nothing was removed — review the new state and confirm again.`,
+            },
+          }
+        }
+      } catch {
+        // Inspection failed; fall through to the guards below, which re-inspect
+        // and will block on their own if the state cannot be established.
+      }
+    }
+
     try {
       const result = await this.getGitServices().worktrees.removeWorktree(
         managedWorktreeId,
@@ -5822,6 +5867,7 @@ export class SessionManager implements ISessionManager {
       }
       const precheck = await this.precheckManagedWorktreeRemoval(sessionId, {
         force: options.forceWorktreeRemoval,
+        confirmedRisk: options.confirmedRisk,
       })
       if (precheck.outcome === 'blocked') {
         return { deleted: false, worktreeRemoval: precheck.result }

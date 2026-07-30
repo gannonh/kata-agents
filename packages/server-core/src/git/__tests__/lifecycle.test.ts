@@ -555,3 +555,90 @@ describe('SessionManager.deleteSession — the backend flag alone cannot wave re
     expect(result.worktreeRemoval?.removed).toBe(true)
   })
 })
+
+describe('SessionManager.deleteSession — a destructive confirmation is not blanket authorization', () => {
+  // `forceWorktreeRemoval` alone would license discarding whatever the server
+  // finds at removal time. The user only ever consented to the counts the
+  // dialog displayed, so work that appeared afterwards must not ride along on
+  // that confirmation.
+  test('refuses when the checkout gained uncommitted files since the confirmation', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'stale', wsRoot)
+
+    const prep = await sm.prepareCheckout('stale', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // The user saw one file and confirmed. A second appeared afterwards.
+    writeFileSync(join(prep.checkout.checkoutPath, 'seen.txt'), 'shown in the dialog\n')
+    writeFileSync(join(prep.checkout.checkoutPath, 'unseen.txt'), 'appeared after the dialog\n')
+
+    const result = await sm.deleteSession('stale', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      confirmedRisk: { uncommittedFileCount: 1, unpushedCommitCount: 0 },
+    })
+
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('gained work since you confirmed')
+    // Nothing destroyed, including the file the user never saw.
+    expect(existsSync(join(prep.checkout.checkoutPath, 'unseen.txt'))).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+  })
+
+  test('proceeds when the confirmation still matches the checkout', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'fresh', wsRoot)
+
+    const prep = await sm.prepareCheckout('fresh', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    writeFileSync(join(prep.checkout.checkoutPath, 'seen.txt'), 'shown in the dialog\n')
+
+    const result = await sm.deleteSession('fresh', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      confirmedRisk: { uncommittedFileCount: 1, unpushedCommitCount: 0 },
+    })
+
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+  })
+
+  test('a shrinking checkout is not treated as stale', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'shrank', wsRoot)
+
+    const prep = await sm.prepareCheckout('shrank', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Confirmed against more work than is actually there now — the user already
+    // authorized at least this much, so removal proceeds.
+    writeFileSync(join(prep.checkout.checkoutPath, 'only.txt'), 'one file\n')
+
+    const result = await sm.deleteSession('shrank', {
+      removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      confirmedRisk: { uncommittedFileCount: 5, unpushedCommitCount: 3 },
+    })
+
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+  })
+})

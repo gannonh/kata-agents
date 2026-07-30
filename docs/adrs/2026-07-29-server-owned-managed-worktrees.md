@@ -90,6 +90,13 @@ therefore removes unowned checkouts that are clean — reusing `removeWorktree`'
 visible rather than inferred from a directory nobody can reach. Without that pass the leak would be
 permanent, since nothing else removes an unowned checkout.
 
+A destructive confirmation authorizes **only the work it displayed**. `force` on its own is blanket
+authorization — it would license discarding whatever the server finds when removal finally runs,
+which may be more than the user was shown. The client therefore sends the counts it rendered
+(`confirmedRisk`), and removal is refused if the checkout has since gained uncommitted files or
+unique commits, so the user re-confirms against current numbers. A checkout that *shrank* is not
+stale: the user already authorized at least that much.
+
 Removal is therefore requested *through* deletion. The standalone `git:removeWorktree` channel
 remains for removing a checkout without deleting its session.
 

@@ -79,6 +79,7 @@ Each has real-repository coverage:
 | Unattended deletion cleans up an unused worktree, and keeps both session and checkout when it holds work | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removeManagedWorktree is safe for any caller" |
 | Removal waits for the turn to unwind (not the backend flag, which `forceAbort` clears immediately) and refuses rather than racing a turn that never finishes | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "removal waits for real agent quiescence" and "the backend flag alone cannot wave removal through" |
 | Reconciliation reclaims unowned clean checkouts and retains unowned ones holding work | `packages/server-core/src/git/__tests__/reconcile.test.ts` — "reclaiming leaked (unowned) checkouts" |
+| A destructive confirmation authorizes only the work it displayed; a checkout that gained work since is refused | `packages/server-core/src/git/__tests__/lifecycle.test.ts` — "a destructive confirmation is not blanket authorization" |
 
 ## Automated coverage
 

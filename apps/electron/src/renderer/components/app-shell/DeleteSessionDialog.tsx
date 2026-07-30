@@ -76,6 +76,8 @@ export function DeleteSessionDialog({
   const [loading, setLoading] = React.useState(false)
   const [removeWorktree, setRemoveWorktree] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  /** Bumped to re-run the risk inspection after a blocked removal. */
+  const [refreshToken, setRefreshToken] = React.useState(0)
 
   // Inspect removal risk when the dialog opens for a managed-worktree session.
   React.useEffect(() => {
@@ -100,7 +102,7 @@ export function DeleteSessionDialog({
     return () => {
       cancelled = true
     }
-  }, [open, sessionId])
+  }, [open, sessionId, refreshToken])
 
   const summary = risk ? summarizeWorktreeRemoval(risk) : null
   const offerRemoval = canOfferWorktreeRemoval(risk)
@@ -114,7 +116,18 @@ export function DeleteSessionDialog({
       const result = await onDeleteSession(
         sessionId,
         removalChosen && summary
-          ? { removeManagedWorktree: true, forceWorktreeRemoval: summary.destructive }
+          ? {
+              removeManagedWorktree: true,
+              forceWorktreeRemoval: summary.destructive,
+              // Send the counts actually rendered above, so `force` authorizes
+              // discarding *this much* work rather than whatever the server
+              // finds later. If the checkout gained work since, the server
+              // refuses and we re-inspect so the user re-confirms real numbers.
+              confirmedRisk: {
+                uncommittedFileCount: summary.uncommittedFileCount,
+                unpushedCommitCount: summary.unpushedCommitCount,
+              },
+            }
           : undefined,
       )
 
@@ -125,6 +138,10 @@ export function DeleteSessionDialog({
         toast.error(t('git.delete.removalBlockedToast'), {
           description: result?.worktreeRemoval?.blockedReason,
         })
+        // Re-inspect so the displayed counts match the state that caused the
+        // block; leaving the stale summary up would invite confirming the same
+        // out-of-date numbers again.
+        setRefreshToken((n) => n + 1)
         return
       }
 
