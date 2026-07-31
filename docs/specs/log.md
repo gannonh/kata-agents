@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-07-30
+
+* **Drafted awaitable agent teardown quiescence contract**: added [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) for [#21](https://github.com/gannonh/kata-agents/issues/21). The approval-gated plan keeps synchronous `forceAbort` semantics, adds required `quiesceForTeardown(reason)`, tracks nested `BaseAgent.chat()` completion, requires confirmed Pi child-process exit, replaces SessionManager polling and its 100 ms floor, and provides phased tasks, pass/fail acceptance criteria, deterministic race tests, and a lesser-model Build handoff.
+
 ## 2026-07-29
 
 * **Final destructive-removal review fixes (PR #20)**: [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md) — ignored files are now counted and hashed even though normal status omits them; identity validation runs before the authoritative content snapshot so no awaited guard follows the confirmed fingerprint; and synchronous browser, agent, or pool-server cleanup errors are contained so a completed checkout removal cannot leave session deletion half-applied. Regression coverage reproduces all three final-head review findings.

@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-07-30
+
+* **Agent quiescence plan drafted**: added the approval-gated [awaitable agent teardown quiescence spec](specs/2026-07-30-agent-quiescence-contract-design.md), linked it from the specs roadmap and documentation index, and mapped issue #21 to a required backend teardown contract, provider process-exit guarantees, SessionManager integration, deterministic safety tests, and a lesser-model Build handoff.
+
 ## 2026-07-29
 
 * **Git/GitHub V1 final review hardening**: documented complete ignored-file destructive inventory, final-snapshot ordering, and cleanup-exception containment in the [managed-worktree ADR](adrs/2026-07-29-server-owned-managed-worktrees.md), with regression coverage for all three findings from the final-head review.
