@@ -136,7 +136,10 @@ export function DeleteSessionDialog({
         // checkout are both intact. Keep the dialog open so the user can retry
         // without the removal choice.
         toast.error(t('git.delete.removalBlockedToast'), {
-          description: result?.worktreeRemoval?.blockedReason,
+          description:
+            result?.worktreeRemoval?.blockedReasonCode === 'agent_not_quiesced'
+              ? t('git.delete.agentTeardownBlocked')
+              : result?.worktreeRemoval?.blockedReason,
         })
         // Re-inspect so the displayed counts match the state that caused the
         // block; leaving the stale summary up would invite confirming the same
@@ -150,7 +153,12 @@ export function DeleteSessionDialog({
       // it separately when it did not happen.
       const removal = result.worktreeRemoval
       if (removal && !removal.removed) {
-        toast.error(t('git.delete.removalFailedToast'), { description: removal.blockedReason })
+        toast.error(t('git.delete.removalFailedToast'), {
+          description:
+            removal.blockedReasonCode === 'agent_not_quiesced'
+              ? t('git.delete.agentTeardownBlocked')
+              : removal.blockedReason,
+        })
       }
       onDeleted?.(sessionId)
       onOpenChange(false)

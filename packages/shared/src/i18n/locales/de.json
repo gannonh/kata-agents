@@ -513,6 +513,7 @@
   "git.confirm.continue": "Fortfahren",
   "git.confirm.defaultBranchBody": "{{branch}} ist der Standard-Branch. Fortfahren?",
   "git.confirm.defaultBranchTitle": "Auf den Standard-Branch pushen?",
+  "git.delete.agentTeardownBlocked": "Der Agent wurde noch nicht vollständig beendet, daher kann sein Worktree noch nicht sicher entfernt werden. Versuche es gleich noch einmal.",
   "git.delete.branchKeptNote": "Der Branch enthält eigene Arbeit und bleibt erhalten.",
   "git.delete.confirm": "Sitzung löschen",
   "git.delete.confirmDestructive": "Löschen & Worktree verwerfen",

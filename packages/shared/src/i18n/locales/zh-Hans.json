@@ -513,6 +513,7 @@
   "git.confirm.continue": "继续",
   "git.confirm.defaultBranchBody": "{{branch}} 是默认分支。是否继续？",
   "git.confirm.defaultBranchTitle": "推送到默认分支？",
+  "git.delete.agentTeardownBlocked": "代理尚未完成停止，因此无法安全地移除其工作树。请稍后重试。",
   "git.delete.branchKeptNote": "该分支包含独有的工作，因此会被保留。",
   "git.delete.confirm": "删除会话",
   "git.delete.confirmDestructive": "删除并丢弃工作区",

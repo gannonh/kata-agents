@@ -513,6 +513,7 @@
   "git.confirm.continue": "Folytatás",
   "git.confirm.defaultBranchBody": "A(z) {{branch}} az alapértelmezett ág. Folytatod?",
   "git.confirm.defaultBranchTitle": "Push az alapértelmezett ágra?",
+  "git.delete.agentTeardownBlocked": "Az ügynök leállítása még nem fejeződött be, ezért a munkafája még nem távolítható el biztonságosan. Próbáld újra egy pillanat múlva.",
   "git.delete.branchKeptNote": "Az ághoz egyedi munka tartozik, ezért megmarad.",
   "git.delete.confirm": "Munkamenet törlése",
   "git.delete.confirmDestructive": "Törlés és worktree eldobása",

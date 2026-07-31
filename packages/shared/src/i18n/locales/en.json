@@ -513,6 +513,7 @@
   "git.confirm.continue": "Continue",
   "git.confirm.defaultBranchBody": "{{branch}} is the default branch. Continue?",
   "git.confirm.defaultBranchTitle": "Push to default branch?",
+  "git.delete.agentTeardownBlocked": "The agent has not finished stopping, so its worktree cannot be removed safely yet. Try again in a moment.",
   "git.delete.branchKeptNote": "The branch has unique work, so it will be kept.",
   "git.delete.confirm": "Delete session",
   "git.delete.confirmDestructive": "Delete & discard worktree",

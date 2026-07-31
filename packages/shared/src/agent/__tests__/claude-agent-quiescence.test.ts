@@ -1,18 +1,45 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
+import type { AgentEvent } from '@kata-sh/core/types'
+import type { FileAttachment } from '../../utils/files.ts'
 import { ClaudeAgent } from '../claude-agent.ts'
-import { AbortReason } from '../backend/types.ts'
+import { AbortReason, type ChatOptions } from '../backend/types.ts'
+import { createMockBackendConfig } from './test-utils.ts'
+
+class BlockingClaudeAgent extends ClaudeAgent {
+  private releaseChatPromise!: () => void
+  private resolveChatStarted!: () => void
+  readonly chatStarted: Promise<void>
+
+  constructor() {
+    super(createMockBackendConfig())
+    this.chatStarted = new Promise<void>((resolve) => {
+      this.resolveChatStarted = resolve
+    })
+  }
+
+  protected override async *chatImpl(
+    _userMessage: string,
+    _attachments?: FileAttachment[],
+    _options?: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    this.resolveChatStarted()
+    await new Promise<void>((resolve) => {
+      this.releaseChatPromise = resolve
+    })
+    yield { type: 'complete' }
+  }
+
+  releaseChat(): void {
+    this.releaseChatPromise()
+  }
+}
 
 describe('ClaudeAgent teardown quiescence', () => {
-  it('does not resolve when forceAbort only clears currentQuery', async () => {
-    const agent = Object.create(ClaudeAgent.prototype) as any
-    let releaseChat!: () => void
-    agent.activeChatCount = 1
-    agent.idleChatPromise = new Promise<void>((resolve) => { releaseChat = resolve })
-    agent.resolveIdleChat = releaseChat
-    agent.pendingSteerMessage = 'queued steer'
-    agent.lastAbortReason = null
-    agent.currentQuery = { interrupt: mock(async () => {}) }
-    agent.currentQueryAbortController = { abort: mock(() => {}) }
+  it('waits for a real chat generator to close after abort', async () => {
+    const agent = new BlockingClaudeAgent()
+    const stream = agent.chat('held turn')
+    const firstNext = stream.next()
+    await agent.chatStarted
 
     let settled = false
     const teardown = agent.quiesceForTeardown(AbortReason.UserStop).then(() => {
@@ -20,11 +47,13 @@ describe('ClaudeAgent teardown quiescence', () => {
     })
 
     await Promise.resolve()
-    expect(agent.currentQuery).toBeNull()
     expect(settled).toBe(false)
 
-    releaseChat()
+    agent.releaseChat()
+    await firstNext
+    await stream.next()
     await teardown
     expect(settled).toBe(true)
+    agent.destroy()
   })
 })

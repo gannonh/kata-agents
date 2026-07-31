@@ -44,6 +44,11 @@ function installFakeChild(agent: PiAgent, child: FakeChild): any {
   return internals
 }
 
+async function drainMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('PiAgent teardown quiescence', () => {
   it('resolves only after the exact persistent child emits exit', async () => {
     const agent = new PiAgent(createConfig())
@@ -81,7 +86,7 @@ describe('PiAgent teardown quiescence', () => {
 
       const stopping = internals.killSubprocessGracefully(100, true)
       jest.advanceTimersByTime(100)
-      await Promise.resolve()
+      await drainMicrotasks()
       await stopping
 
       expect(child.killSignals).toEqual(['SIGTERM', 'SIGKILL'])
@@ -100,11 +105,35 @@ describe('PiAgent teardown quiescence', () => {
       const stopping = internals.killSubprocessGracefully(100, true)
 
       jest.advanceTimersByTime(100)
-      await Promise.resolve()
+      await drainMicrotasks()
       jest.advanceTimersByTime(100)
 
       await expect(stopping).rejects.toThrow('stop timed out after SIGKILL')
       expect(child.killSignals).toEqual(['SIGTERM', 'SIGKILL'])
+      expect(internals.subprocess).toBe(child)
+      agent.destroy()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('rejects pending RPCs when teardown detaches without an exit event', async () => {
+    jest.useFakeTimers()
+    try {
+      const agent = new PiAgent(createConfig())
+      const child = new FakeChild()
+      const internals = installFakeChild(agent, child)
+      const pending = new Promise((resolve, reject) => {
+        internals.pendingLlmQueries.set('llm-test', { resolve, reject })
+      })
+      const rejection = expect(pending).rejects.toThrow('Pi subprocess exited')
+      const stopping = internals.killSubprocessGracefully(100, false)
+      jest.advanceTimersByTime(100)
+      await drainMicrotasks()
+      jest.advanceTimersByTime(100)
+      await drainMicrotasks()
+      await stopping
+      await rejection
       agent.destroy()
     } finally {
       jest.useRealTimers()

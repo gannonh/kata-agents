@@ -513,6 +513,7 @@
   "git.confirm.continue": "続行",
   "git.confirm.defaultBranchBody": "{{branch}} はデフォルトブランチです。続行しますか？",
   "git.confirm.defaultBranchTitle": "デフォルトブランチにプッシュしますか？",
+  "git.delete.agentTeardownBlocked": "エージェントの停止が完了していないため、ワークツリーを安全に削除できません。しばらくしてからもう一度お試しください。",
   "git.delete.branchKeptNote": "ブランチには固有の作業があるため保持されます。",
   "git.delete.confirm": "セッションを削除",
   "git.delete.confirmDestructive": "削除してワークツリーを破棄",

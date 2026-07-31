@@ -519,6 +519,7 @@
   "git.confirm.continue": "Kontynuuj",
   "git.confirm.defaultBranchBody": "{{branch}} to gałąź domyślna. Kontynuować?",
   "git.confirm.defaultBranchTitle": "Wypchnąć do gałęzi domyślnej?",
+  "git.delete.agentTeardownBlocked": "Agent nie zakończył jeszcze zatrzymywania, więc jego worktree nie może być bezpiecznie usunięte. Spróbuj ponownie za chwilę.",
   "git.delete.branchKeptNote": "Gałąź zawiera unikalną pracę, więc zostanie zachowana.",
   "git.delete.confirm": "Usuń sesję",
   "git.delete.confirmDestructive": "Usuń i odrzuć worktree",

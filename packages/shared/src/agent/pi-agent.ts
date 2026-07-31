@@ -163,6 +163,8 @@ export class PiAgent extends BaseAgent {
 
   // Subprocess process handle
   private subprocess: ChildProcess | null = null;
+  // True while a strict teardown has not observed this exact child exit.
+  private subprocessExitUnconfirmed = false;
   private readline: ReadlineInterface | null = null;
   private subprocessReady: Promise<void> | null = null;
   private subprocessReadyResolve: (() => void) | null = null;
@@ -376,6 +378,9 @@ export class PiAgent extends BaseAgent {
    * Lazy initialization -- spawns on first use.
    */
   private async ensureSubprocess(): Promise<void> {
+    if (this.subprocess && this.subprocessExitUnconfirmed) {
+      throw new Error('Pi subprocess exit remains unconfirmed; teardown must complete before starting a new turn');
+    }
     if (this.subprocess && this.subprocessReady) {
       await this.subprocessReady;
       return;
@@ -466,6 +471,7 @@ export class PiAgent extends BaseAgent {
     });
 
     this.subprocess = child;
+    this.subprocessExitUnconfirmed = false;
 
     // Set up readline for JSONL parsing from stdout
     this.readline = createInterface({
@@ -1689,6 +1695,47 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Reject or deny every request that can be left waiting when the subprocess
+   * is detached before its exit event is observed.
+   */
+  private rejectPendingSubprocessRequests(exitReason: string): void {
+    for (const [, pending] of this.pendingPermissions) {
+      pending.resolve(false);
+    }
+    this.pendingPermissions.clear();
+
+    const error = new Error(`Pi subprocess exited unexpectedly (${exitReason})`);
+    for (const [, pending] of this.pendingMiniCompletions) {
+      pending.reject(error);
+    }
+    this.pendingMiniCompletions.clear();
+    for (const [, pending] of this.pendingLlmQueries) {
+      pending.reject(error);
+    }
+    this.pendingLlmQueries.clear();
+    for (const [, pending] of this.pendingEnsureSessionReady) {
+      pending.reject(error);
+    }
+    this.pendingEnsureSessionReady.clear();
+    for (const [, pending] of this.pendingCompactions) {
+      pending.reject(error);
+    }
+    this.pendingCompactions.clear();
+    for (const [, pending] of this.pendingAutoCompactionToggles) {
+      pending.reject(error);
+    }
+    this.pendingAutoCompactionToggles.clear();
+    for (const [, pending] of this.pendingRuntimeConfigUpdates) {
+      pending.reject(error);
+    }
+    this.pendingRuntimeConfigUpdates.clear();
+    for (const [, pending] of this.pendingToolExecutions) {
+      pending.reject(new Error('Pi subprocess exited'));
+    }
+    this.pendingToolExecutions.clear();
+  }
+
+  /**
    * Handle subprocess exit.
    */
   private handleSubprocessExit(child: ChildProcess, code: number | null, signal: string | null): void {
@@ -1697,6 +1744,7 @@ export class PiAgent extends BaseAgent {
       return;
     }
 
+    this.subprocessExitUnconfirmed = false;
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
@@ -1706,8 +1754,8 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
 
     // If we were processing, emit error + complete
+    const exitReason = signal ? `signal ${signal}` : `code ${code}`;
     if (this._isProcessing) {
-      const exitReason = signal ? `signal ${signal}` : `code ${code}`;
       this.eventQueue.enqueue({
         type: 'error',
         message: `Pi subprocess exited unexpectedly (${exitReason})`,
@@ -1715,47 +1763,7 @@ export class PiAgent extends BaseAgent {
       this.eventQueue.complete();
     }
 
-    // Reject pending mini completions with error (not null) so callers
-    // get a meaningful error instead of silently returning "no response"
-    const exitReason = signal ? `signal ${signal}` : `code ${code}`;
-    for (const [, pending] of this.pendingMiniCompletions) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingMiniCompletions.clear();
-
-    // Reject pending llm_query calls (call_llm in-flight during subprocess crash)
-    for (const [, pending] of this.pendingLlmQueries) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingLlmQueries.clear();
-
-    // Reject pending ensure_session_ready requests
-    for (const [, pending] of this.pendingEnsureSessionReady) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingEnsureSessionReady.clear();
-
-    // Reject pending compact/toggle requests
-    for (const [, pending] of this.pendingCompactions) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingCompactions.clear();
-
-    for (const [, pending] of this.pendingAutoCompactionToggles) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingAutoCompactionToggles.clear();
-
-    for (const [, pending] of this.pendingRuntimeConfigUpdates) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingRuntimeConfigUpdates.clear();
-
-    // Reject all pending tool executions
-    for (const [, pending] of this.pendingToolExecutions) {
-      pending.reject(new Error('Pi subprocess exited'));
-    }
-    this.pendingToolExecutions.clear();
+    this.rejectPendingSubprocessRequests(exitReason);
 
     // Drop any cached pre-tool metadata for the dead subprocess.
     this.preToolMetadataByCallId.clear();
@@ -2427,27 +2435,40 @@ export class PiAgent extends BaseAgent {
       ]);
     }
 
-    if (this.readline) {
-      this.readline.close();
-      this.readline = null;
+    const childIsCurrent = this.subprocess === child;
+    if (childIsCurrent) {
+      // Strict teardown keeps this exact child tracked when exit is unconfirmed.
+      if (this.readline) {
+        this.readline.close();
+        this.readline = null;
+      }
+      this.subprocessReady = null;
+      this.subprocessReadyResolve = null;
+      this.callbackPort = 0;
+      this.preToolMetadataByCallId.clear();
+      this.adapter.resetOverflowState();
+      this.rejectPendingSubprocessRequests(
+        result ? (result.signal ? `signal ${result.signal}` : `code ${result.code}`) : 'SIGKILL timeout',
+      );
     }
-    if (this.subprocess === child) {
-      this.subprocess = null;
-    }
-    this.subprocessReady = null;
-    this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
-    this.preToolMetadataByCallId.clear();
-    this.adapter.resetOverflowState();
 
     if (result) {
+      if (childIsCurrent) {
+        this.subprocess = null;
+        this.subprocessExitUnconfirmed = false;
+      }
       this.debug(`Pi subprocess ${pid ?? '(unknown pid)'} stopped for restart: code=${result.code}, signal=${result.signal}`);
     } else {
       const message = `Pi subprocess ${pid ?? '(unknown pid)'} stop timed out after SIGKILL`;
       this.debug(message);
-      if (requireExit) {
-        throw new Error(message);
+      if (childIsCurrent) {
+        this.subprocessExitUnconfirmed = requireExit;
+        if (!requireExit) {
+          this.subprocess = null;
+          this.subprocessExitUnconfirmed = false;
+        }
       }
+      if (requireExit) throw new Error(message);
     }
   }
 
@@ -2461,14 +2482,17 @@ export class PiAgent extends BaseAgent {
     }
 
     if (this.subprocess) {
+      const child = this.subprocess;
       // Try graceful shutdown first
       try {
         this.send({ type: 'shutdown' });
       } catch {
         // stdin may already be closed
       }
-      this.subprocess.kill('SIGTERM');
+      child.kill('SIGTERM');
+      this.rejectPendingSubprocessRequests('SIGTERM requested');
       this.subprocess = null;
+      this.subprocessExitUnconfirmed = false;
     }
 
     this.subprocessReady = null;

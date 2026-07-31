@@ -513,6 +513,7 @@
   "git.confirm.continue": "Continuar",
   "git.confirm.defaultBranchBody": "{{branch}} es la rama predeterminada. ¿Continuar?",
   "git.confirm.defaultBranchTitle": "¿Hacer push a la rama predeterminada?",
+  "git.delete.agentTeardownBlocked": "El agente aún no ha terminado de detenerse, por lo que su worktree no se puede eliminar de forma segura. Inténtalo de nuevo en un momento.",
   "git.delete.branchKeptNote": "La rama tiene trabajo propio, así que se conservará.",
   "git.delete.confirm": "Eliminar sesión",
   "git.delete.confirmDestructive": "Eliminar y descartar worktree",
