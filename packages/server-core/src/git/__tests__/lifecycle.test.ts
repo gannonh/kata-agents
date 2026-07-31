@@ -933,7 +933,7 @@ describe('SessionManager.deleteSession — backend quiescence contract', () => {
         quiesceForTeardown: () => new Promise<void>(() => {}),
       } as any
 
-      const waiting = (sm as any).waitForAgentQuiescence('timeout', managed, 50)
+      const waiting = (sm as any).awaitAgentTeardown('timeout', managed, 50)
       jest.advanceTimersByTime(50)
       await expect(waiting).resolves.toBe(false)
     } finally {
