@@ -1,8779 +1,3433 @@
-import type { EventSink, RpcServer } from '@kata-sh/server-core/transport'
-import { CLIENT_BROWSER_INVOKE } from '@kata-sh/server-core/transport'
-import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@kata-sh/server-core/handlers'
-import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
-import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
-import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
-import { basename, dirname, join, resolve } from 'path'
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
-import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@kata-sh/shared/agent'
-import {
-  resolveSessionConnection,
-  createBackendFromConnection,
-  resolveBackendContext,
-  createBackendFromResolvedContext,
-  cleanupSourceRuntimeArtifacts,
-  providerTypeToAgentProvider,
-  type AgentBackend,
-  type BackendHostRuntimeContext,
-  type PostInitResult,
-} from '@kata-sh/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@kata-sh/shared/config'
-import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
-import { isValidWorkingDirectory } from '../utils/path-validation'
-import { getDefaultGitServices, type GitServices } from '../git'
-import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
-import { InitGate } from '@kata-sh/server-core/domain'
-import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
-import {
-  getWorkspaces,
-  getWorkspaceByNameOrId,
-  loadConfigDefaults,
-  loadPreferences,
-  migrateLegacyCredentials,
-  migrateLegacyLlmConnectionsConfig,
-  migrateOrphanedDefaultConnections,
-  MODEL_REGISTRY,
-  type Workspace,
-  type WorkspaceInfo,
-} from '@kata-sh/shared/config'
-import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
-import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
-import {
-  // Session persistence functions
-  listSessions as listStoredSessions,
-  loadSession as loadStoredSession,
-  saveSession as saveStoredSession,
-  createSession as createStoredSession,
-  deleteSession as deleteStoredSession,
-  updateSessionMetadata,
-  canUpdateSdkCwd,
-  setPendingPlanExecution as setStoredPendingPlanExecution,
-  markCompactionComplete as markStoredCompactionComplete,
-  markPendingPlanExecutionDispatched as markStoredPendingPlanExecutionDispatched,
-  clearPendingPlanExecution as clearStoredPendingPlanExecution,
-  getPendingPlanExecution as getStoredPendingPlanExecution,
-  getSessionAttachmentsPath,
-  getSessionPath as getSessionStoragePath,
-  ensureSessionDir,
-  getSessionFilePath,
-  generateSessionId,
-  sessionPersistenceQueue,
-  getHeaderMetadataSignature,
-  writeSessionJsonl,
-  serializeSession,
-  validateBundle,
-  type SessionBundle,
-  type DispatchMode,
-  type StoredSession,
-  type StoredMessage,
-  type SessionMetadata,
-  type SessionStatus,
-  type SessionHeader,
-  pickSessionFields,
-} from '@kata-sh/shared/sessions'
-import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@kata-sh/shared/sources'
-import { ConfigWatcher, type ConfigWatcherCallbacks } from '@kata-sh/shared/config'
-import { getValidClaudeOAuthToken } from '@kata-sh/shared/auth'
-import { resolveAuthEnvVars } from '@kata-sh/shared/config'
-import { toolMetadataStore, getLastApiError } from '@kata-sh/shared/interceptor'
-import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
-import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
-import { getCredentialManager } from '@kata-sh/shared/credentials'
-import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
-import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
-import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
-import { invalidateContextFileCache } from '@kata-sh/shared/prompts/system'
-import { getToolIconsDir, getMiniModel } from '@kata-sh/shared/config'
-import { getDefaultSummarizationModel } from '@kata-sh/shared/config/models'
-import type { SummarizeCallback } from '@kata-sh/shared/sources'
-import { type ThinkingLevel, DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from '@kata-sh/shared/agent/thinking-levels'
-import { evaluateAutoLabels } from '@kata-sh/shared/labels/auto'
-import { listLabels, loadLabelConfig } from '@kata-sh/shared/labels/storage'
-import { extractLabelId, resolveSessionLabels } from '@kata-sh/shared/labels'
-import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
-import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
-import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
-
-// Import from server-core domain utilities
-import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
-import { resizeImageForAPI, resizeIconBuffer } from '@kata-sh/server-core/services'
-export { sanitizeForTitle }
-
-// Module-level platform ref â€” set once during init via setSessionPlatform()
-let _platform: PlatformServices | null = null
-
-// Scoped logger â€” upgraded from console fallback when setSessionPlatform() is called.
-// Named `sessionLog` so all ~30 existing call sites remain unchanged.
-let sessionLog: Logger = createScopedLogger(CONSOLE_LOGGER, 'session')
-
-export function setSessionPlatform(platform: PlatformServices): void {
-  _platform = platform
-  sessionLog = createScopedLogger(platform.logger, 'session')
-}
-
-interface SessionRuntimeHooks {
-  updateBadgeCount: (count: number) => void
-  captureException: (error: unknown, context?: { errorSource?: string; sessionId?: string }) => void
-  onSessionStarted: () => void
-  onSessionStopped: () => void
-}
-
-const defaultSessionRuntimeHooks: SessionRuntimeHooks = {
-  updateBadgeCount: () => {},
-  onSessionStarted: () => {},
-  onSessionStopped: () => {},
-  captureException: (error, context) => {
-    const err = error instanceof Error ? error : new Error(String(error))
-    if (_platform?.captureError) {
-      _platform.captureError(err)
-      return
-    }
-    sessionLog.error('[runtime-hooks] captureException fallback:', {
-      errorSource: context?.errorSource,
-      sessionId: context?.sessionId,
-      message: err.message,
-      stack: err.stack,
-    })
-  },
-}
-
-let sessionRuntimeHooks: SessionRuntimeHooks = defaultSessionRuntimeHooks
-
-export function setSessionRuntimeHooks(hooks: Partial<SessionRuntimeHooks>): void {
-  sessionRuntimeHooks = {
-    ...sessionRuntimeHooks,
-    ...hooks,
-  }
-}
-
-function buildBackendHostRuntimeContext(): BackendHostRuntimeContext {
-  if (!_platform) throw new Error('setSessionPlatform() must be called before session creation')
-  return {
-    appRootPath: _platform.appRootPath,
-    resourcesPath: _platform.resourcesPath,
-    isPackaged: _platform.isPackaged,
-  }
-}
-
-/**
- * Feature flags for agent behavior
- */
-export const AGENT_FLAGS = {
-  /** Default modes enabled for new sessions */
-  defaultModesEnabled: true,
-} as const
-
-const MAX_ADMIN_REMEMBER_MINUTES = 60
-const MAX_ANNOTATIONS_PER_MESSAGE = 200
-const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
-
-// Window during which fs.watch metadata-revert events from our own atomic write
-// are ignored, so the watcher does not roll back the in-memory mutation we
-// just persisted. See onSessionMetadataChange.
-const METADATA_WRITE_GUARD_MS = 5000
-/**
- * How long deletion waits for an aborted agent to report that it stopped before
- * treating its checkout as still live. Bounded so a wedged subprocess cannot
- * make a session undeletable.
- */
-const AGENT_QUIESCE_TIMEOUT_MS = 5000
-/** Poll interval, and the floor delay that lets an in-flight write land. */
-const AGENT_QUIESCE_POLL_MS = 100
-
-/**
- * Text sent to the session when a plan is approved from outside the desktop
- * UI (e.g. Telegram button). Mirrors the English `plan.approved` i18n key
- * used by the desktop flow at `plan-approval-message.ts`. Not localized â€”
- * the agent reads this, not the end user.
- */
-const PLAN_APPROVAL_MESSAGE = 'Plan approved, please execute.'
-
-// validateSpawnAttachmentPath removed â€” use shared validateFilePath from @kata-sh/server-core/handlers
-
-const PI_TURN_ANCHORS_VERSION = 1
-const PI_TURN_ANCHORS_FILE = 'pi-turn-anchors.json'
-
-interface PiTurnAnchorsIndex {
-  version: number
-  anchors: Record<string, string>
-}
-
-function getPiTurnAnchorsPath(sessionPath: string): string {
-  return join(sessionPath, 'meta', PI_TURN_ANCHORS_FILE)
-}
-
-export async function loadPiTurnAnchors(sessionPath: string): Promise<PiTurnAnchorsIndex> {
-  const filePath = getPiTurnAnchorsPath(sessionPath)
-  try {
-    const raw = await readFile(filePath, 'utf-8')
-    const parsed = JSON.parse(raw) as Partial<PiTurnAnchorsIndex>
-    const anchors = (parsed.anchors && typeof parsed.anchors === 'object') ? parsed.anchors : {}
-    const normalized: Record<string, string> = {}
-    for (const [messageId, anchor] of Object.entries(anchors)) {
-      if (typeof messageId === 'string' && typeof anchor === 'string' && messageId && anchor) {
-        normalized[messageId] = anchor
-      }
-    }
-    return {
-      version: PI_TURN_ANCHORS_VERSION,
-      anchors: normalized,
-    }
-  } catch {
-    return {
-      version: PI_TURN_ANCHORS_VERSION,
-      anchors: {},
-    }
-  }
-}
-
-async function getPiTurnAnchor(sessionPath: string, messageId: string): Promise<string | undefined> {
-  if (!messageId) return undefined
-  const index = await loadPiTurnAnchors(sessionPath)
-  return index.anchors[messageId]
-}
-
-export async function savePiTurnAnchor(sessionPath: string, messageId: string, anchorId: string): Promise<void> {
-  if (!messageId || !anchorId) return
-
-  const index = await loadPiTurnAnchors(sessionPath)
-  if (index.anchors[messageId] === anchorId) return
-
-  index.anchors[messageId] = anchorId
-
-  const filePath = getPiTurnAnchorsPath(sessionPath)
-  await mkdir(join(sessionPath, 'meta'), { recursive: true })
-  await writeFile(filePath, JSON.stringify(index), 'utf-8')
-}
-
-/**
- * Copy Pi turn anchors from the source session into the branch session,
- * filtered to the messages actually carried into the branch.
- *
- * Without this, branching a branch is silently lossy: the source branch's
- * sidecar contains no anchors for messages copied from its own parent, so a
- * downstream branch falls back to "full-history fork" â€” discarding the
- * branch cutoff and producing a session whose visible history doesn't match
- * what the LLM sees. See kata-agents-oss#782.
- */
-export async function copyPiTurnAnchorsForBranch(
-  sourceSessionPath: string,
-  branchSessionPath: string,
-  branchedMessageIds: Iterable<string>,
-): Promise<void> {
-  const index = await loadPiTurnAnchors(sourceSessionPath)
-  if (Object.keys(index.anchors).length === 0) return
-  const idSet = new Set(branchedMessageIds)
-  const filtered: Record<string, string> = {}
-  for (const [messageId, anchor] of Object.entries(index.anchors)) {
-    if (idSet.has(messageId)) {
-      filtered[messageId] = anchor
-    }
-  }
-  if (Object.keys(filtered).length === 0) return
-  await mkdir(join(branchSessionPath, 'meta'), { recursive: true })
-  await writeFile(
-    getPiTurnAnchorsPath(branchSessionPath),
-    JSON.stringify({ version: PI_TURN_ANCHORS_VERSION, anchors: filtered }),
-    'utf-8',
-  )
-}
-
-const CLAUDE_TURN_ANCHORS_VERSION = 1
-const CLAUDE_TURN_ANCHORS_FILE = 'claude-turn-anchors.json'
-
-interface ClaudeTurnAnchorRecord {
-  sdkSessionId: string
-  sdkMessageUuid: string
-}
-
-interface ClaudeTurnAnchorsIndex {
-  version: number
-  anchors: Record<string, ClaudeTurnAnchorRecord>
-}
-
-function getClaudeTurnAnchorsPath(sessionPath: string): string {
-  return join(sessionPath, 'meta', CLAUDE_TURN_ANCHORS_FILE)
-}
-
-function isClaudeMessageUuid(turnId: string): boolean {
-  return /^msg_[A-Za-z0-9]+$/.test(turnId)
-}
-
-async function loadClaudeTurnAnchors(sessionPath: string): Promise<ClaudeTurnAnchorsIndex> {
-  const filePath = getClaudeTurnAnchorsPath(sessionPath)
-  try {
-    const raw = await readFile(filePath, 'utf-8')
-    const parsed = JSON.parse(raw) as Partial<ClaudeTurnAnchorsIndex>
-    const anchors = (parsed.anchors && typeof parsed.anchors === 'object') ? parsed.anchors : {}
-    const normalized: Record<string, ClaudeTurnAnchorRecord> = {}
-
-    for (const [messageId, value] of Object.entries(anchors)) {
-      if (!messageId || typeof messageId !== 'string') continue
-      if (!value || typeof value !== 'object') continue
-      const sdkSessionId = (value as { sdkSessionId?: unknown }).sdkSessionId
-      const sdkMessageUuid = (value as { sdkMessageUuid?: unknown }).sdkMessageUuid
-      if (typeof sdkSessionId === 'string' && sdkSessionId && typeof sdkMessageUuid === 'string' && sdkMessageUuid) {
-        normalized[messageId] = { sdkSessionId, sdkMessageUuid }
-      }
-    }
-
-    return {
-      version: CLAUDE_TURN_ANCHORS_VERSION,
-      anchors: normalized,
-    }
-  } catch {
-    return {
-      version: CLAUDE_TURN_ANCHORS_VERSION,
-      anchors: {},
-    }
-  }
-}
-
-async function getClaudeTurnAnchor(sessionPath: string, messageId: string): Promise<ClaudeTurnAnchorRecord | undefined> {
-  if (!messageId) return undefined
-  const index = await loadClaudeTurnAnchors(sessionPath)
-  return index.anchors[messageId]
-}
-
-async function saveClaudeTurnAnchor(
-  sessionPath: string,
-  messageId: string,
-  sdkSessionId: string,
-  sdkMessageUuid: string,
-): Promise<void> {
-  if (!messageId || !sdkSessionId || !sdkMessageUuid) return
-
-  const index = await loadClaudeTurnAnchors(sessionPath)
-  const previous = index.anchors[messageId]
-  if (previous && previous.sdkSessionId === sdkSessionId && previous.sdkMessageUuid === sdkMessageUuid) return
-
-  index.anchors[messageId] = {
-    sdkSessionId,
-    sdkMessageUuid,
-  }
-
-  const filePath = getClaudeTurnAnchorsPath(sessionPath)
-  await mkdir(join(sessionPath, 'meta'), { recursive: true })
-  await writeFile(filePath, JSON.stringify(index), 'utf-8')
-}
-
-/**
- * Build MCP and API servers from sources using the new unified modules.
- * Handles credential loading and server building in one step.
- * When auth errors occur, updates source configs to reflect actual state.
- *
- * @param sources - Sources to build servers for
- * @param sessionPath - Optional path to session folder for saving large API responses
- * @param tokenRefreshManager - Optional TokenRefreshManager for OAuth token refresh
- */
-async function buildServersFromSources(
-  sources: LoadedSource[],
-  sessionPath?: string,
-  tokenRefreshManager?: TokenRefreshManager,
-  summarize?: SummarizeCallback
-) {
-  const span = perf.span('sources.buildServers', { count: sources.length })
-  const credManager = getSourceCredentialManager()
-  const serverBuilder = getSourceServerBuilder()
-
-  // Load credentials for all sources
-  const sourcesWithCreds: SourceWithCredential[] = await Promise.all(
-    sources.map(async (source) => ({
-      source,
-      token: await credManager.getToken(source),
-      credential: await credManager.getApiCredential(source),
-    }))
-  )
-  span.mark('credentials.loaded')
-
-  // Build token getter for refreshable sources (OAuth + renew-endpoint)
-  // Uses TokenRefreshManager for unified refresh logic (DRY principle)
-  const getTokenForSource = (source: LoadedSource) => {
-    const provider = source.config.provider
-    // Provider-specific OAuth (Google, Slack, Microsoft) or generic OAuth (authType: 'oauth')
-    if (isApiOAuthProvider(provider) || source.config.api?.authType === 'oauth') {
-      const manager = tokenRefreshManager ?? new TokenRefreshManager(credManager, {
-        log: (msg) => sessionLog.debug(msg),
-      })
-      return createTokenGetter(manager, source)
-    }
-    // API renew endpoint â€” non-OAuth token refresh
-    if (hasRenewEndpoint(source)) {
-      const manager = tokenRefreshManager ?? new TokenRefreshManager(credManager, {
-        log: (msg) => sessionLog.debug(msg),
-      })
-      return createTokenGetter(manager, source)
-    }
-    return undefined
-  }
-
-  // Per-request credential getter for non-OAuth / non-renew API sources
-  // (bearer / header / query / basic auth).
-  //
-  // Without this, the in-process API tool captures the credential as a static
-  // string at build time and keeps using it forever â€” meaning a fresh JWT
-  // entered via source_credential_prompt is ignored until session restart.
-  //
-  // With this getter, every API call reads the latest credential from the
-  // vault, so credential updates take effect on the next call. OAuth and
-  // renew-endpoint sources have their own refresh logic via TokenRefreshManager
-  // and are skipped here.
-  const getCredentialForSource = (source: LoadedSource) => {
-    if (source.config.type !== 'api') return undefined
-    if (source.config.api?.authType === 'none') return undefined
-    if (isApiOAuthProvider(source.config.provider)) return undefined
-    if (source.config.api?.authType === 'oauth') return undefined
-    if (hasRenewEndpoint(source)) return undefined
-    return async () => credManager.getApiCredential(source)
-  }
-
-  // Pass sessionPath to enable saving large API responses to session folder
-  const result = await serverBuilder.buildAll(
-    sourcesWithCreds,
-    getTokenForSource,
-    sessionPath,
-    summarize,
-    getCredentialForSource,
-  )
-  span.mark('servers.built')
-  span.setMetadata('mcpCount', Object.keys(result.mcpServers).length)
-  span.setMetadata('apiCount', Object.keys(result.apiServers).length)
-
-  // Update source configs for auth errors so UI reflects actual state.
-  // Re-classify AUTH_REQUIRED â†’ TOKEN_EXPIRED when the credential is merely
-  // expired-but-refreshable; in that case the refresh cycle handles recovery
-  // and we must NOT prematurely mark the source as needing re-auth (#710).
-  for (const error of result.errors) {
-    if (error.error !== SERVER_BUILD_ERRORS.AUTH_REQUIRED) continue
-    const source = sources.find(s => s.config.slug === error.sourceSlug)
-    if (!source) continue
-
-    const cred = await credManager.load(source)
-    const isExpiredRefreshable =
-      cred &&
-      (credManager.isExpired(cred) || credManager.needsRefresh(cred)) &&
-      (cred.refreshToken || hasRenewEndpoint(source))
-
-    if (isExpiredRefreshable) {
-      error.error = SERVER_BUILD_ERRORS.TOKEN_EXPIRED
-      sessionLog.debug(`Source ${error.sourceSlug}: TOKEN_EXPIRED â€” refresh cycle will handle`)
-      continue
-    }
-
-    credManager.markSourceNeedsReauth(source, 'Token missing or expired')
-    sessionLog.info(`Marked source ${error.sourceSlug} as needing re-auth`)
-  }
-
-  span.end()
-  return result
-}
-
-/**
- * Result of expired-credential refresh.
- */
-interface RefreshExpiredCredentialsResult {
-  /** Number of sources whose tokens were successfully refreshed */
-  refreshedCount: number
-  /** Sources that failed to refresh (for warning display) */
-  failedSources: Array<{ slug: string; reason: string }>
-}
-
-/**
- * Refresh expired OAuth / renew-endpoint tokens for the given sources.
- *
- * Side effects (carried by `TokenRefreshManager.ensureFreshToken`):
- * - Success: source.config.isAuthenticated = true (in-memory + on disk).
- * - Failure: source.config.isAuthenticated = false + connectionStatus = 'needs_auth'
- *   (in-memory + on disk), so isSourceUsable() returns false and the source is
- *   excluded from intendedSlugs by callers.
- *
- * The caller is responsible for building servers AFTER this returns â€” that way
- * a single fresh build sees the correct credentials and the correct usable set.
- * Issue #710.
- */
-async function refreshExpiredCredentials(
-  sources: LoadedSource[],
-  tokenRefreshManager: TokenRefreshManager
-): Promise<RefreshExpiredCredentialsResult> {
-  sessionLog.debug('[OAuth] Checking if any tokens need refresh')
-
-  const needRefresh = await tokenRefreshManager.getSourcesNeedingRefresh(sources)
-  if (needRefresh.length === 0) {
-    return { refreshedCount: 0, failedSources: [] }
-  }
-
-  sessionLog.debug(`[OAuth] Refreshing ${needRefresh.length} source(s): ${needRefresh.map(s => s.config.slug).join(', ')}`)
-
-  const { refreshed, failed } = await tokenRefreshManager.refreshSources(needRefresh)
-
-  const failedSources = failed.map(({ source, reason }) => ({
-    slug: source.config.slug,
-    reason,
-  }))
-
-  return { refreshedCount: refreshed.length, failedSources }
-}
-
-/**
- * Apply bridge-mcp-server updates for backends that use it.
- * Delegates to the backend's own applyBridgeUpdates() method.
- * Each backend handles its own strategy via applyBridgeUpdates().
- */
-async function applyBridgeUpdates(
-  agent: AgentInstance,
-  sessionPath: string,
-  enabledSources: LoadedSource[],
-  mcpServers: Record<string, import('@kata-sh/shared/agent/backend').SdkMcpServerConfig>,
-  sessionId: string,
-  workspaceRootPath: string,
-  context: string,
-  poolServerUrl?: string
-): Promise<void> {
-  await agent.applyBridgeUpdates({
-    sessionPath,
-    enabledSources,
-    mcpServers,
-    sessionId,
-    workspaceRootPath,
-    context,
-    poolServerUrl,
-  })
-}
-
-/**
- * Resolve tool display metadata for a tool call.
- * Returns metadata with base64-encoded icon for viewer compatibility.
- *
- * @param toolName - Tool name from the event (e.g., "Skill", "mcp__linear__list_issues")
- * @param toolInput - Tool input (used for Skill tool to get skill identifier)
- * @param workspaceRootPath - Path to workspace for loading skills/sources
- * @param sources - Loaded sources for the workspace
- */
-const BROWSER_TOOL_ICON_FILENAME = 'chrome.svg'
-let browserToolIconDataUrlCache: string | null | undefined
-
-async function getBrowserToolIconDataUrl(): Promise<string | undefined> {
-  // Cache miss sentinel: undefined means "not computed yet"
-  if (browserToolIconDataUrlCache !== undefined) {
-    return browserToolIconDataUrlCache ?? undefined
-  }
-
-  try {
-    const iconCandidates = [
-      join(getToolIconsDir(), BROWSER_TOOL_ICON_FILENAME),
-      // Dev fallback (before sync to ~/.kata-agents/tool-icons)
-      join(process.cwd(), 'apps', 'electron', 'resources', 'tool-icons', BROWSER_TOOL_ICON_FILENAME),
-      // Packaged fallback (app resources)
-      join(process.resourcesPath, 'tool-icons', BROWSER_TOOL_ICON_FILENAME),
-    ]
-
-    for (const iconPath of iconCandidates) {
-      if (!existsSync(iconPath)) continue
-      const encoded = await encodeIconToDataUrlAsync(iconPath, { resize: resizeIconBuffer })
-      if (encoded) {
-        browserToolIconDataUrlCache = encoded
-        return encoded
-      }
-    }
-
-    browserToolIconDataUrlCache = null
-  } catch {
-    browserToolIconDataUrlCache = null
-  }
-
-  return browserToolIconDataUrlCache ?? undefined
-}
-
-async function resolveToolDisplayMeta(
-  toolName: string,
-  toolInput: Record<string, unknown> | undefined,
-  workspaceRootPath: string,
-  sources: LoadedSource[]
-): Promise<ToolDisplayMeta | undefined> {
-  // Check if it's an MCP tool (format: mcp__<serverSlug>__<toolName>)
-  if (toolName.startsWith('mcp__')) {
-    const parts = toolName.split('__')
-    if (parts.length >= 3) {
-      const serverSlug = parts[1]
-      const toolSlug = parts.slice(2).join('__')
-
-      // Internal MCP server tools (session, docs)
-      const internalMcpServers: Record<string, Record<string, string>> = {
-        'session': {
-          'SubmitPlan': 'Submit Plan',
-          'call_llm': 'LLM Query',
-          'config_validate': 'Validate Config',
-          'skill_validate': 'Validate Skill',
-          'mermaid_validate': 'Validate Mermaid',
-          'source_test': 'Test Source',
-          'source_oauth_trigger': 'OAuth',
-          'source_google_oauth_trigger': 'Google Auth',
-          'source_slack_oauth_trigger': 'Slack Auth',
-          'source_microsoft_oauth_trigger': 'Microsoft Auth',
-          'source_credential_prompt': 'Enter Credentials',
-          'transform_data': 'Transform Data',
-          'render_template': 'Render Template',
-          'update_user_preferences': 'Update Preferences',
-          'send_developer_feedback': 'Send Feedback',
-          'browser_tool': 'Browser',
-        },
-        'kata-agents-docs': {
-          'SearchKataAgents': 'Search Docs',
-        },
-      }
-
-      const internalServer = internalMcpServers[serverSlug]
-      if (internalServer) {
-        const displayName = internalServer[toolSlug]
-        if (displayName) {
-          const normalizedBrowserTool = normalizeBrowserToolName(toolSlug)
-          return {
-            displayName,
-            iconDataUrl: normalizedBrowserTool ? await getBrowserToolIconDataUrl() : undefined,
-            category: 'native' as const,
-          }
-        }
-      }
-
-      // External source tools
-      let sourceSlug = serverSlug
-
-      // Special case: api-bridge server embeds source slug in tool name as "api_{slug}"
-      // e.g., mcp__api-bridge__api_stripe â†’ sourceSlug = "stripe"
-      if (sourceSlug === 'api-bridge' && toolSlug.startsWith('api_')) {
-        sourceSlug = toolSlug.slice(4)
-      }
-
-      const source = sources.find(s => s.config.slug === sourceSlug)
-      if (source) {
-        // Try file-based icon first, fall back to emoji icon from config
-        const iconDataUrl = source.iconPath
-          ? await encodeIconToDataUrlAsync(source.iconPath, { resize: resizeIconBuffer })
-          : getEmojiIcon(source.config.icon)
-        return {
-          displayName: source.config.name,
-          iconDataUrl,
-          description: source.config.tagline,
-          category: 'source' as const,
-        }
-      }
-    }
-    return undefined
-  }
-
-  // Check if it's the Skill tool
-  if (toolName === 'Skill' && toolInput) {
-    // Skill input has 'skill' param with format: "skillSlug" or "workspaceId:skillSlug"
-    const skillParam = toolInput.skill as string | undefined
-    if (skillParam) {
-      // Extract skill slug (remove workspace prefix if present)
-      const skillSlug = skillParam.includes(':') ? skillParam.split(':').pop() : skillParam
-      if (skillSlug) {
-        // Load skills and find the one being invoked
-        try {
-          const skills = loadAllSkills(workspaceRootPath)
-          const skill = skills.find(s => s.slug === skillSlug)
-          if (skill) {
-            // Try file-based icon first, fall back to emoji icon from metadata
-            const iconDataUrl = skill.iconPath
-              ? await encodeIconToDataUrlAsync(skill.iconPath, { resize: resizeIconBuffer })
-              : getEmojiIcon(skill.metadata.icon)
-            return {
-              displayName: skill.metadata.name,
-              iconDataUrl,
-              description: skill.metadata.description,
-              category: 'skill' as const,
-            }
-          }
-        } catch {
-          // Skills loading failed, skip
-        }
-      }
-    }
-    return undefined
-  }
-
-  // CLI tool icon resolution for Bash commands
-  // Parses the command string to detect known tools (git, npm, docker, etc.)
-  // and resolves their brand icon from ~/.kata-agents/tool-icons/
-  if (toolName === 'Bash' && toolInput?.command) {
-    try {
-      const toolIconsDir = getToolIconsDir()
-      const match = resolveToolIcon(String(toolInput.command), toolIconsDir)
-      if (match) {
-        return {
-          displayName: match.displayName,
-          iconDataUrl: match.iconDataUrl,
-          category: 'native' as const,
-        }
-      }
-    } catch {
-      // Icon resolution is best-effort â€” never crash the session for it
-    }
-  }
-
-  // Native browser tool names (with Chrome icon)
-  const normalizedBrowserToolName = normalizeBrowserToolName(toolName)
-  if (normalizedBrowserToolName) {
-    const browserDisplayName = normalizedBrowserToolName
-      .split('_')
-      .map((part, index) => (index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-      .join(' ')
-      .replace(/^browser\s+/i, 'Browser ')
-
-    return {
-      displayName: browserDisplayName,
-      iconDataUrl: await getBrowserToolIconDataUrl(),
-      category: 'native' as const,
-    }
-  }
-
-  // Native tool display names (no icons - UI handles these with built-in icons)
-  // This ensures toolDisplayMeta is always populated for consistent display
-  const nativeToolNames: Record<string, string> = {
-    'Read': 'Read',
-    'Write': 'Write',
-    'Edit': 'Edit',
-    'Bash': 'Terminal',
-    'Grep': 'Search',
-    'Glob': 'Find Files',
-    'Task': 'Agent',
-    'Agent': 'Agent',
-    'WebFetch': 'Fetch URL',
-    'WebSearch': 'Web Search',
-    'TodoWrite': 'Update Todos',
-    'NotebookEdit': 'Edit Notebook',
-    'KillShell': 'Kill Shell',
-    'TaskOutput': 'Task Output',
-  }
-
-  const nativeDisplayName = nativeToolNames[toolName]
-  if (nativeDisplayName) {
-    return {
-      displayName: nativeDisplayName,
-      category: 'native' as const,
-    }
-  }
-
-  // Unknown tool - no display metadata (will fall back to tool name in UI)
-  return undefined
-}
-
-/** Agent type - unified backend interface for all providers */
-type AgentInstance = AgentBackend
-
-interface ManagedSession {
-  id: string
-  workspace: Workspace
-  agent: AgentInstance | null  // Lazy-loaded - null until first message
-  messages: Message[]
-  isProcessing: boolean
-  /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
-  stopRequested?: boolean
-  lastMessageAt: number
-  streamingText: string
-  // Incremented each time a new message starts processing.
-  // Used to detect if a follow-up message has superseded the current one (stale-request guard).
-  processingGeneration: number
-  // NOTE: Parent-child tracking state (pendingTools, parentToolStack, toolToParentMap,
-  // pendingTextParent) has been removed. KataAgent now provides parentToolUseId
-  // directly on all events using the SDK's authoritative parent_tool_use_id field.
-  // See: packages/shared/src/agent/tool-matching.ts
-  // Session name (user-defined or AI-generated)
-  name?: string
-  isFlagged: boolean
-  /** Whether this session is archived */
-  isArchived?: boolean
-  /** Timestamp when session was archived (for retention policy) */
-  archivedAt?: number
-  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
-  permissionMode?: PermissionMode
-  /** Previous permission mode (preserved across restarts for session_state modeTransition context) */
-  previousPermissionMode?: PermissionMode
-  /** Centralized MCP client pool for this session's source connections */
-  mcpPool?: McpClientPool
-  /** HTTP MCP server exposing pool tools to external SDK subprocesses */
-  poolServer?: McpPoolServer
-  // SDK session ID for conversation continuity
-  sdkSessionId?: string
-  // Token usage for display
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    contextTokens: number
-    costUsd: number
-    cacheReadTokens?: number
-    cacheCreationTokens?: number
-    /** Model's context window size in tokens (from SDK modelUsage) */
-    contextWindow?: number
-  }
-  // Session status (user-controlled) - determines open vs closed
-  // Dynamic status ID referencing workspace status config
-  sessionStatus?: string
-  // Read/unread tracking - ID of last message user has read
-  lastReadMessageId?: string
-  /**
-   * Explicit unread flag - single source of truth for NEW badge.
-   * Set to true when assistant message completes while user is NOT viewing.
-   * Set to false when user views the session (and not processing).
-   */
-  hasUnread?: boolean
-  // Per-session source selection (slugs of enabled sources)
-  enabledSourceSlugs?: string[]
-  // Labels applied to this session (additive tags, many-per-session)
-  labels?: string[]
-  // Working directory for this session (used by agent for bash commands)
-  workingDirectory?: string
-  // SDK cwd for session storage - set once at creation, never changes.
-  // Ensures SDK can find session transcripts regardless of workingDirectory changes.
-  sdkCwd?: string
-  // Git checkout metadata (managed worktree / current checkout), when bound.
-  checkout?: import('@kata-sh/shared/protocol').SessionCheckoutV1
-  // Shared viewer URL (if shared via viewer)
-  sharedUrl?: string
-  // Shared session ID in viewer (for revoke)
-  sharedId?: string
-  // Model to use for this session (overrides global config if set)
-  model?: string
-  // LLM connection slug for this session (locked after first message)
-  llmConnection?: string
-  // Whether the connection is locked (cannot be changed after first agent creation)
-  connectionLocked?: boolean
-  // Thinking level for this session ('off', 'think', 'max')
-  thinkingLevel?: ThinkingLevel
-  // System prompt preset for mini agents ('default' | 'mini')
-  systemPromptPreset?: 'default' | 'mini' | string
-  // Role/type of the last message (for badge display without loading messages)
-  lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
-  // ID of the last final (non-intermediate) assistant message - pre-computed for unread detection
-  lastFinalMessageId?: string
-  // Turn baseline: last final assistant message ID at turn start (runtime-only, not persisted)
-  turnStartFinalMessageId?: string
-  // External session metadata updates seen while processing (applied after turn stop)
-  pendingExternalMetadata?: SessionHeader
-  // Guard: suppress external metadata revert after programmatic writes (setSessionStatus/setSessionLabels).
-  // fs.watch fires during atomic write (unlink+rename) and can read stale data, reverting in-memory state.
-  _metadataWriteGuardUntil?: number
-  // Whether an async operation is ongoing (sharing, updating share, revoking, title regeneration)
-  // Used for shimmer effect on session title
-  isAsyncOperationOngoing?: boolean
-  // Preview of first user message (for sidebar display fallback)
-  preview?: string
-  // When the session was first created (ms timestamp from JSONL header)
-  createdAt?: number
-  // Total message count (pre-computed in JSONL header for fast list loading)
-  messageCount?: number
-  // Message queue for handling new messages while processing
-  // When a message arrives during processing, we interrupt and queue
-  messageQueue: Array<{
-    message: string
-    attachments?: FileAttachment[]
-    storedAttachments?: StoredAttachment[]
-    options?: SendMessageOptions
-    messageId?: string  // Pre-generated ID for matching with UI
-    optimisticMessageId?: string  // Frontend's ID for reliable event matching
-  }>
-  // Map of shellId -> command for killing background shells
-  backgroundShellCommands: Map<string, string>
-  // Map of taskId -> output info for background task results
-  backgroundTaskOutputs: Map<string, { outputFile: string; summary: string; status: string; completedAt: number }>
-  // Whether messages have been loaded from disk (for lazy loading)
-  messagesLoaded: boolean
-  // Pending auth request tracking (for unified auth flow)
-  pendingAuthRequestId?: string
-  pendingAuthRequest?: AuthRequest
-  // Auth retry tracking (for mid-session token expiry)
-  // Store last sent message/attachments to enable retry after token refresh
-  lastSentMessage?: string
-  lastSentAttachments?: FileAttachment[]
-  lastSentStoredAttachments?: StoredAttachment[]
-  lastSentOptions?: SendMessageOptions
-  // Flag to prevent infinite retry loops (reset at start of each sendMessage)
-  authRetryAttempted?: boolean
-  // Flag indicating auth retry is in progress (to prevent complete handler from interfering)
-  authRetryInProgress?: boolean
-  // Whether this session is hidden from session list (e.g., mini edit sessions)
-  hidden?: boolean
-  branchFromMessageId?: string
-  // Branch context strategy:
-  // - sdk-fork: provider-level fork from parent SDK session
-  // - seeded-fresh-session: fresh backend session seeded with transcript up to branch cutoff
-  branchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
-  // Parent session's SDK session ID (used only when branchContextStrategy === 'sdk-fork')
-  branchFromSdkSessionId?: string
-  // Parent session's storage path (used only when branchContextStrategy === 'sdk-fork')
-  branchFromSessionPath?: string
-  // Parent session's sdkCwd â€” needed so the fork subprocess uses the correct
-  // ~/.claude/projects/{cwd-hash}/ directory to find the parent's session file.
-  branchFromSdkCwd?: string
-  // SDK assistant message UUID at the branch point â€” used as resumeSessionAt
-  // to trim the forked conversation at the branch point.
-  branchFromSdkTurnId?: string
-  // One-shot flag for seeded branch mode - set true after first turn seed injection.
-  branchSeedApplied?: boolean
-  // One-shot hidden summary injected on the first turn after a remote transfer.
-  transferredSessionSummary?: string
-  // Whether the transferred-session summary has already been injected.
-  transferredSessionSummaryApplied?: boolean
-  // Token refresh manager for OAuth token refresh with rate limiting
-  tokenRefreshManager: TokenRefreshManager
-  // Metadata for sessions created by automations
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number }
-  // Promise that resolves when the agent instance is ready (for title gen to await)
-  agentReady?: Promise<void>
-  agentReadyResolve?: () => void
-  // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
-  // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
-  envOverrides?: Record<string, string>
-  // Runtime-affecting backend config signature captured when the live agent was created/refreshed.
-  backendRuntimeSignature?: string
-  /**
-   * Signature over fields that cannot be propagated via `update_runtime_config`
-   * (see `runtime-config.ts:buildRestartRequiredSignature`). When this drifts,
-   * the agent must be disposed + recreated rather than refreshed in place.
-   */
-  backendRestartSignature?: string
-  // Whether the previous turn was interrupted (for context injection on next message).
-  // Ephemeral â€” not persisted to disk. Cleared after one-shot injection.
-  wasInterrupted?: boolean
-  /**
-   * Runtime-only: Pi SDK message id â†’ Craft assistant message id.
-   * Populated when a `text_complete` arrives carrying `sdkMessageId`, and read
-   * when the follow-up `pi_turn_anchor` event arrives (deferred by one microtask
-   * so the SDK's session-manager has updated its leaf â€” see kata-agents-oss#782).
-   * Capped at PI_SDK_MESSAGE_ID_CACHE_LIMIT to bound memory in long sessions.
-   */
-  piSdkMessageToCraftMessage?: Map<string, string>
-  // Source-activation auto-retry (kata-agents-oss#804). When a source activates
-  // mid-turn, we re-send the original message with a "[<slug> activated]" suffix
-  // after a short delay. The pending slot lets `sendMessage` dedup a duplicate
-  // RPC from a legacy renderer that still ships the client-side auto_retry.
-  autoRetryTimer?: ReturnType<typeof setTimeout>
-  autoRetryPending?: {
-    content: string
-    deadlineMs: number
-    /** True after the first matching sendMessage consumes the slot; later matches drop. */
-    committed: boolean
-  }
-}
-
-const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
-
-export interface AutoRetryPendingHost {
-  autoRetryPending?: {
-    content: string
-    deadlineMs: number
-    committed: boolean
-  }
-}
-
-export function claimAutoRetryPending(
-  host: AutoRetryPendingHost,
-  message: string,
-  nowMs = Date.now(),
-): 'send' | 'drop' {
-  const pending = host.autoRetryPending
-  if (pending && message === pending.content) {
-    if (nowMs < pending.deadlineMs) {
-      if (pending.committed) return 'drop'
-      pending.committed = true
-      return 'send'
-    }
-    host.autoRetryPending = undefined
-    return 'send'
-  }
-
-  if (pending && nowMs >= pending.deadlineMs) {
-    host.autoRetryPending = undefined
-  }
-
-  return 'send'
-}
-
-/**
- * Create a ManagedSession from any session-like source (SessionMetadata, SessionConfig, StoredSession).
- * Spreads all matching fields from the source so new persistent fields automatically propagate.
- * Runtime-only fields get sensible defaults.
- */
-export function createManagedSession(
-  source: { id: string } & Partial<ManagedSession>,
-  workspace: Workspace,
-  overrides?: Partial<ManagedSession>,
-): ManagedSession {
-  const s = source as Record<string, unknown>
-  const sourceFields = Object.fromEntries(
-    Object.entries(s).filter(([, v]) => v !== undefined)
-  ) as Partial<ManagedSession>
-
-  if ('thinkingLevel' in sourceFields) {
-    // TODO: Remove legacy 'think' normalization after old persisted session
-    // headers have realistically aged out across upgrades.
-    const normalizedThinkingLevel = normalizeThinkingLevel(sourceFields.thinkingLevel)
-    if (normalizedThinkingLevel) {
-      sourceFields.thinkingLevel = normalizedThinkingLevel
-    } else {
-      delete sourceFields.thinkingLevel
-    }
-  }
-
-  const managed = {
-    // Spread all session-like fields from source (id, name, permissionMode, labels, model, etc.)
-    // This ensures new persistent fields automatically flow through without manual copying.
-    ...sourceFields,
-    // Runtime-only defaults (not persisted)
-    workspace,
-    agent: null,
-    messages: [],
-    isProcessing: false,
-    lastMessageAt: (s.lastMessageAt ?? s.lastUsedAt ?? Date.now()) as number,
-    streamingText: '',
-    processingGeneration: 0,
-    isFlagged: (s.isFlagged ?? false) as boolean,
-    messageQueue: [],
-    backgroundShellCommands: new Map(),
-    backgroundTaskOutputs: new Map(),
-    messagesLoaded: false,
-    tokenRefreshManager: new TokenRefreshManager(getSourceCredentialManager(), {
-      log: (msg) => sessionLog.debug(msg),
-    }),
-    // Caller overrides (permissionMode defaults, thinkingLevel, messagesLoaded, etc.)
-    ...overrides,
-  } as ManagedSession
-
-  if (managed.branchFromMessageId && !managed.branchContextStrategy) {
-    managed.branchContextStrategy = managed.branchFromSdkSessionId
-      ? 'sdk-fork'
-      : 'seeded-fresh-session'
-  }
-
-  if (managed.branchContextStrategy === 'seeded-fresh-session' && managed.branchSeedApplied === undefined) {
-    // If an SDK session ID already exists, first turn has already happened.
-    managed.branchSeedApplied = !!managed.sdkSessionId
-  }
-
-  return managed
-}
-
-/**
- * Resolve supportsBranching for a managed session.
- * Prefers the live agent instance; falls back to true for all backends.
- */
-function resolveSupportsBranching(managed: ManagedSession): boolean {
-  // If agent is live, use its instance property (authoritative)
-  if (managed.agent) {
-    return managed.agent.supportsBranching
-  }
-
-  return true // default: branching enabled for all backends
-}
-
-const DEFAULT_TOKEN_USAGE = {
-  inputTokens: 0, outputTokens: 0, totalTokens: 0,
-  contextTokens: 0, costUsd: 0,
-}
-
-/**
- * Convert a ManagedSession to a renderer-side Session object.
- * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
- */
-function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Session {
-  let sharedOwnerCount: number | undefined
-  if (m.checkout?.mode === 'managed-worktree' && m.checkout.managedWorktreeId) {
-    try {
-      const count = getDefaultGitServices().worktrees.getOwnerCount(m.checkout.managedWorktreeId)
-      if (count > 0) sharedOwnerCount = count
-    } catch {
-      /* registry unavailable â€” omit */
-    }
-  }
-  return {
-    ...pickSessionFields(m),
-    sharedOwnerCount,
-    // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
-    preview: m.preview,
-    lastMessageRole: m.lastMessageRole,
-    tokenUsage: m.tokenUsage,
-    messageCount: m.messageCount,
-    lastFinalMessageId: m.lastFinalMessageId,
-    // Runtime-only fields
-    workspaceId: m.workspace.id,
-    workspaceName: m.workspace.name,
-    messages: [],
-    isProcessing: m.isProcessing,
-    sessionFolderPath: getSessionStoragePath(m.workspace.rootPath, m.id),
-    supportsBranching: resolveSupportsBranching(m),
-    ...overrides,
-  } as Session
-}
-
-// Performance: Batch IPC delta events to reduce renderer load
-const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
-
-interface PendingDelta {
-  delta: string
-  turnId?: string
-}
-
-export class SessionManager implements ISessionManager {
-  private sessions: Map<string, ManagedSession> = new Map()
-  // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
-  private pendingDeltas: Map<string, PendingDelta> = new Map()
-  private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
-  // Config watchers for live updates (sources, etc.) - one per workspace
-  private configWatchers: Map<string, ConfigWatcher> = new Map()
-  // Automation systems for workspace event automations - one per workspace (includes scheduler, diffing, and handlers)
-  private automationSystems: Map<string, AutomationSystem> = new Map()
-  // Pending credential request resolvers (keyed by requestId)
-  private pendingCredentialResolvers: Map<string, (response: import('@kata-sh/shared/protocol').CredentialResponse) => void> = new Map()
-  // Permission request metadata tracking (keyed by requestId)
-  private pendingPermissionRequests: Map<string, {
-    sessionId: string
-    type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval'
-    commandHash?: string
-  }> = new Map()
-  // Privileged approval binding + audit logger
-  private privilegedExecutionBroker = new PrivilegedExecutionBroker(sessionLog)
-  // Session-local admin remember windows (exact command hash binding)
-  private adminRememberApprovals: Map<string, {
-    createdAt: number
-    expiresAt: number
-    sourceRequestId: string
-  }> = new Map()
-  // Promise deduplication for lazy-loading messages (prevents race conditions)
-  private messageLoadingPromises: Map<string, Promise<void>> = new Map()
-  /**
-   * Track which session the user is actively viewing (per workspace).
-   * Map of workspaceId -> sessionId. Used to determine if a session should be
-   * marked as unread when assistant completes - if user is viewing it, don't mark unread.
-   */
-  private activeViewingSession: Map<string, string> = new Map()
-  /** Coordinates startup initialization waiters from IPC handlers. */
-  private initGate = new InitGate()
-  // O(1) index: taskId â†’ sessionId for background task output lookup (avoids O(n) session scan)
-  private taskOutputIndex: Map<string, string> = new Map()
-  /**
-   * Per-session in-flight runtime-refresh promise. Ensures `updateRuntimeConfig`
-   * (or a dispose) cannot overlap with another refresh OR with a send-path
-   * `getOrCreateAgent` on the same session. Without this serialization, a
-   * `SAVE`-triggered refresh and a `sendMessage`-triggered refresh can both
-   * see `agent.isProcessing()=false`, both fire `updateRuntimeConfig`, and the
-   * subprocess can race the resulting `chat` against the still-pending update.
-   */
-  private agentRefreshLocks: Map<string, Promise<void>> = new Map()
-  /** Monotonic clock to ensure strictly increasing message timestamps */
-  private lastTimestamp = 0
-
-  /**
-   * Optional binder installed by the messaging-gateway bootstrap. When set,
-   * `executePromptAutomation` calls it after creating a session whose matcher
-   * declared `telegramTopic`, so the new session is bound to a Telegram forum
-   * topic in the workspace's paired supergroup. Best-effort â€” failures must
-   * not block the session.
-   */
-  private automationBinder?: (input: {
-    workspaceId: string
-    sessionId: string
-    topicName: string
-  }) => Promise<void>
-
-  /**
-   * Centralized setter for session processing state.
-   * Automatically notifies the power manager on transitions (trueâ†’false, falseâ†’true)
-   * so callers don't need to remember to call onSessionStarted/onSessionStopped.
-   */
-  private setProcessing(managed: ManagedSession, processing: boolean): void {
-    const was = managed.isProcessing
-    managed.isProcessing = processing
-    if (!was && processing) {
-      sessionRuntimeHooks.onSessionStarted()
-    } else if (was && !processing) {
-      sessionRuntimeHooks.onSessionStopped()
-    }
-  }
-
-  /** Wait until initialize() has completed (sessions loaded from disk).
-   *  Resolves immediately if already initialized. */
-  waitForInit(): Promise<void> {
-    return this.initGate.wait()
-  }
-
-  /**
-   * Install the automationâ†’topic binder. Wired by the messaging-gateway
-   * bootstrap so SessionManager doesn't need to import the messaging
-   * package (avoids a package-level circular dependency).
-   */
-  setAutomationBinder(
-    fn: (input: { workspaceId: string; sessionId: string; topicName: string }) => Promise<void>,
-  ): void {
-    this.automationBinder = fn
-  }
-
-  private browserPaneManager: IBrowserPaneManager | null = null
-  private rpcServer: RpcServer | null = null
-  private remoteBpms = new Map<string, RemoteBrowserPaneManager>()
-  /** Pinned desktop client per session for `client:browser:invoke` routing. */
-  private browserHostByCanvas = new Map<string, string>()
-  private eventSink: EventSink | null = null
-
-  setEventSink(sink: EventSink): void {
-    this.eventSink = sink
-  }
-
-  setBrowserPaneManager(bpm: IBrowserPaneManager): void {
-    this.browserPaneManager = bpm
-    bpm.setSessionPathResolver((sessionId) => this.getSessionPath(sessionId))
-  }
-
-  /**
-   * Provide the WS RPC server so remote clients can host browser tools.
-   *
-   * When called, the SM activates the remote-bridge code path: per-session
-   * `RemoteBrowserPaneManager` instances are created lazily by
-   * {@link getBrowserPaneManagerForSession}, and the browser-host client is
-   * resolved via {@link getBrowserHostClient} with capability-aware fallback.
-   *
-   * Local Electron callers do not need to call this â€” they already
-   * call `setBrowserPaneManager(bpm)` with the in-process BPM, which takes
-   * precedence over the remote bridge in {@link getBrowserPaneManagerForSession}.
-   */
-  setRpcServer(server: RpcServer): void {
-    this.rpcServer = server
-    sessionLog.info('[browser-pane] setRpcServer called â€” remote browser bridge is now available')
-  }
-
-  /**
-   * Resolve the {@link IBrowserPaneManager} that owns the user's local browser
-   * for a given session. Returns:
-   *
-   * 1. The locally-injected `browserPaneManager` when present (Electron client co-located
-   *    with the agent), regardless of session.
-   * 2. A session-bound {@link RemoteBrowserPaneManager} when `rpcServer` is set.
-   *    Cached in `remoteBpms` so repeat lookups don't allocate.
-   * 3. `null` when there's neither a local BPM nor an RPC server.
-   */
-  getBrowserPaneManagerForSession(sid: string): IBrowserPaneManager | null {
-    if (this.browserPaneManager) return this.browserPaneManager
-    if (!this.rpcServer) return null
-
-    const cached = this.remoteBpms.get(sid)
-    if (cached) return cached
-
-    const session = this.sessions.get(sid)
-    if (!session) return null
-
-    const bridge = new RemoteBrowserPaneManager({
-      sessionId: sid,
-      workspaceId: session.workspace.id,
-      rpcServer: this.rpcServer,
-      getHostClient: () => this.getBrowserHostClient(sid),
-    })
-    this.remoteBpms.set(sid, bridge)
-    return bridge
-  }
-
-  /**
-   * Record which desktop client should host this session's browser. Called
-   * with `ctx.clientId` from the `sessions.sendMessage` RPC handler so the
-   * agent's browser_* tools route back to the client that posted the message.
-   *
-   * No-op when `callerClientId` is undefined â€” preserves the existing pin
-   * (lets reconnected clients continue holding the host role).
-   */
-  private setLastMessageClientId(sid: string, callerClientId: string | undefined): void {
-    if (!callerClientId) return
-    this.browserHostByCanvas.set(sid, callerClientId)
-  }
-
-  /**
-   * Called by the transport bootstrap on `onClientDisconnected`. Drops any
-   * pins held by `clientId` so the next browser tool call re-resolves via
-   * {@link findClientsWithCapability} instead of trying to ship to a dead client.
-   */
-  onClientDisconnected(clientId: string): void {
-    for (const [sid, pinned] of this.browserHostByCanvas) {
-      if (pinned === clientId) this.browserHostByCanvas.delete(sid)
-    }
-  }
-
-  /**
-   * Pinned client first, with fallback to any connected client for the workspace
-   * that advertises `client:browser:invoke`. The fallback handles reconnect-with-
-   * new-clientId so the agent isn't stuck waiting for another user message.
-   */
-  private getBrowserHostClient(sid: string): string | null {
-    if (!this.rpcServer) return null
-    const pinned = this.browserHostByCanvas.get(sid)
-    if (pinned && this.rpcServer.hasClientCapability(pinned, CLIENT_BROWSER_INVOKE)) {
-      return pinned
-    }
-    const session = this.sessions.get(sid)
-    if (!session) return null
-    const candidates = this.rpcServer.findClientsWithCapability(
-      CLIENT_BROWSER_INVOKE,
-      { workspaceId: session.workspace.id },
-    )
-    const fallback = candidates[0]
-    if (!fallback) return null
-    this.browserHostByCanvas.set(sid, fallback)
-    return fallback
-  }
-
-  /** Returns a strictly increasing timestamp (ms). When Date.now() collides with
-   *  the previous value, increments by 1 to preserve event ordering. */
-  private monotonic(): number {
-    const now = Date.now()
-    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1
-    return this.lastTimestamp
-  }
-
-  private getAdminRememberKey(sessionId: string, commandHash: string): string {
-    return `${sessionId}:${commandHash}`
-  }
-
-  private hasActiveAdminRememberApproval(sessionId: string, commandHash: string): boolean {
-    const key = this.getAdminRememberKey(sessionId, commandHash)
-    const entry = this.adminRememberApprovals.get(key)
-    if (!entry) {
-      return false
-    }
-
-    if (Date.now() > entry.expiresAt) {
-      this.adminRememberApprovals.delete(key)
-      this.privilegedExecutionBroker.auditEvent('privileged_remember_window_expired', {
-        sessionId,
-        commandHash,
-        sourceRequestId: entry.sourceRequestId,
-        expiresAt: entry.expiresAt,
-      })
-      return false
-    }
-
-    return true
-  }
-
-  private storeAdminRememberApproval(sessionId: string, commandHash: string, sourceRequestId: string, rememberForMinutes: number): void {
-    const boundedMinutes = Math.min(Math.max(Math.floor(rememberForMinutes), 1), MAX_ADMIN_REMEMBER_MINUTES)
-    const now = Date.now()
-    const expiresAt = now + boundedMinutes * 60 * 1000
-
-    this.adminRememberApprovals.set(this.getAdminRememberKey(sessionId, commandHash), {
-      createdAt: now,
-      expiresAt,
-      sourceRequestId,
-    })
-
-    this.privilegedExecutionBroker.auditEvent('privileged_remember_window_stored', {
-      sessionId,
-      commandHash,
-      sourceRequestId,
-      rememberForMinutes: boundedMinutes,
-      createdAt: now,
-      expiresAt,
-    })
-  }
-
-  private clearAdminRememberApprovalsForSession(sessionId: string): void {
-    const prefix = `${sessionId}:`
-    for (const key of this.adminRememberApprovals.keys()) {
-      if (key.startsWith(prefix)) {
-        this.adminRememberApprovals.delete(key)
-      }
-    }
-  }
-
-  private clearPendingPermissionRequestsForSession(sessionId: string): void {
-    for (const [requestId, metadata] of this.pendingPermissionRequests.entries()) {
-      if (metadata.sessionId === sessionId) {
-        this.pendingPermissionRequests.delete(requestId)
-      }
-    }
-  }
-
-  /**
-   * Apply external session header metadata to in-memory state and emit UI events.
-   * Returns true if any in-memory metadata field changed.
-   */
-  private applyExternalSessionMetadata(managed: ManagedSession, header: SessionHeader): boolean {
-    const sessionId = managed.id
-    let changed = false
-
-    // Labels
-    const oldLabels = JSON.stringify(managed.labels ?? [])
-    const newLabels = JSON.stringify(header.labels ?? [])
-    if (oldLabels !== newLabels) {
-      managed.labels = header.labels
-      this.sendEvent({ type: 'labels_changed', sessionId, labels: header.labels ?? [] }, managed.workspace.id)
-      changed = true
-    }
-
-    // Flagged
-    if ((managed.isFlagged ?? false) !== (header.isFlagged ?? false)) {
-      managed.isFlagged = header.isFlagged ?? false
-      this.sendEvent(
-        { type: header.isFlagged ? 'session_flagged' : 'session_unflagged', sessionId },
-        managed.workspace.id
-      )
-      changed = true
-    }
-
-    // Session status
-    if (managed.sessionStatus !== header.sessionStatus) {
-      managed.sessionStatus = header.sessionStatus
-      this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus: header.sessionStatus ?? '' }, managed.workspace.id)
-      changed = true
-    }
-
-    // Name
-    if (managed.name !== header.name) {
-      managed.name = header.name
-      this.sendEvent({ type: 'name_changed', sessionId, name: header.name }, managed.workspace.id)
-      changed = true
-    }
-
-    if (changed) {
-      sessionLog.info(`External metadata change detected for session ${sessionId}`)
-
-      // Prevent stale pending writes from reverting externally-updated metadata.
-      sessionPersistenceQueue.cancel(sessionId)
-      this.persistSession(managed)
-    }
-
-    return changed
-  }
-
-  /**
-   * Set up ConfigWatcher for a workspace to broadcast live updates
-   * (sources added/removed, guide.md changes, etc.)
-   * Called eagerly at boot for all workspaces (automations/scheduler) and
-   * on client connect (GET_WORKSPACE / SWITCH_WORKSPACE).
-   * Idempotent â€” returns immediately if already watching.
-   * workspaceId must be the global config ID (what the renderer knows).
-   */
-  setupConfigWatcher(workspaceRootPath: string, workspaceId: string): void {
-    // Check if already watching this workspace
-    if (this.configWatchers.has(workspaceRootPath)) {
-      return // Already watching this workspace
-    }
-
-    sessionLog.info(`Setting up ConfigWatcher for workspace: ${workspaceId} (${workspaceRootPath})`)
-
-    const callbacks: ConfigWatcherCallbacks = {
-      onSourcesListChange: async (sources: LoadedSource[]) => {
-        sessionLog.info(`Sources list changed in ${workspaceRootPath} (${sources.length} sources)`)
-        this.broadcastSourcesChanged(workspaceId, sources)
-        await this.reloadSourcesForWorkspace(workspaceRootPath)
-      },
-      onSourceChange: async (slug: string, source: LoadedSource | null) => {
-        sessionLog.info(`Source '${slug}' changed:`, source ? 'updated' : 'deleted')
-        const sources = loadWorkspaceSources(workspaceRootPath)
-        this.broadcastSourcesChanged(workspaceId, sources)
-        await this.reloadSourcesForWorkspace(workspaceRootPath)
-      },
-      onSourceGuideChange: (sourceSlug: string) => {
-        sessionLog.info(`Source guide changed: ${sourceSlug}`)
-        // Broadcast the updated sources list so sidebar picks up guide changes
-        // Note: Guide changes don't require session source reload (no server changes)
-        const sources = loadWorkspaceSources(workspaceRootPath)
-        this.broadcastSourcesChanged(workspaceId, sources)
-      },
-      onStatusConfigChange: () => {
-        sessionLog.info(`Status config changed in ${workspaceId}`)
-        this.broadcastStatusesChanged(workspaceId)
-      },
-      onStatusIconChange: (_workspaceId: string, iconFilename: string) => {
-        sessionLog.info(`Status icon changed: ${iconFilename} in ${workspaceId}`)
-        this.broadcastStatusesChanged(workspaceId)
-      },
-      onLabelConfigChange: () => {
-        sessionLog.info(`Label config changed in ${workspaceId}`)
-        this.broadcastLabelsChanged(workspaceId)
-        // Emit LabelConfigChange event via AutomationSystem
-        const automationSystem = this.automationSystems.get(workspaceRootPath)
-        if (automationSystem) {
-          automationSystem.emitLabelConfigChange().catch((error) => {
-            sessionLog.error(`[Automations] Failed to emit LabelConfigChange:`, error)
-          })
-        }
-      },
-      onAutomationsConfigChange: () => {
-        sessionLog.info(`Automations config changed in ${workspaceId}`)
-        // Reload automations config via AutomationSystem
-        const automationSystem = this.automationSystems.get(workspaceRootPath)
-        if (automationSystem) {
-          const result = automationSystem.reloadConfig()
-          if (result.errors.length === 0) {
-            sessionLog.info(`Reloaded ${result.automationCount} automations for workspace ${workspaceId}`)
-          } else {
-            sessionLog.error(`Failed to reload automations for workspace ${workspaceId}:`, result.errors)
-          }
-        }
-        // Notify renderer to re-read automations.json
-        this.broadcastAutomationsChanged(workspaceId)
-      },
-      onLlmConnectionsChange: () => {
-        sessionLog.info(`LLM connections changed in ${workspaceId}`)
-        this.broadcastLlmConnectionsChanged()
-      },
-      onAppThemeChange: (theme) => {
-        sessionLog.info(`App theme changed`)
-        this.broadcastAppThemeChanged(theme)
-      },
-      onDefaultPermissionsChange: () => {
-        sessionLog.info('Default permissions changed')
-        this.broadcastDefaultPermissionsChanged()
-      },
-      onSkillsListChange: async (skills) => {
-        sessionLog.info(`Skills list changed in ${workspaceRootPath} (${skills.length} skills)`)
-        this.broadcastSkillsChanged(workspaceId, skills)
-      },
-      onSkillChange: async (slug, skill) => {
-        sessionLog.info(`Skill '${slug}' changed:`, skill ? 'updated' : 'deleted')
-        // Broadcast updated list to UI
-        const { loadAllSkills } = await import('@kata-sh/shared/skills')
-        const skills = loadAllSkills(workspaceRootPath)
-        this.broadcastSkillsChanged(workspaceId, skills)
-      },
-
-      // Session metadata changes (edits to session.jsonl headers).
-      // Detects changes from both internal writes (self) and external sources
-      // (other instances, scripts, manual edits).
-      onSessionMetadataChange: (sessionId, header) => {
-        const managed = this.sessions.get(sessionId)
-        if (!managed) return
-
-        // Check if this is our own write echoing back via fs.watch().
-        // Self-writes don't need in-memory sync (already up to date), but
-        // still need to notify the automation system for event matching.
-        const incomingSignature = getHeaderMetadataSignature(header)
-        const lastWrittenSignature = sessionPersistenceQueue.getLastWrittenSignature(sessionId)
-        const isSelfWrite = !!(lastWrittenSignature && incomingSignature === lastWrittenSignature)
-
-        // For external writes: sync in-memory state + emit UI events.
-        // Skip for self-writes to avoid feedback loops (especially on Windows
-        // where fs.watch fires aggressively: unlink + rename = 2+ events).
-        if (!isSelfWrite) {
-          // Defer external metadata application when:
-          // 1. Session is actively processing (agent running), OR
-          // 2. Session was just written programmatically (set_session_status/labels tool)
-          //    â€” fs.watch fires during atomic write (unlink+rename) and can read stale data
-          const hasWriteGuard = managed._metadataWriteGuardUntil && Date.now() < managed._metadataWriteGuardUntil
-          if (managed.isProcessing || hasWriteGuard) {
-            managed.pendingExternalMetadata = header
-            if (hasWriteGuard) {
-              sessionLog.info(`Deferred external metadata update for session ${sessionId} (recent programmatic write)`)
-            } else {
-              sessionLog.info(`Deferred external metadata update for session ${sessionId} (processing active)`)
-            }
-          } else {
-            this.applyExternalSessionMetadata(managed, header)
-          }
-        }
-
-        // Always notify automation system â€” it does its own diffing and needs
-        // to see both self-writes and external changes for event matching.
-        const automationSystem = this.automationSystems.get(managed.workspace.rootPath)
-        if (automationSystem) {
-          automationSystem.updateSessionMetadata(sessionId, {
-            permissionMode: header.permissionMode,
-            labels: header.labels,
-            isFlagged: header.isFlagged,
-            sessionStatus: header.sessionStatus,
-            sessionName: header.name,
-          }).catch((error) => {
-            sessionLog.error(`[Automations] Failed to update session metadata:`, error)
-          })
-        }
-      },
-    }
-
-    const watcher = new ConfigWatcher(workspaceRootPath, callbacks)
-    watcher.start()
-    this.configWatchers.set(workspaceRootPath, watcher)
-
-    // Initialize AutomationSystem for this workspace (includes scheduler, handlers, and event logging)
-    if (!this.automationSystems.has(workspaceRootPath)) {
-      const automationSystem = new AutomationSystem({
-        workspaceRootPath,
-        workspaceId,
-        enableScheduler: true,
-        onPromptsReady: async (prompts) => {
-          // Execute prompt automations by creating new sessions
-          const settled = await Promise.allSettled(
-            prompts.map((pending) =>
-              this.executePromptAutomation({
-                workspaceId,
-                workspaceRootPath,
-                prompt: pending.prompt,
-                labels: pending.labels,
-                permissionMode: pending.permissionMode,
-                mentions: pending.mentions,
-                llmConnection: pending.llmConnection,
-                model: pending.model,
-                thinkingLevel: pending.thinkingLevel,
-                automationName: pending.automationName,
-                telegramTopic: pending.telegramTopic,
-              })
-            )
-          )
-
-          // Write enriched history entries (with session IDs and prompt summaries)
-          for (const [idx, result] of settled.entries()) {
-            const pending = prompts[idx]
-            if (!pending.matcherId) continue
-
-            const entry = createPromptHistoryEntry({
-              matcherId: pending.matcherId,
-              ok: result.status === 'fulfilled',
-              sessionId: result.status === 'fulfilled' ? result.value.sessionId : undefined,
-              prompt: pending.prompt,
-              error: result.status === 'rejected' ? String(result.reason) : undefined,
-            })
-
-            appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
-
-            if (result.status === 'rejected') {
-              sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
-            } else {
-              sessionLog.info(`[Automations] Created session ${result.value.sessionId} from prompt action`)
-            }
-          }
-        },
-        onError: (event, error) => {
-          sessionLog.error(`Automation failed for ${event}:`, error.message)
-        },
-      })
-      this.automationSystems.set(workspaceRootPath, automationSystem)
-      sessionLog.info(`Initialized AutomationSystem for workspace ${workspaceId}`)
-    }
-  }
-
-  /**
-   * Manually notify the ConfigWatcher of a file change.
-   * Workaround for Bun's fs.watch on Linux not detecting atomic renames.
-   */
-  notifyConfigFileChange(workspaceRootPath: string, relativePath: string): void {
-    const watcher = this.configWatchers.get(workspaceRootPath)
-    watcher?.notifyFileChange(relativePath)
-  }
-
-  /**
-   * Reload sources for all sessions in a workspace, skipping those currently processing.
-   */
-  private async reloadSourcesForWorkspace(workspaceRootPath: string): Promise<void> {
-    for (const [_, managed] of this.sessions) {
-      if (managed.workspace.rootPath === workspaceRootPath) {
-        if (managed.isProcessing) {
-          sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
-          continue
-        }
-        await this.reloadSessionSources(managed)
-      }
-    }
-  }
-
-  private broadcastSourcesChanged(workspaceId: string, sources: LoadedSource[]): void {
-    if (!this.eventSink) return
-    this.eventSink(RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
-  }
-
-  private broadcastStatusesChanged(workspaceId: string): void {
-    if (!this.eventSink) return
-    sessionLog.info(`Broadcasting statuses changed for ${workspaceId}`)
-    this.eventSink(RPC_CHANNELS.statuses.CHANGED, { to: 'workspace', workspaceId }, workspaceId)
-  }
-
-  private broadcastLabelsChanged(workspaceId: string): void {
-    if (!this.eventSink) return
-    sessionLog.info(`Broadcasting labels changed for ${workspaceId}`)
-    this.eventSink(RPC_CHANNELS.labels.CHANGED, { to: 'workspace', workspaceId }, workspaceId)
-  }
-
-  private broadcastAutomationsChanged(workspaceId: string): void {
-    if (!this.eventSink) return
-    sessionLog.info(`Broadcasting automations changed for ${workspaceId}`)
-    this.eventSink(RPC_CHANNELS.automations.CHANGED, { to: 'workspace', workspaceId }, workspaceId)
-  }
-
-  private broadcastAppThemeChanged(theme: import('@kata-sh/shared/config').ThemeOverrides | null): void {
-    if (!this.eventSink) return
-    sessionLog.info(`Broadcasting app theme changed`)
-    this.eventSink(RPC_CHANNELS.theme.APP_CHANGED, { to: 'all' }, theme)
-  }
-
-  private broadcastLlmConnectionsChanged(): void {
-    if (!this.eventSink) return
-    sessionLog.info('Broadcasting LLM connections changed')
-    this.eventSink(RPC_CHANNELS.llmConnections.CHANGED, { to: 'all' })
-  }
-
-  private broadcastSkillsChanged(workspaceId: string, skills: import('@kata-sh/shared/skills').LoadedSkill[]): void {
-    if (!this.eventSink) return
-    sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
-    this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
-  }
-
-  private broadcastDefaultPermissionsChanged(): void {
-    if (!this.eventSink) return
-    sessionLog.info('Broadcasting default permissions changed')
-    this.eventSink(RPC_CHANNELS.permissions.DEFAULTS_CHANGED, { to: 'all' }, null)
-  }
-
-  /**
-   * Reload sources for a session with an active agent.
-   * Called by ConfigWatcher when source files change on disk.
-   * If agent is null (session hasn't sent any messages), skip - fresh build happens on next message.
-   */
-  private async reloadSessionSources(managed: ManagedSession): Promise<void> {
-    if (!managed.agent) return  // No agent = nothing to update (fresh build on next message)
-
-    const workspaceRootPath = managed.workspace.rootPath
-    sessionLog.info(`Reloading sources for session ${managed.id}`)
-
-    // Reload all sources from disk (kata-agents-docs is always available as MCP server)
-    const allSources = loadAllSources(workspaceRootPath)
-    managed.agent.setAllSources(allSources)
-
-    // Rebuild MCP and API servers for session's enabled sources
-    const enabledSlugs = managed.enabledSourceSlugs || []
-    const enabledSources = allSources.filter(s =>
-      enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
-    )
-    // Pass session path so large API responses can be saved to session folder
-    const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
-    const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
-    const intendedSlugs = enabledSources.map(s => s.config.slug)
-
-    // Update bridge-mcp-server config/credentials for backends that need it
-    await applyBridgeUpdates(managed.agent, sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath, 'source reload', managed.poolServer?.url)
-
-    await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-
-    sessionLog.info(`Sources reloaded for session ${managed.id}: ${Object.keys(mcpServers).length} MCP, ${Object.keys(apiServers).length} API`)
-  }
-
-  /**
-   * Reinitialize authentication environment variables.
-   * Call this after onboarding or settings changes to pick up new credentials.
-   *
-   * SECURITY NOTE: These env vars are propagated to the SDK subprocess via options.ts.
-   * Bun's automatic .env loading is disabled in the subprocess (--env-file=/dev/null)
-   * to prevent a user's project .env from injecting ANTHROPIC_API_KEY and overriding
-   * OAuth auth â€” Claude Code prioritizes API key over OAuth token when both are set.
-   * See: https://github.com/lukilabs/kata-agents-oss/issues/39
-   */
-  /**
-   * Reinitialize authentication environment variables.
-   *
-   * Uses the default LLM connection to determine which credentials to set.
-   *
-   * @param connectionSlug - Optional connection slug to use (overrides default)
-   */
-  async reinitializeAuth(connectionSlug?: string): Promise<void> {
-    try {
-      const manager = getCredentialManager()
-
-      // Get the connection to use (explicit parameter or default)
-      const slug = connectionSlug || getDefaultLlmConnection()
-      if (!slug) {
-        sessionLog.warn('No LLM connection slug available for reinitializeAuth')
-      }
-      const connection = slug ? getLlmConnection(slug) : null
-
-      // Restore managed auth env vars to their baseline before applying this connection.
-      resetManagedAnthropicAuthEnvVars()
-
-      if (!connection) {
-        sessionLog.error(`No LLM connection found for slug: ${slug}`)
-        resetSummarizationClient()
-        return
-      }
-
-      sessionLog.info(`Reinitializing auth for connection: ${slug} (${connection.authType})`)
-
-      // Resolve auth env vars via shared utility (provider-agnostic)
-      const result = await resolveAuthEnvVars(connection, slug!, manager, getValidClaudeOAuthToken)
-
-      if (!result.success) {
-        sessionLog.error(`Auth resolution failed for ${slug}: ${result.warning}`)
-      } else {
-        // Apply resolved env vars to process.env
-        for (const [key, value] of Object.entries(result.envVars)) {
-          process.env[key] = value
-        }
-        sessionLog.info(`Auth env vars set for connection: ${slug}`)
-      }
-
-      // Reset cached summarization client so it picks up new credentials/base URL
-      resetSummarizationClient()
-    } catch (error) {
-      sessionLog.error('Failed to reinitialize auth:', error)
-      throw error
-    }
-  }
-
-  async initialize(): Promise<void> {
-    try {
-      // Backfill missing `models` arrays on existing LLM connections
-      migrateLegacyLlmConnectionsConfig()
-
-      // Fix defaultLlmConnection if it points to a non-existent connection
-      migrateOrphanedDefaultConnections()
-
-      // Migrate legacy credentials to LLM connection format (one-time migration)
-      // This ensures credentials saved before LLM connections are available via the new system
-      await migrateLegacyCredentials()
-
-      // Set up authentication environment variables (critical for SDK to work)
-      await this.reinitializeAuth()
-
-      // Eagerly activate ConfigWatcher + AutomationSystem for every workspace so
-      // the scheduler and event handlers start at boot â€” not lazily on first
-      // client connect. This is critical for headless servers where no UI may
-      // ever connect, yet scheduled/event-driven automations must still fire.
-      const workspaces = getWorkspaces()
-      for (const workspace of workspaces) {
-        this.setupConfigWatcher(workspace.rootPath, workspace.id)
-      }
-
-      // Load existing sessions from disk
-      this.loadSessionsFromDisk()
-
-      // Signal that initialization is complete â€” IPC handlers waiting on initGate will proceed
-      this.initGate.markReady()
-    } catch (error) {
-      this.initGate.markFailed(error)
-      throw error
-    }
-  }
-
-  // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
-  private loadSessionsFromDisk(): void {
-    try {
-      const workspaces = getWorkspaces()
-      let totalSessions = 0
-
-      // Iterate over each workspace and load its sessions
-      for (const workspace of workspaces) {
-        const workspaceRootPath = workspace.rootPath
-        this.recoverStagedSessionDeletions(workspaceRootPath)
-        const sessionMetadata = listStoredSessions(workspaceRootPath)
-        // Load workspace config once per workspace for default working directory
-        const wsConfig = loadWorkspaceConfig(workspaceRootPath)
-        const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
-
-        for (const meta of sessionMetadata) {
-          // Create managed session from metadata only (messages lazy-loaded on demand)
-          // This dramatically reduces memory usage at startup - messages are loaded
-          // when getSession() is called for a specific session
-          const managed = createManagedSession(meta, workspace, {
-            enabledSourceSlugs: undefined,  // Loaded with messages
-            workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
-          })
-
-          // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
-          if (managed.llmConnection) {
-            const conn = resolveSessionConnection(managed.llmConnection, undefined)
-            if (!conn) {
-              sessionLog.warn(`Session ${meta.id} has orphaned llmConnection "${managed.llmConnection}", clearing`)
-              managed.llmConnection = undefined
-              managed.connectionLocked = false
-            }
-          }
-
-          // Initialize mode-manager state for restored sessions even before agent creation.
-          // This keeps diagnostics/effective mode aligned with persisted session metadata.
-          setPermissionMode(meta.id, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
-          if (managed.previousPermissionMode) {
-            hydratePreviousPermissionMode(meta.id, managed.previousPermissionMode)
-          }
-
-          this.sessions.set(meta.id, managed)
-
-          // Initialize session metadata in AutomationSystem for diffing
-          const automationSystem = this.automationSystems.get(workspaceRootPath)
-          if (automationSystem) {
-            automationSystem.setInitialSessionMetadata(meta.id, {
-              permissionMode: meta.permissionMode,
-              labels: meta.labels,
-              isFlagged: meta.isFlagged,
-              sessionStatus: meta.sessionStatus,
-              sessionName: managed.name,
-            })
-          }
-
-          totalSessions++
-        }
-      }
-
-      sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
-    } catch (error) {
-      sessionLog.error('Failed to load sessions from disk:', error)
-    }
-  }
-
-  // Suppress fs.watch metadata-revert events for the window in which our own
-  // atomic write completes. See onSessionMetadataChange.
-  private setMetadataWriteGuard(managed: ManagedSession): void {
-    managed._metadataWriteGuardUntil = Date.now() + METADATA_WRITE_GUARD_MS
-  }
-
-  /**
-   * Persist a session to disk (async, with debouncing in the persistence queue).
-   *
-   * Cold-session path: if messages haven't been lazy-loaded yet, hydrate them
-   * synchronously from the JSONL first â€” otherwise the snapshot we enqueue
-   * would write `messages: []` over the real messages on disk. Hydration
-   * deliberately does NOT touch persistent metadata fields (name, labels,
-   * sessionStatus, llmConnection, ...) because the caller may have just
-   * mutated them; the in-memory mutation must win over what's on disk.
-   * `loadStoredSession` is synchronous (sync fs reads), so the entire path
-   * stays sync â€” no microtask race window between the load and the enqueue.
-   */
-  private persistSession(managed: ManagedSession): void {
-    if (!managed.messagesLoaded) {
-      this.hydrateMessagesForColdPersist(managed)
-    }
-    this.enqueuePersist(managed)
-  }
-
-  // Cold-persist hydration. Mirrors the messages/queue-recovery half of
-  // loadMessagesFromDisk but skips the metadata field syncs. Sets
-  // messagesLoaded=true so subsequent persistSession calls take the fast path.
-  // Subsequent ensureMessagesLoaded calls also short-circuit, which is fine â€”
-  // queue recovery has already run here.
-  private hydrateMessagesForColdPersist(managed: ManagedSession): void {
-    sessionLog.debug(`Cold-load triggered for persistSession on ${managed.id}`)
-    const stored = loadStoredSession(managed.workspace.rootPath, managed.id)
-    if (stored) {
-      managed.messages = (stored.messages || []).map(storedToMessage)
-      managed.tokenUsage = stored.tokenUsage
-      // Deferred-load fields (intentionally undefined after startup, see
-      // loadSessionsFromDisk). Populate from disk only if not already set in
-      // memory â€” a caller may have mutated them via setSessionSources etc.
-      if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
-      if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
-      if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
-      if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
-      if (managed.sharedId === undefined) managed.sharedId = stored.sharedId
-      if (managed.transferredSessionSummary === undefined) managed.transferredSessionSummary = stored.transferredSessionSummary
-      if (managed.transferredSessionSummaryApplied === undefined) managed.transferredSessionSummaryApplied = stored.transferredSessionSummaryApplied
-
-      // Queue recovery: find orphaned queued messages from crash/restart and re-queue them.
-      const orphanedQueued = managed.messages.filter(m =>
-        m.role === 'user' && m.isQueued === true
-      )
-      if (orphanedQueued.length > 0) {
-        sessionLog.info(`Recovering ${orphanedQueued.length} queued message(s) for session ${managed.id}`)
-        for (const msg of orphanedQueued) {
-          managed.messageQueue.push({
-            message: msg.content,
-            messageId: msg.id,
-            attachments: undefined,
-            storedAttachments: msg.attachments,
-            options: undefined,
-          })
-        }
-        if (!managed.isProcessing && managed.messageQueue.length > 0) {
-          setImmediate(() => {
-            this.processNextQueuedMessage(managed.id)
-          })
-        }
-      }
-      sessionLog.debug(`Cold-hydrated ${managed.messages.length} messages for session ${managed.id}`)
-    }
-    managed.messagesLoaded = true
-  }
-
-  // Build the StoredSession snapshot and hand it to the persistence queue.
-  // Caller must ensure `managed.messagesLoaded` is true.
-  private enqueuePersist(managed: ManagedSession): void {
-    try {
-      // Filter out transient status messages (progress indicators like "Compacting...")
-      // Error messages are now persisted with rich fields for diagnostics
-      const persistableMessages = managed.messages.filter(m =>
-        m.role !== 'status'
-      )
-
-      const storedSession: StoredSession = {
-        ...pickSessionFields(managed),
-        workspaceRootPath: managed.workspace.rootPath,
-        createdAt: managed.createdAt ?? Date.now(),
-        lastUsedAt: Date.now(),
-        messages: persistableMessages.map(messageToStored),
-        tokenUsage: managed.tokenUsage ?? DEFAULT_TOKEN_USAGE,
-      } as StoredSession
-
-      // Queue for async persistence with debouncing
-      sessionPersistenceQueue.enqueue(storedSession)
-    } catch (error) {
-      sessionLog.error(`Failed to queue session ${managed.id} for persistence:`, error)
-    }
-  }
-
-  // Flush a specific session immediately (call on session close/switch).
-  // Cold-persist hydration is synchronous, so by the time we reach here the
-  // queue already has an entry whenever persistSession was just called.
-  async flushSession(sessionId: string): Promise<void> {
-    await sessionPersistenceQueue.flush(sessionId)
-  }
-
-  // Flush all pending sessions (call on app quit).
-  async flushAllSessions(): Promise<void> {
-    await sessionPersistenceQueue.flushAll()
-  }
-
-  // ============================================
-  // Unified Auth Request Helpers
-  // ============================================
-
-  /**
-   * Get human-readable description for auth request
-   */
-  private getAuthRequestDescription(request: AuthRequest): string {
-    switch (request.type) {
-      case 'credential':
-        return `Authentication required for ${request.sourceName}`
-      case 'oauth':
-        return `OAuth authentication for ${request.sourceName}`
-      case 'oauth-google':
-        return `Sign in with Google for ${request.sourceName}`
-      case 'oauth-slack':
-        return `Sign in with Slack for ${request.sourceName}`
-      case 'oauth-microsoft':
-        return `Sign in with Microsoft for ${request.sourceName}`
-    }
-  }
-
-  /**
-   * Format auth result message to send back to agent
-   */
-  private formatAuthResultMessage(result: AuthResult): string {
-    if (result.success) {
-      let msg = `Authentication completed for ${result.sourceSlug}.`
-      if (result.email) msg += ` Signed in as ${result.email}.`
-      if (result.workspace) msg += ` Connected to workspace: ${result.workspace}.`
-      msg += ' Credentials have been saved.'
-      return msg
-    }
-    if (result.cancelled) {
-      return `Authentication cancelled for ${result.sourceSlug}.`
-    }
-    return `Authentication failed for ${result.sourceSlug}: ${result.error || 'Unknown error'}`
-  }
-
-
-  /**
-   * Complete an auth request and send result back to agent
-   * This updates the auth message status and sends a faked user message
-   */
-  async completeAuthRequest(sessionId: string, result: AuthResult): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot complete auth request - session ${sessionId} not found`)
-      return
-    }
-
-    // Find and update the pending auth-request message
-    const authMessage = managed.messages.find(m =>
-      m.role === 'auth-request' &&
-      m.authRequestId === result.requestId &&
-      m.authStatus === 'pending'
-    )
-
-    if (authMessage) {
-      authMessage.authStatus = result.success ? 'completed' :
-                               result.cancelled ? 'cancelled' : 'failed'
-      authMessage.authError = result.error
-      authMessage.authEmail = result.email
-      authMessage.authWorkspace = result.workspace
-    }
-
-    // Emit auth_completed event to update UI
-    this.sendEvent({
-      type: 'auth_completed',
-      sessionId,
-      requestId: result.requestId,
-      success: result.success,
-      cancelled: result.cancelled,
-      error: result.error,
-    }, managed.workspace.id)
-
-    // Create faked user message with result
-    const resultContent = this.formatAuthResultMessage(result)
-
-    // Clear pending auth state
-    managed.pendingAuthRequestId = undefined
-    managed.pendingAuthRequest = undefined
-
-    // Auto-enable the source in the session after successful auth
-    if (result.success && result.sourceSlug) {
-      const slugSet = new Set(managed.enabledSourceSlugs || [])
-      if (!slugSet.has(result.sourceSlug)) {
-        slugSet.add(result.sourceSlug)
-        managed.enabledSourceSlugs = Array.from(slugSet)
-        sessionLog.info(`Auto-enabled source ${result.sourceSlug} in session ${sessionId} after auth`)
-      }
-
-      // Clear any refresh cooldown so the source is immediately usable
-      managed.tokenRefreshManager.clearCooldown(result.sourceSlug)
-    }
-
-    // Persist session with updated auth message and enabled sources
-    this.persistSession(managed)
-
-    // Update bridge-mcp-server config/credentials for backends that need it
-    if (result.success && result.sourceSlug && managed.agent) {
-      const workspaceRootPath = managed.workspace.rootPath
-      const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
-      const enabledSlugs = managed.enabledSourceSlugs || []
-      const allSources = loadAllSources(workspaceRootPath)
-      const enabledSources = allSources.filter(s =>
-        enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
-      )
-      const { mcpServers } = await buildServersFromSources(
-        enabledSources, sessionPath, managed.tokenRefreshManager
-      )
-      await applyBridgeUpdates(managed.agent, sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath, 'source auth', managed.poolServer?.url)
-    }
-
-    // Send the result as a new message to resume conversation
-    // Use empty arrays for attachments since this is a system-generated message
-    await this.sendMessage(sessionId, resultContent, [], [], {})
-
-    sessionLog.info(`Auth request completed for ${result.sourceSlug}: ${result.success ? 'success' : 'failed'}`)
-  }
-
-  /**
-   * Handle credential input from the UI (for non-OAuth auth)
-   * Called when user submits credentials via the inline form
-   */
-  async handleCredentialInput(
-    sessionId: string,
-    requestId: string,
-    response: import('@kata-sh/shared/protocol').CredentialResponse
-  ): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed?.pendingAuthRequest) {
-      sessionLog.warn(`Cannot handle credential input - no pending auth request for session ${sessionId}`)
-      return
-    }
-
-    const request = managed.pendingAuthRequest as CredentialAuthRequest
-    if (request.requestId !== requestId) {
-      sessionLog.warn(`Credential request ID mismatch: expected ${request.requestId}, got ${requestId}`)
-      return
-    }
-
-    if (response.cancelled) {
-      await this.completeAuthRequest(sessionId, {
-        requestId,
-        sourceSlug: request.sourceSlug,
-        success: false,
-        cancelled: true,
-      })
-      return
-    }
-
-    try {
-      // Store credentials using existing workspace ID extraction pattern
-      const credManager = getCredentialManager()
-      // Extract workspace ID from root path (last segment of path)
-      const wsId = basename(managed.workspace.rootPath) || managed.workspace.id
-
-      if (request.mode === 'basic') {
-        // Store value as JSON string {username, password} - credential-manager.ts parses it for basic auth
-        await credManager.set(
-          { type: 'source_basic', workspaceId: wsId, sourceId: request.sourceSlug },
-          { value: JSON.stringify({ username: response.username, password: response.password }) }
-        )
-      } else if (request.mode === 'bearer') {
-        await credManager.set(
-          { type: 'source_bearer', workspaceId: wsId, sourceId: request.sourceSlug },
-          { value: response.value! }
-        )
-      } else if (request.mode === 'multi-header') {
-        // Store multi-header credentials as JSON { "DD-API-KEY": "...", "DD-APPLICATION-KEY": "..." }
-        await credManager.set(
-          { type: 'source_apikey', workspaceId: wsId, sourceId: request.sourceSlug },
-          { value: JSON.stringify(response.headers) }
-        )
-      } else {
-        // header or query - both use API key storage
-        await credManager.set(
-          { type: 'source_apikey', workspaceId: wsId, sourceId: request.sourceSlug },
-          { value: response.value! }
-        )
-      }
-
-      // Update source config to mark as authenticated
-      const { markSourceAuthenticated } = await import('@kata-sh/shared/sources')
-      markSourceAuthenticated(managed.workspace.rootPath, request.sourceSlug)
-
-      // Mark source as unseen so fresh guide is injected on next message
-      if (managed.agent) {
-        managed.agent.markSourceUnseen(request.sourceSlug)
-      }
-
-      await this.completeAuthRequest(sessionId, {
-        requestId,
-        sourceSlug: request.sourceSlug,
-        success: true,
-      })
-    } catch (error) {
-      sessionLog.error(`Failed to save credentials for ${request.sourceSlug}:`, error)
-      await this.completeAuthRequest(sessionId, {
-        requestId,
-        sourceSlug: request.sourceSlug,
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to save credentials',
-      })
-    }
-  }
-
-  getWorkspaces(): Workspace[] {
-    return getWorkspaces()
-  }
-
-  getWorkspacesInfo(): WorkspaceInfo[] {
-    return getWorkspaces().map(({ rootPath, createdAt, ...info }) => info)
-  }
-
-  getActiveSessionCount(workspaceId?: string): number {
-    let count = 0
-    for (const managed of this.sessions.values()) {
-      if (workspaceId && managed.workspace.id !== workspaceId) continue
-      if (managed.isProcessing) count++
-    }
-    return count
-  }
-
-  getWorkspaceAutomationSummary(workspaceId: string): { automationCount: number; schedulerRunning: boolean } {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) return { automationCount: 0, schedulerRunning: false }
-
-    const automationSystem = this.automationSystems.get(workspace.rootPath)
-    if (!automationSystem) return { automationCount: 0, schedulerRunning: false }
-
-    const config = automationSystem.getConfig()
-    let automationCount = 0
-    if (config) {
-      for (const matchers of Object.values(config.automations)) {
-        automationCount += matchers?.length ?? 0
-      }
-    }
-
-    return {
-      automationCount,
-      // SchedulerService is running if the system was created with enableScheduler
-      schedulerRunning: !automationSystem.isDisposed(),
-    }
-  }
-
-  getActiveSessionsInfo(): ActiveSessionInfo[] {
-    const result: ActiveSessionInfo[] = []
-    for (const managed of this.sessions.values()) {
-      if (!managed.isProcessing) continue
-
-      let status: SessionProcessingStatus = 'processing'
-      if (managed.stopRequested) status = 'idle'
-
-      result.push({
-        sessionId: managed.id,
-        workspaceId: managed.workspace.id,
-        workspaceName: managed.workspace.name,
-        title: managed.name || undefined,
-        status,
-        triggeredBy: managed.triggeredBy
-          ? { automationName: managed.triggeredBy.automationName ?? 'Unknown', timestamp: managed.triggeredBy.timestamp ?? 0 }
-          : undefined,
-        createdAt: managed.lastMessageAt,
-      })
-    }
-    return result
-  }
-
-  /**
-   * Reload all sessions from disk.
-   * Used after importing sessions to refresh the in-memory session list.
-   */
-  reloadSessions(): void {
-    this.loadSessionsFromDisk()
-  }
-
-  getSessions(workspaceId?: string): Session[] {
-    // Returns session metadata only - messages are NOT included to save memory
-    // Use getSession(id) to load messages for a specific session
-    let sessions = Array.from(this.sessions.values())
-
-    // Filter by workspace if specified (used when switching workspaces)
-    if (workspaceId) {
-      sessions = sessions.filter(m => m.workspace.id === workspaceId)
-    }
-
-    return sessions
-      .map(m => managedToSession(m))
-      .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
-  }
-
-  /**
-   * Aggregate unread state across all workspaces.
-   * Excludes hidden and archived sessions from counts/indicators.
-   */
-  getUnreadSummary(): UnreadSummary {
-    const byWorkspace: Record<string, number> = {}
-    const hasUnreadByWorkspace: Record<string, boolean> = {}
-
-    for (const workspace of getWorkspaces()) {
-      byWorkspace[workspace.id] = 0
-      hasUnreadByWorkspace[workspace.id] = false
-    }
-
-    for (const session of this.sessions.values()) {
-      if (session.hidden || session.isArchived) continue
-      if (!session.hasUnread) continue
-
-      const workspaceId = session.workspace.id
-      byWorkspace[workspaceId] = (byWorkspace[workspaceId] ?? 0) + 1
-      hasUnreadByWorkspace[workspaceId] = true
-    }
-
-    const totalUnreadSessions = Object.values(byWorkspace).reduce((sum, count) => sum + count, 0)
-
-    return {
-      totalUnreadSessions,
-      byWorkspace,
-      hasUnreadByWorkspace,
-    }
-  }
-
-  /**
-   * Refresh badge count from current unread state.
-   * Called by renderer on mount â€” ensures badge is set even if the initial
-   * emitUnreadSummaryChanged() fired before the renderer was ready.
-   */
-  refreshBadge(): void {
-    const summary = this.getUnreadSummary()
-    sessionRuntimeHooks.updateBadgeCount(summary.totalUnreadSessions)
-  }
-
-  /**
-   * Broadcast global unread summary to all workspace windows.
-   */
-  private emitUnreadSummaryChanged(): void {
-    const summary = this.getUnreadSummary()
-
-    // Update badge via runtime hook â€” host decides whether/how to render badges
-    sessionRuntimeHooks.updateBadgeCount(summary.totalUnreadSessions)
-
-    if (!this.eventSink) return
-
-    // Broadcast to renderers for UI updates (session list dots, etc.)
-    this.eventSink(RPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED, { to: 'all' }, summary)
-  }
-
-  /**
-   * Get a single session by ID with all messages loaded.
-   * Used for lazy loading session messages when session is selected.
-   * Messages are loaded from disk on first access to reduce memory usage.
-   */
-  async getSession(sessionId: string): Promise<Session | null> {
-    const m = this.sessions.get(sessionId)
-    if (!m) return null
-
-    // Lazy-load messages from disk if not yet loaded
-    await this.ensureMessagesLoaded(m)
-
-    return managedToSession(m, { messages: m.messages })
-  }
-
-  /**
-   * Ensure messages are loaded for a managed session.
-   * Uses promise deduplication to prevent race conditions when multiple
-   * concurrent calls (e.g., rapid session switches + message send) try
-   * to load messages simultaneously.
-   */
-  private async ensureMessagesLoaded(managed: ManagedSession): Promise<void> {
-    if (managed.messagesLoaded) return
-
-    // Deduplicate concurrent loads - return existing promise if already loading
-    const existingPromise = this.messageLoadingPromises.get(managed.id)
-    if (existingPromise) {
-      return existingPromise
-    }
-
-    const loadPromise = this.loadMessagesFromDisk(managed)
-    this.messageLoadingPromises.set(managed.id, loadPromise)
-
-    try {
-      await loadPromise
-    } finally {
-      this.messageLoadingPromises.delete(managed.id)
-    }
-  }
-
-  /**
-   * Internal: Load messages from disk storage into the managed session.
-   */
-  private async loadMessagesFromDisk(managed: ManagedSession): Promise<void> {
-    const storedSession = loadStoredSession(managed.workspace.rootPath, managed.id)
-    if (storedSession) {
-      managed.messages = (storedSession.messages || []).map(storedToMessage)
-      managed.tokenUsage = storedSession.tokenUsage
-      managed.lastReadMessageId = storedSession.lastReadMessageId
-      managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
-      managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
-      managed.sharedUrl = storedSession.sharedUrl
-      managed.sharedId = storedSession.sharedId
-      // Sync name from disk - ensures title persistence across lazy loading
-      managed.name = storedSession.name
-      // Restore LLM connection state - ensures correct provider on resume
-      if (storedSession.llmConnection) {
-        managed.llmConnection = storedSession.llmConnection
-      }
-      if (storedSession.connectionLocked) {
-        managed.connectionLocked = storedSession.connectionLocked
-      }
-      // Sync transferred session summary state from disk
-      managed.transferredSessionSummary = storedSession.transferredSessionSummary
-      managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
-      sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
-
-      // Queue recovery: find orphaned queued messages from crash/restart and re-queue them
-      const orphanedQueued = managed.messages.filter(m =>
-        m.role === 'user' && m.isQueued === true
-      )
-      if (orphanedQueued.length > 0) {
-        sessionLog.info(`Recovering ${orphanedQueued.length} queued message(s) for session ${managed.id}`)
-        for (const msg of orphanedQueued) {
-          managed.messageQueue.push({
-            message: msg.content,
-            messageId: msg.id,
-            attachments: undefined,  // Attachments already stored on disk
-            storedAttachments: msg.attachments,
-            options: undefined,
-          })
-        }
-        // Process queue when session becomes active (will be triggered by first message or interaction)
-        // Use setImmediate to avoid blocking the load and allow session state to settle
-        if (!managed.isProcessing && managed.messageQueue.length > 0) {
-          setImmediate(() => {
-            this.processNextQueuedMessage(managed.id)
-          })
-        }
-      }
-    }
-    managed.messagesLoaded = true
-  }
-
-  /**
-   * Get the filesystem path to a session's folder
-   */
-  getSessionPath(sessionId: string): string | null {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return null
-    return getSessionStoragePath(managed.workspace.rootPath, sessionId)
-  }
-
-  async createSession(workspaceId: string, options?: import('@kata-sh/shared/protocol').CreateSessionOptions): Promise<Session> {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      throw new Error(`Workspace ${workspaceId} not found`)
-    }
-
-    // Get new session defaults from workspace config (with global fallback)
-    // Options.permissionMode overrides the workspace default (used by EditPopover for auto-execute)
-    const workspaceRootPath = workspace.rootPath
-    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
-    const globalDefaults = loadConfigDefaults()
-
-    // Read permission mode from workspace config, fallback to global defaults
-    const defaultPermissionMode = options?.permissionMode
-      ?? wsConfig?.defaults?.permissionMode
-      ?? globalDefaults.workspaceDefaults.permissionMode
-
-    const userDefaultWorkingDir = wsConfig?.defaults?.workingDirectory || undefined
-    // Resolve thinking level with caller-first precedence, matching permissionMode above:
-    //   caller override â†’ workspace default â†’ global default.
-    // normalizeThinkingLevel() tolerates undefined/unknown inputs.
-    const defaultThinkingLevel =
-      normalizeThinkingLevel(options?.thinkingLevel)
-      ?? normalizeThinkingLevel(wsConfig?.defaults?.thinkingLevel)
-      ?? getDefaultThinkingLevel()
-    // Get default model from workspace config (used when no session-specific model is set)
-    const defaultModel = wsConfig?.defaults?.model
-    // Get default enabled sources from workspace config
-    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
-
-    // Resolve model tier hints ('fast' / 'default') to actual model IDs.
-    // EditPopover uses tier hints instead of hardcoded Anthropic model names
-    // so the right model is selected regardless of the active LLM provider.
-    let resolvedModelOption = options?.model || defaultModel
-    if (resolvedModelOption === 'fast' || resolvedModelOption === 'default') {
-      const tierConnection = resolveSessionConnection(
-        options?.llmConnection,
-        wsConfig?.defaults?.defaultLlmConnection,
-      )
-      if (tierConnection) {
-        resolvedModelOption = resolvedModelOption === 'fast'
-          ? (getMiniModel(tierConnection) ?? tierConnection.defaultModel ?? defaultModel)
-          : (tierConnection.defaultModel ?? defaultModel)
-      } else {
-        resolvedModelOption = defaultModel
-      }
-    }
-
-    // Resolve backend target early for branching policy checks.
-    const targetBackendContext = resolveBackendContext({
-      sessionConnectionSlug: options?.llmConnection,
-      workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
-      managedModel: resolvedModelOption,
-    })
-    const targetProviderType = targetBackendContext.connection?.providerType
-      ?? (targetBackendContext.provider === 'pi' ? 'pi' : 'anthropic')
-    const targetPiAuthProvider = targetBackendContext.connection?.piAuthProvider
-
-    // Resolve working directory from options:
-    // - 'user_default' or undefined: Use workspace's configured default
-    // - 'none': No working directory (empty string means session folder only)
-    // - Absolute path: Use as-is
-    let resolvedWorkingDir: string | undefined
-    if (options?.workingDirectory === 'none') {
-      resolvedWorkingDir = undefined  // No working directory
-    } else if (options?.workingDirectory === 'user_default' || options?.workingDirectory === undefined) {
-      resolvedWorkingDir = userDefaultWorkingDir
-    } else {
-      resolvedWorkingDir = options.workingDirectory
-    }
-
-    // Validate branch request up-front so branch metadata is only set for valid branches.
-    // This prevents creating sessions that claim to be branched but don't have copied history.
-    let validatedBranch: {
-      sourceSessionId: string
-      sourceMessageId: string
-      sourceSession: StoredSession
-      branchIdx: number
-      branchContextStrategy: 'sdk-fork' | 'seeded-fresh-session'
-      branchFromSdkSessionId?: string
-      branchFromSessionPath?: string
-      branchFromSdkCwd?: string
-      branchFromSdkTurnId?: string
-      sourceProvider?: 'anthropic' | 'pi'
-    } | undefined
-
-    if (options?.branchFromSessionId || options?.branchFromMessageId) {
-      if (!options.branchFromSessionId || !options.branchFromMessageId) {
-        sessionLog.warn('Branch validation failed: missing branchFromSessionId or branchFromMessageId', {
-          workspaceId,
-          branchFromSessionId: options.branchFromSessionId,
-          branchFromMessageId: options.branchFromMessageId,
-        })
-        throw new Error('Invalid branch request: both branchFromSessionId and branchFromMessageId are required')
-      }
-
-      const sourceManaged = this.sessions.get(options.branchFromSessionId)
-      if (sourceManaged) {
-        if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
-          sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
-            workspaceId,
-            targetWorkspaceRootPath: workspaceRootPath,
-            sourceWorkspaceRootPath: sourceManaged.workspace.rootPath,
-            branchFromSessionId: options.branchFromSessionId,
-          })
-          throw new Error('Invalid branch request: source session belongs to a different workspace')
-        }
-
-        // Flush source session to disk to ensure latest message list is available for branch copy.
-        this.persistSession(sourceManaged)
-        await sessionPersistenceQueue.flush(sourceManaged.id)
-      }
-
-      const sourceSession = loadStoredSession(workspaceRootPath, options.branchFromSessionId)
-      if (!sourceSession) {
-        sessionLog.warn('Branch validation failed: source session not found on disk', {
-          workspaceId,
-          branchFromSessionId: options.branchFromSessionId,
-        })
-        throw new Error(`Invalid branch request: source session ${options.branchFromSessionId} not found`)
-      }
-
-      const sourceBackendContext = resolveBackendContext({
-        sessionConnectionSlug: sourceManaged?.llmConnection || sourceSession.llmConnection,
-        workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
-        managedModel: sourceManaged?.model || sourceSession.model,
-      })
-      const sourceProviderType = sourceBackendContext.connection?.providerType
-        ?? (sourceBackendContext.provider === 'pi' ? 'pi' : 'anthropic')
-      const sourcePiAuthProvider = sourceBackendContext.connection?.piAuthProvider
-
-      const providerMismatch = sourceBackendContext.provider !== targetBackendContext.provider
-      const providerTypeMismatch = sourceProviderType !== targetProviderType
-      const piAuthProviderMismatch =
-        sourceBackendContext.provider === 'pi' && sourcePiAuthProvider !== targetPiAuthProvider
-
-      if (providerMismatch || providerTypeMismatch || piAuthProviderMismatch) {
-        sessionLog.warn('Branch validation failed: source and target providers are incompatible', {
-          workspaceId,
-          branchFromSessionId: options.branchFromSessionId,
-          sourceProvider: sourceBackendContext.provider,
-          sourceProviderType,
-          sourcePiAuthProvider,
-          targetProvider: targetBackendContext.provider,
-          targetProviderType,
-          targetPiAuthProvider,
-        })
-        throw new Error('Branching is only supported within the same provider/backend. Switch this panel connection and try again.')
-      }
-
-      const branchIdx = sourceSession.messages.findIndex(m => m.id === options.branchFromMessageId)
-      if (branchIdx === -1) {
-        sessionLog.warn('Branch validation failed: message not found in source session', {
-          workspaceId,
-          branchFromSessionId: options.branchFromSessionId,
-          branchFromMessageId: options.branchFromMessageId,
-        })
-        throw new Error(`Invalid branch request: message ${options.branchFromMessageId} not found in source session`)
-      }
-
-      // New branches always use strict provider-level SDK fork semantics.
-      // Seeded mode remains only for legacy sessions created before strict fork was enforced.
-      const branchContextStrategy: 'sdk-fork' | 'seeded-fresh-session' = 'sdk-fork'
-
-      const branchFromSdkSessionId = branchContextStrategy === 'sdk-fork'
-        ? (sourceManaged?.sdkSessionId || sourceSession.sdkSessionId)
-        : undefined
-      const branchFromSessionPath = branchContextStrategy === 'sdk-fork'
-        ? getSessionStoragePath(workspaceRootPath, options.branchFromSessionId)
-        : undefined
-      // Capture parent's sdkCwd so the child SDK subprocess can find the parent's
-      // session file (stored under ~/.claude/projects/{cwd-hash}/).
-      const branchFromSdkCwd = branchContextStrategy === 'sdk-fork'
-        ? (sourceManaged?.sdkCwd || sourceSession.sdkCwd)
-        : undefined
-
-      // Provider-native branch anchor at branch point.
-      // - Claude: assistant message UUID (resumeSessionAt), but only when anchor lineage
-      //   matches the parent SDK session being resumed.
-      // - Pi: session entry ID loaded from sidecar (pi-turn-anchors.json)
-      const branchMessage = sourceSession.messages[branchIdx]
-      let branchFromSdkTurnId: string | undefined
-      if (branchContextStrategy === 'sdk-fork') {
-        if (sourceBackendContext.provider === 'pi') {
-          if (branchFromSessionPath) {
-            branchFromSdkTurnId = await getPiTurnAnchor(branchFromSessionPath, options.branchFromMessageId)
-            if (!branchFromSdkTurnId) {
-              sessionLog.warn('Pi branch anchor missing: falling back to full-history fork for this branch', {
-                workspaceId,
-                branchFromSessionId: options.branchFromSessionId,
-                branchFromMessageId: options.branchFromMessageId,
-              })
-            }
-          }
-        } else if (sourceBackendContext.provider === 'anthropic') {
-          if (branchFromSessionPath && branchFromSdkSessionId) {
-            const anchor = await getClaudeTurnAnchor(branchFromSessionPath, options.branchFromMessageId)
-            if (!anchor) {
-              sessionLog.warn('Claude branch anchor missing: falling back to full-history fork for this branch', {
-                workspaceId,
-                branchFromSessionId: options.branchFromSessionId,
-                branchFromMessageId: options.branchFromMessageId,
-              })
-            } else if (!anchor.sdkMessageUuid || !isClaudeMessageUuid(anchor.sdkMessageUuid)) {
-              sessionLog.warn('Claude branch anchor malformed: falling back to full-history fork for this branch', {
-                workspaceId,
-                branchFromSessionId: options.branchFromSessionId,
-                branchFromMessageId: options.branchFromMessageId,
-                anchorSdkSessionId: anchor.sdkSessionId,
-              })
-            } else if (anchor.sdkSessionId !== branchFromSdkSessionId) {
-              sessionLog.warn('Claude branch anchor lineage mismatch: falling back to full-history fork for this branch', {
-                workspaceId,
-                branchFromSessionId: options.branchFromSessionId,
-                branchFromMessageId: options.branchFromMessageId,
-                anchorSdkSessionId: anchor.sdkSessionId,
-                parentSdkSessionId: branchFromSdkSessionId,
-              })
-            } else {
-              branchFromSdkTurnId = anchor.sdkMessageUuid
-            }
-          }
-        } else {
-          branchFromSdkTurnId = branchMessage?.turnId
-        }
-      }
-
-      if (branchContextStrategy === 'sdk-fork' && !branchFromSdkSessionId) {
-        sessionLog.warn('Branch validation failed: sdk-fork requires parent SDK session ID', {
-          workspaceId,
-          branchFromSessionId: options.branchFromSessionId,
-          sourceProvider: sourceBackendContext.provider,
-          targetProvider: targetBackendContext.provider,
-        })
-        throw new Error('Cannot create branch yet: parent session SDK context is not initialized. Send one message in the parent session and try again.')
-      }
-
-      validatedBranch = {
-        sourceSessionId: options.branchFromSessionId,
-        sourceMessageId: options.branchFromMessageId,
-        sourceSession,
-        branchIdx,
-        branchContextStrategy,
-        branchFromSdkSessionId,
-        branchFromSessionPath,
-        branchFromSdkCwd,
-        branchFromSdkTurnId,
-        sourceProvider: sourceBackendContext.provider,
-      }
-
-      sessionLog.info('Branch validation succeeded', {
-        workspaceId,
-        branchFromSessionId: validatedBranch.sourceSessionId,
-        branchFromMessageId: validatedBranch.sourceMessageId,
-        branchContextStrategy: validatedBranch.branchContextStrategy,
-        branchFromSdkSessionId: !!validatedBranch.branchFromSdkSessionId,
-        copiedMessageCount: validatedBranch.branchIdx + 1,
-      })
-    }
-
-    // Use storage layer to create and persist the session
-    const storedSession = await createStoredSession(workspaceRootPath, {
-      name: options?.name,
-      permissionMode: defaultPermissionMode,
-      workingDirectory: resolvedWorkingDir,
-      hidden: options?.hidden,
-      sessionStatus: options?.sessionStatus,
-      labels: options?.labels,
-      isFlagged: options?.isFlagged,
-    })
-
-    // Branch: copy messages from source session up to and including the branch point
-    if (validatedBranch) {
-      const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
-      if (!branchedStored) {
-        throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
-      }
-
-      const sourceMessages = validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1)
-
-      // Re-map embedded paths: source messages were loaded with expandSessionPath(sourceDir),
-      // so they contain absolute paths to the *source* session directory. When saved to the
-      // branch session, makeSessionPathPortable uses the *branch* dir â€” which won't match.
-      // Fix: replace source dir paths with branch dir paths so tokenization works on save.
-      const sourceDir = normalizePath(getSessionStoragePath(workspaceRootPath, validatedBranch.sourceSessionId))
-      const branchDir = normalizePath(getSessionStoragePath(workspaceRootPath, storedSession.id))
-      if (sourceDir !== branchDir) {
-        branchedStored.messages = sourceMessages.map(m => {
-          const json = JSON.stringify(m)
-          if (!json.includes(sourceDir)) return m
-          return JSON.parse(json.replaceAll(sourceDir, branchDir)) as StoredMessage
-        })
-      } else {
-        branchedStored.messages = sourceMessages
-      }
-
-      branchedStored.branchFromMessageId = validatedBranch.sourceMessageId
-      if (validatedBranch.branchContextStrategy === 'sdk-fork') {
-        branchedStored.branchFromSdkSessionId = validatedBranch.branchFromSdkSessionId
-        branchedStored.branchFromSessionPath = validatedBranch.branchFromSessionPath
-        branchedStored.branchFromSdkCwd = validatedBranch.branchFromSdkCwd
-        branchedStored.branchFromSdkTurnId = validatedBranch.branchFromSdkTurnId
-      } else {
-        delete branchedStored.branchFromSdkSessionId
-        delete branchedStored.branchFromSessionPath
-        delete branchedStored.branchFromSdkCwd
-        delete branchedStored.branchFromSdkTurnId
-      }
-
-      // Conversation-branch shared ownership: a child from a managed-worktree
-      // session shares the same managed worktree (V1 does not claim filesystem
-      // isolation between provider-native conversation branches). Inherit the
-      // parent's checkout metadata and worktree working directory / sdk cwd.
-      if (validatedBranch.sourceSession.checkout) {
-        const parentCheckout = validatedBranch.sourceSession.checkout
-        branchedStored.checkout = parentCheckout
-        branchedStored.workingDirectory = parentCheckout.checkoutPath
-        branchedStored.sdkCwd = parentCheckout.checkoutPath
-      }
-
-      await saveStoredSession(branchedStored)
-
-      // Propagate the Pi turn-anchor sidecar into the branch so a downstream
-      // branch can still resolve anchors for messages copied here from the
-      // source. Without this step, branch-of-branch silently falls back to
-      // full-history fork â€” see kata-agents-oss#782.
-      if (
-        validatedBranch.branchContextStrategy === 'sdk-fork' &&
-        validatedBranch.sourceProvider === 'pi'
-      ) {
-        try {
-          await copyPiTurnAnchorsForBranch(
-            sourceDir,
-            branchDir,
-            branchedStored.messages.map((m) => m.id),
-          )
-        } catch (err) {
-          sessionLog.warn('Failed to copy Pi turn-anchors sidecar to branch', {
-            err,
-            sourceSessionId: validatedBranch.sourceSessionId,
-            branchSessionId: storedSession.id,
-          })
-        }
-      }
-    }
-
-    // Resolve connection/provider/auth/model using the provider-agnostic backend resolver.
-    // Reuse precomputed target context so branch validation and session construction share the same target identity.
-    const resolvedContext = targetBackendContext
-    const resolvedModel = resolvedContext.resolvedModel
-
-    // Log mini agent session creation
-    if (options?.systemPromptPreset === 'mini' || options?.model) {
-      sessionLog.info(`ðŸ¤– Creating mini agent session: model=${resolvedModel}, systemPromptPreset=${options?.systemPromptPreset}`)
-    }
-
-    const isBranch = !!validatedBranch
-
-    const managed = createManagedSession(storedSession, workspace, {
-      permissionMode: defaultPermissionMode,
-      workingDirectory: resolvedWorkingDir,
-      model: resolvedModel,
-      llmConnection: options?.llmConnection,
-      thinkingLevel: defaultThinkingLevel,
-      systemPromptPreset: options?.systemPromptPreset,
-      enabledSourceSlugs: defaultEnabledSourceSlugs,
-      branchFromMessageId: validatedBranch?.sourceMessageId,
-      branchContextStrategy: validatedBranch?.branchContextStrategy,
-      branchFromSdkSessionId: validatedBranch?.branchFromSdkSessionId,
-      branchFromSessionPath: validatedBranch?.branchFromSessionPath,
-      branchFromSdkCwd: validatedBranch?.branchFromSdkCwd,
-      branchFromSdkTurnId: validatedBranch?.branchFromSdkTurnId,
-      branchSeedApplied: validatedBranch ? validatedBranch.branchContextStrategy === 'sdk-fork' : undefined,
-      messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
-    })
-
-    // Eagerly load messages for branched sessions so the renderer gets the full
-    // conversation immediately (needed for scroll-to-bottom on panel open)
-    if (isBranch) {
-      await this.ensureMessagesLoaded(managed)
-
-      const requiresBranchPreflight = managed.branchContextStrategy === 'sdk-fork'
-      if (requiresBranchPreflight) {
-        // Enforce branch correctness at creation time.
-        // A branch is only valid if backend context can be established now,
-        // not deferred to the first user message.
-        try {
-          await this.getOrCreateAgent(managed)
-          await managed.agent!.ensureBranchReady()
-        } catch (error) {
-          sessionLog.warn('Branch creation failed during backend preflight handshake', {
-            workspaceId,
-            sessionId: storedSession.id,
-            branchFromSessionId: validatedBranch?.sourceSessionId,
-            branchFromMessageId: validatedBranch?.sourceMessageId,
-            branchContextStrategy: managed.branchContextStrategy,
-            error: error instanceof Error ? error.message : String(error),
-          })
-
-          await rollbackFailedBranchCreation({
-            managed,
-            workspaceRootPath,
-            sessionId: storedSession.id,
-            deleteFromRuntimeSessions: (id) => {
-              const m = this.sessions.get(id)
-              if (m?.autoRetryTimer) {
-                clearTimeout(m.autoRetryTimer)
-                m.autoRetryTimer = undefined
-              }
-              if (m) m.autoRetryPending = undefined
-              this.sessions.delete(id)
-            },
-            deleteStoredSession,
-          })
-
-          throw new Error(
-            `Could not create branch: ${error instanceof Error ? error.message : String(error)}`
-          )
-        }
-      }
-    }
-
-    // Conversation-branch shared ownership: mirror the parent's checkout onto
-    // the in-memory child and register it as an additional owner of the shared
-    // managed worktree so removal is blocked while this owner remains.
-    if (validatedBranch?.sourceSession.checkout) {
-      const parentCheckout = validatedBranch.sourceSession.checkout
-      managed.checkout = parentCheckout
-      managed.workingDirectory = parentCheckout.checkoutPath
-      managed.sdkCwd = parentCheckout.checkoutPath
-      if (parentCheckout.mode === 'managed-worktree' && parentCheckout.managedWorktreeId) {
-        try {
-          this.getGitServices().worktrees.addOwner(parentCheckout.managedWorktreeId, storedSession.id)
-        } catch (err) {
-          sessionLog.warn('Failed to register conversation-branch worktree owner', {
-            sessionId: storedSession.id,
-            managedWorktreeId: parentCheckout.managedWorktreeId,
-            err,
-          })
-        }
-      }
-    }
-
-    // Initialize mode-manager state immediately to avoid UI/enforcement races
-    // before the agent instance is lazily created.
-    setPermissionMode(storedSession.id, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
-    if (managed.previousPermissionMode) {
-      hydratePreviousPermissionMode(storedSession.id, managed.previousPermissionMode)
-    }
-
-    this.sessions.set(storedSession.id, managed)
-
-    // Initialize session metadata in AutomationSystem for diffing
-    const automationSystem = this.automationSystems.get(workspaceRootPath)
-    if (automationSystem) {
-      automationSystem.setInitialSessionMetadata(storedSession.id, {
-        permissionMode: storedSession.permissionMode,
-        labels: storedSession.labels,
-        isFlagged: storedSession.isFlagged,
-        sessionStatus: storedSession.sessionStatus,
-        sessionName: managed.name,
-      })
-    }
-
-    return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
-  }
-
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
-    const sessionId = managed.id
-
-    if (managed.agent) {
-      try {
-        if (managed.agent.disposeForRestart) {
-          await managed.agent.disposeForRestart()
-        } else {
-          managed.agent.dispose()
-        }
-      } catch (error) {
-        sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
-      }
-    }
-
-    if (managed.poolServer) {
-      try {
-        await managed.poolServer.stop()
-      } catch (error) {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
-      }
-    }
-
-    if (managed.mcpPool) {
-      try {
-        await managed.mcpPool.disconnectAll()
-      } catch (error) {
-        sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
-      }
-    }
-
-    managed.agent = null
-    managed.poolServer = undefined
-    managed.mcpPool = undefined
-    managed.envOverrides = undefined
-    managed.agentReady = undefined
-    managed.agentReadyResolve = undefined
-    managed.backendRuntimeSignature = undefined
-    managed.backendRestartSignature = undefined
-    unregisterSessionScopedToolCallbacks(sessionId)
-  }
-
-  /**
-   * Refresh an existing agent's runtime config in place when the session's
-   * resolved connection signature has drifted from what the agent was created
-   * with. No-ops when the agent doesn't exist, when the signature still
-   * matches, or when the agent is mid-stream (the gate is `agent.isProcessing()`
-   * â€” `managed.isProcessing` is not used because `sendMessage` flips it before
-   * calling `getOrCreateAgent`, which would make every send-path refresh dead
-   * code).
-   *
-   * Concurrency: per-session serialization via `agentRefreshLocks`. A second
-   * caller (e.g. `sendMessage` arriving mid-`SAVE`-refresh) awaits the
-   * in-flight refresh, then re-evaluates from the post-refresh state â€” so the
-   * subsequent `agent.chat()` is sent only after the subprocess has applied
-   * the runtime update (or the agent has been disposed for recreation).
-   *
-   * The helper distinguishes two kinds of drift:
-   *   - Restart-required (provider/auth/slug/piAuthProvider): goes straight
-   *     to dispose + recreate because `update_runtime_config` cannot fully
-   *     re-route credential/provider state in a live subprocess.
-   *   - In-place safe (model/baseUrl/customEndpoint/customModels): attempts
-   *     `agent.updateRuntimeConfig` and falls back to dispose if the backend
-   *     can't apply the update.
-   */
-  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
-    // Serialize against any in-flight refresh on this session. The waiter
-    // doesn't propagate the prior call's errors â€” those are logged at the
-    // origin call site.
-    const inflight = this.agentRefreshLocks.get(managed.id)
-    if (inflight) {
-      await inflight.catch(() => undefined)
-    }
-
-    if (!managed.agent) return
-
-    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model,
-    })
-    const connection = backendContext.connection
-    const sigInput = {
-      connection,
-      provider: backendContext.provider,
-      authType: backendContext.authType,
-      resolvedModel: backendContext.resolvedModel,
-    }
-    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
-    const restartSignature = buildRestartRequiredSignature(sigInput)
-
-    if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
-      managed.backendRuntimeSignature = runtimeSignature
-      managed.backendRestartSignature = restartSignature
-      return
-    }
-
-    const restartRequired = managed.backendRestartSignature !== restartSignature
-    const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
-
-    if (!restartRequired && !runtimeChanged) return
-
-    if (managed.agent.isProcessing()) {
-      sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
-      return
-    }
-
-    const work = this.runAgentRuntimeRefresh(
-      managed,
-      backendContext,
-      runtimeSignature,
-      restartSignature,
-      restartRequired,
-      reason,
-    )
-    // Track the work so concurrent callers serialize. Swallow errors on the
-    // tracked promise â€” the awaiter shouldn't get someone else's exception;
-    // errors are logged inside `runAgentRuntimeRefresh`.
-    const tracked = work.then(() => undefined, () => undefined)
-    this.agentRefreshLocks.set(managed.id, tracked)
-    try {
-      await work
-    } finally {
-      // Concurrent callers awaited `tracked` before reaching this point and
-      // each registered their own work serially, so the slot is always ours
-      // to clear when our own work resolves.
-      if (this.agentRefreshLocks.get(managed.id) === tracked) {
-        this.agentRefreshLocks.delete(managed.id)
-      }
-    }
-  }
-
-  private async runAgentRuntimeRefresh(
-    managed: ManagedSession,
-    backendContext: ReturnType<typeof resolveBackendContext>,
-    runtimeSignature: string,
-    restartSignature: string,
-    restartRequired: boolean,
-    reason: string,
-  ): Promise<void> {
-    if (restartRequired) {
-      sessionLog.info(`Restart-required field changed for session ${managed.id}; recreating backend runtime (${reason})`)
-      await this.disposeManagedAgentRuntime(managed, 'restart-required runtime change')
-      return
-    }
-
-    const connection = backendContext.connection
-    let refreshed = false
-    if (managed.agent?.updateRuntimeConfig) {
-      try {
-        refreshed = await managed.agent.updateRuntimeConfig({
-          model: backendContext.resolvedModel,
-          providerType: connection?.providerType,
-          authType: backendContext.authType,
-          runtime: connection ? {
-            baseUrl: connection.baseUrl,
-            piAuthProvider: connection.piAuthProvider,
-            customEndpoint: connection.customEndpoint,
-            customModels: connection.models?.map(model => {
-              if (typeof model === 'string') return model
-              const supportsImages = typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined
-              if (model.contextWindow || supportsImages !== undefined) {
-                return {
-                  id: model.id,
-                  ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-                  ...(supportsImages !== undefined ? { supportsImages } : {}),
-                }
-              }
-              return model.id
-            }),
-          } : undefined,
-        })
-      } catch (error) {
-        sessionLog.warn(`Runtime config in-place refresh failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
-      }
-    }
-
-    if (refreshed) {
-      managed.backendRuntimeSignature = runtimeSignature
-      managed.backendRestartSignature = restartSignature
-      sessionLog.info(`Refreshed runtime config for session ${managed.id} (${reason})`)
-    } else {
-      sessionLog.info(`Recreating backend runtime for session ${managed.id} after config change (${reason})`)
-      await this.disposeManagedAgentRuntime(managed, 'runtime config refresh')
-    }
-  }
-
-  /**
-   * Push a connection's runtime updates (e.g. `supportsImages` toggle) to every
-   * active session that uses it. Called from the `llmConnections.SAVE` handler
-   * so capability changes reach live Pi subprocesses immediately instead of
-   * waiting for the next send to lazily notice the signature drift.
-   */
-  async refreshConnectionRuntime(connectionSlug: string): Promise<void> {
-    for (const managed of this.sessions.values()) {
-      if (managed.llmConnection !== connectionSlug) continue
-      try {
-        await this.tryRefreshAgentRuntime(managed, 'connection update')
-      } catch (error) {
-        sessionLog.warn(`refreshConnectionRuntime failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
-      }
-    }
-  }
-
-  /**
-   * Get or create agent for a session (lazy loading)
-   * Creates the appropriate backend agent based on LLM connection.
-   *
-   * Provider resolution order:
-   * 1. session.llmConnection (locked after first message)
-   * 2. workspace.defaults.defaultLlmConnection
-   * 3. global defaultLlmConnection
-   * 4. fallback: no connection configured
-   */
-  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
-    // Refresh runtime config in-place when the connection has drifted since
-    // the agent was created. May null out `managed.agent` if the in-place
-    // refresh fails, in which case the create branch below rebuilds it.
-    await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
-
-    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model,
-    })
-    const connection = backendContext.connection
-    const sigInput = {
-      connection,
-      provider: backendContext.provider,
-      authType: backendContext.authType,
-      resolvedModel: backendContext.resolvedModel,
-    }
-    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
-    const restartSignature = buildRestartRequiredSignature(sigInput)
-
-    if (!managed.agent) {
-      const end = perf.start('agent.create', { sessionId: managed.id })
-
-      // Lock the connection after first resolution
-      // This ensures the session always uses the same provider
-      if (connection && !managed.connectionLocked) {
-        managed.llmConnection = connection.slug
-        managed.connectionLocked = true
-        sessionLog.info(`Locked session ${managed.id} to connection "${connection.slug}"`)
-        this.persistSession(managed)
-
-        // Keep renderer session capabilities in sync when auto-locking the connection.
-        this.sendEvent({
-          type: 'connection_changed',
-          sessionId: managed.id,
-          connectionSlug: connection.slug,
-          supportsBranching: resolveSupportsBranching(managed),
-        }, managed.workspace.id)
-      }
-
-      const provider = backendContext.provider
-      if (connection) {
-        sessionLog.info(`Using LLM connection "${connection.slug}" (${connection.providerType}) for session ${managed.id}`)
-      } else {
-        sessionLog.warn(`No LLM connection found for session ${managed.id}, using default anthropic provider`)
-      }
-
-      // Set session directory for tool metadata cross-process sharing.
-      // The SDK subprocess reads KATA_SESSION_DIR to write tool-metadata.json;
-      // the main process reads it via toolMetadataStore.setSessionDir().
-      const sessionDirForMetadata = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-      process.env.KATA_SESSION_DIR = sessionDirForMetadata
-      toolMetadataStore.setSessionDir(sessionDirForMetadata)
-
-      // Set up agentReady promise so title generation can await agent creation
-      managed.agentReady = new Promise<void>(r => { managed.agentReadyResolve = r })
-
-      // ============================================================
-      // Common setup: sources, MCP pool, session config
-      // ============================================================
-
-      const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-      const enabledSlugs = managed.enabledSourceSlugs || []
-      const allSources = loadAllSources(managed.workspace.rootPath)
-      const enabledSources = allSources.filter(s =>
-        enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
-      )
-
-      // Build server configs for enabled sources
-      const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager)
-
-      // Create centralized MCP client pool (all backends use it)
-      managed.mcpPool = new McpClientPool({ debug: (msg) => sessionLog.debug(msg), workspaceRootPath: managed.workspace.rootPath, sessionPath })
-
-      // Backends that run as external subprocesses need an HTTP pool server
-      let poolServerUrl: string | undefined
-      if (backendContext.capabilities.needsHttpPoolServer) {
-        managed.poolServer = new McpPoolServer(managed.mcpPool, { debug: (msg) => sessionLog.debug(msg) })
-        managed.mcpPool.onToolsChanged = () => managed.poolServer?.notifyToolsChanged()
-        poolServerUrl = await managed.poolServer.start()
-        await managed.mcpPool.sync(mcpServers) // Ensure pool has tools before SDK connects
-      }
-
-      // Per-session env overrides
-      const miniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
-      const envOverrides: Record<string, string> = {
-        KATA_WORKSPACE_PATH: managed.workspace.rootPath,
-        // Pass mini model to SDK subprocess so built-in tools like WebFetch
-        // use the correct model for summarization (instead of hardcoded Haiku)
-        ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
-      }
-      managed.envOverrides = envOverrides
-
-      // ============================================================
-      // Common session + callback config (identical for all backends)
-      // ============================================================
-
-      const sessionConfig = {
-        id: managed.id,
-        workspaceRootPath: managed.workspace.rootPath,
-        sdkSessionId: managed.sdkSessionId,
-        branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
-        branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
-        branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
-        branchFromSdkTurnId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkTurnId : undefined,
-        branchFromMessageId: managed.branchFromMessageId,
-        createdAt: managed.lastMessageAt,
-        lastUsedAt: managed.lastMessageAt,
-        workingDirectory: managed.workingDirectory,
-        sdkCwd: managed.sdkCwd,
-        model: managed.model,
-        llmConnection: managed.llmConnection,
-        permissionMode: managed.permissionMode,
-        previousPermissionMode: managed.previousPermissionMode,
-      }
-
-      const onSdkSessionIdUpdate = (sdkSessionId: string) => {
-        managed.sdkSessionId = sdkSessionId
-        // Retire branch-only fork metadata now that child session is established
-        if (managed.branchFromSdkSessionId) {
-          sessionLog.info(`Branch fork established for ${managed.id}: child=${sdkSessionId}, retiring parent fork metadata (parent=${managed.branchFromSdkSessionId})`)
-          managed.branchFromSdkSessionId = undefined
-          managed.branchFromSdkCwd = undefined
-          managed.branchFromSdkTurnId = undefined
-        } else {
-          sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
-        }
-        this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
-      }
-
-      const onSdkSessionIdCleared = () => {
-        managed.sdkSessionId = undefined
-        sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
-        this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
-      }
-
-      const onBranchForkInvalidated = () => {
-        managed.sdkSessionId = undefined
-        managed.branchFromSdkSessionId = undefined
-        managed.branchFromSdkCwd = undefined
-        managed.branchFromSdkTurnId = undefined
-        sessionLog.info(`Branch fork invalidated for ${managed.id}: cleared all fork metadata`)
-        this.persistSession(managed)
-        sessionPersistenceQueue.flush(managed.id)
-      }
-
-      const getRecoveryMessages = () => {
-        const relevantMessages = managed.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .filter(m => !m.isIntermediate)
-          .slice(-6)
-        return relevantMessages.map(m => ({
-          type: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))
-      }
-
-      const getBranchFallbackMessages = () => {
-        if (!managed.branchFromMessageId) return []
-        return managed.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .filter(m => !m.isIntermediate)
-          .map(m => ({
-            type: m.role as 'user' | 'assistant',
-            content: m.content,
-          }))
-      }
-
-      const getBranchSeedMessages = () => {
-        if (managed.branchContextStrategy !== 'seeded-fresh-session') return []
-        if (managed.branchSeedApplied) return []
-
-        const seedMessages = managed.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .filter(m => !m.isIntermediate)
-
-        return seedMessages.map(m => ({
-          type: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))
-      }
-
-      const markBranchSeedApplied = () => {
-        if (managed.branchContextStrategy !== 'seeded-fresh-session') return
-        if (managed.branchSeedApplied) return
-        managed.branchSeedApplied = true
-        sessionLog.info('Branch seed context applied', {
-          sessionId: managed.id,
-          strategy: managed.branchContextStrategy,
-        })
-      }
-
-      const getTransferredSessionSummary = () => {
-        const summary = managed.transferredSessionSummaryApplied ? null : (managed.transferredSessionSummary ?? null)
-        sessionLog.info(`[transfer-context] getTransferredSessionSummary for ${managed.id}: applied=${managed.transferredSessionSummaryApplied}, has_summary=${!!managed.transferredSessionSummary}, returning=${summary ? `${summary.length} chars` : 'null'}`)
-        return summary
-      }
-
-      const markTransferredSessionSummaryApplied = () => {
-        if (managed.transferredSessionSummaryApplied || !managed.transferredSessionSummary) return
-        managed.transferredSessionSummaryApplied = true
-        this.persistSession(managed)
-        sessionLog.info('Transferred session summary applied', {
-          sessionId: managed.id,
-        })
-      }
-
-      // ============================================================
-      // Construct backend via factory
-      // ============================================================
-
-      managed.agent = createBackendFromResolvedContext({
-        context: backendContext,
-        hostRuntime: buildBackendHostRuntimeContext(),
-        coreConfig: {
-        workspace: managed.workspace,
-        miniModel,
-        thinkingLevel: managed.thinkingLevel,
-        session: sessionConfig,
-        onSdkSessionIdUpdate,
-        onSdkSessionIdCleared,
-        onBranchForkInvalidated,
-        getRecoveryMessages,
-        getBranchFallbackMessages,
-        getBranchSeedMessages,
-        markBranchSeedApplied,
-        getTransferredSessionSummary,
-        markTransferredSessionSummaryApplied,
-        mcpPool: managed.mcpPool,
-        poolServerUrl,
-        envOverrides,
-        // Claude-specific
-        isHeadless: !AGENT_FLAGS.defaultModesEnabled,
-        skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher â€” don't duplicate in agents
-        automationSystem: this.automationSystems.get(managed.workspace.rootPath),
-        systemPromptPreset: managed.systemPromptPreset,
-        debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
-        enable1MContext: await (async () => { const { getEnable1MContext } = await import('@kata-sh/shared/config/storage'); return getEnable1MContext(); })(),
-        // Image resize callback â€” prevents oversized images from entering conversation history
-        onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
-          try {
-            const buffer = await readFile(filePath)
-            const result = await resizeImageForAPI(buffer, { maxSizeBytes })
-            if (!result) return null
-
-            // Write to session tmp directory (cleaned up with session)
-            const sessionTmpDir = join(sessionPath, 'tmp')
-            await mkdir(sessionTmpDir, { recursive: true })
-            const ext = result.format === 'jpeg' ? 'jpg' : 'png'
-            const outPath = join(sessionTmpDir, `resized-${randomUUID()}.${ext}`)
-            await writeFile(outPath, result.buffer)
-
-            sessionLog.info(`Image resized for Read: ${(buffer.length / 1024 / 1024).toFixed(1)}MB â†’ ${(result.buffer.length / 1024 / 1024).toFixed(1)}MB (â†’ ${result.width}Ã—${result.height})`)
-            return outPath
-          } catch (err) {
-            sessionLog.error('Image resize failed:', err)
-            return null
-          }
-        },
-        // Source configs for postInit() â€” backends set up their own bridge/config
-        initialSources: {
-          enabledSources,
-          mcpServers,
-          apiServers,
-          enabledSlugs,
-        },
-        },
-      }) as AgentInstance
-
-      sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
-
-      // ============================================================
-      // Post-construction: debug callback, auth callback, postInit()
-      // ============================================================
-
-      managed.agent.onDebug = (msg: string) => {
-        const marker = '__PERMISSION_BLOCK__'
-        if (msg.includes(marker)) {
-          const idx = msg.indexOf(marker)
-          const payloadRaw = msg.slice(idx + marker.length)
-          try {
-            const payload = JSON.parse(payloadRaw) as {
-              sessionId: string
-              toolName: string
-              effectiveMode: string
-              modeVersion: number
-              changedBy: string
-              changedAt: string
-              reason: string
-            }
-            sessionLog.info('Tool blocked by permission mode', payload)
-            return
-          } catch {
-            // fall through to plain logging when payload parsing fails
-          }
-        }
-
-        sessionLog.info(msg)
-      }
-
-      // Unified auth callback â€” replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
-      managed.agent.onBackendAuthRequired = (reason: string) => {
-        sessionLog.warn(`Backend auth required for session ${managed.id}: ${reason}`)
-        this.sendEvent({
-          type: 'info',
-          sessionId: managed.id,
-          message: `Authentication required: ${reason}`,
-          level: 'error',
-        }, managed.workspace.id)
-      }
-
-      // Run post-init (auth injection) â€” each backend handles its own
-      const postInitResult = await managed.agent.postInit()
-      if (postInitResult.authWarning) {
-        sessionLog.warn(`Auth warning for session ${managed.id}: ${postInitResult.authWarning}`)
-        this.sendEvent({
-          type: 'info',
-          sessionId: managed.id,
-          message: postInitResult.authWarning,
-          level: postInitResult.authWarningLevel || 'error',
-        }, managed.workspace.id)
-      }
-
-      // Wire up large response handling in the MCP pool (all backends)
-      if (managed.mcpPool && managed.agent) {
-        managed.mcpPool.setSummarizeCallback(managed.agent.getSummarizeCallback())
-      }
-
-      // Wire up browser pane tools â€” merge BrowserPaneFns into session callbacks
-      // so browser_* tools can delegate to BrowserPaneManager.
-      //
-      // Always register when EITHER a local BPM is set OR an RPC server is
-      // available (which lets `getBrowserPaneManagerForSession` lazily build a
-      // RemoteBrowserPaneManager). Calls fail per-method with
-      // BROWSER_NO_CAPABLE_CLIENT if no desktop client is connected, instead
-      // of "tool unavailable".
-      sessionLog.info('[browser-pane] BPF gate check', {
-        sessionId: managed.id,
-        hasLocalBpm: !!this.browserPaneManager,
-        hasRpcServer: !!this.rpcServer,
-      })
-      if (this.browserPaneManager || this.rpcServer) {
-        const sid = managed.id
-        const bpm = this.getBrowserPaneManagerForSession(sid)
-        if (!bpm) {
-          throw new Error('Browser pane manager unavailable despite passing the gate â€” this is a bug.')
-        }
-        sessionLog.info('[browser-pane] BPF block resolved BPM', {
-          sessionId: sid,
-          bpmKind: this.browserPaneManager === bpm ? 'local' : 'remote',
-        })
-
-        const workspaceId = managed.workspace.id
-        const resolveSessionBrowserInstance = async (toolName: string, options?: { show?: boolean }): Promise<string> => {
-          const instanceId = await bpm.createForSessionAsync(sid, {
-            show: options?.show ?? false,
-            workspaceId,
-          })
-          const info = await bpm.getInstanceAsync(instanceId)
-          sessionLog.info(`[browser-pane] tool target resolved: ${toolName} session=${sid} instance=${instanceId} ownerType=${info?.ownerType ?? 'unknown'} ownerSessionId=${info?.ownerSessionId ?? 'none'} visible=${info?.isVisible ?? false}`)
-          return instanceId
-        }
-
-        const resolveLifecycleWindowTarget = async (command: 'release' | 'close' | 'hide', requestedInstanceId?: string) => {
-          const windows = await bpm.listInstancesAsync()
-
-          if (windows.length === 0) {
-            return { windows, reason: 'No browser windows are available. Use "open" first.' }
-          }
-
-          const validateTarget = (target: (typeof windows)[number] | undefined) => {
-            if (!target) {
-              return { ok: false as const, reason: `Browser window "${requestedInstanceId}" not found. Use "windows" to list available windows.` }
-            }
-
-            if (target.boundSessionId && target.boundSessionId !== sid) {
-              return { ok: false as const, reason: `Browser window "${target.id}" is locked to session ${target.boundSessionId}.` }
-            }
-
-            if (!target.boundSessionId && target.ownerSessionId && target.ownerSessionId !== sid) {
-              return { ok: false as const, reason: `Browser window "${target.id}" is currently owned by session ${target.ownerSessionId}.` }
-            }
-
-            return { ok: true as const, target }
-          }
-
-          if (requestedInstanceId) {
-            const validated = validateTarget(windows.find((w) => w.id === requestedInstanceId))
-            if (!validated.ok) {
-              return { windows, reason: validated.reason }
-            }
-            return { windows, target: validated.target }
-          }
-
-          const fallbackTarget = windows.find((w) => w.boundSessionId === sid)
-            ?? windows.find((w) => w.ownerSessionId === sid)
-
-          if (!fallbackTarget) {
-            return { windows, reason: `No ${command} target is currently associated with this session. Use "windows", then "${command} <id>".` }
-          }
-
-          const validated = validateTarget(fallbackTarget)
-          if (!validated.ok) {
-            return { windows, reason: validated.reason }
-          }
-
-          return { windows, target: validated.target }
-        }
-
-        sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
-        mergeSessionScopedToolCallbacks(sid, {
-          browserPaneFns: {
-            openPanel: async (options) => {
-              const instanceId = options?.background
-                ? await bpm.createForSessionAsync(sid, { show: false, workspaceId })
-                : await bpm.focusBoundForSessionAsync(sid, { workspaceId })
-              const info = await bpm.getInstanceAsync(instanceId)
-              sessionLog.info(`[browser-pane] route decision: browser_open session=${sid} instance=${instanceId} background=${options?.background ?? false} ownerType=${info?.ownerType ?? 'unknown'} ownerSessionId=${info?.ownerSessionId ?? 'none'} visible=${info?.isVisible ?? false}`)
-              return { instanceId }
-            },
-            navigate: async (url) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_navigate')
-              return bpm.navigate(instanceId, url)
-            },
-            snapshot: async () => {
-              const instanceId = await resolveSessionBrowserInstance('browser_snapshot')
-              return bpm.getAccessibilitySnapshot(instanceId)
-            },
-            click: async (ref, options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_click')
-              return bpm.clickElement(instanceId, ref, options)
-            },
-            clickAt: async (x, y) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_click_at')
-              return bpm.clickAtCoordinates(instanceId, x, y)
-            },
-            drag: async (x1, y1, x2, y2) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_drag')
-              return bpm.drag(instanceId, x1, y1, x2, y2)
-            },
-            fill: async (ref, value) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_fill')
-              return bpm.fillElement(instanceId, ref, value)
-            },
-            type: async (text) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_type')
-              return bpm.typeText(instanceId, text)
-            },
-            select: async (ref, value) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_select')
-              return bpm.selectOption(instanceId, ref, value)
-            },
-            setClipboard: async (text) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_set_clipboard')
-              return bpm.setClipboard(instanceId, text)
-            },
-            getClipboard: async () => {
-              const instanceId = await resolveSessionBrowserInstance('browser_get_clipboard')
-              return bpm.getClipboard(instanceId)
-            },
-            screenshot: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_screenshot')
-              return bpm.screenshot(instanceId, options)
-            },
-            screenshotRegion: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_screenshot_region')
-              return bpm.screenshotRegion(instanceId, options)
-            },
-            getConsoleLogs: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_console')
-              return bpm.getConsoleLogs(instanceId, options)
-            },
-            windowResize: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_window_resize')
-              return bpm.windowResize(instanceId, options.width, options.height)
-            },
-            getNetworkLogs: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_network')
-              return bpm.getNetworkLogs(instanceId, options)
-            },
-            waitFor: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_wait')
-              return bpm.waitFor(instanceId, options)
-            },
-            sendKey: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_key')
-              return bpm.sendKey(instanceId, options)
-            },
-            getDownloads: async (options) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_downloads')
-              return bpm.getDownloads(instanceId, options)
-            },
-            upload: async (ref, filePaths) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_upload')
-              return bpm.uploadFile(instanceId, ref, filePaths).then(() => {})
-            },
-            scroll: async (direction, amount) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_scroll')
-              return bpm.scroll(instanceId, direction, amount)
-            },
-            goBack: async () => {
-              const instanceId = await resolveSessionBrowserInstance('browser_back')
-              return bpm.goBack(instanceId)
-            },
-            goForward: async () => {
-              const instanceId = await resolveSessionBrowserInstance('browser_forward')
-              return bpm.goForward(instanceId)
-            },
-            evaluate: async (expression) => {
-              const instanceId = await resolveSessionBrowserInstance('browser_evaluate')
-              return bpm.evaluate(instanceId, expression)
-            },
-            focusWindow: async (targetInstanceId) => {
-              const windows = await bpm.listInstancesAsync()
-              if (windows.length === 0) {
-                throw new Error('No browser windows available to focus. Use "open" first.')
-              }
-
-              const target = targetInstanceId
-                ? windows.find(w => w.id === targetInstanceId)
-                : windows.find(w => w.boundSessionId === sid || w.ownerSessionId === sid)
-
-              if (!target) {
-                if (targetInstanceId) {
-                  throw new Error(`Browser window "${targetInstanceId}" not found. Use "windows" to list available windows.`)
-                }
-                throw new Error('No browser window is currently bound to this session. Use "open --foreground" to create or reuse one.')
-              }
-
-              const availableToSession = !target.boundSessionId || target.boundSessionId === sid
-              if (!availableToSession) {
-                throw new Error(`Browser window "${target.id}" is locked to session ${target.boundSessionId}.`)
-              }
-
-              if (!target.boundSessionId) {
-                bpm.bindSession(target.id, sid, { workspaceId })
-              }
-
-              bpm.focus(target.id)
-              const focused = await bpm.getInstanceAsync(target.id)
-              return {
-                instanceId: target.id,
-                title: focused?.title ?? target.title,
-                url: focused?.currentUrl ?? target.url,
-              }
-            },
-            releaseControl: async (requestedInstanceId) => {
-              if (requestedInstanceId === 'all') {
-                const before = await bpm.listInstancesAsync()
-                const beforeActive = before.filter((w) => !!w.agentControlActive).length
-                bpm.clearAgentControl(sid)
-                const after = await bpm.listInstancesAsync()
-                const afterActive = after.filter((w) => !!w.agentControlActive).length
-                const released = afterActive < beforeActive
-
-                sessionLog.info(`[browser-pane] lifecycle release-all session=${sid} overlays=${beforeActive}->${afterActive}`)
-
-                return {
-                  action: released ? 'released' : 'noop',
-                  requestedInstanceId,
-                  affectedIds: released ? before.filter((w) => !!w.agentControlActive).map((w) => w.id) : [],
-                  reason: released ? undefined : 'No active overlay was found for this session.',
-                }
-              }
-
-              const resolution = await resolveLifecycleWindowTarget('release', requestedInstanceId)
-              if (!resolution.target) {
-                sessionLog.info(`[browser-pane] lifecycle release session=${sid} requested=${requestedInstanceId ?? 'auto'} result=noop reason=${resolution.reason}`)
-                return {
-                  action: 'noop',
-                  requestedInstanceId,
-                  affectedIds: [],
-                  reason: resolution.reason,
-                }
-              }
-
-              const result = bpm.clearAgentControlForInstance(resolution.target.id, sid)
-              const action = result.released ? 'released' : 'noop'
-              sessionLog.info(`[browser-pane] lifecycle release session=${sid} requested=${requestedInstanceId ?? 'auto'} resolved=${resolution.target.id} result=${action} reason=${result.reason ?? 'none'}`)
-
-              return {
-                action,
-                requestedInstanceId,
-                resolvedInstanceId: resolution.target.id,
-                affectedIds: result.released ? [resolution.target.id] : [],
-                reason: result.reason,
-              }
-            },
-            closeWindow: async (requestedInstanceId) => {
-              const resolution = await resolveLifecycleWindowTarget('close', requestedInstanceId)
-              if (!resolution.target) {
-                sessionLog.info(`[browser-pane] lifecycle close session=${sid} requested=${requestedInstanceId ?? 'auto'} result=noop reason=${resolution.reason}`)
-                return {
-                  action: 'noop',
-                  requestedInstanceId,
-                  affectedIds: [],
-                  reason: resolution.reason,
-                }
-              }
-
-              bpm.destroyInstance(resolution.target.id)
-              sessionLog.info(`[browser-pane] lifecycle close session=${sid} requested=${requestedInstanceId ?? 'auto'} resolved=${resolution.target.id} result=closed`)
-
-              return {
-                action: 'closed',
-                requestedInstanceId,
-                resolvedInstanceId: resolution.target.id,
-                affectedIds: [resolution.target.id],
-              }
-            },
-            hideWindow: async (requestedInstanceId) => {
-              const resolution = await resolveLifecycleWindowTarget('hide', requestedInstanceId)
-              if (!resolution.target) {
-                sessionLog.info(`[browser-pane] lifecycle hide session=${sid} requested=${requestedInstanceId ?? 'auto'} result=noop reason=${resolution.reason}`)
-                return {
-                  action: 'noop',
-                  requestedInstanceId,
-                  affectedIds: [],
-                  reason: resolution.reason,
-                }
-              }
-
-              bpm.hide(resolution.target.id)
-              sessionLog.info(`[browser-pane] lifecycle hide session=${sid} requested=${requestedInstanceId ?? 'auto'} resolved=${resolution.target.id} result=hidden`)
-
-              return {
-                action: 'hidden',
-                requestedInstanceId,
-                resolvedInstanceId: resolution.target.id,
-                affectedIds: [resolution.target.id],
-              }
-            },
-            listWindows: async () => {
-              return bpm.listInstancesAsync()
-            },
-            detectChallenge: async () => {
-              const instanceId = await resolveSessionBrowserInstance('browser_detect_challenge')
-              return bpm.detectSecurityChallenge(instanceId)
-            },
-          } satisfies BrowserPaneFns,
-        })
-      }
-
-      // Signal that the agent instance is ready (unblocks title generation)
-      managed.agentReadyResolve?.()
-
-      // Set up permission handler to forward requests to renderer
-      managed.agent.onPermissionRequest = (request: {
-        requestId: string;
-        toolName: string;
-        command?: string;
-        description: string;
-        type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
-        appName?: string;
-        reason?: string;
-        impact?: string;
-        requiresSystemPrompt?: boolean;
-        rememberForMinutes?: number;
-        commandHash?: string;
-        approvalTtlSeconds?: number;
-      }) => {
-        sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
-        let brokerMetadata: {
-          commandHash?: string
-          approvalTtlSeconds?: number
-        } = {}
-
-        if (request.type === 'admin_approval' && request.command) {
-          const brokerRequest = this.privilegedExecutionBroker.createRequest({
-            requestId: request.requestId,
-            sessionId: managed.id,
-            command: request.command,
-            reason: request.reason,
-            impact: request.impact,
-            approvalTtlSeconds: request.approvalTtlSeconds,
-          })
-
-          brokerMetadata = {
-            commandHash: brokerRequest.commandHash,
-            approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
-          }
-        }
-
-        const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
-
-        this.pendingPermissionRequests.set(request.requestId, {
-          sessionId: managed.id,
-          type: request.type,
-          commandHash: effectiveCommandHash,
-        })
-
-        if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
-          const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
-            expectedCommandHash: effectiveCommandHash,
-          })
-
-          this.pendingPermissionRequests.delete(request.requestId)
-
-          if (brokerResult.ok) {
-            this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
-              sessionId: managed.id,
-              requestId: request.requestId,
-              commandHash: effectiveCommandHash,
-            })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
-            }
-          }
-
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
-        }
-
-        this.sendEvent({
-          type: 'permission_request',
-          sessionId: managed.id,
-          request: {
-            ...request,
-            ...brokerMetadata,
-            sessionId: managed.id,
-          }
-        }, managed.workspace.id)
-      }
-
-      // Note: Credential requests now flow through onAuthRequest (unified auth flow)
-      // The legacy onCredentialRequest callback has been removed from KataAgent
-      // Auth refresh for mid-session token expiry is handled by the error handler in sendMessage
-      // which destroys/recreates the agent to get fresh credentials
-
-      // Set up mode change handlers
-      managed.agent.onPermissionModeChange = (mode) => {
-        if (managed.permissionMode === mode) {
-          return
-        }
-
-        managed.permissionMode = mode
-        const diagnostics = getPermissionModeDiagnostics(managed.id)
-        managed.previousPermissionMode = diagnostics.previousPermissionMode
-        sessionLog.info('Permission mode changed (agent callback)', {
-          sessionId: managed.id,
-          permissionMode: mode,
-          modeVersion: diagnostics.modeVersion,
-          changedBy: diagnostics.lastChangedBy,
-          changedAt: diagnostics.lastChangedAt,
-        })
-        this.sendEvent({
-          type: 'permission_mode_changed',
-          sessionId: managed.id,
-          permissionMode: managed.permissionMode,
-          modeVersion: diagnostics.modeVersion,
-          changedBy: diagnostics.lastChangedBy,
-          changedAt: diagnostics.lastChangedAt,
-          previousPermissionMode: diagnostics.previousPermissionMode,
-          transitionDisplay: diagnostics.transitionDisplay,
-        }, managed.workspace.id)
-      }
-
-      // Wire up onPlanSubmitted to add plan message to conversation
-      managed.agent.onPlanSubmitted = async (planPath) => {
-        sessionLog.info(`Plan submitted for session ${managed.id}:`, planPath)
-        try {
-          // Read the plan file content
-          const planContent = await readFile(planPath, 'utf-8')
-
-          // Mark the SubmitPlan tool message as completed (it won't get a tool_result due to forceAbort)
-          const submitPlanMsg = managed.messages.find(
-            m => m.toolName?.includes('SubmitPlan') && m.toolStatus === 'executing'
-          )
-          if (submitPlanMsg) {
-            submitPlanMsg.toolStatus = 'completed'
-            submitPlanMsg.content = 'Plan submitted for review'
-            submitPlanMsg.toolResult = 'Plan submitted for review'
-          }
-
-          // Create a plan message
-          const planMessage = {
-            id: `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            role: 'plan' as const,
-            content: planContent,
-            timestamp: this.monotonic(),
-            planPath,
-          }
-
-          // Add to session messages
-          managed.messages.push(planMessage)
-
-          // Update lastMessageRole for badge display
-          managed.lastMessageRole = 'plan'
-
-          // Send event to renderer
-          this.sendEvent({
-            type: 'plan_submitted',
-            sessionId: managed.id,
-            message: planMessage,
-          }, managed.workspace.id)
-
-          // Interrupt execution - plan presentation is a stopping point
-          // The user needs to review and respond before continuing
-          if (managed.isProcessing && managed.agent) {
-            sessionLog.info(`Interrupting for plan submission in session ${managed.id}`)
-            managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
-            this.setProcessing(managed, false)
-
-            // Release browser overlay + session binding because the agent is no longer running.
-            // Plan submission pauses execution until user review, so browser ownership should not remain locked.
-            await releaseBrowserOwnershipOnForcedStop(
-              (sid) => this.getBrowserPaneManagerForSession(sid),
-              managed.id,
-            )
-
-            // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
-            this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
-
-            // Persist session state
-            this.persistSession(managed)
-          }
-        } catch (error) {
-          sessionLog.error(`Failed to read plan file:`, error)
-        }
-      }
-
-      // Wire up onAuthRequest to add auth message to conversation and pause execution
-      managed.agent.onAuthRequest = (request) => {
-        sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
-
-        // Create auth-request message
-        const authMessage: Message = {
-          id: generateMessageId(),
-          role: 'auth-request',
-          content: this.getAuthRequestDescription(request),
-          timestamp: this.monotonic(),
-          authRequestId: request.requestId,
-          authRequestType: request.type,
-          authSourceSlug: request.sourceSlug,
-          authSourceName: request.sourceName,
-          authStatus: 'pending',
-          // Copy type-specific fields for credentials
-          ...(request.type === 'credential' && {
-            authCredentialMode: request.mode,
-            authLabels: request.labels,
-            authDescription: request.description,
-            authHint: request.hint,
-            authHeaderName: request.headerName,
-            authHeaderNames: request.headerNames,
-            authSourceUrl: request.sourceUrl,
-            authPasswordRequired: request.passwordRequired,
-          }),
-        }
-
-        // Add to session messages
-        managed.messages.push(authMessage)
-
-        // Store pending auth request for later resolution
-        managed.pendingAuthRequestId = request.requestId
-        managed.pendingAuthRequest = request
-
-        // Interrupt execution (like SubmitPlan)
-        if (managed.isProcessing && managed.agent) {
-          sessionLog.info(`Interrupting for auth request in session ${managed.id}`)
-          managed.agent.interruptForHandoff(AbortReason.AuthRequest)
-          this.setProcessing(managed, false)
-
-          // Release browser overlay + session binding because the agent is paused awaiting user auth.
-          void releaseBrowserOwnershipOnForcedStop(
-            (sid) => this.getBrowserPaneManagerForSession(sid),
-            managed.id,
-          )
-
-          // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
-          this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
-        }
-
-        // Emit auth_request event to renderer
-        this.sendEvent({
-          type: 'auth_request',
-          sessionId: managed.id,
-          message: authMessage,
-          request: request,
-        }, managed.workspace.id)
-
-        // Persist session state
-        this.persistSession(managed)
-
-        // OAuth flow is client-driven via performOAuth() (preload).
-        // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
-      }
-
-      // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = async (request) => {
-        sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-        })
-
-        // Build FileAttachment[] from paths (if any)
-        let fileAttachments: FileAttachment[] | undefined
-        if (request.attachments?.length) {
-          const attachments: FileAttachment[] = []
-          for (const a of request.attachments) {
-            try {
-              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (request.workingDirectory) extraDirs.push(request.workingDirectory)
-              const safePath = await validateFilePath(a.path, extraDirs)
-              const attachment = readFileAttachment(safePath)
-              if (attachment) {
-                if (a.name) attachment.name = a.name
-                attachments.push(attachment)
-              } else {
-                sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
-            }
-          }
-          if (attachments.length > 0) fileAttachments = attachments
-        }
-
-        // Notify renderer to hydrate full session metadata (including name)
-        // before streaming events arrive. Without this, the renderer creates
-        // a synthetic empty session and shows "New Chat" in the sidebar.
-        this.sendEvent({ type: 'session_created', sessionId: session.id }, managed.workspace.id)
-
-        // Fire and forget â€” send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
-        }
-      }
-
-      // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
-      mergeSessionScopedToolCallbacks(managed.id, {
-        setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
-          await this.setSessionLabels(sessionId ?? managed.id, labels)
-        },
-        setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
-          await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
-        },
-        getSessionInfoFn: (sessionId?: string) => {
-          const targetId = sessionId ?? managed.id
-          const session = this.sessions.get(targetId)
-          if (!session) return null
-          return {
-            id: session.id,
-            name: session.name ?? session.id,
-            labels: session.labels ?? [],
-            status: session.sessionStatus ?? 'todo',
-            permissionMode: session.permissionMode ?? 'ask',
-            createdAt: session.createdAt ?? 0,
-            workingDirectory: session.workingDirectory,
-            llmConnection: session.llmConnection,
-            model: session.model,
-            isActive: session.agent != null,
-          }
-        },
-        listSessionsFn: (options) => {
-          const DEFAULT_LIMIT = 20
-          const MAX_LIMIT = 100
-          const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-          const offset = options?.offset ?? 0
-
-          let sessions = this.getSessions(managed.workspace.id)
-
-          // Filter
-          if (options?.status) {
-            sessions = sessions.filter(s => s.sessionStatus === options.status)
-          }
-          if (options?.label) {
-            sessions = sessions.filter(s => s.labels?.includes(options.label!))
-          }
-          if (options?.search) {
-            const needle = options.search.toLowerCase()
-            sessions = sessions.filter(s => s.name?.toLowerCase().includes(needle))
-          }
-
-          // Sort
-          const sortBy = options?.sortBy ?? 'recent'
-          if (sortBy === 'recent') {
-            sessions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-          } else if (sortBy === 'name') {
-            sessions.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          } else if (sortBy === 'status') {
-            sessions.sort((a, b) => (a.sessionStatus ?? '').localeCompare(b.sessionStatus ?? ''))
-          }
-
-          const total = sessions.length
-
-          // Paginate
-          const page = sessions.slice(offset, offset + limit)
-
-          return {
-            total,
-            returned: page.length,
-            sessions: page.map(s => ({
-              id: s.id,
-              name: s.name ?? s.id,
-              labels: s.labels ?? [],
-              status: s.sessionStatus ?? 'todo',
-              createdAt: s.createdAt ?? 0,
-            })),
-          }
-        },
-        resolveLabelsFn: (labels: string[]) => {
-          const labelConfig = loadLabelConfig(managed.workspace.rootPath)
-          return resolveSessionLabels(labels, labelConfig.labels)
-        },
-        resolveStatusFn: (status: string) => {
-          const statusConfig = loadStatusConfig(managed.workspace.rootPath)
-          const allStatuses = statusConfig.statuses
-          const available = allStatuses.map(s => s.id)
-
-          // Exact ID match
-          const byId = allStatuses.find(s => s.id === status)
-          if (byId) return { resolved: byId.id, available }
-          // Case-insensitive label â†’ ID
-          const byLabel = allStatuses.find(s => s.label.toLowerCase() === status.toLowerCase())
-          if (byLabel) return { resolved: byLabel.id, available }
-
-          return { resolved: null, available }
-        },
-        sendAgentMessageFn: async (sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>) => {
-          // Build FileAttachment[] from paths (same pattern as spawn_session)
-          let fileAttachments: FileAttachment[] | undefined
-          if (attachments?.length) {
-            const builtAttachments: FileAttachment[] = []
-            for (const a of attachments) {
-              try {
-                const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-                const safePath = await validateFilePath(a.path, extraDirs)
-                const attachment = readFileAttachment(safePath)
-                if (attachment) {
-                  if (a.name) attachment.name = a.name
-                  builtAttachments.push(attachment)
-                }
-              } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error)
-                sessionLog.warn(`send_agent_message: blocked attachment path ${a.path}: ${msg}`)
-              }
-            }
-            if (builtAttachments.length > 0) fileAttachments = builtAttachments
-          }
-
-          await this.sendMessage(sessionId, message, fileAttachments)
-        },
-        activateSourceInSessionFn: async (sourceSlug: string) => {
-          const cb = managed.agent?.onSourceActivationRequest
-          if (!cb) {
-            return { ok: false, reason: 'Agent has no activation callback wired' }
-          }
-          const ok = await cb(sourceSlug)
-          if (!ok) {
-            return {
-              ok: false,
-              reason: 'Activation failed â€” source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
-            }
-          }
-          // Both backends need the current turn to end before new tools are visible:
-          // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
-          // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
-          // Mark a pending restart on the agent â€” ClaudeAgent/PiAgent consume it after
-          // the next tool_result, yield source_activated, and forceAbort. The
-          // `source_activated` handler in this class then schedules a server-side
-          // resend of the original user message with a "[{slug} activated]" suffix â€”
-          // landing in a fresh turn with tools live (kata-agents-oss#804).
-          const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
-          if (userMessage) {
-            managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
-          }
-          return { ok: true, availability: 'next-turn' as const }
-        },
-      })
-
-      // Wire up onSourceActivationRequest to auto-enable sources when agent tries to use them
-      managed.agent.onSourceActivationRequest = async (sourceSlug: string): Promise<boolean> => {
-        sessionLog.info(`Source activation request for session ${managed.id}:`, sourceSlug)
-
-        const workspaceRootPath = managed.workspace.rootPath
-
-        // Check if source is already enabled
-        if (managed.enabledSourceSlugs?.includes(sourceSlug)) {
-          sessionLog.info(`Source ${sourceSlug} already in enabledSourceSlugs, checking server status`)
-          // Source is in the list but server might not be active (e.g., build failed previously)
-        }
-
-        // Load the source to check if it exists and is ready
-        const sources = getSourcesBySlugs(workspaceRootPath, [sourceSlug])
-        if (sources.length === 0) {
-          sessionLog.warn(`Source ${sourceSlug} not found in workspace`)
-          return false
-        }
-
-        const source = sources[0]
-
-        // Check if source is usable (enabled and authenticated if auth is required)
-        if (!isSourceUsable(source)) {
-          sessionLog.warn(`Source ${sourceSlug} is not usable (disabled or requires authentication)`)
-          return false
-        }
-
-        // Track whether we added this slug (for rollback on failure)
-        const slugSet = new Set(managed.enabledSourceSlugs || [])
-        const wasAlreadyEnabled = slugSet.has(sourceSlug)
-
-        // Add to enabled sources if not already there
-        if (!wasAlreadyEnabled) {
-          slugSet.add(sourceSlug)
-          managed.enabledSourceSlugs = Array.from(slugSet)
-          sessionLog.info(`Added source ${sourceSlug} to session enabled sources`)
-        }
-
-        // Build server configs for all enabled sources
-        const allEnabledSources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs || [])
-        // Pass session path so large API responses can be saved to session folder
-        const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
-        const { mcpServers, apiServers, errors } = await buildServersFromSources(allEnabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
-
-        if (errors.length > 0) {
-          sessionLog.warn(`Source build errors during auto-enable:`, errors)
-        }
-
-        // Check if our target source was built successfully
-        const sourceBuilt = sourceSlug in mcpServers || sourceSlug in apiServers
-        if (!sourceBuilt) {
-          sessionLog.warn(`Source ${sourceSlug} failed to build`)
-          // Only remove if WE added it (not if it was already there)
-          if (!wasAlreadyEnabled) {
-            slugSet.delete(sourceSlug)
-            managed.enabledSourceSlugs = Array.from(slugSet)
-          }
-          return false
-        }
-
-        // Apply source servers to the agent
-        const intendedSlugs = allEnabledSources
-          .filter(isSourceUsable)
-          .map(s => s.config.slug)
-
-        // Update bridge-mcp-server config/credentials for backends that need it
-        await applyBridgeUpdates(managed.agent!, sessionPath, allEnabledSources, mcpServers, managed.id, workspaceRootPath, 'source enable', managed.poolServer?.url)
-
-        await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs)
-
-        sessionLog.info(`Auto-enabled source ${sourceSlug} for session ${managed.id}`)
-
-        // Persist session with updated enabled sources
-        this.persistSession(managed)
-
-        // Notify renderer of source change
-        this.sendEvent({
-          type: 'sources_changed',
-          sessionId: managed.id,
-          enabledSourceSlugs: managed.enabledSourceSlugs || [],
-        }, managed.workspace.id)
-
-        return true
-      }
-
-      // NOTE: Source reloading is now handled by ConfigWatcher callbacks
-      // which detect filesystem changes and update all affected sessions.
-      // See setupConfigWatcher() for the full reload logic.
-
-      // Apply session-scoped permission mode to the newly created agent
-      // This ensures the UI toggle state is reflected in the agent before first message
-      if (managed.permissionMode) {
-        setPermissionMode(managed.id, managed.permissionMode, { changedBy: 'restore' })
-        if (managed.previousPermissionMode) {
-          hydratePreviousPermissionMode(managed.id, managed.previousPermissionMode)
-        }
-        managed.agent!.setPermissionMode(managed.permissionMode)
-        const diagnostics = getPermissionModeDiagnostics(managed.id)
-        sessionLog.info('Applied permission mode to agent', {
-          sessionId: managed.id,
-          permissionMode: managed.permissionMode,
-          modeVersion: diagnostics.modeVersion,
-          changedBy: diagnostics.lastChangedBy,
-          changedAt: diagnostics.lastChangedAt,
-        })
-      }
-      managed.backendRuntimeSignature = runtimeSignature
-      managed.backendRestartSignature = restartSignature
-      end()
-    }
-    return managed.agent
-  }
-
-  async flagSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.isFlagged = true
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_flagged', sessionId }, managed.workspace.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  async unflagSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.isFlagged = false
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_unflagged', sessionId }, managed.workspace.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  async archiveSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.isArchived = true
-      managed.archivedAt = Date.now()
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_archived', sessionId }, managed.workspace.id)
-      this.emitUnreadSummaryChanged()
-    }
-  }
-
-  async unarchiveSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.isArchived = false
-      managed.archivedAt = undefined
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_unarchived', sessionId }, managed.workspace.id)
-      this.emitUnreadSummaryChanged()
-    }
-  }
-
-  async setSessionStatus(sessionId: string, sessionStatus: SessionStatus): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.sessionStatus = sessionStatus
-      this.setMetadataWriteGuard(managed)
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus }, managed.workspace.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  /**
-   * Set the LLM connection for a session.
-   * Can only be changed before the first message is sent (connection is locked after).
-   * This determines which LLM provider/backend will be used for this session.
-   */
-  async setSessionConnection(sessionId: string, connectionSlug: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`setSessionConnection: session ${sessionId} not found`)
-      throw new Error(`Session ${sessionId} not found`)
-    }
-
-    // Only allow changing connection before first message (session hasn't started)
-    if (managed.messages && managed.messages.length > 0) {
-      sessionLog.warn(`setSessionConnection: cannot change connection after session has started (${sessionId})`)
-      throw new Error('Cannot change connection after session has started')
-    }
-
-    // Validate connection exists
-    const { getLlmConnection } = await import('@kata-sh/shared/config/storage')
-    const connection = getLlmConnection(connectionSlug)
-    if (!connection) {
-      sessionLog.warn(`setSessionConnection: connection "${connectionSlug}" not found`)
-      throw new Error(`LLM connection "${connectionSlug}" not found`)
-    }
-
-    managed.llmConnection = connectionSlug
-    // Persist in-memory state directly to avoid race with pending queue writes
-    this.persistSession(managed)
-    await this.flushSession(managed.id)
-    sessionLog.info(`Set LLM connection for session ${sessionId} to ${connectionSlug}`)
-
-    // Notify UI that connection changed (triggers capabilities refresh)
-    this.sendEvent({
-      type: 'connection_changed',
-      sessionId,
-      connectionSlug,
-      supportsBranching: resolveSupportsBranching(managed),
-    }, managed.workspace.id)
-  }
-
-  // ============================================
-  // Pending Plan Execution (Accept & Compact)
-  // ============================================
-
-  /**
-   * Set pending plan execution state.
-   * Called when user clicks "Accept & Compact" to persist the plan path
-   * so execution can resume after compaction (even if page reloads).
-   */
-  async setPendingPlanExecution(sessionId: string, planPath: string, draftInputSnapshot?: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      await setStoredPendingPlanExecution(managed.workspace.rootPath, sessionId, planPath, draftInputSnapshot)
-      sessionLog.info(`Session ${sessionId}: set pending plan execution for ${planPath}`)
-    }
-  }
-
-  /**
-   * Mark compaction as complete for pending plan execution.
-   * Called when compaction_complete event fires - allows reload recovery
-   * to know that compaction finished and plan can be executed.
-   */
-  async markCompactionComplete(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      await markStoredCompactionComplete(managed.workspace.rootPath, sessionId)
-      sessionLog.info(`Session ${sessionId}: compaction marked complete for pending plan`)
-    }
-  }
-
-  /**
-   * Mark pending plan execution as already dispatched from the UI.
-   * This prevents reload recovery from double-submitting the same plan if
-   * sending succeeded but cleanup failed due a reconnect/disconnect.
-   */
-  async markPendingPlanExecutionDispatched(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      await markStoredPendingPlanExecutionDispatched(managed.workspace.rootPath, sessionId)
-      sessionLog.info(`Session ${sessionId}: marked pending plan execution as dispatched`)
-    }
-  }
-
-  /**
-   * Clear pending plan execution state.
-   * Called after plan execution is triggered, on new user message,
-   * or when the pending execution is no longer relevant.
-   */
-  async clearPendingPlanExecution(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
-      sessionLog.info(`Session ${sessionId}: cleared pending plan execution`)
-    }
-  }
-
-  /**
-   * Get pending plan execution state for a session.
-   * Used on reload/init to check if we need to resume plan execution.
-   */
-  getPendingPlanExecution(sessionId: string): { planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean; executionDispatched: boolean } | null {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return null
-    return getStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
-  }
-
-  /**
-   * Dispatch a plan approval for a session, equivalent to the desktop
-   * "Accept plan" button. Switches the session out of Explore mode (safe)
-   * into allow-all if needed so the plan can execute without per-tool
-   * prompts, then sends the approval message through the normal sendMessage
-   * path.
-   */
-  async acceptPlan(sessionId: string, _planPath?: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`acceptPlan: session ${sessionId} not found`)
-      return
-    }
-
-    if (managed.permissionMode === 'safe') {
-      this.setSessionPermissionMode(sessionId, 'allow-all')
-    }
-
-    await this.sendMessage(sessionId, PLAN_APPROVAL_MESSAGE)
-  }
-
-  // ============================================
-  // Session Sharing
-  // ============================================
-
-  /**
-   * Share session to the web viewer
-   * Uploads session data and returns shareable URL
-   */
-  async shareToViewer(sessionId: string): Promise<import('@kata-sh/shared/protocol').ShareResult> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      return { success: false, error: 'Session not found' }
-    }
-
-    // Signal async operation start for shimmer effect
-    managed.isAsyncOperationOngoing = true
-    this.sendEvent({ type: 'async_operation', sessionId, isOngoing: true }, managed.workspace.id)
-
-    try {
-      // Load session directly from disk (already in correct format)
-      const storedSession = loadStoredSession(managed.workspace.rootPath, sessionId)
-      if (!storedSession) {
-        return { success: false, error: 'Session file not found' }
-      }
-
-      const { VIEWER_URL } = await import('@kata-sh/shared/branding')
-      const response = await fetch(`${VIEWER_URL}/s/api`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storedSession)
-      })
-
-      if (!response.ok) {
-        sessionLog.error(`Share failed with status ${response.status}`)
-        if (response.status === 413) {
-          return { success: false, error: 'Session file is too large to share' }
-        }
-        return { success: false, error: 'Failed to upload session' }
-      }
-
-      const data = await response.json() as { id: string; url: string }
-
-      // Store shared info in session
-      managed.sharedUrl = data.url
-      managed.sharedId = data.id
-      const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, {
-        sharedUrl: data.url,
-        sharedId: data.id,
-      })
-
-      sessionLog.info(`Session ${sessionId} shared at ${data.url}`)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_shared', sessionId, sharedUrl: data.url }, managed.workspace.id)
-      return { success: true, url: data.url }
-    } catch (error) {
-      sessionLog.error('Share error:', error)
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    } finally {
-      // Signal async operation end
-      managed.isAsyncOperationOngoing = false
-      this.sendEvent({ type: 'async_operation', sessionId, isOngoing: false }, managed.workspace.id)
-    }
-  }
-
-  /**
-   * Update an existing shared session
-   * Re-uploads session data to the same URL
-   */
-  async updateShare(sessionId: string): Promise<import('@kata-sh/shared/protocol').ShareResult> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      return { success: false, error: 'Session not found' }
-    }
-    if (!managed.sharedId) {
-      return { success: false, error: 'Session not shared' }
-    }
-
-    // Signal async operation start for shimmer effect
-    managed.isAsyncOperationOngoing = true
-    this.sendEvent({ type: 'async_operation', sessionId, isOngoing: true }, managed.workspace.id)
-
-    try {
-      // Load session directly from disk (already in correct format)
-      const storedSession = loadStoredSession(managed.workspace.rootPath, sessionId)
-      if (!storedSession) {
-        return { success: false, error: 'Session file not found' }
-      }
-
-      const { VIEWER_URL } = await import('@kata-sh/shared/branding')
-      const response = await fetch(`${VIEWER_URL}/s/api/${managed.sharedId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storedSession)
-      })
-
-      if (!response.ok) {
-        sessionLog.error(`Update share failed with status ${response.status}`)
-        if (response.status === 413) {
-          return { success: false, error: 'Session file is too large to share' }
-        }
-        return { success: false, error: 'Failed to update shared session' }
-      }
-
-      sessionLog.info(`Session ${sessionId} share updated at ${managed.sharedUrl}`)
-      return { success: true, url: managed.sharedUrl }
-    } catch (error) {
-      sessionLog.error('Update share error:', error)
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    } finally {
-      // Signal async operation end
-      managed.isAsyncOperationOngoing = false
-      this.sendEvent({ type: 'async_operation', sessionId, isOngoing: false }, managed.workspace.id)
-    }
-  }
-
-  /**
-   * Revoke a shared session
-   * Deletes from viewer and clears local shared state
-   */
-  async revokeShare(sessionId: string): Promise<import('@kata-sh/shared/protocol').ShareResult> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      return { success: false, error: 'Session not found' }
-    }
-    if (!managed.sharedId) {
-      return { success: false, error: 'Session not shared' }
-    }
-
-    // Signal async operation start for shimmer effect
-    managed.isAsyncOperationOngoing = true
-    this.sendEvent({ type: 'async_operation', sessionId, isOngoing: true }, managed.workspace.id)
-
-    try {
-      const { VIEWER_URL } = await import('@kata-sh/shared/branding')
-      const response = await fetch(
-        `${VIEWER_URL}/s/api/${managed.sharedId}`,
-        { method: 'DELETE' }
-      )
-
-      if (!response.ok) {
-        sessionLog.error(`Revoke failed with status ${response.status}`)
-        return { success: false, error: 'Failed to revoke share' }
-      }
-
-      // Clear shared info
-      delete managed.sharedUrl
-      delete managed.sharedId
-      const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, {
-        sharedUrl: undefined,
-        sharedId: undefined,
-      })
-
-      sessionLog.info(`Session ${sessionId} share revoked`)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_unshared', sessionId }, managed.workspace.id)
-      return { success: true }
-    } catch (error) {
-      sessionLog.error('Revoke error:', error)
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    } finally {
-      // Signal async operation end
-      managed.isAsyncOperationOngoing = false
-      this.sendEvent({ type: 'async_operation', sessionId, isOngoing: false }, managed.workspace.id)
-    }
-  }
-
-  // ============================================
-  // Session Sources
-  // ============================================
-
-  /**
-   * Update session's enabled sources
-   * If agent exists, builds and applies servers immediately.
-   * Otherwise, servers will be built fresh on next message.
-   */
-  async setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      throw new Error(`Session not found: ${sessionId}`)
-    }
-
-    const workspaceRootPath = managed.workspace.rootPath
-    sessionLog.info(`Setting sources for session ${sessionId}:`, sourceSlugs)
-
-    // Clean up credential cache for sources being disabled (security)
-    // This removes decrypted tokens from disk when sources are no longer active
-    const previousSlugs = new Set(managed.enabledSourceSlugs || [])
-    const newSlugs = new Set(sourceSlugs)
-    const disabledSlugs = [...previousSlugs].filter(prevSlug => !newSlugs.has(prevSlug))
-    if (disabledSlugs.length > 0) {
-      try {
-        await cleanupSourceRuntimeArtifacts(workspaceRootPath, disabledSlugs)
-      } catch (err) {
-        sessionLog.warn(`Failed to clean up source runtime artifacts: ${err}`)
-      }
-    }
-
-    // Store the selection
-    managed.enabledSourceSlugs = sourceSlugs
-
-    // If agent exists, build and apply servers immediately
-    if (managed.agent) {
-      const sources = getSourcesBySlugs(workspaceRootPath, sourceSlugs)
-      // Pass session path so large API responses can be saved to session folder
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, managed.agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
-      }
-
-      // Set all sources for context (agent sees full list with descriptions, including built-ins)
-      const allSources = loadAllSources(workspaceRootPath)
-      managed.agent.setAllSources(allSources)
-
-      // Set active source servers (tools are only available from these)
-      const intendedSlugs = sources.filter(isSourceUsable).map(s => s.config.slug)
-
-      // Update bridge-mcp-server config/credentials for backends that need it
-      const usableSources = sources.filter(isSourceUsable)
-      await applyBridgeUpdates(managed.agent, sessionPath, usableSources, mcpServers, managed.id, workspaceRootPath, 'source config change', managed.poolServer?.url)
-
-      await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-
-      sessionLog.info(`Applied ${Object.keys(mcpServers).length} MCP + ${Object.keys(apiServers).length} API sources to active agent (${allSources.length} total)`)
-    }
-
-    // Persist the session with updated sources
-    this.persistSession(managed)
-
-    // Notify renderer of the source change
-    this.sendEvent({
-      type: 'sources_changed',
-      sessionId,
-      enabledSourceSlugs: sourceSlugs,
-    }, managed.workspace.id)
-
-    sessionLog.info(`Session ${sessionId} sources updated: ${sourceSlugs.length} sources`)
-  }
-
-  /**
-   * Get the enabled source slugs for a session
-   */
-  getSessionSources(sessionId: string): string[] {
-    const managed = this.sessions.get(sessionId)
-    return managed?.enabledSourceSlugs ?? []
-  }
-
-  /**
-   * Get the last final assistant message ID from a list of messages
-   * A "final" message is one where:
-   * - role === 'assistant' AND
-   * - isIntermediate !== true (not commentary between tool calls)
-   * Returns undefined if no final assistant message exists
-   */
-  private getLastFinalAssistantMessageId(messages: Message[]): string | undefined {
-    // Iterate backwards to find the most recent final assistant message
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg.role === 'assistant' && !msg.isIntermediate) {
-        return msg.id
-      }
-    }
-    return undefined
-  }
-
-  /**
-   * Set which session the user is actively viewing.
-   * Called when user navigates to a session. Used to determine whether to mark
-   * new messages as unread - if user is viewing, don't mark unread.
-   */
-  setActiveViewingSession(sessionId: string | null, workspaceId: string): void {
-    if (sessionId) {
-      this.activeViewingSession.set(workspaceId, sessionId)
-      // When user starts viewing a session that's not processing, clear unread
-      const managed = this.sessions.get(sessionId)
-      if (managed && !managed.isProcessing && managed.hasUnread) {
-        this.markSessionRead(sessionId)
-      }
-    } else {
-      this.activeViewingSession.delete(workspaceId)
-    }
-  }
-
-  /**
-   * Clear active viewing session for a workspace.
-   * Called when all windows leave a workspace to ensure read/unread state is correct.
-   */
-  clearActiveViewingSession(workspaceId: string): void {
-    this.activeViewingSession.delete(workspaceId)
-  }
-
-  /**
-   * Check if a session is currently being viewed by the user
-   */
-  private isSessionBeingViewed(sessionId: string, workspaceId: string): boolean {
-    return this.activeViewingSession.get(workspaceId) === sessionId
-  }
-
-  /**
-   * Mark a session as read by setting lastReadMessageId and clearing hasUnread.
-   * Called when user navigates to a session (and it's not processing).
-   */
-  async markSessionRead(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return
-
-    // Only mark as read if not currently processing
-    // (user is viewing but we want to wait for processing to complete)
-    if (managed.isProcessing) return
-
-    let needsPersist = false
-    const updates: { lastReadMessageId?: string; hasUnread?: boolean } = {}
-
-    // Update lastReadMessageId for legacy/manual unread functionality
-    if (managed.messages.length > 0) {
-      const lastFinalId = this.getLastFinalAssistantMessageId(managed.messages)
-      if (lastFinalId && managed.lastReadMessageId !== lastFinalId) {
-        managed.lastReadMessageId = lastFinalId
-        updates.lastReadMessageId = lastFinalId
-        needsPersist = true
-      }
-    }
-
-    // Clear hasUnread flag (primary source of truth for NEW badge)
-    if (managed.hasUnread) {
-      managed.hasUnread = false
-      updates.hasUnread = false
-      needsPersist = true
-    }
-
-    // Persist changes
-    if (needsPersist) {
-      const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, updates)
-      this.emitUnreadSummaryChanged()
-    }
-  }
-
-  /**
-   * Mark a session as unread by setting hasUnread flag.
-   * Called when user manually marks a session as unread via context menu.
-   */
-  async markSessionUnread(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.hasUnread = true
-      managed.lastReadMessageId = undefined
-      // Persist to disk
-      const workspaceRootPath = managed.workspace.rootPath
-      await updateSessionMetadata(workspaceRootPath, sessionId, { hasUnread: true, lastReadMessageId: undefined })
-      this.emitUnreadSummaryChanged()
-    }
-  }
-
-  /**
-   * Mark all non-hidden, non-archived sessions in a workspace as read.
-   * Called from "Mark All Read" context menu on "All Sessions".
-   */
-  async markAllSessionsRead(workspaceId: string): Promise<void> {
-    const updates: Promise<void>[] = []
-    for (const managed of this.sessions.values()) {
-      if (managed.workspace.id !== workspaceId) continue
-      if (managed.hidden || managed.isArchived) continue
-      if (managed.isProcessing) continue
-      if (!managed.hasUnread) continue
-      managed.hasUnread = false
-      updates.push(
-        updateSessionMetadata(managed.workspace.rootPath, managed.id, { hasUnread: false })
-      )
-    }
-    if (updates.length > 0) {
-      await Promise.all(updates)
-      this.emitUnreadSummaryChanged()
-    }
-  }
-
-  async renameSession(sessionId: string, name: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.name = name
-      this.persistSession(managed)
-      // Notify renderer of the name change
-      this.sendEvent({ type: 'title_generated', sessionId, title: name }, managed.workspace.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  /**
-   * Regenerate the session title based on recent messages.
-   * Uses the last few user messages to capture what the session has evolved into.
-   * Automatically uses the same provider as the session (Claude or OpenAI).
-   */
-  async refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }> {
-    sessionLog.info(`refreshTitle called for session ${sessionId}`)
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`refreshTitle: Session ${sessionId} not found`)
-      return { success: false, error: 'Session not found' }
-    }
-
-    // Ensure messages are loaded from disk (lazy loading support)
-    await this.ensureMessagesLoaded(managed)
-
-    // Select a spread of user messages (first, middle, last) to capture the session's purpose
-    const allUserContents = managed.messages
-      .filter((m) => m.role === 'user')
-      .map((m) => m.content)
-    const userMessages = selectSpreadMessages(allUserContents)
-
-    sessionLog.info(`refreshTitle: Selected ${userMessages.length} spread messages from ${allUserContents.length} total`)
-
-    if (userMessages.length === 0) {
-      sessionLog.warn(`refreshTitle: No user messages found`)
-      return { success: false, error: 'No user messages to generate title from' }
-    }
-
-    // Get the most recent assistant response
-    const lastAssistantMsg = managed.messages
-      .filter((m) => m.role === 'assistant' && !m.isIntermediate)
-      .slice(-1)[0]
-
-    const assistantResponse = lastAssistantMsg?.content ?? ''
-
-    // Derive language from app's i18n setting for language-aware title generation
-    const titleLangCode = (i18n.resolvedLanguage ?? 'en') as LanguageCode
-    const titleLangEntry = LOCALE_REGISTRY[titleLangCode]
-    const titleOptions = { language: titleLangEntry?.nativeName }
-    sessionLog.info(`[refreshTitle] language at call time`, {
-      sessionId,
-      resolvedLanguage: i18n.resolvedLanguage ?? null,
-      titleLangCode,
-      nativeName: titleLangEntry?.nativeName ?? null,
-    })
-
-    // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
-    let isTemporary = false
-
-    if (!agent && managed.llmConnection) {
-      try {
-        const connection = getLlmConnection(managed.llmConnection)
-        const resolvedMiniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
-
-        agent = createBackendFromConnection(managed.llmConnection, {
-          workspace: managed.workspace,
-          miniModel: resolvedMiniModel,
-          session: {
-            id: `title-${managed.id}`,
-            workspaceRootPath: managed.workspace.rootPath,
-            llmConnection: managed.llmConnection,
-            createdAt: Date.now(),
-            lastUsedAt: Date.now(),
-          },
-          isHeadless: true,
-        }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
-        isTemporary = true
-        sessionLog.info(`refreshTitle: Created temporary agent for session ${sessionId}`)
-      } catch (error) {
-        sessionLog.error(`refreshTitle: Failed to create temporary agent:`, error)
-        return { success: false, error: 'Failed to create agent for title generation' }
-      }
-    }
-
-    if (!agent) {
-      sessionLog.warn(`refreshTitle: No agent and no connection for session ${sessionId}`)
-      return { success: false, error: 'No agent available' }
-    }
-
-    sessionLog.info(`refreshTitle: Calling agent.regenerateTitle...`)
-
-
-    // Notify renderer that title regeneration has started (for shimmer effect)
-    managed.isAsyncOperationOngoing = true
-    this.sendEvent({ type: 'async_operation', sessionId, isOngoing: true }, managed.workspace.id)
-    // Keep legacy event for backward compatibility
-    this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: true }, managed.workspace.id)
-
-    try {
-      const title = await agent.regenerateTitle(userMessages, assistantResponse, titleOptions)
-      sessionLog.info(`refreshTitle: regenerateTitle returned: ${title ? `"${title}"` : 'null'}`)
-      if (title) {
-        managed.name = title
-        this.persistSession(managed)
-        // title_generated will also clear isRegeneratingTitle via the event handler
-        this.sendEvent({ type: 'title_generated', sessionId, title }, managed.workspace.id)
-        sessionLog.info(`Refreshed title for session ${sessionId}: "${title}"`)
-        return { success: true, title }
-      }
-      // Failed to generate - clear regenerating state
-      this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: false }, managed.workspace.id)
-      return { success: false, error: 'Failed to generate title' }
-    } catch (error) {
-      // Error occurred - clear regenerating state
-      this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: false }, managed.workspace.id)
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      sessionLog.error(`Failed to refresh title for session ${sessionId}:`, error)
-      return { success: false, error: message }
-    } finally {
-      // Clean up temporary agent
-      if (isTemporary && agent) {
-        agent.destroy()
-      }
-      // Signal async operation end
-      managed.isAsyncOperationOngoing = false
-      this.sendEvent({ type: 'async_operation', sessionId, isOngoing: false }, managed.workspace.id)
-    }
-  }
-
-  /**
-   * Update the working directory for a session.
-   *
-   * If no messages have been sent yet (no SDK interaction), also updates sdkCwd
-   * so the SDK will use the new path for transcript storage. This prevents the
-   * confusing "bash shell runs from a different directory" warning when the user
-   * changes the working directory before their first message.
-   */
-  updateWorkingDirectory(sessionId: string, path: string): void {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      // A bound checkout owns the working directory. Git actions, the Changes
-      // surface, and the persisted checkout identity all resolve from
-      // `managed.checkout`, so repointing `workingDirectory`/`sdkCwd` elsewhere
-      // would have the agent edit one tree while Kata inspects and commits
-      // another. Reject instead: checkout selection is the only way to change
-      // where a prepared session works.
-      if (managed.checkout && resolve(path) !== resolve(managed.checkout.checkoutPath)) {
-        const reason =
-          'This session is bound to a checkout. Its working directory cannot be changed.'
-        sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" â€” ${reason}`)
-        this.sendEvent({ type: 'working_directory_error', sessionId, error: reason }, managed.workspace.id)
-        return
-      }
-
-      const validation = isValidWorkingDirectory(path)
-      if (!validation.valid) {
-        sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" â€” ${validation.reason}`)
-        this.sendEvent({
-          type: 'working_directory_error',
-          sessionId,
-          error: validation.reason!,
-        }, managed.workspace.id)
-        return
-      }
-
-      managed.workingDirectory = path
-
-      // Invalidate filesystem caches that depend on working directory
-      invalidateContextFileCache(path)
-      invalidateSkillsCache()
-
-      // Check if we can also update sdkCwd (safe if no SDK interaction yet)
-      // Conditions: no messages sent AND no agent created yet (no SDK session)
-      const shouldUpdateSdkCwd =
-        managed.messages.length === 0 &&
-        !managed.sdkSessionId &&
-        !managed.agent
-
-      if (shouldUpdateSdkCwd) {
-        managed.sdkCwd = path
-        sessionLog.info(`Session ${sessionId}: sdkCwd updated to ${path} (no prior interaction)`)
-      }
-
-      // Also update the agent's session config if agent exists
-      if (managed.agent) {
-        managed.agent.updateWorkingDirectory(path)
-        // If agent exists but conditions still allow sdkCwd update (edge case),
-        // update the agent's sdkCwd as well
-        if (shouldUpdateSdkCwd) {
-          managed.agent.updateSdkCwd(path)
-        }
-      }
-
-      this.persistSession(managed)
-      // Notify renderer of the working directory change
-      this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: path }, managed.workspace.id)
-    }
-  }
-
-  /** Lazily-resolved Git domain services (managed worktrees, repository ops). */
-  private gitServicesInstance: GitServices | null = null
-  private getGitServices(): GitServices {
-    if (!this.gitServicesInstance) {
-      this.gitServicesInstance = getDefaultGitServices()
-    }
-    return this.gitServicesInstance
-  }
-
-  /**
-   * Override the Git domain services. Bootstrap wires the same instance used by
-   * the RPC handlers so checkout preparation and read-only Git RPCs share one
-   * registry/mutation-lock. Tests inject temp-rooted services.
-   */
-  setGitServices(services: GitServices): void {
-    this.gitServicesInstance = services
-  }
-
-  /**
-   * Callback that requests an immediate Git status refresh for a session.
-   * Installed by the git RPC handlers so agent turn completion (and, later,
-   * app-issued Git actions) can refresh the Changes surface without waiting for
-   * the coalesced poll tick (spec: refresh immediately after agent turn
-   * completion). No-op when the session's checkout is not subscribed.
-   */
-  private gitStatusRefresher: ((sessionId: string) => void) | null = null
-
-  /** Install the agent-turn / app-action Git status refresher. */
-  setGitStatusRefresher(refresh: (sessionId: string) => void): void {
-    this.gitStatusRefresher = refresh
-  }
-
-  /**
-   * Empty-session checkout preparation gate. See ISessionManager.prepareCheckout.
-   *
-   * Ordering (managed worktree):
-   * 1. Verify the session is empty (no messages, no SDK session ID, no agent).
-   * 2. Resolve repository + base-ref identity from the intent directory.
-   * 3. Create a provisional worktree + `kata-agent/<token>` branch.
-   * 4. Apply `.worktreeinclude`.
-   * 5. Re-verify the empty gate, then bind checkout metadata + workingDirectory
-   *    + sdkCwd atomically and persist.
-   * If binding fails, the still-clean provisional worktree/branch is removed.
-   */
-  async prepareCheckout(
-    sessionId: string,
-    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
-  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult> {
-    if (!isGitWorkspaceV1Enabled()) {
-      throw new Error('Git workspace feature is not enabled.')
-    }
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      throw new Error(`Session ${sessionId} not found`)
-    }
-
-    this.assertEmptySessionGate(managed)
-
-    const git = this.getGitServices()
-    const workingDirectory = intent.workingDirectory
-    const ctx = await git.repository.getContext(workingDirectory)
-    if (!ctx.isGitRepository || !ctx.repositoryRoot || !ctx.gitCommonDir) {
-      throw new Error('Selected directory is not inside a Git repository.')
-    }
-
-    // Idempotence: a repeated request only succeeds when its full intent
-    // (mode + repository + base ref) matches the persisted ready record; any
-    // different intent is rejected. `ctx.repositoryRoot` is compared against
-    // both the recorded repository root and checkout path so a re-request made
-    // from inside a prepared worktree still resolves as the same intent.
-    const existing = managed.checkout
-    if (existing) {
-      const sameMode = existing.mode === intent.mode
-      const sameRepo =
-        existing.repositoryRoot === ctx.repositoryRoot ||
-        existing.checkoutPath === ctx.repositoryRoot
-      let sameIntent = false
-      if (intent.mode === 'current') {
-        sameIntent = sameMode && sameRepo
-      } else {
-        const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
-        sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
-      }
-      if (sameIntent) {
-        return {
-          checkout: existing,
-          workingDirectory: existing.checkoutPath,
-          sdkCwd: managed.sdkCwd ?? existing.checkoutPath,
-        }
-      }
-      throw new Error('Session checkout is already prepared with a different intent.')
-    }
-
-    if (intent.mode === 'current') {
-      const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
-        schemaVersion: 1,
-        mode: 'current',
-        repositoryRoot: ctx.repositoryRoot,
-        checkoutPath: ctx.repositoryRoot,
-        branchAtPreparation: ctx.currentBranch,
-        baseRef: null,
-        managedWorktreeId: null,
-        expectedBranch: null,
-      }
-      this.bindCheckout(managed, checkout, workingDirectory)
-      // Prefer a durable persist before returning success: `bindCheckout`
-      // enqueues a debounced write, so flush it so a restart/resume immediately
-      // after preparation restores the same checkout (AC5).
-      await this.flushSession(sessionId)
-      return { checkout, workingDirectory, sdkCwd: managed.sdkCwd ?? workingDirectory }
-    }
-
-    // managed-worktree
-    const baseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
-    if (!baseRef) {
-      throw new Error('A base ref is required to create a new worktree.')
-    }
-
-    const { record, include } = await git.worktrees.createWorktree({
-      workspaceId: managed.workspace.id,
-      sessionId,
-      repositoryRoot: ctx.repositoryRoot,
-      gitCommonDir: ctx.gitCommonDir,
-      baseRef,
-    })
-
-    // Re-verify the gate after the async worktree creation; a concurrent send
-    // could have advanced the session. If so, tear down the clean provisional.
-    try {
-      this.assertEmptySessionGate(managed)
-    } catch (gateErr) {
-      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId)
-      throw gateErr
-    }
-
-    const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
-      schemaVersion: 1,
-      mode: 'managed-worktree',
-      repositoryRoot: ctx.repositoryRoot,
-      checkoutPath: record.checkoutPath,
-      branchAtPreparation: record.expectedBranch,
-      baseRef,
-      managedWorktreeId: record.managedWorktreeId,
-      expectedBranch: record.expectedBranch,
-    }
-
-    try {
-      this.bindCheckout(managed, checkout, record.checkoutPath)
-      git.registry.setState(record.managedWorktreeId, 'ready')
-      // Durable persist so restart/resume immediately after preparation returns
-      // to the same managed worktree (AC5).
-      await this.flushSession(sessionId)
-    } catch (bindErr) {
-      // Session update failed â€” attempt clean provisional cleanup.
-      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId).catch(() => {})
-      throw bindErr
-    }
-
-    return {
-      checkout,
-      workingDirectory: record.checkoutPath,
-      sdkCwd: managed.sdkCwd ?? record.checkoutPath,
-      warnings: include.skippedSymlinks > 0
-        ? [`Skipped ${include.skippedSymlinks} symlink(s) while applying .worktreeinclude.`]
-        : undefined,
-    }
-  }
-
-  /**
-   * Resolve the managed-worktree identity for a session from its persisted
-   * checkout metadata and the registry â€” never a client-supplied path/id. The
-   * requesting session must be a recorded owner of the worktree.
-   */
-  private resolveOwnedWorktreeId(sessionId: string): string {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) throw new Error(`Session ${sessionId} not found`)
-    const managedWorktreeId = managed.checkout?.managedWorktreeId
-    if (managed.checkout?.mode !== 'managed-worktree' || !managedWorktreeId) {
-      throw new Error('Session has no managed worktree to remove.')
-    }
-    const git = this.getGitServices()
-    const record = git.registry.get(managedWorktreeId)
-    if (!record) {
-      throw new Error('Managed worktree record not found for this session.')
-    }
-    if (!record.ownerSessionIds.includes(sessionId)) {
-      throw new Error('Session does not own this managed worktree.')
-    }
-    return managedWorktreeId
-  }
-
-  /**
-   * Inspect managed-worktree removal risk for the requesting session. Identity
-   * is resolved server-side from the session's persisted checkout.
-   */
-  async inspectManagedWorktreeRemoval(
-    sessionId: string,
-  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk> {
-    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
-    return this.getGitServices().worktrees.inspectRemoval(managedWorktreeId, sessionId)
-  }
-
-  /**
-   * Remove the managed worktree owned by the requesting session. Identity is
-   * resolved server-side from the session's persisted checkout; the client
-   * never supplies a worktree path or ID. Blocked while another session owns
-   * it. `force` governs uncommitted/unique work only, not identity safety.
-   */
-  async removeManagedWorktree(
-    sessionId: string,
-    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
-  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult> {
-    if (!isGitWorkspaceV1Enabled()) {
-      throw new Error('Git workspace feature is not enabled.')
-    }
-    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
-    return this.getGitServices().worktrees.removeWorktree(managedWorktreeId, sessionId, options)
-  }
-
-  /**
-   * Remove this session's managed worktree before deleting the session. The
-   * authoritative fingerprint comparison and removal happen together under the
-   * repository mutation lock, so a mismatch cannot be discovered only after
-   * the session has already been lost.
-   *
-   * Three outcomes, deliberately distinct so `removeManagedWorktree` is safe for
-   * any caller to pass â€” including unattended cleanup that cannot inspect the
-   * session first:
-   *
-   *  - `nothing-to-remove`: there is no Kata-owned checkout to remove (feature
-   *    disabled, no managed checkout, no registry record, or this session is not
-   *    a recorded owner). Deletion proceeds normally; a client hint about
-   *    removal must never block deleting a session that has nothing to clean up.
-   *  - `blocked`: a real removal guard rejected it â€” another session still owns
-   *    the worktree, it holds uncommitted or unique work and `force` was not
-   *    given, or identity revalidation failed. The caller aborts entirely.
-   *  - `removed`: removal completed and session deletion may proceed.
-   */
-  private async removeManagedWorktreeBeforeSessionDeletion(
-    sessionId: string,
-    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
-  ): Promise<
-    | { outcome: 'nothing-to-remove' }
-    | { outcome: 'removed'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
-    | { outcome: 'blocked'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
-  > {
-    if (!isGitWorkspaceV1Enabled()) return { outcome: 'nothing-to-remove' }
-    let managedWorktreeId: string
-    try {
-      managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
-    } catch {
-      // No managed checkout, no registry record, or not an owner â€” all mean
-      // there is nothing this session may remove.
-      return { outcome: 'nothing-to-remove' }
-    }
-
-    try {
-      const result = await this.getGitServices().worktrees.removeWorktree(
-        managedWorktreeId,
-        sessionId,
-        {
-          force: options?.force,
-          expectedConfirmation: options?.expectedConfirmation,
-        },
-      )
-      if (result.blocked) return { outcome: 'blocked', result }
-      return { outcome: 'removed', result }
-    } catch (err) {
-      return {
-        outcome: 'blocked',
-        result: {
-          removed: false,
-          branchPruned: false,
-          blocked: true,
-          blockedReason: err instanceof Error ? err.message : String(err),
-        },
-      }
-    }
-  }
-
-  /**
-   * Atomically hide the persisted session without destroying it. A blocked
-   * checkout removal renames this directory back, while a successful combined
-   * deletion removes the tombstone only after runtime cleanup completes.
-   */
-  private async stageSessionStorageForDeletion(
-    workspaceRootPath: string,
-    sessionId: string,
-    managedWorktreeId: string,
-  ): Promise<{ originalPath: string; stagedPath: string; transactionPath: string } | null> {
-    await sessionPersistenceQueue.flush(sessionId)
-    sessionPersistenceQueue.cancel(sessionId)
-    const originalPath = getSessionStoragePath(workspaceRootPath, sessionId)
-    if (!existsSync(originalPath)) return null
-    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
-    const transactionPath = join(transactionRoot, randomUUID())
-    const stagedPath = join(transactionPath, 'session')
-    mkdirSync(transactionPath, { recursive: true })
-    writeFileSync(
-      join(transactionPath, 'transaction.json'),
-      JSON.stringify({ sessionId, managedWorktreeId }),
-      'utf8',
-    )
-    renameSync(originalPath, stagedPath)
-    return { originalPath, stagedPath, transactionPath }
-  }
-
-  private restoreStagedSessionStorage(
-    staged:
-      | { originalPath: string; stagedPath: string; transactionPath: string }
-      | null,
-  ): void {
-    if (!staged || !existsSync(staged.stagedPath)) return
-    renameSync(staged.stagedPath, staged.originalPath)
-    rmSync(staged.transactionPath, { recursive: true, force: true })
-  }
-
-  private finalizeStagedSessionStorage(
-    staged:
-      | { originalPath: string; stagedPath: string; transactionPath: string }
-      | null,
-  ): void {
-    if (!staged) return
-    rmSync(staged.transactionPath, { recursive: true, force: true })
-  }
-
-  /**
-   * Recover a crash-interrupted combined delete before normal session
-   * discovery. A still-tracked, still-present checkout means removal never
-   * completed and the session is restored. Otherwise the hidden transaction is
-   * finalized so no stale header can resurrect a dangling session.
-   */
-  private recoverStagedSessionDeletions(workspaceRootPath: string): void {
-    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
-    if (!existsSync(transactionRoot)) return
-    for (const entry of readdirSync(transactionRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const transactionPath = join(transactionRoot, entry.name)
-      const markerPath = join(transactionPath, 'transaction.json')
-      const stagedPath = join(transactionPath, 'session')
-      try {
-        if (!existsSync(markerPath) || !existsSync(stagedPath)) {
-          rmSync(transactionPath, { recursive: true, force: true })
-          continue
-        }
-        const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
-          sessionId?: string
-          managedWorktreeId?: string
-        }
-        if (!marker.sessionId || !marker.managedWorktreeId) {
-          rmSync(transactionPath, { recursive: true, force: true })
-          continue
-        }
-        const originalPath = getSessionStoragePath(workspaceRootPath, marker.sessionId)
-        const rec = this.getGitServices().registry.get(marker.managedWorktreeId)
-        if (rec && existsSync(rec.checkoutPath) && !existsSync(originalPath)) {
-          renameSync(stagedPath, originalPath)
-        }
-        rmSync(transactionPath, { recursive: true, force: true })
-      } catch (err) {
-        sessionLog.error(
-          `Failed to recover staged session deletion at ${transactionPath}:`,
-          err,
-        )
-      }
-    }
-  }
-
-  /**
-   * Wait for an aborted turn to actually finish before its checkout is inspected
-   * or removed.
-   *
-   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: work
-   * still in flight can land files afterwards, and a forced worktree removal
-   * would then discard work the destructive confirmation never counted.
-   *
-   * The backend's own `isProcessing()` cannot be the barrier here â€” `forceAbort`
-   * clears the exact state it reads (`ClaudeAgent` nulls `currentQuery`,
-   * `PiAgent` sets `_isProcessing = false`), so it reports idle the instant the
-   * abort is requested and would wave us through immediately. The meaningful
-   * signal is the session-level `isProcessing` flag, which is cleared by
-   * `onProcessingStopped` only after the abort has propagated out of the send
-   * loop and the turn has unwound. Both are checked, so neither can report idle
-   * on its own.
-   *
-   * Returns whether the turn confirmed it stopped. `false` means "unknown, and
-   * we stopped waiting" â€” callers must treat the checkout as still live rather
-   * than assume it is safe to remove.
-   *
-   * This is a turn-loop barrier, not a filesystem one: it does not prove the
-   * spawned subprocess has exited or that its last write landed. Closing that
-   * needs a real quiescence contract on the backend interface (see #21); the
-   * floor delay below only gives an already-issued write time to land.
-   */
-  private async waitForAgentQuiescence(
-    sessionId: string,
-    managed: ManagedSession,
-    timeoutMs = AGENT_QUIESCE_TIMEOUT_MS,
-  ): Promise<boolean> {
-    const agent = managed.agent
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-    // Floor delay, kept from the original fixed wait: it protects session-file
-    // writes during rapid deletes and lets an in-flight write land. It is now a
-    // minimum rather than the whole guarantee.
-    await sleep(AGENT_QUIESCE_POLL_MS)
-    if (!agent) return true
-
-    const deadline = Date.now() + timeoutMs
-    for (;;) {
-      // Both are evaluated every iteration, never short-circuited: the session
-      // flag is the one `forceAbort` does not clear, and the backend flag can
-      // still report work the session layer has not observed yet.
-      const sessionBusy = managed.isProcessing === true
-      let backendBusy = false
-      try {
-        backendBusy = agent.isProcessing()
-      } catch {
-        // A backend that cannot report its state leaves the session flag as the
-        // whole signal.
-        backendBusy = false
-      }
-      if (!sessionBusy && !backendBusy) return true
-      if (Date.now() >= deadline) {
-        sessionLog.warn(
-          `Turn for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
-        )
-        return false
-      }
-      await sleep(AGENT_QUIESCE_POLL_MS)
-    }
-  }
-
-  /** Throw unless the session is empty (no messages, no SDK session, no agent). */
-  private assertEmptySessionGate(managed: ManagedSession): void {
-    if (
-      managed.messages.length > 0 ||
-      managed.sdkSessionId ||
-      managed.agent ||
-      managed.isProcessing
-    ) {
-      throw new Error(
-        'Checkout preparation is only allowed on an empty session (no messages, no SDK session, no live agent).',
-      )
-    }
-  }
-
-  /**
-   * Bind checkout metadata, workingDirectory, and initial sdkCwd atomically.
-   * The empty-session gate guarantees sdkCwd is still safe to change.
-   */
-  private bindCheckout(
-    managed: ManagedSession,
-    checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1,
-    resolvedWorkingDir: string,
-  ): void {
-    managed.checkout = checkout
-    managed.workingDirectory = resolvedWorkingDir
-    managed.sdkCwd = resolvedWorkingDir
-    if (managed.agent) {
-      managed.agent.updateWorkingDirectory(resolvedWorkingDir)
-      managed.agent.updateSdkCwd(resolvedWorkingDir)
-    }
-    invalidateContextFileCache(resolvedWorkingDir)
-    invalidateSkillsCache()
-    this.persistSession(managed)
-    this.sendEvent(
-      { type: 'working_directory_changed', sessionId: managed.id, workingDirectory: resolvedWorkingDir },
-      managed.workspace.id,
-    )
-  }
-
-  /**
-   * Update the model for a session
-   * Pass null to clear the session-specific model (will use global config)
-   * @param connection - Optional LLM connection slug (only applied if not already locked)
-   */
-  async updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void> {
-    sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.model = model ?? undefined
-      // Also update connection if provided and not already locked
-      if (connection && !managed.connectionLocked) {
-        managed.llmConnection = connection
-      }
-      // Persist to disk (include connection if it was updated)
-      const updates: { model?: string; llmConnection?: string } = { model: model ?? undefined }
-      if (connection && !managed.connectionLocked) {
-        updates.llmConnection = connection
-      }
-      await updateSessionMetadata(managed.workspace.rootPath, sessionId, updates)
-      // Update agent model if it already exists (takes effect on next query)
-      if (managed.agent) {
-        // Fallback chain: session model > workspace default > connection default
-        const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
-        const sessionConn = resolveSessionConnection(managed.llmConnection, wsConfig?.defaults?.defaultLlmConnection)
-        const effectiveModel = model ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
-        sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, connectionLocked=${managed.connectionLocked}]`)
-        managed.agent.setModel(effectiveModel)
-      } else {
-        sessionLog.info(`[updateSessionModel] No agent yet, model will apply on next agent creation`)
-      }
-      // Notify renderer of the model change
-      this.sendEvent({ type: 'session_model_changed', sessionId, model }, managed.workspace.id)
-      sessionLog.info(`Session ${sessionId} model updated to: ${model ?? '(global config)'}`)
-    }
-  }
-
-  /**
-   * Update the content of a specific message in a session
-   * Used by preview window to save edited content back to the original message
-   */
-  updateMessageContent(sessionId: string, messageId: string, content: string): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot update message: session ${sessionId} not found`)
-      return
-    }
-
-    const message = managed.messages.find(m => m.id === messageId)
-    if (!message) {
-      sessionLog.warn(`Cannot update message: message ${messageId} not found in session ${sessionId}`)
-      return
-    }
-
-    // Update the message content
-    message.content = content
-    // Persist the updated session
-    this.persistSession(managed)
-    sessionLog.info(`Updated message ${messageId} content in session ${sessionId}`)
-  }
-
-  /**
-   * Add an annotation to a message and persist the session.
-   */
-  addMessageAnnotation(sessionId: string, messageId: string, annotation: NonNullable<Message['annotations']>[number]): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot add annotation: session ${sessionId} not found`)
-      return
-    }
-
-    const message = managed.messages.find(m => m.id === messageId)
-    if (!message) {
-      sessionLog.warn(`Cannot add annotation: message ${messageId} not found in session ${sessionId}`)
-      return
-    }
-
-    if (!annotation?.id || !annotation?.target?.selectors?.length) {
-      sessionLog.warn(`Cannot add annotation: invalid annotation payload for message ${messageId}`)
-      return
-    }
-
-    if (annotation.target.source.messageId !== messageId) {
-      sessionLog.warn(`Cannot add annotation: target source.messageId mismatch (${annotation.target.source.messageId} !== ${messageId})`)
-      return
-    }
-
-    const safeAnnotation: NonNullable<Message['annotations']>[number] = {
-      ...annotation,
-      schemaVersion: 1,
-      target: {
-        ...annotation.target,
-        source: {
-          ...annotation.target.source,
-          sessionId,
-          messageId,
-        },
-      },
-    }
-
-    const annotationBytes = Buffer.byteLength(JSON.stringify(safeAnnotation), 'utf8')
-    if (annotationBytes > MAX_ANNOTATION_JSON_BYTES) {
-      sessionLog.warn(`Cannot add annotation: payload too large (${annotationBytes} bytes > ${MAX_ANNOTATION_JSON_BYTES}) on message ${messageId}`)
-      return
-    }
-
-    const existing = message.annotations ?? []
-    if (existing.some(a => a.id === safeAnnotation.id)) {
-      sessionLog.warn(`Cannot add annotation: duplicate annotation id ${safeAnnotation.id} on message ${messageId}`)
-      return
-    }
-
-    if (existing.length >= MAX_ANNOTATIONS_PER_MESSAGE) {
-      sessionLog.warn(`Cannot add annotation: per-message limit reached (${MAX_ANNOTATIONS_PER_MESSAGE}) on message ${messageId}`)
-      return
-    }
-
-    message.annotations = [...existing, safeAnnotation]
-    this.persistSession(managed)
-    this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
-  }
-
-  /**
-   * Patch an existing annotation on a message.
-   */
-  updateMessageAnnotation(
-    sessionId: string,
-    messageId: string,
-    annotationId: string,
-    patch: Partial<NonNullable<Message['annotations']>[number]>
-  ): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot update annotation: session ${sessionId} not found`)
-      return
-    }
-
-    const message = managed.messages.find(m => m.id === messageId)
-    if (!message) {
-      sessionLog.warn(`Cannot update annotation: message ${messageId} not found in session ${sessionId}`)
-      return
-    }
-
-    const existing = message.annotations ?? []
-    const idx = existing.findIndex(a => a.id === annotationId)
-    if (idx === -1) {
-      sessionLog.warn(`Cannot update annotation: annotation ${annotationId} not found on message ${messageId}`)
-      return
-    }
-
-    if (patch.target?.source?.messageId && patch.target.source.messageId !== messageId) {
-      sessionLog.warn(`Cannot update annotation: target source.messageId mismatch in patch (${patch.target.source.messageId} !== ${messageId})`)
-      return
-    }
-
-    if (patch.target?.selectors && patch.target.selectors.length === 0) {
-      sessionLog.warn(`Cannot update annotation: empty selectors patch for annotation ${annotationId} on message ${messageId}`)
-      return
-    }
-
-    const current = existing[idx]!
-    const updated = {
-      ...current,
-      ...patch,
-      id: current.id,
-      schemaVersion: current.schemaVersion,
-      target: patch.target
-        ? {
-            ...current.target,
-            ...patch.target,
-            source: {
-              ...current.target.source,
-              ...(patch.target.source ?? {}),
-              sessionId,
-              messageId,
-            },
-          }
-        : {
-            ...current.target,
-            source: {
-              ...current.target.source,
-              sessionId,
-              messageId,
-            },
-          },
-      updatedAt: Date.now(),
-    }
-
-    const updatedBytes = Buffer.byteLength(JSON.stringify(updated), 'utf8')
-    if (updatedBytes > MAX_ANNOTATION_JSON_BYTES) {
-      sessionLog.warn(`Cannot update annotation: payload too large (${updatedBytes} bytes > ${MAX_ANNOTATION_JSON_BYTES}) for annotation ${annotationId} on message ${messageId}`)
-      return
-    }
-
-    const next = [...existing]
-    next[idx] = updated
-    message.annotations = next
-    this.persistSession(managed)
-    this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
-  }
-
-  /**
-   * Remove an annotation from a message and persist the session.
-   */
-  removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot remove annotation: session ${sessionId} not found`)
-      return
-    }
-
-    const message = managed.messages.find(m => m.id === messageId)
-    if (!message) {
-      sessionLog.warn(`Cannot remove annotation: message ${messageId} not found in session ${sessionId}`)
-      return
-    }
-
-    const existing = message.annotations ?? []
-    if (!existing.some(a => a.id === annotationId)) {
-      sessionLog.warn(`Cannot remove annotation: annotation ${annotationId} not found on message ${messageId}`)
-      return
-    }
-
-    message.annotations = existing.filter(a => a.id !== annotationId)
-    this.persistSession(managed)
-    this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
-  }
-
-  async deleteSession(
-    sessionId: string,
-    options?: import('@kata-sh/shared/protocol').SessionDeleteOptions,
-  ): Promise<import('@kata-sh/shared/protocol').SessionDeleteResult> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
-      return { deleted: false }
-    }
-
-    // Get workspace slug before deleting
-    const workspaceRootPath = managed.workspace.rootPath
-
-    // Quiesce the agent BEFORE anything reads or removes the checkout. A live
-    // turn writes into the worktree, so inspecting removal risk or removing the
-    // checkout while it runs could discard files the destructive confirmation
-    // never counted (spec: AC19). Also prevents overlapping writes from
-    // corrupting session files during rapid deletes.
-    let agentQuiesced = true
-    if (managed.isProcessing && managed.agent) {
-      managed.agent.forceAbort(AbortReason.UserStop)
-      agentQuiesced = await this.waitForAgentQuiescence(sessionId, managed)
-    }
-
-    // Managed-worktree removal is an opt-in extra step (spec: AC18â€“AC19). Its
-    // authoritative confirmation check and removal complete while the session
-    // still exists. If anything changed after the dialog inspection, the
-    // operation stops before ownership or session state is touched.
-    let completedWorktreeRemoval:
-      | import('@kata-sh/shared/protocol').WorktreeRemovalResult
-      | undefined
-    let stagedSessionStorage:
-      | { originalPath: string; stagedPath: string; transactionPath: string }
-      | null
-      | undefined
-    if (options?.removeManagedWorktree) {
-      // Removal requires a backend that has *confirmed* it stopped. Inspecting
-      // and force-removing a checkout that a subprocess may still be writing to
-      // would discard work no confirmation ever counted, so a wedged agent
-      // blocks removal â€” and therefore this deletion â€” rather than racing it.
-      // Deleting the session without the removal option never touches the
-      // checkout and stays available.
-      if (!agentQuiesced) {
-        sessionLog.warn(
-          `Refusing managed-worktree removal for ${sessionId}: agent did not confirm it stopped`,
-        )
-        return {
-          deleted: false,
-          worktreeRemoval: {
-            removed: false,
-            branchPruned: false,
-            blocked: true,
-            blockedReason:
-              'The agent has not finished stopping, so its worktree cannot be removed safely yet. Try again in a moment.',
-          },
-        }
-      }
-      let ownedWorktreeId: string | null = null
-      if (isGitWorkspaceV1Enabled()) {
-        try {
-          ownedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
-        } catch {
-          // The removal hint is harmless when this session owns no checkout.
-        }
-      }
-      if (ownedWorktreeId) {
-        try {
-          stagedSessionStorage = await this.stageSessionStorageForDeletion(
-            workspaceRootPath,
-            sessionId,
-            ownedWorktreeId,
-          )
-        } catch (err) {
-          return {
-            deleted: false,
-            worktreeRemoval: {
-              removed: false,
-              branchPruned: false,
-              blocked: true,
-              blockedReason: `The session could not be staged for safe deletion: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          }
-        }
-      }
-
-      const removal = await this.removeManagedWorktreeBeforeSessionDeletion(sessionId, {
-        force: options.forceWorktreeRemoval,
-        expectedConfirmation: options.worktreeRemovalConfirmation,
-      })
-      if (removal.outcome === 'blocked') {
-        try {
-          this.restoreStagedSessionStorage(stagedSessionStorage ?? null)
-        } catch (err) {
-          sessionLog.error(
-            `Failed to restore session storage after blocked worktree removal for ${sessionId}:`,
-            err,
-          )
-        }
-        return { deleted: false, worktreeRemoval: removal.result }
-      }
-      if (removal.outcome === 'removed') completedWorktreeRemoval = removal.result
-    }
-
-    // Drop managed-worktree ownership for this session. Deleting a session never
-    // removes the checkout on its own; it only releases the owner reference so
-    // shared-owner counts stay correct. When explicit removal was requested,
-    // the registry record is already gone and this is a harmless no-op.
-    if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
-      try {
-        this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
-      } catch (err) {
-        sessionLog.warn(`Failed to release worktree ownership for ${sessionId}:`, err)
-      }
-    }
-
-    // Revoke share if session was shared (prevent orphaned viewer copies)
-    if (managed.sharedId) {
-      try {
-        const { VIEWER_URL } = await import('@kata-sh/shared/branding')
-        const response = await fetch(
-          `${VIEWER_URL}/s/api/${managed.sharedId}`,
-          { method: 'DELETE', signal: AbortSignal.timeout(5000) }
-        )
-        if (!response.ok) {
-          sessionLog.warn(`Failed to revoke share for ${sessionId}: HTTP ${response.status}`)
-        } else {
-          sessionLog.info(`Revoked share for deleted session ${sessionId}`)
-        }
-      } catch (error) {
-        sessionLog.warn(`Failed to revoke share for ${sessionId}:`, error)
-      }
-    }
-
-    // Clean up delta flush timers to prevent orphaned timers
-    const timer = this.deltaFlushTimers.get(sessionId)
-    if (timer) {
-      clearTimeout(timer)
-      this.deltaFlushTimers.delete(sessionId)
-    }
-    this.pendingDeltas.delete(sessionId)
-    this.clearAdminRememberApprovalsForSession(sessionId)
-    this.clearPendingPermissionRequestsForSession(sessionId)
-
-    // Cancel any pending persistence write (session is being deleted, no need to save)
-    sessionPersistenceQueue.cancel(sessionId)
-
-    // Clean up session-scoped tool callbacks to prevent memory accumulation
-    unregisterSessionScopedToolCallbacks(sessionId)
-
-    // Destroy browser instances bound to this session
-    const sessionBpm = this.getBrowserPaneManagerForSession(sessionId)
-    if (sessionBpm) {
-      try {
-        sessionBpm.destroyForSession(sessionId)
-      } catch (err) {
-        // Worktree removal may already have completed. Cleanup is best-effort
-        // from this point forward so a synchronous browser failure cannot leave
-        // the staged session transaction half-applied.
-        sessionLog.warn(`Failed to destroy browser instances for ${sessionId}:`, err)
-      }
-    }
-    // Drop the per-session remote bridge + host-client pin on destroy.
-    this.remoteBpms.delete(sessionId)
-    this.browserHostByCanvas.delete(sessionId)
-
-    // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    if (managed.agent) {
-      try {
-        managed.agent.dispose()
-      } catch (err) {
-        sessionLog.warn(`Failed to dispose agent for ${sessionId}:`, err)
-      }
-    }
-
-    // Stop pool server (HTTP MCP server for external SDK subprocesses)
-    if (managed.poolServer) {
-      try {
-        managed.poolServer.stop().catch(err => {
-          sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-        })
-      } catch (err) {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      }
-    }
-
-    // Cancel any pending source-activation auto-retry timer (kata-agents-oss#804).
-    if (managed.autoRetryTimer) {
-      clearTimeout(managed.autoRetryTimer)
-      managed.autoRetryTimer = undefined
-    }
-    managed.autoRetryPending = undefined
-
-    this.sessions.delete(sessionId)
-
-    // Clean up session metadata in AutomationSystem (prevents memory leak)
-    const automationSystem = this.automationSystems.get(workspaceRootPath)
-    if (automationSystem) {
-      automationSystem.removeSessionMetadata(sessionId)
-    }
-
-    // Delete from disk too. Managed-worktree deletion staged the complete
-    // directory before removal, so finalization cannot leave a discoverable
-    // persisted session pointing at a checkout that is already gone.
-    if (stagedSessionStorage !== undefined) {
-      try {
-        this.finalizeStagedSessionStorage(stagedSessionStorage)
-      } catch (err) {
-        sessionLog.warn(`Failed to remove staged session storage for ${sessionId}:`, err)
-      }
-    } else if (!deleteStoredSession(workspaceRootPath, sessionId)) {
-      sessionLog.warn(`Failed to delete stored session ${sessionId}`)
-    }
-
-    // Notify all windows for this workspace that the session was deleted
-    this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
-    this.emitUnreadSummaryChanged()
-
-    // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
-    sessionLog.info(`Deleted session ${sessionId}`)
-
-    return completedWorktreeRemoval
-      ? { deleted: true, worktreeRemoval: completedWorktreeRemoval }
-      : { deleted: true }
-  }
-
-  async sendMessage(
-    sessionId: string,
-    message: string,
-    attachments?: FileAttachment[],
-    storedAttachments?: StoredAttachment[],
-    options?: SendMessageOptions,
-    existingMessageId?: string,
-    _isAuthRetry?: boolean,
-    /**
-     * Internal hook fired after the user message has been pushed to
-     * `managed.messages` and persisted to disk, but before the model-streaming
-     * work begins. The RPC handler uses this to send a synchronous "accepted"
-     * ack to the client so a crash mid-stream doesn't lose the user message
-     * (#616). Pre-persist errors still reject the outer promise as before.
-     */
-    onAck?: (messageId: string) => void,
-    /**
-     * Optional transport context. The `sessions.sendMessage` RPC handler passes
-     * `{ callerClientId: ctx.clientId }` so the SM can pin the desktop client
-     * that should host this session's browser tools. Pass undefined when calling
-     * directly (tests, intra-server flows) to leave the existing pin in place.
-     */
-    rpcContext?: { callerClientId?: string },
-  ): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      throw new Error(`Session ${sessionId} not found`)
-    }
-    this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
-
-    // Source-activation auto-retry dedup (kata-agents-oss#804). When the server
-    // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
-    // duplicate that arrives from a legacy renderer still running the client-side
-    // auto_retry. The first matching caller wins (server timer or legacy RPC,
-    // whichever arrives first), subsequent matching calls within the deadline drop.
-    if (claimAutoRetryPending(managed, message) === 'drop') {
-      sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-      return
-    }
-
-    // Clear any pending plan execution state when a new user message is sent.
-    // This acts as a safety valve - if the user moves on, we don't want to
-    // auto-execute an old plan later.
-    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
-
-    // Ensure messages are loaded before we try to add new ones
-    await this.ensureMessagesLoaded(managed)
-
-    // If currently processing, behavior depends on the connection's
-    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},
-    // defaults to provider-appropriate value):
-    //
-    // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
-    //   Claude emulates via PreToolUse hook. If `redirect()` returns false
-    //   (Claude with no live query, or backend can't steer), the backend has
-    //   already called forceAbort(Redirect) and we queue for replay.
-    // - 'queue': hold the message untouched; the current turn keeps running
-    //   to natural completion; replay as a new turn afterwards. NO call to
-    //   `agent.redirect()`, NO forceAbort, NO interruption.
-    if (managed.isProcessing) {
-      const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      // Fallback to 'steer' when no connection is resolvable â€” preserves
-      // today's exact behavior (call redirect, take whatever it returns).
-      const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
-
-      const agent = managed.agent
-      let steered = false
-      if (behavior === 'steer') {
-        steered = agent?.redirect(message) ?? false
-      }
-      // For 'queue': skip redirect entirely. The current turn is undisturbed.
-
-      sessionLog.info('mid-stream send', {
-        sessionId,
-        behavior,
-        steered,
-        queueLengthBefore: managed.messageQueue.length,
-        backend: agent ? agent.constructor.name : 'none',
-        connectionSlug: connection?.slug,
-      })
-
-      // Create user message for UI
-      const userMessage: Message = {
-        id: generateMessageId(),
-        role: 'user',
-        content: message,
-        timestamp: this.monotonic(),
-        attachments: storedAttachments,
-        badges: options?.badges,
-      }
-      managed.messages.push(userMessage)
-
-      // Emit to UI â€” 'accepted' iff a steer succeeded; 'queued' otherwise
-      // (covers both queue-direct and queue-after-abort paths).
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: steered ? 'accepted' : 'queued',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
-      if (!steered) {
-        // Push for FIFO replay on next onProcessingStopped tick. Same shape
-        // for both queue-direct (current turn still running) and
-        // queue-after-abort (backend already aborted) â€” the replay path in
-        // processNextQueuedMessage is identical.
-        managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-        managed.wasInterrupted = true
-      }
-
-      this.persistSession(managed)
-      // Force a synchronous flush so the user message is genuinely on disk
-      // before we tell the renderer "accepted" â€” `persistSession` only
-      // enqueues with a 500ms debounce. (#616 reliability fix.)
-      await this.flushSession(managed.id)
-      onAck?.(userMessage.id)
-      return
-    }
-
-    // Add user message with stored attachments for persistence
-    // Skip if existingMessageId is provided (message was already created when queued)
-    let userMessage: Message
-    if (existingMessageId) {
-      // Find existing message (already added when queued)
-      userMessage = managed.messages.find(m => m.id === existingMessageId)!
-      if (!userMessage) {
-        throw new Error(`Existing message ${existingMessageId} not found`)
-      }
-    } else {
-      // Create new message
-      userMessage = {
-        id: generateMessageId(),
-        role: 'user',
-        content: message,
-        timestamp: this.monotonic(),
-        attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
-        badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
-      }
-      managed.messages.push(userMessage)
-
-      // Update lastMessageRole for badge display
-      managed.lastMessageRole = 'user'
-
-      // Persist + flush before announcing â€” the user message must be
-      // genuinely on disk before we tell the renderer "accepted", and
-      // `persistSession` is debounced (500ms). #616.
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      onAck?.(userMessage.id)
-
-      // Emit user_message event so UI can confirm the optimistic message
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: 'accepted',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
-      // If this is the first user message and no title exists, set one immediately
-      // AI generation will enhance it later, but we always have a title from the start
-      // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
-        // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
-        // so titles show human-readable names instead of raw IDs
-        let titleSource = message
-        if (options?.badges) {
-          for (const badge of options.badges) {
-            if (badge.rawText && badge.label) {
-              titleSource = titleSource.replace(badge.rawText, badge.label)
-            }
-          }
-        }
-        // Sanitize: strip any remaining bracket mentions, XML blocks, tags
-        const sanitized = sanitizeForTitle(titleSource)
-        const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? 'â€¦' : '')
-        managed.name = initialTitle
-        this.persistSession(managed)
-        // Flush immediately so disk is authoritative before notifying renderer
-        await this.flushSession(managed.id)
-        this.sendEvent({
-          type: 'title_generated',
-          sessionId,
-          title: initialTitle,
-        }, managed.workspace.id)
-
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
-      }
-    }
-
-    // Evaluate auto-label rules against the user message (common path for both
-    // fresh and queued messages). Scans regex patterns configured on labels,
-    // then merges any new matches into the session's label array.
-    try {
-      const labelTree = listLabels(managed.workspace.rootPath)
-      const autoMatches = evaluateAutoLabels(message, labelTree)
-
-      if (autoMatches.length > 0) {
-        const existingLabels = managed.labels ?? []
-        const newEntries = autoMatches
-          .map(m => `${m.labelId}::${m.value}`)
-          .filter(entry => !existingLabels.includes(entry))
-
-        if (newEntries.length > 0) {
-          managed.labels = [...existingLabels, ...newEntries]
-          this.persistSession(managed)
-          this.sendEvent({
-            type: 'labels_changed',
-            sessionId,
-            labels: managed.labels,
-          }, managed.workspace.id)
-        }
-      }
-    } catch (e) {
-      sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
-    }
-
-    managed.lastMessageAt = Date.now()
-    this.setProcessing(managed, true)
-    managed.streamingText = ''
-    managed.processingGeneration++
-    managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
-
-    // Reset auth retry flag for this new message (allows one retry per message)
-    // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
-    // and resetting it would allow infinite retry loops
-    // Note: authRetryInProgress is NOT reset here - it's managed by the retry logic
-    if (!_isAuthRetry) {
-      managed.authRetryAttempted = false
-    }
-
-    // Store message/attachments for potential retry after auth refresh
-    // (SDK subprocess caches token at startup, so if it expires mid-session,
-    // we need to recreate the agent and retry the message)
-    managed.lastSentMessage = message
-    managed.lastSentAttachments = attachments
-    managed.lastSentStoredAttachments = storedAttachments
-    managed.lastSentOptions = options
-
-    // Capture the generation to detect if a new request supersedes this one.
-    // This prevents the finally block from clobbering state when a follow-up message arrives.
-    const myGeneration = managed.processingGeneration
-
-    // Pre-enable sources required by invoked skills (Issue #249)
-    // This eliminates the two-turn penalty where the agent discovers missing sources at runtime.
-    // Uses targeted loadSkillBySlug() instead of loadAllSkills() to avoid O(N) filesystem scans.
-    if (options?.skillSlugs?.length) {
-      try {
-        const workspaceRoot = managed.workspace.rootPath
-
-        const requiredSources = new Set<string>()
-        for (const slug of options.skillSlugs) {
-          const skill = loadSkillBySlug(workspaceRoot, slug, managed.workingDirectory)
-          if (skill?.metadata.requiredSources) {
-            for (const src of skill.metadata.requiredSources) {
-              requiredSources.add(src)
-            }
-          }
-        }
-
-        if (requiredSources.size > 0) {
-          const currentSlugs = new Set(managed.enabledSourceSlugs || [])
-          const toEnable: string[] = []
-          const skipped: string[] = []
-          const candidateSlugs = Array.from(requiredSources)
-          const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
-          const usableSources = new Set(
-            loadedSources
-              .filter(isSourceUsable)
-              .map(source => source.config.slug)
-          )
-
-          for (const srcSlug of candidateSlugs) {
-            if (currentSlugs.has(srcSlug)) continue
-            if (usableSources.has(srcSlug)) {
-              toEnable.push(srcSlug)
-            } else {
-              skipped.push(srcSlug)
-            }
-          }
-
-          if (skipped.length > 0) {
-            sessionLog.warn(`Skill requires sources that are not usable (missing or unauthenticated): ${skipped.join(', ')}`)
-          }
-
-          if (toEnable.length > 0) {
-            managed.enabledSourceSlugs = [...(managed.enabledSourceSlugs || []), ...toEnable]
-            sessionLog.info(`Pre-enabled sources for skill invocation: ${toEnable.join(', ')}`)
-            this.persistSession(managed)
-            this.sendEvent({
-              type: 'sources_changed',
-              sessionId,
-              enabledSourceSlugs: managed.enabledSourceSlugs,
-            }, managed.workspace.id)
-          }
-        }
-      } catch (e) {
-        sessionLog.warn(`Failed to pre-enable skill sources for session ${sessionId}:`, e)
-      }
-    }
-
-    // Start perf span for entire sendMessage flow
-    const sendSpan = perf.span('session.sendMessage', { sessionId })
-
-    const workspaceRootPath = managed.workspace.rootPath
-    const enabledSlugs = managed.enabledSourceSlugs ?? []
-    const hasSources = enabledSlugs.length > 0
-
-    // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
-    // runs its internal cold-session build. Otherwise that build sees stale tokens
-    // and emits AUTH_REQUIRED, causing a brief "needs_auth" UI flicker before the
-    // post-build refresh restores state (#710).
-    const sources: LoadedSource[] = hasSources
-      ? getSourcesBySlugs(workspaceRootPath, enabledSlugs)
-      : []
-
-    if (hasSources && managed.tokenRefreshManager) {
-      const refreshResult = await refreshExpiredCredentials(sources, managed.tokenRefreshManager)
-      if (refreshResult.failedSources.length > 0) {
-        sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
-      }
-      if (refreshResult.refreshedCount > 0) {
-        sendSpan.mark('oauth.refreshed')
-      }
-    }
-
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      // Single fresh build â€” tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
-      }
-
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
-      }
-      sendSpan.mark('servers.applied')
-    }
-
-    try {
-      sessionLog.info('Starting chat for session:', sessionId)
-      sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
-      sessionLog.info('Message:', message)
-      sessionLog.info('Agent model:', agent.getModel())
-      sessionLog.info('process.cwd():', process.cwd())
-
-      // Process the message through the agent
-      sessionLog.info('Calling agent.chat()...')
-      if (attachments?.length) {
-        sessionLog.info('Attachments:', attachments.length)
-      }
-
-      // Skills mentioned via @mentions are handled by the SDK's Skill tool.
-      // The UI layer (extractBadges in mentions.ts) injects fully-qualified names
-      // in the rawText, and canUseTool in kata-agent.ts provides a fallback
-      // to qualify short names. No transformation needed here.
-
-      // Ensure main process reads tool metadata from the correct session directory.
-      // This must be set before each chat() call since multiple sessions share the process.
-      const chatSessionDir = getSessionStoragePath(workspaceRootPath, sessionId)
-      toolMetadataStore.setSessionDir(chatSessionDir)
-
-      // Inject interruption context so the LLM knows the previous turn was cut short.
-      // Uses <system-reminder> tags so the LLM treats it as transient system guidance
-      // rather than part of the user's message content. The original message is stored
-      // in session JSONL (line ~3952); this only affects the SDK's in-process context.
-      let effectiveMessage = message
-      if (managed.wasInterrupted) {
-        effectiveMessage = `${message}\n\n<system-reminder>The previous assistant response was interrupted by the user and may be incomplete. Do not repeat or continue the interrupted response unless asked. Focus on the new message above.</system-reminder>`
-        managed.wasInterrupted = false
-      }
-
-      const messageBackendContext = resolveBackendContext({
-        sessionConnectionSlug: managed.llmConnection,
-        workspaceDefaultConnectionSlug: loadWorkspaceConfig(workspaceRootPath)?.defaults?.defaultLlmConnection,
-        managedModel: managed.model,
-      })
-      const modelInputAttachments = filterAttachmentsForModelInput(
-        attachments,
-        messageBackendContext.connection,
-        messageBackendContext.resolvedModel,
-      )
-      if (modelInputAttachments.omittedImages.length > 0) {
-        const omittedNames = modelInputAttachments.omittedImages.map(a => a.name).join(', ')
-        sessionLog.info(`Omitting ${modelInputAttachments.omittedImages.length} image attachment(s) from model input for ${messageBackendContext.resolvedModel}: ${omittedNames}`)
-        this.sendEvent({
-          type: 'info',
-          sessionId,
-          message: `Image attachment${modelInputAttachments.omittedImages.length === 1 ? '' : 's'} not sent because image input is disabled for ${messageBackendContext.resolvedModel}.`,
-          level: 'warning',
-        }, managed.workspace.id)
-      }
-
-      sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
-      sessionLog.info('Got chat iterator, starting iteration...')
-
-      for await (const event of chatIterator) {
-        // Log events (skip noisy text_delta)
-        if (event.type !== 'text_delta') {
-          if (event.type === 'tool_start') {
-            sessionLog.info(`tool_start: ${event.toolName} (${event.toolUseId})`)
-          } else if (event.type === 'tool_result') {
-            sessionLog.info(`tool_result: ${event.toolUseId} isError=${event.isError}`)
-          } else {
-            sessionLog.info('Got event:', event.type)
-          }
-        }
-
-        // Process the event first
-        await this.processEvent(managed, event)
-
-        // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
-        // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
-        // which immediately flushes to disk. This fallback handles edge cases where the
-        // callback might not fire (e.g., SDK version mismatch, callback not supported).
-        if (!managed.sdkSessionId) {
-          const sdkId = agent.getSessionId()
-          if (sdkId) {
-            managed.sdkSessionId = sdkId
-            sessionLog.info(`Captured SDK session ID via fallback: ${sdkId}`)
-            // Also flush here since we're in fallback mode
-            this.persistSession(managed)
-            sessionPersistenceQueue.flush(managed.id)
-          }
-        }
-
-        // Handle complete event - SDK always sends this (even after interrupt)
-        // This is the central place where processing ends
-        if (event.type === 'complete') {
-          // Skip normal completion handling if auth retry is in progress
-          // The retry will handle its own completion
-          if (managed.authRetryInProgress) {
-            sessionLog.info('Chat completed but auth retry is in progress, skipping normal completion handling')
-            sendSpan.mark('chat.complete.auth_retry_pending')
-            sendSpan.end()
-            return  // Exit function - retry will handle completion
-          }
-
-          // Auth/plan handoff paths already stopped processing and emitted a complete
-          // event to the renderer. Ignore the backend's trailing complete to avoid
-          // double cleanup and duplicate UI completion events.
-          if (!managed.isProcessing) {
-            sessionLog.info('Chat completed after explicit handoff/stop; skipping normal completion handling')
-            sendSpan.mark('chat.complete.already_stopped')
-            sendSpan.end()
-            return
-          }
-
-          sessionLog.info('Chat completed via complete event')
-
-          // Check if we got an assistant response in this turn
-          // If not, the SDK may have hit context limits or other issues
-          const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate
-          )
-          const lastUserMsg = [...managed.messages].reverse().find(m => m.role === 'user')
-
-          // If the last user message is newer than any assistant response, we got no reply
-          // This can happen due to context overflow or API issues
-          if (lastUserMsg && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)) {
-            sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
-
-            // Check if there's a captured API error that explains the silent failure.
-            // Pass explicit session path to avoid reading from the wrong session
-            // (_sessionDir singleton can be clobbered by concurrent sessions).
-            const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-            const apiError = getLastApiError(sessionErrorPath)
-
-            if (apiError && apiError.status === 400) {
-              const isImageError = apiError.message?.includes('image exceeds')
-
-              const errorMessage: Message = {
-                id: generateMessageId(),
-                role: 'error',
-                content: isImageError
-                  ? `Image Too Large: ${apiError.message}`
-                  : `Request Error: ${apiError.message}`,
-                timestamp: this.monotonic(),
-                errorCode: isImageError ? 'image_too_large' : 'invalid_request',
-                errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
-                errorDetails: isImageError
-                  ? ['An image in the conversation exceeds the 5 MB API limit.',
-                     'This session cannot recover â€” the image is embedded in the history.',
-                     'Please start a new session to continue.']
-                  : [apiError.message],
-                errorCanRetry: false,
-              }
-              managed.messages.push(errorMessage)
-              this.sendEvent({
-                type: 'typed_error',
-                sessionId,
-                error: {
-                  code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
-                  title: errorMessage.errorTitle!,
-                  message: apiError.message,
-                  actions: [],
-                  canRetry: false,
-                  details: errorMessage.errorDetails,
-                },
-              }, managed.workspace.id)
-            }
-          }
-
-          sendSpan.mark('chat.complete')
-          sendSpan.end()
-          this.onProcessingStopped(sessionId, 'complete')
-          return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
-        }
-
-        // NOTE: We no longer break early on !isProcessing or stopRequested.
-        // After soft interrupt (forceAbort), the backend sets turnComplete=true which causes
-        // the generator to yield remaining queued events and then complete naturally.
-        // This ensures we don't lose in-flight messages.
-      }
-
-      // Loop exited - either via complete event (normal) or generator ended after soft interrupt
-      if (!managed.isProcessing) {
-        sessionLog.info('Chat loop exited after explicit handoff/stop')
-        sendSpan.mark('chat.exit.already_stopped')
-        sendSpan.end()
-      } else if (managed.stopRequested) {
-        sessionLog.info('Chat loop completed after stop request - events drained successfully')
-        this.onProcessingStopped(sessionId, 'interrupted')
-      } else {
-        sessionLog.info('Chat loop exited unexpectedly')
-      }
-    } catch (error) {
-      // Check if this is an abort error (expected when interrupted)
-      const isAbortError = error instanceof Error && (
-        error.name === 'AbortError' ||
-        error.message === 'Request was aborted.' ||
-        error.message.includes('aborted')
-      )
-
-      if (isAbortError) {
-        // Extract abort reason if available (safety net for unexpected abort propagation)
-        const reason = (error as DOMException).cause as AbortReason | undefined
-
-        sessionLog.info(`Chat aborted (reason: ${reason || 'unknown'})`)
-        sendSpan.mark('chat.aborted')
-        sendSpan.setMetadata('abort_reason', reason || 'unknown')
-        sendSpan.end()
-
-        // UI handoff paths (plan submission, auth request) handle their own cleanup
-        // by setting isProcessing = false directly. All other abort reasons route
-        // through onProcessingStopped for queue draining.
-        if (reason === AbortReason.UserStop || reason === AbortReason.Redirect || reason === undefined) {
-          this.onProcessingStopped(sessionId, 'interrupted')
-        }
-      } else {
-        sessionLog.error('Error in chat:', error)
-        sessionLog.error('Error message:', error instanceof Error ? error.message : String(error))
-        sessionLog.error('Error stack:', error instanceof Error ? error.stack : 'No stack')
-
-        // Report chat/SDK errors via runtime hooks (Electron can forward to Sentry)
-        sessionRuntimeHooks.captureException(error, { errorSource: 'chat', sessionId })
-
-        sendSpan.mark('chat.error')
-        sendSpan.setMetadata('error', error instanceof Error ? error.message : String(error))
-        sendSpan.end()
-        this.sendEvent({
-          type: 'error',
-          sessionId,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        }, managed.workspace.id)
-        // Handle error via centralized handler
-        this.onProcessingStopped(sessionId, 'error')
-      }
-    } finally {
-      // Only handle cleanup for unexpected exits (loop break without complete event)
-      // Normal completion returns early after calling onProcessingStopped
-      // Errors are handled in catch block
-      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
-        sessionLog.info('Finally block cleanup - unexpected exit')
-        sendSpan.mark('chat.unexpected_exit')
-        sendSpan.end()
-        this.onProcessingStopped(sessionId, 'interrupted')
-      }
-    }
-  }
-
-  async cancelProcessing(sessionId: string, silent = false): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed?.isProcessing) {
-      return // Not processing, nothing to cancel
-    }
-
-    sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
-
-    // Collect queued message text for input restoration before clearing
-    const queuedTexts = managed.messageQueue.map(q => q.message)
-
-    // Collect queued message IDs so we can remove them from the messages array
-    // (they were added when sendMessage was called during processing)
-    const queuedMessageIds = new Set(
-      managed.messageQueue.map(q => q.messageId).filter((id): id is string => !!id)
-    )
-
-    // Clear queue - user explicitly stopped, don't process queued messages
-    managed.messageQueue = []
-
-    // Remove queued user messages from the persisted messages array
-    if (queuedMessageIds.size > 0) {
-      managed.messages = managed.messages.filter(m => !queuedMessageIds.has(m.id))
-    }
-
-    // Signal intent to stop - let the event loop drain remaining events before clearing isProcessing
-    // This prevents losing in-flight messages after soft interrupt
-    managed.stopRequested = true
-
-    // Track interruption so the next user message gets a context note
-    // telling the LLM the previous response was cut short
-    managed.wasInterrupted = true
-
-    // Force-abort via Query.close() - sends soft interrupt to the backend
-    if (managed.agent) {
-      managed.agent.forceAbort(AbortReason.UserStop)
-    }
-
-    // Only show "Response interrupted" message when user explicitly clicked Stop
-    // Silent mode is used when redirecting (sending new message while processing)
-    if (!silent) {
-      const interruptedMessage: Message = {
-        id: generateMessageId(),
-        role: 'info',
-        content: 'Response interrupted',
-        timestamp: this.monotonic(),
-      }
-      managed.messages.push(interruptedMessage)
-      this.sendEvent({
-        type: 'interrupted',
-        sessionId,
-        message: interruptedMessage,
-        // Include queued texts so the UI can restore them to the input field
-        ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
-      }, managed.workspace.id)
-    } else {
-      // Still send interrupted event but without the message (for UI state update)
-      this.sendEvent({
-        type: 'interrupted',
-        sessionId,
-        // Include queued texts so the UI can restore them to the input field
-        ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
-      }, managed.workspace.id)
-    }
-
-    // Safety timeout: if event loop doesn't complete within 5 seconds, force cleanup
-    // This handles cases where the generator gets stuck
-    setTimeout(() => {
-      if (managed.stopRequested && managed.isProcessing) {
-        sessionLog.warn('Generator did not complete after stop request, forcing cleanup')
-        this.onProcessingStopped(sessionId, 'timeout')
-      }
-    }, 5000)
-
-    // NOTE: We don't clear isProcessing or send complete event here anymore.
-    // The event loop will drain remaining events and call onProcessingStopped when done.
-  }
-
-  /**
-   * Attempt auth retry: refresh token, destroy agent, resend last message.
-   * Shared by both typed_error and plain error auth-retry paths.
-   * Returns true if retry was initiated, false if conditions not met.
-   */
-  private attemptAuthRetry(
-    sessionId: string,
-    managed: ManagedSession,
-    workspaceId: string,
-    failureErrorCode?: string,
-  ): boolean {
-    if (managed.authRetryAttempted || !managed.lastSentMessage) return false
-
-    sessionLog.info(`Auth error detected, attempting token refresh and retry for session ${sessionId}`)
-    managed.authRetryAttempted = true
-    managed.authRetryInProgress = true
-
-    // Emit lightweight info so the user sees progress instead of a scary red error
-    this.sendEvent({
-      type: 'info',
-      sessionId,
-      message: 'Token expired, refreshing sessionâ€¦',
-      timestamp: this.monotonic(),
-    }, workspaceId)
-
-    setImmediate(async () => {
-      try {
-        // 1. Reset summarization client so it picks up fresh credentials
-        sessionLog.info(`[auth-retry] Resetting summarization client for session ${sessionId}`)
-        resetSummarizationClient()
-
-        // 2. Destroy the agent â€” the new agent's postInit() will refresh auth
-        sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
-        managed.agent = null
-
-        // 3. Retry the message
-        const retryMessage = managed.lastSentMessage
-        const retryAttachments = managed.lastSentAttachments
-        const retryStoredAttachments = managed.lastSentStoredAttachments
-        const retryOptions = managed.lastSentOptions
-
-        if (retryMessage) {
-          sessionLog.info(`[auth-retry] Retrying message for session ${sessionId}`)
-          this.setProcessing(managed, false)
-
-          // Remove the user message that was added for this failed attempt
-          // so we don't get duplicate messages when retrying
-          const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
-          if (lastUserMsgIndex !== -1) {
-            managed.messages.splice(lastUserMsgIndex, 1)
-          }
-
-          managed.authRetryInProgress = false
-
-          await this.sendMessage(
-            sessionId,
-            retryMessage,
-            retryAttachments,
-            retryStoredAttachments,
-            retryOptions,
-            undefined,  // existingMessageId
-            true        // _isAuthRetry - prevents infinite retry loop
-          )
-          sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
-        } else {
-          managed.authRetryInProgress = false
-        }
-      } catch (retryError) {
-        managed.authRetryInProgress = false
-        sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
-        sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
-        const failedMessage: Message = {
-          id: generateMessageId(),
-          role: 'error',
-          content: 'Authentication failed. Please check your credentials.',
-          timestamp: this.monotonic(),
-          errorCode: failureErrorCode,
-        }
-        managed.messages.push(failedMessage)
-        this.sendEvent({
-          type: 'error',
-          sessionId,
-          error: 'Authentication failed. Please check your credentials.',
-          timestamp: failedMessage.timestamp,
-        }, workspaceId)
-        this.onProcessingStopped(sessionId, 'error')
-      }
-    })
-
-    return true
-  }
-
-  /**
-   * Central handler for when processing stops (any reason).
-   * Single source of truth for cleanup and queue processing.
-   *
-   * @param sessionId - The session that stopped processing
-   * @param reason - Why processing stopped ('complete' | 'interrupted' | 'error')
-   */
-  private async onProcessingStopped(
-    sessionId: string,
-    reason: 'complete' | 'interrupted' | 'error' | 'timeout'
-  ): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return
-
-    sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
-
-    // Agent turn just ended â€” request an immediate Git status refresh so the
-    // Changes surface reflects any files the agent touched without waiting for
-    // the coalesced poll tick. Best-effort and a no-op when the checkout is not
-    // subscribed; never blocks turn cleanup.
-    try {
-      this.gitStatusRefresher?.(sessionId)
-    } catch (err) {
-      sessionLog.warn(`Git status refresh after turn failed for ${sessionId}:`, err)
-    }
-
-    // 1. Cleanup state
-    this.setProcessing(managed, false)
-    managed.stopRequested = false  // Reset for next turn
-
-    const turnStartFinalMessageId = managed.turnStartFinalMessageId
-    managed.turnStartFinalMessageId = undefined
-
-    // Clear agent control overlay between turns. The session keeps browser
-    // ownership (boundSessionId) â€” only the visual overlay is removed.
-    // Full unbind happens below when the queue is empty (session truly done).
-    const turnBpm = this.getBrowserPaneManagerForSession(sessionId)
-    if (turnBpm) {
-      await turnBpm.clearVisualsForSession(sessionId)
-    }
-
-    // 2. Handle unread state based on whether user is viewing this session
-    //    This is the explicit state machine for NEW badge:
-    //    - If user is viewing: mark as read (they saw it complete)
-    //    - If user is NOT viewing: mark as unread (they have new content)
-    //    IMPORTANT: only apply this when the turn produced a NEW final assistant message.
-    const isViewing = this.isSessionBeingViewed(sessionId, managed.workspace.id)
-    const currentFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
-    const didReceiveNewFinalMessage = !!currentFinalMessageId && currentFinalMessageId !== turnStartFinalMessageId
-
-    if (reason === 'complete' && didReceiveNewFinalMessage) {
-      if (isViewing) {
-        // User is watching - mark as read immediately
-        await this.markSessionRead(sessionId)
-      } else {
-        // User is not watching - mark as unread for NEW badge
-        if (!managed.hasUnread) {
-          managed.hasUnread = true
-          await updateSessionMetadata(managed.workspace.rootPath, sessionId, { hasUnread: true })
-          this.emitUnreadSummaryChanged()
-        }
-      }
-    }
-
-    // 3. Auto-complete mini agent sessions to avoid session list clutter
-    //    Mini agents are spawned from EditPopovers for quick config edits
-    //    and should automatically move to 'done' when finished
-    if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
-      sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
-      await this.setSessionStatus(sessionId, 'done')
-    }
-
-    // 4. Apply deferred external metadata updates captured while processing.
-    if (managed.pendingExternalMetadata) {
-      const pendingHeader = managed.pendingExternalMetadata
-      managed.pendingExternalMetadata = undefined
-      sessionLog.info(`Applying deferred external metadata for session ${sessionId} after processing stop`)
-      this.applyExternalSessionMetadata(managed, pendingHeader)
-    }
-
-    // 5. Check queue and process or complete
-    if (managed.messageQueue.length > 0) {
-      // Has queued messages - process next
-      this.processNextQueuedMessage(sessionId)
-    } else {
-      // Session is truly done â€” release browser ownership.
-      // The window stays alive (hidden) and becomes reusable by future sessions.
-      // On the next turn, getOrCreateForSession() will re-bind it.
-      const doneBpm = this.getBrowserPaneManagerForSession(sessionId)
-      if (doneBpm) {
-        await doneBpm.clearVisualsForSession(sessionId)
-        doneBpm.unbindAllForSession(sessionId)
-      }
-
-      // No queue - emit complete to UI (include tokenUsage and hasUnread for state updates)
-      this.sendEvent({
-        type: 'complete',
-        sessionId,
-        tokenUsage: managed.tokenUsage,
-        hasUnread: managed.hasUnread,  // Propagate unread state to renderer
-      }, managed.workspace.id)
-    }
-
-    // 6. Always persist
-    this.persistSession(managed)
-  }
-
-  /**
-   * Process the next message in the queue.
-   * Called by onProcessingStopped when queue has messages.
-   */
-  private processNextQueuedMessage(sessionId: string): void {
-    const managed = this.sessions.get(sessionId)
-    if (!managed || managed.messageQueue.length === 0) return
-
-    const next = managed.messageQueue.shift()!
-    sessionLog.info('replay queued', {
-      sessionId,
-      messageId: next.messageId,
-      queueLengthAfterShift: managed.messageQueue.length,
-    })
-
-    // Update UI: queued â†’ processing
-    if (next.messageId) {
-      const existingMessage = managed.messages.find(m => m.id === next.messageId)
-      if (existingMessage) {
-        // Clear isQueued flag and persist - prevents re-queueing if crash during processing
-        existingMessage.isQueued = false
-        this.persistSession(managed)
-
-        this.sendEvent({
-          type: 'user_message',
-          sessionId,
-          message: existingMessage,
-          status: 'processing',
-          optimisticMessageId: next.optimisticMessageId
-        }, managed.workspace.id)
-      }
-    }
-
-    // Process message (use setImmediate to allow current stack to clear)
-    setImmediate(() => {
-      this.sendMessage(
-        sessionId,
-        next.message,
-        next.attachments,
-        next.storedAttachments,
-        next.options,
-        next.messageId
-      ).catch(err => {
-        sessionLog.error('replay failed', {
-          sessionId,
-          messageId: next.messageId,
-          error: err instanceof Error ? err.message : String(err),
-        })
-        // Report queued message failures via runtime hooks
-        sessionRuntimeHooks.captureException(err, { errorSource: 'chat-queue', sessionId })
-        // Surface a typed error so the UI can show a clear, actionable banner
-        // instead of a generic "Unknown error" (#616).
-        this.sendEvent({
-          type: 'typed_error',
-          sessionId,
-          error: {
-            code: 'queued_message_replay_failed',
-            title: 'Queued message could not be sent',
-            message: 'A message you sent while the agent was running could not be re-sent automatically. Tap retry to send it now.',
-            actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
-            canRetry: true,
-            originalError: err instanceof Error ? err.message : String(err),
-          },
-        }, managed.workspace.id)
-        // Call onProcessingStopped to handle cleanup and check for more queued messages
-        this.onProcessingStopped(sessionId, 'error')
-      })
-    })
-  }
-
-  async killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      return { success: false, error: 'Session not found' }
-    }
-
-    sessionLog.info(`Killing shell ${shellId} for session: ${sessionId}`)
-
-    // Try to kill the actual process using the stored command
-    const command = managed.backgroundShellCommands.get(shellId)
-    if (command) {
-      try {
-        // Use pkill to find and kill processes matching the command
-        // The -f flag matches against the full command line
-        const { exec } = await import('child_process')
-        const { promisify } = await import('util')
-        const execAsync = promisify(exec)
-
-        // Escape the command for use in pkill pattern
-        // We search for the unique command string in process args
-        const escapedCommand = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-        sessionLog.info(`Attempting to kill process with command: ${command.slice(0, 100)}...`)
-
-        // Use pgrep first to find the PID, then kill it
-        // This is safer than pkill -f which can match too broadly
-        try {
-          const { stdout } = await execAsync(`pgrep -f "${escapedCommand}"`)
-          const pids = stdout.trim().split('\n').filter(Boolean)
-
-          if (pids.length > 0) {
-            sessionLog.info(`Found ${pids.length} process(es) to kill: ${pids.join(', ')}`)
-            // Kill each process
-            for (const pid of pids) {
-              try {
-                await execAsync(`kill -TERM ${pid}`)
-                sessionLog.info(`Sent SIGTERM to process ${pid}`)
-              } catch (killErr) {
-                // Process may have already exited
-                sessionLog.warn(`Failed to kill process ${pid}: ${killErr}`)
-              }
-            }
-          } else {
-            sessionLog.info(`No processes found matching command`)
-          }
-        } catch (pgrepErr) {
-          // pgrep returns exit code 1 when no processes found, which is fine
-          sessionLog.info(`No matching processes found (pgrep returned no results)`)
-        }
-
-        // Clean up the stored command
-        managed.backgroundShellCommands.delete(shellId)
-      } catch (err) {
-        sessionLog.error(`Error killing shell process: ${err}`)
-      }
-    } else {
-      sessionLog.warn(`No command stored for shell ${shellId}, cannot kill process`)
-    }
-
-    // Always emit shell_killed to remove from UI regardless of process kill success
-    this.sendEvent({
-      type: 'shell_killed',
-      sessionId,
-      shellId,
-    }, managed.workspace.id)
-
-    return { success: true }
-  }
-
-  /**
-   * Get output from a background task
-   *
-   * Looks up the output file stored when a task_completed event was received,
-   * reads its contents, and returns them. Falls back to the SDK-provided summary
-   * if the file cannot be read.
-   *
-   * @param taskId - The task or shell ID
-   * @returns Task output content, or null if task not found
-   */
-  async getTaskOutput(taskId: string): Promise<string | null> {
-    // O(1) lookup via taskOutputIndex
-    const sessionId = this.taskOutputIndex.get(taskId)
-    if (!sessionId) {
-      sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
-      return null
-    }
-
-    const managed = this.sessions.get(sessionId)
-    const info = managed?.backgroundTaskOutputs.get(taskId)
-    if (!info) {
-      // Index out of sync â€” clean up stale entry
-      this.taskOutputIndex.delete(taskId)
-      return null
-    }
-
-    sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
-    try {
-      const content = await readFile(info.outputFile, 'utf-8')
-      // Delete after successful read to prevent memory leak
-      managed!.backgroundTaskOutputs.delete(taskId)
-      this.taskOutputIndex.delete(taskId)
-      return content
-    } catch (err) {
-      sessionLog.error(`Failed to read task output file: ${info.outputFile}`, err)
-      // Fall back to SDK-provided summary
-      return info.summary || null
-    }
-  }
-
-  /**
-   * Respond to a pending permission request
-   * Returns true if the response was delivered, false if agent/session is gone
-   */
-  respondToPermission(
-    sessionId: string,
-    requestId: string,
-    allowed: boolean,
-    alwaysAllow: boolean,
-    options?: import('@kata-sh/shared/protocol').PermissionResponseOptions,
-  ): boolean {
-    const managed = this.sessions.get(sessionId)
-    if (managed?.agent) {
-      const requestMeta = this.pendingPermissionRequests.get(requestId)
-      this.pendingPermissionRequests.delete(requestId)
-
-      if (requestMeta?.type === 'admin_approval') {
-        const brokerResult = this.privilegedExecutionBroker.resolveApproval(requestId, allowed, {
-          expectedCommandHash: requestMeta.commandHash,
-        })
-        if (!brokerResult.ok) {
-          sessionLog.warn(`Admin approval rejected by broker for ${requestId}: ${brokerResult.reason}`)
-          // Broker rejection should fail closed.
-          managed.agent.respondToPermission(requestId, false, false)
-          return false
-        }
-
-        if (allowed && requestMeta.commandHash && options?.rememberForMinutes) {
-          this.storeAdminRememberApproval(sessionId, requestMeta.commandHash, requestId, options.rememberForMinutes)
-        }
-      }
-
-      sessionLog.info(`Permission response for ${requestId}: allowed=${allowed}, alwaysAllow=${alwaysAllow}`)
-      managed.agent.respondToPermission(requestId, allowed, alwaysAllow)
-      return true
-    } else {
-      sessionLog.warn(`Cannot respond to permission - no agent for session ${sessionId}`)
-      return false
-    }
-  }
-
-  /**
-   * Respond to a pending credential request
-   * Returns true if the response was delivered, false if no pending request found
-   *
-   * Supports both:
-   * - New unified auth flow (via handleCredentialInput)
-   * - Legacy callback flow (via pendingCredentialResolvers)
-   */
-  async respondToCredential(sessionId: string, requestId: string, response: import('@kata-sh/shared/protocol').CredentialResponse): Promise<boolean> {
-    // First, check if this is a new unified auth flow request
-    const managed = this.sessions.get(sessionId)
-    if (managed?.pendingAuthRequest && managed.pendingAuthRequest.requestId === requestId) {
-      sessionLog.info(`Credential response (unified flow) for ${requestId}: cancelled=${response.cancelled}`)
-      await this.handleCredentialInput(sessionId, requestId, response)
-      return true
-    }
-
-    // Fall back to legacy callback flow
-    const resolver = this.pendingCredentialResolvers.get(requestId)
-    if (resolver) {
-      sessionLog.info(`Credential response (legacy flow) for ${requestId}: cancelled=${response.cancelled}`)
-      resolver(response)
-      this.pendingCredentialResolvers.delete(requestId)
-      return true
-    } else {
-      sessionLog.warn(`Cannot respond to credential - no pending request for ${requestId}`)
-      return false
-    }
-  }
-
-  /**
-   * Set the permission mode for a session ('safe', 'ask', 'allow-all')
-   */
-  setSessionPermissionMode(sessionId: string, mode: PermissionMode): void {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      const previousManagedMode = managed.permissionMode ?? 'ask'
-      const diagnosticsBefore = getPermissionModeDiagnostics(sessionId)
-      const previousEffectiveMode = diagnosticsBefore.permissionMode
-
-      // No-op only when BOTH managed state and mode-manager state already match.
-      // If managed state matches but diagnostics drifted, heal authoritative mode state.
-      if (previousManagedMode === mode && previousEffectiveMode === mode) {
-        return
-      }
-
-      if (previousManagedMode === mode && previousEffectiveMode !== mode) {
-        sessionLog.warn('Permission mode drift detected on same-mode update; reconciling authoritative mode state', {
-          sessionId,
-          managedMode: previousManagedMode,
-          diagnosticsMode: previousEffectiveMode,
-          targetMode: mode,
-          modeVersion: diagnosticsBefore.modeVersion,
-          changedBy: diagnosticsBefore.lastChangedBy,
-        })
-      }
-
-      // Update in-memory managed mode first
-      managed.permissionMode = mode
-
-      // Reconcile mode-manager state for this specific session.
-      if (previousEffectiveMode !== mode) {
-        const changedBy = previousManagedMode === mode ? 'restore' : 'user'
-        setPermissionMode(sessionId, mode, { changedBy })
-      }
-
-      const diagnostics = getPermissionModeDiagnostics(sessionId)
-      managed.previousPermissionMode = diagnostics.previousPermissionMode
-      sessionLog.info('Permission mode changed', {
-        sessionId,
-        permissionMode: mode,
-        modeVersion: diagnostics.modeVersion,
-        changedBy: diagnostics.lastChangedBy,
-        changedAt: diagnostics.lastChangedAt,
-      })
-
-      // Forward to the agent instance so backends can propagate mode changes downstream.
-      if (managed.agent) {
-        managed.agent.setPermissionMode(mode)
-      }
-
-      this.sendEvent({
-        type: 'permission_mode_changed',
-        sessionId: managed.id,
-        permissionMode: mode,
-        modeVersion: diagnostics.modeVersion,
-        changedBy: diagnostics.lastChangedBy,
-        changedAt: diagnostics.lastChangedAt,
-        previousPermissionMode: diagnostics.previousPermissionMode,
-        transitionDisplay: diagnostics.transitionDisplay,
-      }, managed.workspace.id)
-      // Persist to disk
-      this.persistSession(managed)
-    }
-  }
-
-  /**
-   * Get authoritative permission mode diagnostics for a session.
-   * Used by renderer to reconcile optimistic/stale mode state.
-   */
-  getSessionPermissionModeState(sessionId: string): {
-    permissionMode: PermissionMode
-    previousPermissionMode?: PermissionMode
-    transitionDisplay?: string
-    modeVersion: number
-    changedAt: string
-    changedBy: 'user' | 'system' | 'restore' | 'automation' | 'unknown'
-  } | null {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) return null
-
-    let diagnostics = getPermissionModeDiagnostics(sessionId)
-
-    // Hydrate persisted transition context when mode-manager has been reset (e.g. app restart).
-    if (managed.previousPermissionMode && !diagnostics.previousPermissionMode) {
-      hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
-      diagnostics = getPermissionModeDiagnostics(sessionId)
-    }
-
-    // Heal restore races where mode-manager still has default state while
-    // session metadata already has a persisted non-default mode.
-    if (managed.permissionMode && diagnostics.permissionMode !== managed.permissionMode) {
-      sessionLog.warn('Permission mode diagnostics mismatch, reconciling to managed session mode', {
-        sessionId,
-        managedMode: managed.permissionMode,
-        diagnosticsMode: diagnostics.permissionMode,
-        modeVersion: diagnostics.modeVersion,
-        changedBy: diagnostics.lastChangedBy,
-      })
-      setPermissionMode(sessionId, managed.permissionMode, { changedBy: 'restore' })
-      if (managed.previousPermissionMode) {
-        hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
-      }
-      diagnostics = getPermissionModeDiagnostics(sessionId)
-    }
-
-    managed.previousPermissionMode = diagnostics.previousPermissionMode
-
-    return {
-      permissionMode: diagnostics.permissionMode,
-      previousPermissionMode: diagnostics.previousPermissionMode,
-      transitionDisplay: diagnostics.transitionDisplay,
-      modeVersion: diagnostics.modeVersion,
-      changedAt: diagnostics.lastChangedAt,
-      changedBy: diagnostics.lastChangedBy,
-    }
-  }
-
-  /**
-   * Set labels for a session (additive tags, many-per-session).
-   * Labels are IDs referencing workspace labels/config.json.
-   */
-  async setSessionLabels(sessionId: string, labels: string[]): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.labels = labels
-      this.setMetadataWriteGuard(managed)
-
-      this.sendEvent({
-        type: 'labels_changed',
-        sessionId: managed.id,
-        labels: managed.labels,
-      }, managed.workspace.id)
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  /**
-   * Set the thinking level for a session. See {@link ThinkingLevel} for valid values.
-   * This is sticky and persisted across messages.
-   */
-  setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      // Update thinking level in managed session
-      managed.thinkingLevel = level
-
-      // Update the agent's thinking level if it exists
-      if (managed.agent) {
-        managed.agent.setThinkingLevel(level)
-      }
-
-      sessionLog.info(`Session ${sessionId}: thinking level set to ${level}`)
-      // Persist to disk
-      this.persistSession(managed)
-    }
-  }
-
-  /**
-   * Generate an AI title for a session from the user's first message.
-   * Uses the agent's generateTitle() method which handles provider-specific SDK calls.
-   * If no agent exists, creates a temporary one using the session's connection.
-   */
-  private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
-    sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
-
-    // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
-    let isTemporary = false
-
-    // Wait briefly for agent to be created (it's created concurrently)
-    if (!agent) {
-      let attempts = 0
-      while (!managed.agent && attempts < 10) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        attempts++
-      }
-      agent = managed.agent
-    }
-
-    // If still no agent, create a temporary one using the session's connection
-    if (!agent && managed.llmConnection) {
-      try {
-        const connection = getLlmConnection(managed.llmConnection)
-
-        agent = createBackendFromConnection(managed.llmConnection, {
-          workspace: managed.workspace,
-          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
-          session: {
-            id: `title-${managed.id}`,
-            workspaceRootPath: managed.workspace.rootPath,
-            llmConnection: managed.llmConnection,
-            createdAt: Date.now(),
-            lastUsedAt: Date.now(),
-          },
-          isHeadless: true,
-        }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
-        isTemporary = true
-        sessionLog.info(`[generateTitle] Created temporary agent for session ${managed.id}`)
-      } catch (error) {
-        sessionLog.error(`[generateTitle] Failed to create temporary agent:`, error)
-        return
-      }
-    }
-
-    if (!agent) {
-      sessionLog.warn(`[generateTitle] No agent and no connection for session ${managed.id}`)
-      return
-    }
-
-    try {
-      const genLangCode = (i18n.resolvedLanguage ?? 'en') as LanguageCode
-      const genLangEntry = LOCALE_REGISTRY[genLangCode]
-      sessionLog.info(`[generateTitle] language at call time`, {
-        sessionId: managed.id,
-        resolvedLanguage: i18n.resolvedLanguage ?? null,
-        genLangCode,
-        nativeName: genLangEntry?.nativeName ?? null,
-      })
-      const title = await agent.generateTitle(userMessage, { language: genLangEntry?.nativeName })
-      if (title) {
-        managed.name = title
-        this.persistSession(managed)
-        // Flush immediately to ensure disk is up-to-date before notifying renderer.
-        // This prevents race condition where lazy loading reads stale disk data
-        // (the persistence queue has a 500ms debounce).
-        await this.flushSession(managed.id)
-        // Now safe to notify renderer - disk is authoritative
-        this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
-        sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
-      } else {
-        sessionLog.warn(`Title generation returned null for session ${managed.id}`)
-      }
-    } catch (error) {
-      sessionLog.error(`Failed to generate title for session ${managed.id}:`, error)
-
-      // Surface quota/auth errors to the user â€” these indicate the main chat call will also fail
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('401') || errorMsg.includes('insufficient')) {
-        this.sendEvent({
-          type: 'typed_error',
-          sessionId: managed.id,
-          error: {
-            code: 'provider_error',
-            title: 'API Error',
-            message: `API error: ${errorMsg.slice(0, 200)}`,
-            actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
-            canRetry: true,
-          }
-        }, managed.workspace.id)
-      }
-    } finally {
-      // Clean up temporary agent
-      if (isTemporary && agent) {
-        agent.destroy()
-      }
-    }
-  }
-
-  private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
-    const sessionId = managed.id
-    const workspaceId = managed.workspace.id
-
-    switch (event.type) {
-      case 'text_delta':
-        managed.streamingText += event.text
-        // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
-        this.queueDelta(sessionId, workspaceId, event.text, event.turnId)
-        break
-
-      case 'text_complete': {
-        // Flush any pending deltas before sending complete (ensures renderer has all content)
-        this.flushDelta(sessionId, workspaceId)
-
-        const assistantMessage: Message = {
-          id: generateMessageId(),
-          role: 'assistant',
-          content: event.text,
-          timestamp: this.monotonic(),
-          isIntermediate: event.isIntermediate,
-          turnId: event.turnId,
-          parentToolUseId: event.parentToolUseId,
-        }
-        managed.messages.push(assistantMessage)
-        managed.streamingText = ''
-
-        // Update lastMessageRole and lastFinalMessageId for badge/unread display (only for final messages)
-        if (!event.isIntermediate) {
-          managed.lastMessageRole = 'assistant'
-          managed.lastFinalMessageId = assistantMessage.id
-
-          const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
-
-          // Claude branch-cutoff support: persist message UUID + SDK session lineage in sidecar.
-          // Used to guard resumeSessionAt so we only send anchors valid for the parent SDK session.
-          if (event.turnId && managed.sdkSessionId && isClaudeMessageUuid(event.turnId)) {
-            try {
-              await saveClaudeTurnAnchor(sessionPath, assistantMessage.id, managed.sdkSessionId, event.turnId)
-            } catch (error) {
-              sessionLog.warn(`Failed to persist Claude turn anchor for session ${sessionId}:`, error)
-            }
-          }
-
-          // Pi branch-cutoff support: remember the SDK message id â†’ Craft
-          // assistant message id mapping. The actual anchor arrives as a
-          // separate `pi_turn_anchor` event one microtask later â€” the SDK
-          // updates its leaf only AFTER firing message_end (see #782).
-          if (event.sdkMessageId) {
-            let cache = managed.piSdkMessageToCraftMessage
-            if (!cache) {
-              cache = new Map()
-              managed.piSdkMessageToCraftMessage = cache
-            }
-            cache.set(event.sdkMessageId, assistantMessage.id)
-            // Prune oldest entries when over the cap. Map preserves insertion
-            // order, so the first key is the oldest.
-            if (cache.size > PI_SDK_MESSAGE_ID_CACHE_LIMIT) {
-              const oldest = cache.keys().next().value
-              if (oldest !== undefined) cache.delete(oldest)
-            }
-          }
-        }
-
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
-
-        // Persist session after complete message to prevent data loss on quit
-        this.persistSession(managed)
-        break
-      }
-
-      case 'pi_turn_anchor': {
-        // Follow-up to a `text_complete` from the Pi backend, carrying the
-        // correct leaf id captured AFTER the SDK appended its assistant entry
-        // (the synchronous `message_end` listener could not see it â€” #782).
-        // Look up the Craft assistant message id by SDK message id and
-        // persist the anchor to the sidecar.
-        const cache = managed.piSdkMessageToCraftMessage
-        const craftMessageId = cache?.get(event.sdkMessageId)
-        if (!craftMessageId) {
-          sessionLog.debug(`pi_turn_anchor for unknown sdkMessageId=${event.sdkMessageId}; ignoring`)
-          break
-        }
-        const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
-        try {
-          await savePiTurnAnchor(sessionPath, craftMessageId, event.sdkTurnAnchor)
-        } catch (error) {
-          sessionLog.warn(`Failed to persist Pi turn anchor for session ${sessionId}:`, error)
-        }
-        break
-      }
-
-      case 'tool_start': {
-        // Format tool input paths to relative for better readability
-        const formattedToolInput = formatToolInputPaths(event.input)
-
-        // Resolve call_llm model for TurnCard badge display.
-        // Resolve call_llm model short names to full IDs for display.
-        // Note: Pi sessions override the model in PiEventAdapter (call_llm always uses miniModel).
-        if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
-          const shortName = String(formattedToolInput.model)
-          const modelDef = MODEL_REGISTRY.find(m => m.id === shortName)
-            || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === shortName.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === shortName.toLowerCase())
-          if (modelDef) {
-            formattedToolInput.model = modelDef.id
-          }
-        }
-
-        // Resolve tool display metadata (icon, displayName) for skills/sources
-        // Only resolve when we have input (second event for SDK dual-event pattern)
-        const workspaceRootPath = managed.workspace.rootPath
-        let toolDisplayMeta: ToolDisplayMeta | undefined
-        if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
-          const allSources = loadAllSources(workspaceRootPath)
-          toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
-        }
-
-        // Check if a message with this toolUseId already exists FIRST
-        // SDK sends two events per tool: first from stream_event (empty input),
-        // second from assistant message (complete input)
-        const existingStartMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
-        const isDuplicateEvent = !!existingStartMsg
-
-        // Use parentToolUseId directly from the event â€” KataAgent resolves this
-        // from SDK's parent_tool_use_id (authoritative, handles parallel Tasks correctly).
-        // No stack or map needed; the event carries the correct parent from the start.
-        const parentToolUseId = event.parentToolUseId
-
-        // Track if we need to send an event to the renderer
-        // Send on: first occurrence OR when we have new input data to update
-        let shouldSendEvent = !isDuplicateEvent
-
-        if (existingStartMsg) {
-          // Update existing message with complete input (second event has full input)
-          if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
-            const hadInputBefore = existingStartMsg.toolInput && Object.keys(existingStartMsg.toolInput).length > 0
-            existingStartMsg.toolInput = formattedToolInput
-            // Send update event if we're adding input that wasn't there before
-            if (!hadInputBefore) {
-              shouldSendEvent = true
-            }
-          }
-          // Also set parent if not already set
-          if (parentToolUseId && !existingStartMsg.parentToolUseId) {
-            existingStartMsg.parentToolUseId = parentToolUseId
-          }
-          // Set toolDisplayMeta if not already set (has base64 icon for viewer)
-          if (toolDisplayMeta && !existingStartMsg.toolDisplayMeta) {
-            existingStartMsg.toolDisplayMeta = toolDisplayMeta
-          }
-          // Update toolIntent if not already set (second event has intent from complete input)
-          if (event.intent && !existingStartMsg.toolIntent) {
-            existingStartMsg.toolIntent = event.intent
-          }
-          // Update toolDisplayName if not already set
-          if (event.displayName && !existingStartMsg.toolDisplayName) {
-            existingStartMsg.toolDisplayName = event.displayName
-          }
-        } else {
-          // Add tool message immediately (will be updated on tool_result)
-          // This ensures tool calls are persisted even if they don't complete
-          const toolStartMessage: Message = {
-            id: generateMessageId(),
-            role: 'tool',
-            content: `Running ${event.toolName}...`,
-            timestamp: this.monotonic(),
-            toolName: event.toolName,
-            toolUseId: event.toolUseId,
-            toolInput: formattedToolInput,
-            toolStatus: 'executing',
-            toolIntent: event.intent,
-            toolDisplayName: event.displayName,
-            toolDisplayMeta,  // Includes base64 icon for viewer compatibility
-            turnId: event.turnId,
-            parentToolUseId,
-          }
-          managed.messages.push(toolStartMessage)
-        }
-
-        // Activate browser agent control overlay on actionable browser tool starts.
-        // Skip browser_tool help/release commands to avoid pointless overlay flashes.
-        const shouldActivateOverlay = shouldActivateBrowserOverlay(
-          event.toolName,
-          formattedToolInput,
-        )
-
-        const overlayBpm = this.getBrowserPaneManagerForSession(sessionId)
-        if (overlayBpm && shouldActivateOverlay) {
-          // Ensure first browser action in a turn gets an instance before overlay activation.
-          overlayBpm.getOrCreateForSession(sessionId, { workspaceId })
-
-          const resolvedDisplayName = toolDisplayMeta?.displayName
-            ?? event.displayName
-            ?? event.toolName
-          overlayBpm.setAgentControl(
-            sessionId,
-            { displayName: resolvedDisplayName, intent: event.intent },
-            { workspaceId },
-          )
-        }
-
-        // Send event to renderer on first occurrence OR when input data is updated
-        if (shouldSendEvent) {
-          const timestamp = existingStartMsg?.timestamp ?? this.monotonic()
-          this.sendEvent({
-            type: 'tool_start',
-            sessionId,
-            toolName: event.toolName,
-            toolUseId: event.toolUseId,
-            toolInput: formattedToolInput ?? {},
-            toolIntent: event.intent,
-            toolDisplayName: event.displayName,
-            toolDisplayMeta,  // Includes base64 icon for viewer compatibility
-            turnId: event.turnId,
-            parentToolUseId,
-            timestamp,
-          }, workspaceId)
-        }
-        break
-      }
-
-      case 'tool_result': {
-        // toolName comes directly from KataAgent (resolved via ToolIndex)
-        const toolName = event.toolName || 'unknown'
-
-        // Format absolute paths to relative paths for better readability
-        const rawFormattedResult = event.result ? formatPathsToRelative(event.result) : ''
-
-        // Safety net: prevent massive tool results from bloating session JSONL (protects all backends)
-        const MAX_PERSISTED_RESULT_CHARS = 200_000 // ~50K tokens
-        const formattedResult = rawFormattedResult.length > MAX_PERSISTED_RESULT_CHARS
-          ? rawFormattedResult.slice(0, MAX_PERSISTED_RESULT_CHARS) +
-            `\n\n[Truncated for storage: ${rawFormattedResult.length.toLocaleString()} chars total]`
-          : rawFormattedResult
-
-        // Some backends omit explicit isError but still prefix with [ERROR].
-        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
-
-        // Update existing tool message (created on tool_start) instead of creating new one
-        const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
-        // Track if already completed to avoid sending duplicate events
-        const wasAlreadyComplete = existingToolMsg?.toolStatus === 'completed'
-
-        sessionLog.info(`RESULT MATCH: toolUseId=${event.toolUseId}, found=${!!existingToolMsg}, toolName=${existingToolMsg?.toolName || toolName}, wasComplete=${wasAlreadyComplete}`)
-
-        // parentToolUseId comes from KataAgent (SDK-authoritative) or existing message
-        const parentToolUseId = existingToolMsg?.parentToolUseId || event.parentToolUseId
-
-        if (existingToolMsg) {
-          // Keep lightweight status text in `content` and store full payload in `toolResult` only.
-          existingToolMsg.toolResult = formattedResult
-          existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
-          existingToolMsg.isError = inferredError
-          // If message doesn't have parent set, use event's parentToolUseId
-          if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
-            existingToolMsg.parentToolUseId = event.parentToolUseId
-          }
-        } else {
-          // No matching tool_start found â€” create message from result.
-          // This is normal for background subagent child tools where tool_result arrives
-          // without a prior tool_start. If tool_start arrives later, findToolMessage will
-          // locate this message by toolUseId and update it with input/intent/displayMeta.
-          sessionLog.info(`RESULT WITHOUT START: toolUseId=${event.toolUseId}, toolName=${toolName} (creating message from result)`)
-          const fallbackWorkspaceRootPath = managed.workspace.rootPath
-          const fallbackSources = loadAllSources(fallbackWorkspaceRootPath)
-          const fallbackToolDisplayMeta = await resolveToolDisplayMeta(toolName, undefined, fallbackWorkspaceRootPath, fallbackSources)
-
-          const toolMessage: Message = {
-            id: generateMessageId(),
-            role: 'tool',
-            content: '',
-            timestamp: this.monotonic(),
-            toolName: toolName,
-            toolUseId: event.toolUseId,
-            toolResult: formattedResult,
-            toolStatus: inferredError ? 'error' : 'completed',
-            toolDisplayMeta: fallbackToolDisplayMeta,
-            parentToolUseId,
-            isError: inferredError,
-          }
-          managed.messages.push(toolMessage)
-        }
-
-        // Send event to renderer if: (a) first completion, or (b) result content changed
-        // (e.g., safety net auto-completed with empty result, then real result arrived later)
-        const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
-        if (!wasAlreadyComplete || resultChanged) {
-          // Use existing tool message timestamp, or fallback message timestamp for ordering
-          const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
-          this.sendEvent({
-            type: 'tool_result',
-            sessionId,
-            toolUseId: event.toolUseId,
-            toolName: toolName,
-            result: formattedResult,
-            turnId: event.turnId,
-            parentToolUseId,
-            isError: inferredError,
-            timestamp: toolResultTimestamp,
-          }, workspaceId)
-        }
-
-        // Safety net: when a parent Task completes, mark all its still-pending child tools as completed.
-        // This handles the case where child tool_result events never arrive (e.g., subagent internal tools
-        // whose results aren't surfaced through the parent stream).
-        if (isParentTaskTool(toolName) || toolName === 'TaskOutput') {
-          const pendingChildren = managed.messages.filter(
-            m => m.parentToolUseId === event.toolUseId
-              && m.toolStatus !== 'completed'
-              && m.toolStatus !== 'error'
-          )
-          for (const child of pendingChildren) {
-            child.toolStatus = 'completed'
-            child.toolResult = child.toolResult || ''
-            sessionLog.info(`CHILD AUTO-COMPLETED: toolUseId=${child.toolUseId}, toolName=${child.toolName} (parent ${toolName} completed)`)
-            this.sendEvent({
-              type: 'tool_result',
-              sessionId,
-              toolUseId: child.toolUseId!,
-              toolName: child.toolName || 'unknown',
-              result: child.toolResult || '',
-              turnId: child.turnId,
-              parentToolUseId: event.toolUseId,
-            }, workspaceId)
-          }
-        }
-
-        // Persist session after tool completes to prevent data loss on quit
-        this.persistSession(managed)
-        break
-      }
-
-      case 'status':
-        this.sendEvent({
-          type: 'status',
-          sessionId,
-          message: event.message,
-          statusType: event.message.includes('Compacting') ? 'compacting' : undefined
-        }, workspaceId)
-        break
-
-      case 'info': {
-        const isCompactionComplete = event.message.startsWith('Compacted')
-        const infoTimestamp = this.monotonic()
-
-        // Persist compaction messages so they survive reload
-        // Other info messages are transient (just sent to renderer)
-        if (isCompactionComplete) {
-          const compactionMessage: Message = {
-            id: generateMessageId(),
-            role: 'info',
-            content: event.message,
-            timestamp: infoTimestamp,
-            statusType: 'compaction_complete',
-          }
-          managed.messages.push(compactionMessage)
-
-          // Mark compaction complete in the session state.
-          // This is done here (backend) rather than in the renderer so it's
-          // not affected by CMD+R during compaction. The frontend reload
-          // recovery will see awaitingCompaction=false and trigger execution.
-          void markStoredCompactionComplete(managed.workspace.rootPath, sessionId)
-          sessionLog.info(`Session ${sessionId}: compaction complete, marked pending plan ready`)
-
-          // Emit usage_update so the context count badge refreshes immediately
-          // after compaction, without waiting for the next message
-          if (managed.tokenUsage) {
-            this.sendEvent({
-              type: 'usage_update',
-              sessionId,
-              tokenUsage: {
-                inputTokens: managed.tokenUsage.inputTokens,
-                contextWindow: managed.tokenUsage.contextWindow,
-              },
-            }, workspaceId)
-          }
-        }
-
-        this.sendEvent({
-          type: 'info',
-          sessionId,
-          message: event.message,
-          statusType: isCompactionComplete ? 'compaction_complete' : undefined,
-          timestamp: infoTimestamp,
-        }, workspaceId)
-        break
-      }
-
-      case 'error': {
-        // Skip errors after handoff (plan submission, auth request) â€” the SDK may emit
-        // an error from the interrupted query after we've already stopped processing.
-        if (!managed.isProcessing) {
-          sessionLog.info('Skipping error event after handoff/stop:', event.message)
-          break
-        }
-
-        // Skip abort errors - these are expected when force-aborting via Query.close()
-        if (event.message.includes('aborted') || event.message.includes('AbortError')) {
-          sessionLog.info('Skipping abort error event (expected during interrupt)')
-          break
-        }
-
-        // Defensive: detect auth-expiry text in plain errors that weren't classified
-        // as typed_error (e.g. Pi SDK error path or future provider changes).
-        const lowerErr = event.message.toLowerCase()
-        const isPlainAuthError =
-          lowerErr.includes('token is expired') ||
-          lowerErr.includes('authentication token is expired') ||
-          lowerErr.includes('please try signing in again') ||
-          (lowerErr.includes('401') && (lowerErr.includes('unauthorized') || lowerErr.includes('auth')))
-
-        if (isPlainAuthError && this.attemptAuthRetry(sessionId, managed, workspaceId)) {
-          break
-        }
-
-        // AgentEvent uses `message` not `error`
-        const errorMessage: Message = {
-          id: generateMessageId(),
-          role: 'error',
-          content: event.message,
-          timestamp: this.monotonic()
-        }
-        managed.messages.push(errorMessage)
-        this.sendEvent({ type: 'error', sessionId, error: event.message, timestamp: errorMessage.timestamp }, workspaceId)
-        break
-      }
-
-      case 'typed_error':
-        // Skip errors after handoff (plan submission, auth request)
-        if (!managed.isProcessing) {
-          sessionLog.info('Skipping typed_error event after handoff/stop:', event.error.message || event.error.title)
-          break
-        }
-
-        // Skip abort errors - these are expected when force-aborting via Query.close()
-        const typedErrorMsg = event.error.message || event.error.title || ''
-        if (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError')) {
-          sessionLog.info('Skipping typed abort error event (expected during interrupt)')
-          break
-        }
-        // Typed errors have structured information - send both formats for compatibility
-        sessionLog.info('typed_error:', JSON.stringify(event.error, null, 2))
-
-        // Check for auth errors that can be retried by refreshing the token
-        // The SDK subprocess caches the token at startup, so if it expires mid-session,
-        // we get invalid_api_key errors. We can fix this by:
-        // 1. Resetting the summarization client cache
-        // 2. Destroying the agent (new agent's postInit() refreshes the token)
-        // 3. Retrying the message
-        const isAuthError = event.error.code === 'invalid_api_key' ||
-          event.error.code === 'expired_oauth_token'
-
-        if (isAuthError && this.attemptAuthRetry(sessionId, managed, workspaceId, event.error.code)) {
-          // Don't add error message or send to renderer - we're handling it via retry
-          break
-        }
-
-        // Build rich error message with all diagnostic fields for persistence and UI display
-        const typedErrorMessage: Message = {
-          id: generateMessageId(),
-          role: 'error',
-          // Combine title and message for content display (handles undefined gracefully)
-          content: [event.error.title, event.error.message].filter(Boolean).join(': ') || 'An error occurred',
-          timestamp: this.monotonic(),
-          // Rich error fields for diagnostics and retry functionality
-          errorCode: event.error.code,
-          errorTitle: event.error.title,
-          errorDetails: event.error.details,
-          errorOriginal: event.error.originalError,
-          errorCanRetry: event.error.canRetry,
-        }
-        managed.messages.push(typedErrorMessage)
-        // Send typed_error event with full structure for renderer to handle
-        this.sendEvent({
-          type: 'typed_error',
-          sessionId,
-          error: {
-            code: event.error.code,
-            title: event.error.title,
-            message: event.error.message,
-            actions: event.error.actions,
-            canRetry: event.error.canRetry,
-            details: event.error.details,
-            originalError: event.error.originalError,
-          },
-          timestamp: typedErrorMessage.timestamp,
-        }, workspaceId)
-        break
-
-      case 'task_backgrounded':
-      case 'task_progress':
-        // Forward background task events directly to renderer
-        this.sendEvent({
-          ...event,
-          sessionId,
-        }, workspaceId)
-        break
-
-      case 'task_completed':
-        // Store output for later retrieval via getTaskOutput()
-        if (managed) {
-          managed.backgroundTaskOutputs.set(event.taskId, {
-            outputFile: event.outputFile || '',
-            summary: event.summary || '',
-            status: event.status,
-            completedAt: Date.now(),
-          })
-          // O(1) index for getTaskOutput() â€” avoids scanning all sessions
-          this.taskOutputIndex.set(event.taskId, sessionId)
-          sessionLog.info(`Background task ${event.taskId} completed (status=${event.status})`)
-
-          // Evict stale entries older than 1 hour to bound memory growth
-          const ONE_HOUR = 3_600_000
-          const now = Date.now()
-          for (const [tid, info] of managed.backgroundTaskOutputs) {
-            if (now - info.completedAt > ONE_HOUR) {
-              managed.backgroundTaskOutputs.delete(tid)
-              this.taskOutputIndex.delete(tid)
-            }
-          }
-        }
-        // Forward to renderer for UI update
-        this.sendEvent({
-          ...event,
-          sessionId,
-        }, workspaceId)
-        break
-
-      case 'shell_backgrounded':
-        // Store the command for later process killing
-        if (event.command && managed) {
-          managed.backgroundShellCommands.set(event.shellId, event.command)
-          sessionLog.info(`Stored command for shell ${event.shellId}: ${event.command.slice(0, 50)}...`)
-        }
-        // Forward to renderer
-        this.sendEvent({
-          ...event,
-          sessionId,
-        }, workspaceId)
-        break
-
-      case 'source_activated': {
-        // A source was auto-activated mid-turn. The server schedules a re-send of the
-        // original message with a "[<slug> activated]" suffix so headless deployments
-        // (WebUI, docker server) chain activations the same way the renderer used to.
-        // The renderer still receives the event to render activation feedback, but no
-        // longer fires its own auto_retry (see processor.ts).
-        sessionLog.info(`Source "${event.sourceSlug}" activated for session ${sessionId}, scheduling auto-retry`)
-
-        this.sendEvent({
-          type: 'source_activated',
-          sessionId,
-          sourceSlug: event.sourceSlug,
-          originalMessage: event.originalMessage,
-        }, workspaceId)
-
-        if (!managed) break
-
-        const originalMessage = event.originalMessage ?? ''
-        if (!originalMessage.trim()) {
-          sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
-          break
-        }
-
-        const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
-        const messageCountAtSchedule = managed.messages.length
-
-        // Stash the retry payload so a duplicate sendMessage from a legacy renderer
-        // (mixed-version rollout: new server + v0.9.5 Electron client) gets deduped.
-        // 2s window covers WS latency tail on flaky mobile / proxy links.
-        managed.autoRetryPending = {
-          content: messageWithSuffix,
-          deadlineMs: Date.now() + 2000,
-          committed: false,
-        }
-
-        if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
-        managed.autoRetryTimer = setTimeout(() => {
-          const current = this.sessions.get(sessionId)
-          if (!current) return
-          current.autoRetryTimer = undefined
-
-          // If a user follow-up arrived in the 100ms window, skip â€” they preempted us.
-          if (current.messages.length > messageCountAtSchedule) {
-            sessionLog.info(`Auto-retry skipped for ${sessionId}: follow-up message arrived first`)
-            current.autoRetryPending = undefined
-            return
-          }
-
-          // Note: do NOT clear autoRetryPending here â€” sendMessage() needs to see it
-          // so a legacy renderer's duplicate RPC arriving ~50ms later gets dropped.
-          // The pending slot is cleared by the deadline check in sendMessage, by the
-          // next matching sendMessage that drops as a duplicate, or by session deletion.
-          this.sendMessage(sessionId, messageWithSuffix).catch(err => {
-            sessionLog.error(`Auto-retry sendMessage failed for ${sessionId}:`, err)
-          })
-        }, 100)
-        break
-      }
-
-      case 'complete':
-        // Complete event from KataAgent - accumulate usage from this turn
-        // Actual 'complete' sent to renderer comes from the finally block in sendMessage
-        if (event.usage) {
-          // Initialize tokenUsage if not set
-          if (!managed.tokenUsage) {
-            managed.tokenUsage = {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: 0,
-              contextTokens: 0,
-              costUsd: 0,
-            }
-          }
-          // inputTokens = current context size (full conversation sent this turn), NOT accumulated
-          // Each API call sends the full conversation history, so we use the latest value
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
-          // outputTokens and costUsd are accumulated across all turns (total session usage)
-          managed.tokenUsage.outputTokens += event.usage.outputTokens
-          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
-          managed.tokenUsage.costUsd += event.usage.costUsd ?? 0
-          // Cache tokens reflect current state, not accumulated
-          managed.tokenUsage.cacheReadTokens = event.usage.cacheReadTokens ?? 0
-          managed.tokenUsage.cacheCreationTokens = event.usage.cacheCreationTokens ?? 0
-          // Update context window (use latest value - may change if model switches)
-          if (event.usage.contextWindow) {
-            managed.tokenUsage.contextWindow = event.usage.contextWindow
-          }
-        }
-        break
-
-      case 'usage_update':
-        // Real-time usage update for context display during processing
-        // Update managed session's tokenUsage with latest context size
-        if (event.usage) {
-          if (!managed.tokenUsage) {
-            managed.tokenUsage = {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: 0,
-              contextTokens: 0,
-              costUsd: 0,
-            }
-          }
-          // Update only inputTokens (current context size) - other fields accumulate on complete
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
-          if (event.usage.contextWindow) {
-            managed.tokenUsage.contextWindow = event.usage.contextWindow
-          }
-
-          // Send to renderer for immediate UI update
-          this.sendEvent({
-            type: 'usage_update',
-            sessionId: managed.id,
-            tokenUsage: {
-              inputTokens: event.usage.inputTokens,
-              contextWindow: event.usage.contextWindow,
-            },
-          }, workspaceId)
-        }
-        break
-
-      case 'steer_undelivered':
-        // Steer message was not delivered (no PreToolUse fired before turn ended).
-        // Re-queue it so it's sent as a normal message on the next turn.
-        sessionLog.info(`Steer message undelivered, re-queuing for session ${sessionId}`)
-        managed.messageQueue.push({ message: event.message })
-        managed.wasInterrupted = true
-        break
-
-      // Note: working_directory_changed is user-initiated only (via updateWorkingDirectory),
-      // the agent no longer has a change_working_directory tool
-    }
-  }
-
-  private sendEvent(event: SessionEvent, workspaceId?: string): void {
-    if (!this.eventSink) {
-      sessionLog.warn('Cannot send event - no event sink')
-      return
-    }
-
-    if (!workspaceId) {
-      sessionLog.warn(`Cannot send ${event.type} event - no workspaceId`)
-      return
-    }
-
-    this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)
-  }
-
-  /**
-   * Queue a text delta for batched sending (performance optimization)
-   * Instead of sending 50+ IPC events per second, batches deltas and flushes every 50ms
-   */
-  private queueDelta(sessionId: string, workspaceId: string, delta: string, turnId?: string): void {
-    const existing = this.pendingDeltas.get(sessionId)
-    if (existing) {
-      // Append to existing batch
-      existing.delta += delta
-      // Keep the latest turnId (should be the same, but just in case)
-      if (turnId) existing.turnId = turnId
-    } else {
-      // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, turnId })
-    }
-
-    // Schedule flush if not already scheduled
-    if (!this.deltaFlushTimers.has(sessionId)) {
-      const timer = setTimeout(() => {
-        this.flushDelta(sessionId, workspaceId)
-      }, DELTA_BATCH_INTERVAL_MS)
-      this.deltaFlushTimers.set(sessionId, timer)
-    }
-  }
-
-  /**
-   * Flush any pending deltas for a session (sends batched IPC event)
-   * Called on timer or when streaming ends (text_complete)
-   */
-  private flushDelta(sessionId: string, workspaceId: string): void {
-    // Clear the timer
-    const timer = this.deltaFlushTimers.get(sessionId)
-    if (timer) {
-      clearTimeout(timer)
-      this.deltaFlushTimers.delete(sessionId)
-    }
-
-    // Send batched delta if any
-    const pending = this.pendingDeltas.get(sessionId)
-    if (pending && pending.delta) {
-      this.sendEvent({
-        type: 'text_delta',
-        sessionId,
-        delta: pending.delta,
-        turnId: pending.turnId
-      }, workspaceId)
-      this.pendingDeltas.delete(sessionId)
-    }
-  }
-
-  /**
-   * Execute a prompt automation by creating a new session and sending the prompt.
-   *
-   * The options-object form replaced the previous positional-args signature
-   * once the param list outgrew readability â€” `thinkingLevel` was the trigger.
-   * When `thinkingLevel` is omitted, `createSession` falls back to the
-   * workspace default (then DEFAULT_THINKING_LEVEL).
-   */
-  async executePromptAutomation(
-    input: ExecutePromptAutomationInput,
-  ): Promise<{ sessionId: string }> {
-    const {
-      workspaceId,
-      workspaceRootPath,
-      prompt,
-      labels,
-      permissionMode,
-      mentions,
-      llmConnection,
-      model,
-      thinkingLevel,
-      automationName,
-      telegramTopic,
-    } = input
-
-    // Warn if llmConnection was specified but doesn't resolve
-    if (llmConnection) {
-      const connection = resolveSessionConnection(llmConnection)
-      if (!connection) {
-        sessionLog.warn(`[Automations] llmConnection "${llmConnection}" not found, using default`)
-      }
-    }
-
-    // Resolve @mentions to source/skill slugs
-    const resolved = mentions ? this.resolveAutomationMentions(workspaceRootPath, mentions) : undefined
-
-    // Ensure labels exist in workspace config before assigning to session
-    const resolvedLabels = labels?.length
-      ? ensureLabelsExist(workspaceRootPath, labels)
-      : labels
-
-    // Use automation name if provided, otherwise fall back to prompt snippet
-    const fallback = `Automation: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`
-    const sessionName = automationName || fallback
-
-    // Create a new session for this automation
-    const session = await this.createSession(workspaceId, {
-      name: sessionName,
-      labels: resolvedLabels,
-      permissionMode: permissionMode || 'safe',
-      enabledSourceSlugs: resolved?.sourceSlugs,
-      llmConnection,
-      model,
-      thinkingLevel,
-    })
-
-    // Populate triggeredBy metadata so title generation is explicitly skipped
-    // and the session is identifiable as automation-initiated after reload
-    const managed = this.sessions.get(session.id)
-    if (managed) {
-      managed.triggeredBy = { automationName, timestamp: Date.now() }
-      this.persistSession(managed)
-    }
-
-    // Notify renderer to hydrate full session metadata (including title)
-    // before streaming events arrive. Without this, the renderer may create
-    // a synthetic empty session and temporarily show "New chat".
-    this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
-
-    // Bind the new session to its Telegram forum topic if the matcher
-    // declared `telegramTopic`. Done before `sendMessage` so the first
-    // assistant tokens already route through the bound topic. Failure
-    // is logged inside the binder; the session continues unbound.
-    if (this.automationBinder && telegramTopic && telegramTopic.trim().length > 0) {
-      try {
-        await this.automationBinder({
-          workspaceId,
-          sessionId: session.id,
-          topicName: telegramTopic.trim(),
-        })
-      } catch (err) {
-        sessionLog.warn('[Automations] automation binder threw', {
-          sessionId: session.id,
-          telegramTopic,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
-
-    // Send the prompt
-    await this.sendMessage(session.id, prompt, undefined, undefined, {
-      skillSlugs: resolved?.skillSlugs,
-    })
-
-    return { sessionId: session.id }
-  }
-
-  /**
-   * Resolve @mentions in automation prompts to source and skill slugs
-   */
-  private resolveAutomationMentions(workspaceRootPath: string, mentions: string[]): { sourceSlugs: string[]; skillSlugs: string[] } | undefined {
-    const sources = loadWorkspaceSources(workspaceRootPath)
-    const skills = loadAllSkills(workspaceRootPath)
-    const sourceSlugs: string[] = []
-    const skillSlugs: string[] = []
-
-    for (const mention of mentions) {
-      if (sources.some(s => s.config.slug === mention)) {
-        sourceSlugs.push(mention)
-      } else if (skills.some(s => s.slug === mention)) {
-        skillSlugs.push(mention)
-      } else {
-        sessionLog.warn(`[Automations] Unknown mention: @${mention}`)
-      }
-    }
-
-    return (sourceSlugs.length > 0 || skillSlugs.length > 0) ? { sourceSlugs, skillSlugs } : undefined
-  }
-
-  // ============================================
-  // Export / Import / Dispatch
-  // ============================================
-
-  private async generateRemoteTransferSummary(managed: ManagedSession): Promise<string | null> {
-    await this.ensureMessagesLoaded(managed)
-
-    const messages = managed.messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .filter(m => !m.isIntermediate)
-      .map(m => ({
-        type: m.role as 'user' | 'assistant',
-        content: m.content,
-      }))
-
-    if (messages.length === 0) return null
-
-    const workspaceRootPath = managed.workspace.rootPath
-    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
-    const defaultModel = wsConfig?.defaults?.model
-    const backendContext = resolveBackendContext({
-      sessionConnectionSlug: managed.llmConnection,
-      workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
-      managedModel: managed.model || defaultModel,
-    })
-
-    const miniModel = backendContext.connection
-      ? (getMiniModel(backendContext.connection) ?? backendContext.connection.defaultModel ?? getDefaultSummarizationModel())
-      : getDefaultSummarizationModel()
-
-    const envOverrides: Record<string, string> = {
-      KATA_WORKSPACE_PATH: workspaceRootPath,
-      ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
-    }
-
-    const agent = createBackendFromResolvedContext({
-      context: backendContext,
-      hostRuntime: buildBackendHostRuntimeContext(),
-      coreConfig: {
-        workspace: managed.workspace,
-        session: {
-          id: `${managed.id}-remote-transfer-summary`,
-          workspaceRootPath,
-          createdAt: Date.now(),
-          lastUsedAt: Date.now(),
-          workingDirectory: managed.workingDirectory,
-          sdkCwd: managed.sdkCwd,
-          model: managed.model,
-          llmConnection: managed.llmConnection,
-          permissionMode: managed.permissionMode,
-          previousPermissionMode: managed.previousPermissionMode,
-        },
-        miniModel,
-        envOverrides,
-        isHeadless: true,
-      },
-      providerOptions: { piAuthProvider: backendContext.connection?.piAuthProvider },
-    })
-
-    try {
-      return await generateConversationSummary(messages, agent.runMiniCompletion.bind(agent))
-    } finally {
-      agent.destroy()
-    }
-  }
-
-  async exportRemoteSessionTransfer(sessionId: string, workspaceId: string): Promise<RemoteSessionTransferPayload | null> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`[dispatch] Cannot export remote transfer: ${sessionId} not found`)
-      return null
-    }
-
-    if (managed.workspace.id !== workspaceId) {
-      sessionLog.warn(`[dispatch] Session ${sessionId} does not belong to workspace ${workspaceId}`)
-      return null
-    }
-
-    if (managed.isProcessing) {
-      sessionLog.warn(`[dispatch] Cannot export remote transfer ${sessionId}: still processing`)
-      return null
-    }
-
-    this.persistSession(managed)
-    await sessionPersistenceQueue.flush(sessionId)
-
-    const summary = await this.generateRemoteTransferSummary(managed)
-    if (!summary) {
-      sessionLog.warn(`[dispatch] Failed to generate remote transfer summary for ${sessionId}`)
-      return null
-    }
-
-    return {
-      sourceSessionId: managed.id,
-      name: managed.name,
-      sessionStatus: managed.sessionStatus,
-      labels: managed.labels,
-      permissionMode: managed.permissionMode,
-      summary,
-    }
-  }
-
-  async importRemoteSessionTransfer(
-    workspaceId: string,
-    payload: RemoteSessionTransferPayload,
-  ): Promise<ImportRemoteSessionTransferResult> {
-    if (!payload || typeof payload !== 'object' || typeof payload.summary !== 'string' || !payload.summary.trim()) {
-      throw new Error('Invalid remote session transfer payload')
-    }
-
-    const session = await this.createSession(workspaceId, {
-      name: payload.name,
-      permissionMode: payload.permissionMode,
-      sessionStatus: payload.sessionStatus,
-      labels: payload.labels,
-    })
-
-    const managed = this.sessions.get(session.id)
-    if (!managed) {
-      throw new Error(`Transferred session ${session.id} was not created`)
-    }
-
-    managed.transferredSessionSummary = payload.summary.trim()
-    managed.transferredSessionSummaryApplied = false
-    this.persistSession(managed)
-    await sessionPersistenceQueue.flush(session.id)
-
-    return { sessionId: session.id }
-  }
-
-  /**
-   * Export a session as a portable SessionBundle.
-   *
-   * Steps:
-   * 1. Validate session exists and resolve its workspace
-   * 2. If session is processing, refuse (caller must stop it first)
-   * 3. Flush pending persistence writes
-   * 4. Serialize session directory into a bundle
-   */
-  async exportSession(sessionId: string, workspaceId: string): Promise<SessionBundle | null> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`[dispatch] Cannot export session: ${sessionId} not found`)
-      return null
-    }
-
-    if (managed.workspace.id !== workspaceId) {
-      sessionLog.warn(`[dispatch] Session ${sessionId} does not belong to workspace ${workspaceId}`)
-      return null
-    }
-
-    if (managed.isProcessing) {
-      sessionLog.warn(`[dispatch] Cannot export session ${sessionId}: still processing`)
-      return null
-    }
-
-    // Flush pending writes to ensure JSONL is up to date
-    this.persistSession(managed)
-    await sessionPersistenceQueue.flush(sessionId)
-
-    const bundle = serializeSession(managed.workspace.rootPath, sessionId)
-    if (!bundle) {
-      sessionLog.error(`[dispatch] Failed to serialize session ${sessionId}`)
-      return null
-    }
-
-    return bundle
-  }
-
-  /**
-   * Import a session bundle into a target workspace.
-   *
-   * Steps:
-   * 1. Validate bundle structure and target workspace
-   * 2. Generate new session ID (fork) or use original (move)
-   * 3. Create session directory and write JSONL + files
-   * 4. Register session in-memory
-   * 5. Emit session_created event
-   * 6. Return new session ID and compatibility warnings
-   */
-  async importSession(
-    workspaceId: string,
-    bundle: SessionBundle,
-    mode: DispatchMode,
-  ): Promise<{ sessionId: string; warnings?: string[] }> {
-    sessionLog.info(`[import] Starting import: workspaceId=${workspaceId}, mode=${mode}, bundleSessionId=${bundle?.session?.header?.id ?? 'unknown'}, files=${bundle?.files?.length ?? 0}`)
-
-    if (!validateBundle(bundle)) {
-      throw new Error('Invalid session bundle')
-    }
-
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      throw new Error(`Workspace ${workspaceId} not found`)
-    }
-
-    sessionLog.info(`[import] Target workspace: "${workspace.name}" at ${workspace.rootPath}`)
-
-    const warnings: string[] = []
-    const workspaceRootPath = workspace.rootPath
-
-    // Determine session ID
-    const sessionId = mode === 'move'
-      ? bundle.session.header.id
-      : generateSessionId(workspaceRootPath)
-
-    // Check for ID collision on move
-    if (mode === 'move' && this.sessions.has(sessionId)) {
-      throw new Error(`Session ${sessionId} already exists in target workspace`)
-    }
-
-    // Create session directory with all subdirectories
-    const sessionDir = ensureSessionDir(workspaceRootPath, sessionId)
-
-    // Build the stored session from bundle data
-    const header = bundle.session.header
-    const storedSession: StoredSession = {
-      id: sessionId,
-      workspaceRootPath,
-      sdkSessionId: header.sdkSessionId, // Preserved initially; fork logic below may clear it
-      // Always regenerate sdkCwd for the target workspace.
-      // The source sdkCwd points to a path on the originating server
-      // which doesn't exist here (cross-server transfer).
-      sdkCwd: getSessionStoragePath(workspaceRootPath, sessionId),
-      name: header.name,
-      createdAt: header.createdAt,
-      lastUsedAt: Date.now(),
-      lastMessageAt: header.lastMessageAt,
-      isFlagged: header.isFlagged,
-      permissionMode: header.permissionMode,
-      previousPermissionMode: header.previousPermissionMode,
-      sessionStatus: header.sessionStatus,
-      labels: header.labels,
-      enabledSourceSlugs: header.enabledSourceSlugs,
-      workingDirectory: header.workingDirectory,
-      model: header.model,
-      llmConnection: header.llmConnection,
-      connectionLocked: header.connectionLocked,
-      thinkingLevel: header.thinkingLevel,
-      hidden: header.hidden,
-      transferredSessionSummary: header.transferredSessionSummary,
-      transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
-      messages: bundle.session.messages,
-      tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
-      // NOTE: `checkout` is intentionally NOT copied from the source header.
-      // Host-specific managed-worktree IDs and paths are not portable; import
-      // and remote transfer must never recreate or claim ownership of a
-      // source-host worktree. The destination starts with no checkout record.
-    }
-
-    // Fork-specific: set up SDK branching if branchInfo provided
-    if (mode === 'fork' && bundle.branchInfo) {
-      storedSession.branchFromSdkSessionId = bundle.branchInfo.sdkSessionId
-      storedSession.branchFromSdkTurnId = bundle.branchInfo.sdkTurnId
-      storedSession.branchFromSdkCwd = bundle.branchInfo.sdkCwd
-    }
-
-    // Fork-specific: clear sharing state and attempt resume-first strategy
-    if (mode === 'fork') {
-      storedSession.sharedUrl = undefined
-      storedSession.sharedId = undefined
-
-      // Resume-first: try to find a compatible LLM connection on the target workspace.
-      // If found and the session has an sdkSessionId, preserve it for API-level resume.
-      // If not, clear SDK state and fall back to transferred session summary.
-      const sourceProviderType = header.llmConnection
-        ? getLlmConnection(header.llmConnection)?.providerType
-        : undefined
-      const compatibleConnection = sourceProviderType
-        ? this.findCompatibleLlmConnection(workspaceRootPath, sourceProviderType)
-        : null
-
-      if (compatibleConnection && storedSession.sdkSessionId) {
-        // Resume path: compatible credentials exist â€” preserve SDK session ID
-        sessionLog.info(`[import] Fork: compatible ${sourceProviderType} connection "${compatibleConnection}" found â€” preserving sdkSessionId for resume`)
-        storedSession.llmConnection = compatibleConnection
-        storedSession.connectionLocked = false
-      } else {
-        // Summary path: no compatible connection or no SDK session â€” clear for fresh start
-        if (storedSession.llmConnection) {
-          sessionLog.info(`[import] Fork: no compatible ${sourceProviderType ?? 'unknown'} connection â€” clearing, will use summary context`)
-        }
-        storedSession.sdkSessionId = undefined
-        storedSession.llmConnection = undefined
-        storedSession.connectionLocked = false
-      }
-      // Clear thinking level so the session inherits the workspace default
-      storedSession.thinkingLevel = undefined
-      // Clear working directory â€” the source path won't exist on a different server.
-      // The user can set a new cwd after the session is transferred.
-      storedSession.workingDirectory = undefined
-    }
-
-    // Check source compatibility (before writing JSONL so fixes are persisted)
-    if (storedSession.enabledSourceSlugs?.length) {
-      const availableSources = loadWorkspaceSources(workspaceRootPath)
-      const availableSlugs = new Set(availableSources.map(s => s.config.slug))
-      const missingSources = storedSession.enabledSourceSlugs.filter(s => !availableSlugs.has(s))
-      if (missingSources.length > 0) {
-        sessionLog.warn(`[import] Sources not available: ${missingSources.join(', ')}`)
-        warnings.push(`Sources not available in target workspace: ${missingSources.join(', ')}`)
-      }
-    }
-
-    // Check LLM connection compatibility for move mode (fork already cleared above)
-    if (mode === 'move' && storedSession.llmConnection) {
-      sessionLog.info(`[import] Checking LLM connection: "${storedSession.llmConnection}"`)
-      const conn = resolveSessionConnection(storedSession.llmConnection, undefined)
-      if (!conn) {
-        sessionLog.warn(`[import] LLM connection "${storedSession.llmConnection}" not found â€” clearing to use default`)
-        warnings.push(`LLM connection "${storedSession.llmConnection}" not found in target â€” session will use default`)
-        storedSession.llmConnection = undefined
-        storedSession.connectionLocked = false
-      } else {
-        sessionLog.info(`[import] LLM connection "${storedSession.llmConnection}" resolved OK`)
-      }
-    } else if (mode === 'move' && !storedSession.llmConnection) {
-      sessionLog.info('[import] No LLM connection in bundle â€” will use default')
-    }
-
-    // Write JSONL file (after compatibility checks so remapped values are persisted)
-    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
-    sessionLog.info(`[import] Writing JSONL: ${sessionFile} (llmConnection=${storedSession.llmConnection ?? 'default'}, messages=${storedSession.messages.length})`)
-    writeSessionJsonl(sessionFile, storedSession)
-
-    // Write all bundle files (attachments, plans, data, downloads, etc.)
-    // Uses restoreFiles() for path traversal, size, and base64 validation.
-    restoreFiles(sessionDir, bundle.files)
-
-    // Register in-memory â€” pass session metadata without messages to avoid
-    // StoredMessage[] vs Message[] type mismatch, then convert messages separately
-    const { messages: bundleMessages, ...sessionMeta } = storedSession
-    const managed = createManagedSession(sessionMeta, workspace, {
-      messagesLoaded: true,
-      workingDirectory: storedSession.workingDirectory,
-    })
-    managed.messages = bundleMessages.map(storedToMessage)
-
-    setPermissionMode(sessionId, managed.permissionMode ?? 'ask', { changedBy: 'restore' })
-    if (managed.previousPermissionMode) {
-      hydratePreviousPermissionMode(sessionId, managed.previousPermissionMode)
-    }
-
-    this.sessions.set(sessionId, managed)
-
-    // Initialize automation metadata
-    const automationSystem = this.automationSystems.get(workspaceRootPath)
-    if (automationSystem) {
-      automationSystem.setInitialSessionMetadata(sessionId, {
-        permissionMode: storedSession.permissionMode,
-        labels: storedSession.labels,
-        isFlagged: storedSession.isFlagged,
-        sessionStatus: storedSession.sessionStatus,
-        sessionName: managed.name,
-      })
-    }
-
-    // Emit session_created so renderer picks it up
-    this.sendEvent({ type: 'session_created', sessionId }, workspaceId)
-
-    sessionLog.info(`[import] Complete: sessionId=${sessionId}, transferredSummary=${managed.transferredSessionSummary ? `${managed.transferredSessionSummary.length} chars` : 'none'}, applied=${managed.transferredSessionSummaryApplied}, warnings=${warnings.length > 0 ? warnings.join('; ') : 'none'}`)
-    return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
-  }
-
-  /**
-   * Find an LLM connection on this server that matches the given provider type.
-   * Checks workspace default first, then falls back to any matching connection.
-   */
-  private findCompatibleLlmConnection(workspaceRootPath: string, providerType: string): string | null {
-    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
-    const defaultSlug = wsConfig?.defaults?.defaultLlmConnection
-    if (defaultSlug) {
-      const conn = getLlmConnection(defaultSlug)
-      if (conn?.providerType === providerType) return defaultSlug
-    }
-    // Fall back: any connection with matching provider type
-    const connections = getLlmConnections()
-    const match = connections.find(c => c.providerType === providerType)
-    return match?.slug ?? null
-  }
-
-  /**
-   * Clean up all resources held by the SessionManager.
-   * Should be called on app shutdown to prevent resource leaks.
-   */
-  cleanup(): void {
-    sessionLog.info('Cleaning up resources...')
-
-    // Stop all ConfigWatchers (file system watchers)
-    for (const [path, watcher] of this.configWatchers) {
-      watcher.stop()
-      sessionLog.info(`Stopped config watcher for ${path}`)
-    }
-    this.configWatchers.clear()
-
-    // Dispose all AutomationSystems (includes scheduler, handlers, and event loggers)
-    for (const [workspacePath, automationSystem] of this.automationSystems) {
-      try {
-        automationSystem.dispose()
-        sessionLog.info(`Disposed AutomationSystem for ${workspacePath}`)
-      } catch (error) {
-        sessionLog.error(`Failed to dispose AutomationSystem for ${workspacePath}:`, error)
-      }
-    }
-    this.automationSystems.clear()
-
-    // Clear all pending delta flush timers
-    for (const [sessionId, timer] of this.deltaFlushTimers) {
-      clearTimeout(timer)
-    }
-    this.deltaFlushTimers.clear()
-    this.pendingDeltas.clear()
-
-    // Clear pending credential resolvers (they won't be resolved, but prevents memory leak)
-    this.pendingCredentialResolvers.clear()
-    this.pendingPermissionRequests.clear()
-    this.adminRememberApprovals.clear()
-
-    // Clean up session-scoped tool callbacks for all sessions
-    for (const sessionId of this.sessions.keys()) {
-      unregisterSessionScopedToolCallbacks(sessionId)
-    }
-
-    sessionLog.info('Cleanup complete')
-  }
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×möëÔèµ©hºÚn¶X§zÍZ[\Ü\HÈ]™[Ú[šËœÔÙ\™\ˆHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÝ˜[œÜÜ	Âš[\ÜÈÓQS•Ð”“ÕÔÑT—ÒS•“ÒÑHHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÝ˜[œÜÜ	Âš[\Ü\HÈTÙ\ÜÚ[Û“X[˜YÙ\‹Pœ›ÝÜÙ\”[™SX[˜YÙ\‹^XÝ]T›Û\]]ÛX][Û’[œ]Hœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÚ[™\œÉÂš[\ÜÈ™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\ˆHœ›ÛH	Ë‹Ô™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\‰Âš[\ÜÈ˜[Y]Qš[T]Ù]ÛÜšÜÜXÙP[ÝÙY\œÈHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÚ[™\œÉÂš[\ÜÈÜ™X]TØÛÜYÙÙÙ\‹ÓÓ”ÓÓWÓÑÑÑT‹\H]›Ü›TÙ\šXÙ\Ë\HÙÙÙ\ˆHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÜ[[YIÂš[\ÜÈ˜\Ù[˜[YK\›˜[YK›Ú[‹™\ÛÛ™HHœ›ÛH	Ü]	Âš[\ÜÂˆ^\ÝÔÞ[˜ËˆZÙ\”Þ[˜Ëˆ™XYš[TÞ[˜Ëˆ™XY\”Þ[˜Ëˆ™[˜[YTÞ[˜Ëˆ›TÞ[˜ËˆÜš]Qš[TÞ[˜ËŸHœ›ÛH	ÙœÉÂš[\ÜÈ™XYš[KÜš]Qš[KZÙ\ˆHœ›ÛH	ÙœËÜ›ÛZ\Ù\ÉÂš[\ÜÈ˜[™ÛUURQHœ›ÛH	Û›ÙN˜Üž\ÉÂš[\ÜÈ\HYÙ[]™[Ù]\›Z\ÜÚ[Û“[ÙKY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜË\H\›Z\ÜÚ[Û“[ÙK[œ™YÚ\Ý\”Ù\ÜÚ[Û”ØÛÜYÛÛØ[˜XÚÜËY\™ÙTÙ\ÜÚ[Û”ØÛÜYÛÛØ[˜XÚÜËX›Ü™X\ÛÛ‹\H]]™\]Y\Ý\H]]™\Ý[\HÜ™Y[X[]]™\]Y\Ý\Hœ›ÝÜÙ\”[™Q›œËÙ[™\˜]PÛÛ™\œØ][Û”Ý[[X\žHHœ›ÛH	ÐØ]K\ÚÜÚ\™YØYÙ[	Âš[\ÜÂˆ™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[Û‹ˆÜ™X]P˜XÚÙ[™œ›ÛPÛÛ›™XÝ[Û‹ˆ™\ÛÛ™P˜XÚÙ[™ÛÛ^ˆÜ™X]P˜XÚÙ[™œ›ÛT™\ÛÛ™YÛÛ^ˆÛX[\ÛÝ\˜ÙT[[YP\Y˜XÝËˆ›ÝšY\•\UÐYÙ[›ÝšY\‹ˆ\HYÙ[˜XÚÙ[™ˆ\H˜XÚÙ[™ÜÝ[[YPÛÛ^ˆ\HÜÝ[š]™\Ý[ŸHœ›ÛH	ÐØ]K\ÚÜÚ\™YØYÙ[Ø˜XÚÙ[™	Âš[\ÜÈÙ]PÛÛ›™XÝ[Û‹Ù]PÛÛ›™XÝ[ÛœËÙ]Y˜][PÛÛ›™XÝ[Û‹Ù]Y˜][[šÚ[™Ó]™[™\Ù]X[˜YÙY[›ÜXÐ]][•˜\œË™\ÛÛ™SZYÝ™X[P™Z]š[ÜˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÂš[\ÜÈš]š[YÙY^XÝ][Ûœ›ÚÙ\ˆHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÜÙ\šXÙ\ÉÂš[\ÜÈ\Õ˜[YÛÜšÚ[™Ñ\™XÝÜžHHœ›ÛH	Ë‹‹Ý][ËÜ]]˜[Y][Û‰Âš[\ÜÈÙ]Y˜][Ú]Ù\šXÙ\Ë\HÚ]Ù\šXÙ\ÈHœ›ÛH	Ë‹‹ÙÚ]	Âš[\ÜÈ\ÑÚ]ÛÜšÜÜXÙUŒQ[˜X›YHœ›ÛH	ÐØ]K\ÚÜÚ\™YÙ™X]\™KY›YÜÉÂš[\ÜÈ[š]Ø]HHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÙÛXZ[‰Âš[\ÜÈLN‹ÐÐSWÔ‘QÒTÕ–K\H[™ÝXYÙPÛÙHHœ›ÛH	ÐØ]K\ÚÜÚ\™YÚLN‰Âš[\ÜÂˆÙ]ÛÜšÜÜXÙ\ËˆÙ]ÛÜšÜÜXÙPžS˜[YSÜ’YˆØYÛÛ™šYÑY˜][ËˆØY™Y™\™[˜Ù\ËˆZYÜ˜]SYØXÞPÜ™Y[X[ËˆZYÜ˜]SYØXÞSPÛÛ›™XÝ[ÛœÐÛÛ™šYËˆZYÜ˜]SÜœ[™YY˜][ÛÛ›™XÝ[ÛœËˆSÑSÔ‘QÒTÕ–Kˆ\HÛÜšÜÜXÙKˆ\HÛÜšÜÜXÙR[™›ËŸHœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÂš[\Ü\HÈXÝ]™TÙ\ÜÚ[Û’[™›ËÙ\ÜÚ[Û”›ØÙ\ÜÚ[™ÔÝ]\ÈHœ›ÛH	ÐØ]K\ÚØÛÜ™KÝ\\ÉÂš[\ÜÈØYÛÜšÜÜXÙPÛÛ™šYÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÝÛÜšÜÜXÙ\ÉÂš[\ÜÂˆËÈÙ\ÜÚ[Ûˆ\œÚ\Ý[˜ÙH[˜Ý[ÛœÂˆ\ÝÙ\ÜÚ[ÛœÈ\È\ÝÝÜ™YÙ\ÜÚ[ÛœËˆØYÙ\ÜÚ[Ûˆ\ÈØYÝÜ™YÙ\ÜÚ[Û‹ˆØ]™TÙ\ÜÚ[Ûˆ\ÈØ]™TÝÜ™YÙ\ÜÚ[Û‹ˆÜ™X]TÙ\ÜÚ[Ûˆ\ÈÜ™X]TÝÜ™YÙ\ÜÚ[Û‹ˆ[]TÙ\ÜÚ[Ûˆ\È[]TÝÜ™YÙ\ÜÚ[Û‹ˆ\]TÙ\ÜÚ[Û“Y]Y]KˆØ[•\]TÙÐÝÙˆÙ][™[™Ô[‘^XÝ][Ûˆ\ÈÙ]ÝÜ™Y[™[™Ô[‘^XÝ][Û‹ˆX\šÐÛÛ\XÝ[ÛÛÛ\]H\ÈX\šÔÝÜ™YÛÛ\XÝ[ÛÛÛ\]KˆX\šÔ[™[™Ô[‘^XÝ][Û‘\Ü]ÚY\ÈX\šÔÝÜ™Y[™[™Ô[‘^XÝ][Û‘\Ü]ÚYˆÛX\”[™[™Ô[‘^XÝ][Ûˆ\ÈÛX\”ÝÜ™Y[™[™Ô[‘^XÝ][Û‹ˆÙ][™[™Ô[‘^XÝ][Ûˆ\ÈÙ]ÝÜ™Y[™[™Ô[‘^XÝ][Û‹ˆÙ]Ù\ÜÚ[Û]XÚY[Ô]ˆÙ]Ù\ÜÚ[Û”]\ÈÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]ˆ[œÝ\™TÙ\ÜÚ[Û‘\‹ˆÙ]Ù\ÜÚ[Û‘š[T]ˆÙ[™\˜]TÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YKˆÙ]XY\“Y]Y]TÚYÛ˜]\™KˆÜš]TÙ\ÜÚ[Û’œÛÛ›ˆÙ\šX[^™TÙ\ÜÚ[Û‹ˆ˜[Y]P[™Kˆ\HÙ\ÜÚ[Û[™Kˆ\H\Ü]Ú[ÙKˆ\HÝÜ™YÙ\ÜÚ[Û‹ˆ\HÝÜ™YY\ÜØYÙKˆ\HÙ\ÜÚ[Û“Y]Y]Kˆ\HÙ\ÜÚ[Û”Ý]\Ëˆ\HÙ\ÜÚ[Û’XY\‹ˆXÚÔÙ\ÜÚ[Û‘šY[ËŸHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜÙ\ÜÚ[ÛœÉÂš[\ÜÈØYÛÜšÜÜXÙTÛÝ\˜Ù\ËØY[ÛÝ\˜Ù\ËÙ]ÛÝ\˜Ù\ÐžTÛYÜË\ÔÛÝ\˜ÙU\ØX›K\HØYYÛÝ\˜ÙK\HXÜÙ\™\ÛÛ™šYËÙ]ÛÝ\˜Ù\Ó™YY[™Ð]]Ù]ÛÝ\˜ÙPÜ™Y[X[X[˜YÙ\‹Ù]ÛÝ\˜ÙTÙ\™\Z[\‹\HÛÝ\˜ÙUÚ]Ü™Y[X[\Ð\SÐ]]›ÝšY\‹\Ô™[™]Ñ[™Ú[ÑT•‘T—Ð•RSÑT”“Ô”ËÚÙ[”™Yœ™\ÚX[˜YÙ\‹Ü™X]UÚÙ[‘Ù]\ˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜÛÝ\˜Ù\ÉÂš[\ÜÈÛÛ™šYÕØ]Ú\‹\HÛÛ™šYÕØ]Ú\Ø[˜XÚÜÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÂš[\ÜÈÙ]˜[YÛ]YSÐ]]ÚÙ[ˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YØ]]	Âš[\ÜÈ™\ÛÛ™P]][•˜\œÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÂš[\ÜÈÛÛY]Y]TÝÜ™KÙ]\Ý\Q\œ›ÜˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YÚ[\˜Ù\Ü‰Âš[\ÜÈ\Ô\™[\ÚÕÛÛHœ›ÛH	ÐØ]K\ÚÜÚ\™YÝ][ËÝÛÛ˜[Y\ÉÂš[\ÜÈ™\ÝÜ™Qš[\ÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÝ][ËØ[™KYš[\ÉÂš[\ÜÈÙ]Ü™Y[X[X[˜YÙ\ˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YØÜ™Y[X[ÉÂš[\ÜÈÜ˜YXÜÛY[XÜÛY[ÛÛXÜÛÛÙ\™\ˆHœ›ÛH	ÐØ]K\ÚÜÚ\™YÛXÜ	Âš[\ÜÈ\HÙ\ÜÚ[Û‹\HÙ\ÜÚ[Û‘]™[\Hš[P]XÚY[\HÙ[™Y\ÜØYÙSÜ[ÛœË\H[œ™XYÝ[[X\žK\H™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\”^[ØY\H[\Ü™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\”™\Ý[\HÛÜšÝ™YT™[[Ý˜[ÛÛ™š\›X][Û‹”×ÐÒS“‘SËÙ[™\˜]SY\ÜØYÙRYHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	Âš[\ÜÈY\ÜØYÙUÔÝÜ™YÝÜ™YÓY\ÜØYÙK\HY\ÜØYÙK\HÝÜ™Y]XÚY[\HÛÛ\Ü^SY]HHœ›ÛH	ÐØ]K\ÚØÛÜ™KÝ\\ÉÂš[\ÜÈ›Ü›X]]ÕÔ™[]]™K›Ü›X]ÛÛ[œ]]Ë\™‹[˜ÛÙRXÛÛ•Ñ]U\›\Þ[˜ËÙ][[ÚšRXÛÛ‹™\Ù]Ý[[X\š^˜][ÛÛY[™\ÛÛ™UÛÛXÛÛ‹™XYš[P]XÚY[Ù[XÝÜ™XYY\ÜØYÙ\Ë›Ü›X[^™T]Hœ›ÛH	ÐØ]K\ÚÜÚ\™YÝ][ÉÂš[\ÜÈØY[ÚÚ[ËØYÚÚ[žTÛYË[˜[Y]TÚÚ[ÐØXÚK\HØYYÚÚ[Hœ›ÛH	ÐØ]K\ÚÜÚ\™YÜÚÚ[ÉÂš[\ÜÈ[˜[Y]PÛÛ^š[PØXÚHHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜ›Û\ËÜÞ\Ý[IÂš[\ÜÈÙ]ÛÛXÛÛœÑ\‹Ù]Z[šS[Ù[Hœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÂš[\ÜÈÙ]Y˜][Ý[[X\š^˜][Û“[Ù[Hœ›ÛH	ÐØ]K\ÚÜÚ\™YØÛÛ™šYËÛ[Ù[ÉÂš[\Ü\HÈÝ[[X\š^™PØ[˜XÚÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜÛÝ\˜Ù\ÉÂš[\ÜÈ\H[šÚ[™Ó]™[QUSÕS’ÒS‘×ÓU‘S›Ü›X[^™U[šÚ[™Ó]™[Hœ›ÛH	ÐØ]K\ÚÜÚ\™YØYÙ[Ý[šÚ[™Ë[]™[ÉÂš[\ÜÈ]˜[X]P]]ÓX™[ÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÛX™[ËØ]]ÉÂš[\ÜÈ\ÝX™[ËØYX™[ÛÛ™šYÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÛX™[ËÜÝÜ˜YÙIÂš[\ÜÈ^˜XÝX™[Y™\ÛÛ™TÙ\ÜÚ[Û“X™[ÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÛX™[ÉÂš[\ÜÈ[œÝ\™SX™[Ñ^\ÝHœ›ÛH	ÐØ]K\ÚÜÚ\™YÛX™[ËØÜY	Âš[\ÜÈØYÝ]\ÐÛÛ™šYÈHœ›ÛH	ÐØ]K\ÚÜÚ\™YÜÝ]\Ù\ËÜÝÜ˜YÙIÂš[\ÜÈ]]ÛX][Û”Þ\Ý[KÜ™X]T›Û\\ÝÜžQ[žK\[™]]ÛX][Û’\ÝÜžQ[žK\H]]ÛX][Û”Þ\Ý[SY]Y]TÛ˜\ÚÝHœ›ÛH	ÐØ]K\ÚÜÚ\™YØ]]ÛX][ÛœÉÂš[\ÜÈZ[˜XÚÙ[™[[YTÚYÛ˜]\™KZ[™\Ý\™\]Z\™YÚYÛ˜]\™Kš[\]XÚY[Ñ›Ü“[Ù[[œ]Hœ›ÛH	Ë‹Ü[[YKXÛÛ™šYÉÂ‚‹ËÈ[\Üœ›ÛHÙ\™\‹XÛÜ™HÛXZ[ˆ][]Y\Âš[\ÜÈØ[š]^™Q›Ü•]KÚÝ[XÝ]˜]Pœ›ÝÜÙ\“Ý™\›^K›Ü›X[^™Pœ›ÝÜÙ\•ÛÛ˜[YK›Û˜XÚÑ˜Z[Yœ˜[˜ÚÜ™X][Û‹™[X\ÙPœ›ÝÜÙ\“ÝÛ™\œÚ\Û‘›Ü˜ÙYÝÜHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÙÛXZ[‰Âš[\ÜÈ™\Ú^™R[XYÙQ›ÜTK™\Ú^™RXÛÛY™™\ˆHœ›ÛH	ÐØ]K\ÚÜÙ\™\‹XÛÜ™KÜÙ\šXÙ\ÉÂ™^ÜÈØ[š]^™Q›Ü•]HB‚‹ËÈ[Ù[K[]™[]›Ü›H™Yˆ8 %Ù]Û˜ÙH\š[™È[š]šXHÙ]Ù\ÜÚ[Û”]›Ü›J
+B›]Ü]›Ü›Nˆ]›Ü›TÙ\šXÙ\È[H[‚‹ËÈØÛÜYÙÙÙ\ˆ8 %\Ü˜YYœ›ÛHÛÛœÛÛH˜[˜XÚÈÚ[ˆÙ]Ù\ÜÚ[Û”]›Ü›J
+H\ÈØ[Y‚‹ËÈ˜[YYÙ\ÜÚ[Û“ÙØÛÈ[ŒÌ^\Ý[™ÈØ[Ú]\È™[XZ[ˆ[˜Ú[™ÙY‚›]Ù\ÜÚ[Û“ÙÎˆÙÙÙ\ˆHÜ™X]TØÛÜYÙÙÙ\ŠÓÓ”ÓÓWÓÑÑÑT‹	ÜÙ\ÜÚ[Û‰ÊB‚™^Ü[˜Ý[ÛˆÙ]Ù\ÜÚ[Û”]›Ü›J]›Ü›Nˆ]›Ü›TÙ\šXÙ\ÊNˆ›ÚYÂˆÜ]›Ü›HH]›Ü›BˆÙ\ÜÚ[Û“ÙÈHÜ™X]TØÛÜYÙÙÙ\Š]›Ü›K›ÙÙÙ\‹	ÜÙ\ÜÚ[Û‰ÊBŸB‚š[\™˜XÙHÙ\ÜÚ[Û”[[YRÛÚÜÈÂˆ\]P˜YÙPÛÝ[ˆ
+ÛÝ[ˆ[X™\ŠHOˆ›ÚYˆØ\\™Q^Ù\[ÛŽˆ
+\œ›ÜŽˆ[šÛ›ÝÛ‹ÛÛ^ÎˆÈ\œ›Ü”ÛÝ\˜ÙOÎˆÝš[™ÎÈÙ\ÜÚ[Û’YÎˆÝš[™ÈJHOˆ›ÚYˆÛ”Ù\ÜÚ[Û”Ý\Yˆ
+
+HOˆ›ÚYˆÛ”Ù\ÜÚ[Û”ÝÜYˆ
+
+HOˆ›ÚYŸB‚˜ÛÛœÝY˜][Ù\ÜÚ[Û”[[YRÛÚÜÎˆÙ\ÜÚ[Û”[[YRÛÚÜÈHÂˆ\]P˜YÙPÛÝ[ˆ
+
+HOˆßKˆÛ”Ù\ÜÚ[Û”Ý\Yˆ
+
+HOˆßKˆÛ”Ù\ÜÚ[Û”ÝÜYˆ
+
+HOˆßKˆØ\\™Q^Ù\[ÛŽˆ
+\œ›Ü‹ÛÛ^
+HOˆÂˆÛÛœÝ\œˆH\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Üˆˆ™]È\œ›ÜŠÝš[™Ê\œ›ÜŠJBˆYˆ
+Ü]›Ü›OË˜Ø\\™Q\œ›ÜŠHÂˆÜ]›Ü›K˜Ø\\™Q\œ›ÜŠ\œŠBˆ™]\›‚ˆBˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	ÖÜ[[YKZÛÚÜ×HØ\\™Q^Ù\[Ûˆ˜[˜XÚÎ‰ËÂˆ\œ›Ü”ÛÝ\˜ÙNˆÛÛ^Ë™\œ›Ü”ÛÝ\˜ÙKˆÙ\ÜÚ[Û’YˆÛÛ^ËœÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ\œ‹›Y\ÜØYÙKˆÝXÚÎˆ\œ‹œÝXÚËˆJBˆKŸB‚›]Ù\ÜÚ[Û”[[YRÛÚÜÎˆÙ\ÜÚ[Û”[[YRÛÚÜÈHY˜][Ù\ÜÚ[Û”[[YRÛÚÜÂ‚™^Ü[˜Ý[ÛˆÙ]Ù\ÜÚ[Û”[[YRÛÚÜÊÛÚÜÎˆ\X[Ù\ÜÚ[Û”[[YRÛÚÜÏŠNˆ›ÚYÂˆÙ\ÜÚ[Û”[[YRÛÚÜÈHÂˆ‹‹œÙ\ÜÚ[Û”[[YRÛÚÜËˆ‹‹šÛÚÜËˆBŸB‚™[˜Ý[ÛˆZ[˜XÚÙ[™ÜÝ[[YPÛÛ^
+
+Nˆ˜XÚÙ[™ÜÝ[[YPÛÛ^ÂˆYˆ
+WÜ]›Ü›JH›ÝÈ™]È\œ›ÜŠ	ÜÙ]Ù\ÜÚ[Û”]›Ü›J
+H]\Ý™HØ[Y™Y›Ü™HÙ\ÜÚ[ÛˆÜ™X][Û‰ÊBˆ™]\›ˆÂˆ\›ÛÝ]ˆÜ]›Ü›K˜\›ÛÝ]ˆ™\ÛÝ\˜Ù\Ô]ˆÜ]›Ü›Kœ™\ÛÝ\˜Ù\Ô]ˆ\ÔXÚØYÙYˆÜ]›Ü›Kš\ÔXÚØYÙYˆBŸB‚‹ÊŠ‚ˆ
+ˆ™X]\™H›YÜÈ›ÜˆYÙ[™Z]š[Ü‚ˆ
+‹Â™^ÜÛÛœÝQÑS•Ñ“QÔÈHÂˆÊŠˆY˜][[Ù\È[˜X›Y›Üˆ™]ÈÙ\ÜÚ[ÛœÈ
+‹ÂˆY˜][[Ù\Ñ[˜X›YˆYKŸH\ÈÛÛœÝ‚˜ÛÛœÝPVÐQRS—Ô‘SQSP‘T—ÓRS•UTÈHŒ˜ÛÛœÝPVÐS““ÕUSÓ”×ÔT—ÓQTÔÐQÑHHŒ˜ÛÛœÝPVÐS““ÕUSÓ—Ò”ÓÓ—Ð–UTÈHÌˆ
+ˆL‚‹ËÈÚ[™ÝÈ\š[™ÈÚXÚœËØ]ÚY]Y]K\™]™\]™[Èœ›ÛHÝ\ˆÝÛˆ]ÛZXÈÜš]B‹ËÈ\™HYÛ›Ü™YÛÈHØ]Ú\ˆÙ\È›Ý›Û˜XÚÈH[‹[Y[[ÜžH]]][ÛˆÙB‹ËÈ\Ý\œÚ\ÝYˆÙYHÛ”Ù\ÜÚ[Û“Y]Y]PÚ[™ÙK‚˜ÛÛœÝQUQUWÕÔ’UWÑÕPT‘ÓTÈHL‹ÊŠ‚ˆ
+ˆÝÈÛ™È[][ÛˆØZ]È›Üˆ[ˆX›ÜYYÙ[È™\Ü]]ÝÜY™Y›Ü™Bˆ
+ˆ™X][™È]ÈÚXÚÛÝ]\ÈÝ[]™Kˆ›Ý[™YÛÈHÙYÙYÝXœ›ØÙ\ÜÈØ[››Ýˆ
+ˆXZÙHHÙ\ÜÚ[Ûˆ[™[]X›K‚ˆ
+‹Â˜ÛÛœÝQÑS•ÔURQTÐÑWÕSQSÕUÓTÈHL‚‹ÊŠ‚ˆ
+ˆ^Ù[ÈHÙ\ÜÚ[ÛˆÚ[ˆH[ˆ\È\›Ý™Yœ›ÛHÝ]ÚYHH\ÚÝÜˆ
+ˆRH
+K™Ëˆ[YÜ˜[H]ÛŠKˆZ\œ›ÜœÈH[™Û\Ú[‹˜\›Ý™YLNˆÙ^Bˆ
+ˆ\ÙYžHH\ÚÝÜ›ÝÈ][‹X\›Ý˜[[Y\ÜØYÙKØˆ›ÝØØ[^™Y8 %ˆ
+ˆHYÙ[™XYÈ\Ë›ÝH[™\Ù\‹‚ˆ
+‹Â˜ÛÛœÝS—ÐT“ÕSÓQTÔÐQÑHH	Ô[ˆ\›Ý™YX\ÙH^XÝ]K‰Â‚‹ËÈ˜[Y]TÜ]Û]XÚY[]™[[Ý™Y8 %\ÙHÚ\™Y˜[Y]Qš[T]œ›ÛHØ]K\ÚÜÙ\™\‹XÛÜ™KÚ[™\œÂ‚˜ÛÛœÝWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓˆHB˜ÛÛœÝWÕT“—ÐSÒÔ”×Ñ’SHH	ÜK]\›‹X[˜ÚÜœËšœÛÛ‰Â‚š[\™˜XÙHU\›[˜ÚÜœÒ[™^Âˆ™\œÚ[ÛŽˆ[X™\‚ˆ[˜ÚÜœÎˆ™XÛÜ™Ýš[™ËÝš[™Ï‚ŸB‚™[˜Ý[ÛˆÙ]U\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]ˆÝš[™ÊNˆÝš[™ÈÂˆ™]\›ˆ›Ú[ŠÙ\ÜÚ[Û”]	ÛY]IËWÕT“—ÐSÒÔ”×Ñ’SJBŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØYU\›[˜ÚÜœÊÙ\ÜÚ[Û”]ˆÝš[™ÊNˆ›ÛZ\ÙOU\›[˜ÚÜœÒ[™^ˆÂˆÛÛœÝš[T]HÙ]U\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]
+BˆžHÂˆÛÛœÝ˜]ÈH]ØZ]™XYš[Jš[T]	Ý]‹N	ÊBˆÛÛœÝ\œÙYH”ÓÓ‹œ\œÙJ˜]ÊH\È\X[U\›[˜ÚÜœÒ[™^‚ˆÛÛœÝ[˜ÚÜœÈH
+\œÙY˜[˜ÚÜœÈ	‰ˆ\[Ùˆ\œÙY˜[˜ÚÜœÈOOH	ÛØš™XÝ	ÊHÈ\œÙY˜[˜ÚÜœÈˆßBˆÛÛœÝ›Ü›X[^™Yˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHßBˆ›Üˆ
+ÛÛœÝÛY\ÜØYÙRY[˜ÚÜ—HÙˆØš™XÝ™[šY\Ê[˜ÚÜœÊJHÂˆYˆ
+\[ÙˆY\ÜØYÙRYOOH	ÜÝš[™ÉÈ	‰ˆ\[Ùˆ[˜ÚÜˆOOH	ÜÝš[™ÉÈ	‰ˆY\ÜØYÙRY	‰ˆ[˜ÚÜŠHÂˆ›Ü›X[^™YÛY\ÜØYÙRYHH[˜ÚÜ‚ˆBˆBˆ™]\›ˆÂˆ™\œÚ[ÛŽˆWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓ‹ˆ[˜ÚÜœÎˆ›Ü›X[^™YˆBˆHØ]ÚÂˆ™]\›ˆÂˆ™\œÚ[ÛŽˆWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓ‹ˆ[˜ÚÜœÎˆßKˆBˆBŸB‚˜\Þ[˜È[˜Ý[ÛˆÙ]U\›[˜ÚÜŠÙ\ÜÚ[Û”]ˆÝš[™ËY\ÜØYÙRYˆÝš[™ÊNˆ›ÛZ\ÙOÝš[™È[™Yš[™YˆÂˆYˆ
+[Y\ÜØYÙRY
+H™]\›ˆ[™Yš[™YˆÛÛœÝ[™^H]ØZ]ØYU\›[˜ÚÜœÊÙ\ÜÚ[Û”]
+Bˆ™]\›ˆ[™^˜[˜ÚÜœÖÛY\ÜØYÙRYBŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØ]™TU\›[˜ÚÜŠÙ\ÜÚ[Û”]ˆÝš[™ËY\ÜØYÙRYˆÝš[™Ë[˜ÚÜ’YˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆYˆ
+[Y\ÜØYÙRYX[˜ÚÜ’Y
+H™]\›‚‚ˆÛÛœÝ[™^H]ØZ]ØYU\›[˜ÚÜœÊÙ\ÜÚ[Û”]
+BˆYˆ
+[™^˜[˜ÚÜœÖÛY\ÜØYÙRYHOOH[˜ÚÜ’Y
+H™]\›‚‚ˆ[™^˜[˜ÚÜœÖÛY\ÜØYÙRYHH[˜ÚÜ’Y‚ˆÛÛœÝš[T]HÙ]U\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]
+Bˆ]ØZ]ZÙ\Š›Ú[ŠÙ\ÜÚ[Û”]	ÛY]IÊKÈ™XÝ\œÚ]™NˆYHJBˆ]ØZ]Üš]Qš[Jš[T]”ÓÓ‹œÝš[™ÚYžJ[™^
+K	Ý]‹N	ÊBŸB‚‹ÊŠ‚ˆ
+ˆÛÜHH\›ˆ[˜ÚÜœÈœ›ÛHHÛÝ\˜ÙHÙ\ÜÚ[Ûˆ[ÈHœ˜[˜ÚÙ\ÜÚ[Û‹ˆ
+ˆš[\™YÈHY\ÜØYÙ\ÈXÝX[HØ\œšYY[ÈHœ˜[˜Ú‚ˆ
+‚ˆ
+ˆÚ]Ý]\Ëœ˜[˜Ú[™ÈHœ˜[˜Ú\ÈÚ[[HÜÜÞNˆHÛÝ\˜ÙHœ˜[˜Ú	ÜÂˆ
+ˆÚYXØ\ˆÛÛZ[œÈ›È[˜ÚÜœÈ›ÜˆY\ÜØYÙ\ÈÛÜYYœ›ÛH]ÈÝÛˆ\™[ÛÈBˆ
+ˆÝÛœÝ™X[Hœ˜[˜Ú˜[È˜XÚÈÈ™[Z\ÝÜžH›ÜšÈˆ8 %\ØØ\™[™ÈBˆ
+ˆœ˜[˜ÚÝ]Ù™ˆ[™›ÙXÚ[™ÈHÙ\ÜÚ[ÛˆÚÜÙHš\ÚX›H\ÝÜžHÙ\Û‰ÝX]Úˆ
+ˆÚ]HHÙY\ËˆÙYHØ]KXYÙ[Ë[ÜÜÈÍÎ‹‚ˆ
+‹Â™^Ü\Þ[˜È[˜Ý[ÛˆÛÜTU\›[˜ÚÜœÑ›Üœ˜[˜Ú
+ˆÛÝ\˜ÙTÙ\ÜÚ[Û”]ˆÝš[™Ëˆœ˜[˜ÚÙ\ÜÚ[Û”]ˆÝš[™Ëˆœ˜[˜ÚYY\ÜØYÙRYÎˆ]\˜X›OÝš[™Ï‹ŠNˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝ[™^H]ØZ]ØYU\›[˜ÚÜœÊÛÝ\˜ÙTÙ\ÜÚ[Û”]
+BˆYˆ
+Øš™XÝšÙ^\Ê[™^˜[˜ÚÜœÊK›[™ÝOOH
+H™]\›‚ˆÛÛœÝYÙ]H™]ÈÙ]
+œ˜[˜ÚYY\ÜØYÙRYÊBˆÛÛœÝš[\™Yˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHßBˆ›Üˆ
+ÛÛœÝÛY\ÜØYÙRY[˜ÚÜ—HÙˆØš™XÝ™[šY\Ê[™^˜[˜ÚÜœÊJHÂˆYˆ
+YÙ]š\ÊY\ÜØYÙRY
+JHÂˆš[\™YÛY\ÜØYÙRYHH[˜ÚÜ‚ˆBˆBˆYˆ
+Øš™XÝšÙ^\Êš[\™Y
+K›[™ÝOOH
+H™]\›‚ˆ]ØZ]ZÙ\Š›Ú[Šœ˜[˜ÚÙ\ÜÚ[Û”]	ÛY]IÊKÈ™XÝ\œÚ]™NˆYHJBˆ]ØZ]Üš]Qš[JˆÙ]U\›[˜ÚÜœÔ]
+œ˜[˜ÚÙ\ÜÚ[Û”]
+Kˆ”ÓÓ‹œÝš[™ÚYžJÈ™\œÚ[ÛŽˆWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓ‹[˜ÚÜœÎˆš[\™YJKˆ	Ý]‹N	Ëˆ
+BŸB‚˜ÛÛœÝÓUQWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓˆHB˜ÛÛœÝÓUQWÕT“—ÐSÒÔ”×Ñ’SHH	ØÛ]YK]\›‹X[˜ÚÜœËšœÛÛ‰Â‚š[\™˜XÙHÛ]YU\›[˜ÚÜ”™XÛÜ™ÂˆÙÔÙ\ÜÚ[Û’YˆÝš[™ÂˆÙÓY\ÜØYÙU]ZYˆÝš[™ÂŸB‚š[\™˜XÙHÛ]YU\›[˜ÚÜœÒ[™^Âˆ™\œÚ[ÛŽˆ[X™\‚ˆ[˜ÚÜœÎˆ™XÛÜ™Ýš[™ËÛ]YU\›[˜ÚÜ”™XÛÜ™‚ŸB‚™[˜Ý[ÛˆÙ]Û]YU\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]ˆÝš[™ÊNˆÝš[™ÈÂˆ™]\›ˆ›Ú[ŠÙ\ÜÚ[Û”]	ÛY]IËÓUQWÕT“—ÐSÒÔ”×Ñ’SJBŸB‚™[˜Ý[Ûˆ\ÐÛ]YSY\ÜØYÙU]ZY
+\›’YˆÝš[™ÊNˆ›ÛÛX[ˆÂˆ™]\›ˆ×›\Ù×ÖÐKV˜K^ŒNWJÉË\Ý
+\›’Y
+BŸB‚˜\Þ[˜È[˜Ý[ÛˆØYÛ]YU\›[˜ÚÜœÊÙ\ÜÚ[Û”]ˆÝš[™ÊNˆ›ÛZ\ÙOÛ]YU\›[˜ÚÜœÒ[™^ˆÂˆÛÛœÝš[T]HÙ]Û]YU\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]
+BˆžHÂˆÛÛœÝ˜]ÈH]ØZ]™XYš[Jš[T]	Ý]‹N	ÊBˆÛÛœÝ\œÙYH”ÓÓ‹œ\œÙJ˜]ÊH\È\X[Û]YU\›[˜ÚÜœÒ[™^‚ˆÛÛœÝ[˜ÚÜœÈH
+\œÙY˜[˜ÚÜœÈ	‰ˆ\[Ùˆ\œÙY˜[˜ÚÜœÈOOH	ÛØš™XÝ	ÊHÈ\œÙY˜[˜ÚÜœÈˆßBˆÛÛœÝ›Ü›X[^™Yˆ™XÛÜ™Ýš[™ËÛ]YU\›[˜ÚÜ”™XÛÜ™ˆHßB‚ˆ›Üˆ
+ÛÛœÝÛY\ÜØYÙRY˜[YWHÙˆØš™XÝ™[šY\Ê[˜ÚÜœÊJHÂˆYˆ
+[Y\ÜØYÙRY\[ÙˆY\ÜØYÙRYOOH	ÜÝš[™ÉÊHÛÛ[YBˆYˆ
+]˜[YH\[Ùˆ˜[YHOOH	ÛØš™XÝ	ÊHÛÛ[YBˆÛÛœÝÙÔÙ\ÜÚ[Û’YH
+˜[YH\ÈÈÙÔÙ\ÜÚ[Û’YÎˆ[šÛ›ÝÛˆJKœÙÔÙ\ÜÚ[Û’YˆÛÛœÝÙÓY\ÜØYÙU]ZYH
+˜[YH\ÈÈÙÓY\ÜØYÙU]ZYÎˆ[šÛ›ÝÛˆJKœÙÓY\ÜØYÙU]ZYˆYˆ
+\[ÙˆÙÔÙ\ÜÚ[Û’YOOH	ÜÝš[™ÉÈ	‰ˆÙÔÙ\ÜÚ[Û’Y	‰ˆ\[ÙˆÙÓY\ÜØYÙU]ZYOOH	ÜÝš[™ÉÈ	‰ˆÙÓY\ÜØYÙU]ZY
+HÂˆ›Ü›X[^™YÛY\ÜØYÙRYHHÈÙÔÙ\ÜÚ[Û’YÙÓY\ÜØYÙU]ZYBˆBˆB‚ˆ™]\›ˆÂˆ™\œÚ[ÛŽˆÓUQWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓ‹ˆ[˜ÚÜœÎˆ›Ü›X[^™YˆBˆHØ]ÚÂˆ™]\›ˆÂˆ™\œÚ[ÛŽˆÓUQWÕT“—ÐSÒÔ”×Õ‘T”ÒSÓ‹ˆ[˜ÚÜœÎˆßKˆBˆBŸB‚˜\Þ[˜È[˜Ý[ÛˆÙ]Û]YU\›[˜ÚÜŠÙ\ÜÚ[Û”]ˆÝš[™ËY\ÜØYÙRYˆÝš[™ÊNˆ›ÛZ\ÙOÛ]YU\›[˜ÚÜ”™XÛÜ™[™Yš[™YˆÂˆYˆ
+[Y\ÜØYÙRY
+H™]\›ˆ[™Yš[™YˆÛÛœÝ[™^H]ØZ]ØYÛ]YU\›[˜ÚÜœÊÙ\ÜÚ[Û”]
+Bˆ™]\›ˆ[™^˜[˜ÚÜœÖÛY\ÜØYÙRYBŸB‚˜\Þ[˜È[˜Ý[ÛˆØ]™PÛ]YU\›[˜ÚÜŠˆÙ\ÜÚ[Û”]ˆÝš[™ËˆY\ÜØYÙRYˆÝš[™ËˆÙÔÙ\ÜÚ[Û’YˆÝš[™ËˆÙÓY\ÜØYÙU]ZYˆÝš[™ËŠNˆ›ÛZ\ÙO›ÚYˆÂˆYˆ
+[Y\ÜØYÙRY\ÙÔÙ\ÜÚ[Û’Y\ÙÓY\ÜØYÙU]ZY
+H™]\›‚‚ˆÛÛœÝ[™^H]ØZ]ØYÛ]YU\›[˜ÚÜœÊÙ\ÜÚ[Û”]
+BˆÛÛœÝ™]š[Ý\ÈH[™^˜[˜ÚÜœÖÛY\ÜØYÙRYBˆYˆ
+™]š[Ý\È	‰ˆ™]š[Ý\ËœÙÔÙ\ÜÚ[Û’YOOHÙÔÙ\ÜÚ[Û’Y	‰ˆ™]š[Ý\ËœÙÓY\ÜØYÙU]ZYOOHÙÓY\ÜØYÙU]ZY
+H™]\›‚‚ˆ[™^˜[˜ÚÜœÖÛY\ÜØYÙRYHHÂˆÙÔÙ\ÜÚ[Û’YˆÙÓY\ÜØYÙU]ZYˆB‚ˆÛÛœÝš[T]HÙ]Û]YU\›[˜ÚÜœÔ]
+Ù\ÜÚ[Û”]
+Bˆ]ØZ]ZÙ\Š›Ú[ŠÙ\ÜÚ[Û”]	ÛY]IÊKÈ™XÝ\œÚ]™NˆYHJBˆ]ØZ]Üš]Qš[Jš[T]”ÓÓ‹œÝš[™ÚYžJ[™^
+K	Ý]‹N	ÊBŸB‚‹ÊŠ‚ˆ
+ˆZ[PÔ[™THÙ\™\œÈœ›ÛHÛÝ\˜Ù\È\Ú[™ÈH™]È[šYšYY[Ù[\Ë‚ˆ
+ˆ[™\ÈÜ™Y[X[ØY[™È[™Ù\™\ˆZ[[™È[ˆÛ™HÝ\‚ˆ
+ˆÚ[ˆ]]\œ›ÜœÈØØÝ\‹\]\ÈÛÝ\˜ÙHÛÛ™šYÜÈÈ™Y›XÝXÝX[Ý]K‚ˆ
+‚ˆ
+ˆ\˜[HÛÝ\˜Ù\ÈHÛÝ\˜Ù\ÈÈZ[Ù\™\œÈ›Ü‚ˆ
+ˆ\˜[HÙ\ÜÚ[Û”]HÜ[Û˜[]ÈÙ\ÜÚ[Ûˆ›Û\ˆ›ÜˆØ]š[™È\™ÙHTH™\ÜÛœÙ\Âˆ
+ˆ\˜[HÚÙ[”™Yœ™\ÚX[˜YÙ\ˆHÜ[Û˜[ÚÙ[”™Yœ™\ÚX[˜YÙ\ˆ›ÜˆÐ]]ÚÙ[ˆ™Yœ™\Úˆ
+‹Â˜\Þ[˜È[˜Ý[ÛˆZ[Ù\™\œÑœ›ÛTÛÝ\˜Ù\ÊˆÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×KˆÙ\ÜÚ[Û”]ÎˆÝš[™ËˆÚÙ[”™Yœ™\ÚX[˜YÙ\ÎˆÚÙ[”™Yœ™\ÚX[˜YÙ\‹ˆÝ[[X\š^™OÎˆÝ[[X\š^™PØ[˜XÚÂŠHÂˆÛÛœÝÜ[ˆH\™‹œÜ[Š	ÜÛÝ\˜Ù\Ë˜Z[Ù\™\œÉËÈÛÝ[ˆÛÝ\˜Ù\Ë›[™ÝJBˆÛÛœÝÜ™YX[˜YÙ\ˆHÙ]ÛÝ\˜ÙPÜ™Y[X[X[˜YÙ\Š
+BˆÛÛœÝÙ\™\Z[\ˆHÙ]ÛÝ\˜ÙTÙ\™\Z[\Š
+B‚ˆËÈØYÜ™Y[X[È›Üˆ[ÛÝ\˜Ù\ÂˆÛÛœÝÛÝ\˜Ù\ÕÚ]Ü™YÎˆÛÝ\˜ÙUÚ]Ü™Y[X[×HH]ØZ]›ÛZ\ÙK˜[
+ˆÛÝ\˜Ù\Ë›X\
+\Þ[˜È
+ÛÝ\˜ÙJHOˆ
+ÂˆÛÝ\˜ÙKˆÚÙ[Žˆ]ØZ]Ü™YX[˜YÙ\‹™Ù]ÚÙ[ŠÛÝ\˜ÙJKˆÜ™Y[X[ˆ]ØZ]Ü™YX[˜YÙ\‹™Ù]\PÜ™Y[X[
+ÛÝ\˜ÙJKˆJJBˆ
+BˆÜ[‹›X\šÊ	ØÜ™Y[X[Ë›ØYY	ÊB‚ˆËÈZ[ÚÙ[ˆÙ]\ˆ›Üˆ™Yœ™\ÚX›HÛÝ\˜Ù\È
+Ð]]
+È™[™]ËY[™Ú[
+BˆËÈ\Ù\ÈÚÙ[”™Yœ™\ÚX[˜YÙ\ˆ›Üˆ[šYšYY™Yœ™\ÚÙÚXÈ
+–Hš[˜Ú\JBˆÛÛœÝÙ]ÚÙ[‘›Ü”ÛÝ\˜ÙHH
+ÛÝ\˜ÙNˆØYYÛÝ\˜ÙJHOˆÂˆÛÛœÝ›ÝšY\ˆHÛÝ\˜ÙK˜ÛÛ™šYËœ›ÝšY\‚ˆËÈ›ÝšY\‹\ÜXÚYšXÈÐ]]
+ÛÛÙÛKÛXÚËZXÜ›ÜÛÙ
+HÜˆÙ[™\šXÈÐ]]
+]]\Nˆ	ÛØ]]	ÊBˆYˆ
+\Ð\SÐ]]›ÝšY\Š›ÝšY\ŠHÛÝ\˜ÙK˜ÛÛ™šYË˜\OË˜]]\HOOH	ÛØ]]	ÊHÂˆÛÛœÝX[˜YÙ\ˆHÚÙ[”™Yœ™\ÚX[˜YÙ\ˆÏÈ™]ÈÚÙ[”™Yœ™\ÚX[˜YÙ\ŠÜ™YX[˜YÙ\‹ÂˆÙÎˆ
+\ÙÊHOˆÙ\ÜÚ[Û“ÙË™XYÊ\ÙÊKˆJBˆ™]\›ˆÜ™X]UÚÙ[‘Ù]\ŠX[˜YÙ\‹ÛÝ\˜ÙJBˆBˆËÈTH™[™]È[™Ú[8 %›Û‹SÐ]]ÚÙ[ˆ™Yœ™\ÚˆYˆ
+\Ô™[™]Ñ[™Ú[
+ÛÝ\˜ÙJJHÂˆÛÛœÝX[˜YÙ\ˆHÚÙ[”™Yœ™\ÚX[˜YÙ\ˆÏÈ™]ÈÚÙ[”™Yœ™\ÚX[˜YÙ\ŠÜ™YX[˜YÙ\‹ÂˆÙÎˆ
+\ÙÊHOˆÙ\ÜÚ[Û“ÙË™XYÊ\ÙÊKˆJBˆ™]\›ˆÜ™X]UÚÙ[‘Ù]\ŠX[˜YÙ\‹ÛÝ\˜ÙJBˆBˆ™]\›ˆ[™Yš[™YˆB‚ˆËÈ\‹\™\]Y\ÝÜ™Y[X[Ù]\ˆ›Üˆ›Û‹SÐ]]È›Û‹\™[™]ÈTHÛÝ\˜Ù\ÂˆËÈ
+™X\™\ˆÈXY\ˆÈ]Y\žHÈ˜\ÚXÈ]]
+K‚ˆËÂˆËÈÚ]Ý]\ËH[‹\›ØÙ\ÜÈTHÛÛØ\\™\ÈHÜ™Y[X[\ÈHÝ]XÂˆËÈÝš[™È]Z[[YH[™ÙY\È\Ú[™È]›Ü™]™\ˆ8 %YX[š[™ÈHœ™\Ú•ÕˆËÈ[\™YšXHÛÝ\˜ÙWØÜ™Y[X[Ü›Û\\ÈYÛ›Ü™Y[[Ù\ÜÚ[Ûˆ™\Ý\‚ˆËÂˆËÈÚ]\ÈÙ]\‹]™\žHTHØ[™XYÈH]\ÝÜ™Y[X[œ›ÛHBˆËÈ˜][ÛÈÜ™Y[X[\]\ÈZÙHY™™XÝÛˆH™^Ø[ˆÐ]][™ˆËÈ™[™]ËY[™Ú[ÛÝ\˜Ù\È]™HZ\ˆÝÛˆ™Yœ™\ÚÙÚXÈšXHÚÙ[”™Yœ™\ÚX[˜YÙ\‚ˆËÈ[™\™HÚÚ\Y\™K‚ˆÛÛœÝÙ]Ü™Y[X[›Ü”ÛÝ\˜ÙHH
+ÛÝ\˜ÙNˆØYYÛÝ\˜ÙJHOˆÂˆYˆ
+ÛÝ\˜ÙK˜ÛÛ™šYË\HOOH	Ø\IÊH™]\›ˆ[™Yš[™YˆYˆ
+ÛÝ\˜ÙK˜ÛÛ™šYË˜\OË˜]]\HOOH	Û›Û™IÊH™]\›ˆ[™Yš[™YˆYˆ
+\Ð\SÐ]]›ÝšY\ŠÛÝ\˜ÙK˜ÛÛ™šYËœ›ÝšY\ŠJH™]\›ˆ[™Yš[™YˆYˆ
+ÛÝ\˜ÙK˜ÛÛ™šYË˜\OË˜]]\HOOH	ÛØ]]	ÊH™]\›ˆ[™Yš[™YˆYˆ
+\Ô™[™]Ñ[™Ú[
+ÛÝ\˜ÙJJH™]\›ˆ[™Yš[™Yˆ™]\›ˆ\Þ[˜È
+
+HOˆÜ™YX[˜YÙ\‹™Ù]\PÜ™Y[X[
+ÛÝ\˜ÙJBˆB‚ˆËÈ\ÜÈÙ\ÜÚ[Û”]È[˜X›HØ]š[™È\™ÙHTH™\ÜÛœÙ\ÈÈÙ\ÜÚ[Ûˆ›Û\‚ˆÛÛœÝ™\Ý[H]ØZ]Ù\™\Z[\‹˜Z[[
+ˆÛÝ\˜Ù\ÕÚ]Ü™YËˆÙ]ÚÙ[‘›Ü”ÛÝ\˜ÙKˆÙ\ÜÚ[Û”]ˆÝ[[X\š^™KˆÙ]Ü™Y[X[›Ü”ÛÝ\˜ÙKˆ
+BˆÜ[‹›X\šÊ	ÜÙ\™\œË˜Z[	ÊBˆÜ[‹œÙ]Y]Y]J	ÛXÜÛÝ[	ËØš™XÝšÙ^\Ê™\Ý[›XÜÙ\™\œÊK›[™Ý
+BˆÜ[‹œÙ]Y]Y]J	Ø\PÛÝ[	ËØš™XÝšÙ^\Ê™\Ý[˜\TÙ\™\œÊK›[™Ý
+B‚ˆËÈ\]HÛÝ\˜ÙHÛÛ™šYÜÈ›Üˆ]]\œ›ÜœÈÛÈRH™Y›XÝÈXÝX[Ý]K‚ˆËÈ™KXÛ\ÜÚYžHUUÔ‘TURT‘Q8¡¤ˆÒÑS—ÑVT‘QÚ[ˆHÜ™Y[X[\ÈY\™[BˆËÈ^\™YX]\™Yœ™\ÚX›NÈ[ˆ]Ø\ÙHH™Yœ™\ÚÞXÛH[™\È™XÛÝ™\žBˆËÈ[™ÙH]\Ý“Õ™[X]\™[HX\šÈHÛÝ\˜ÙH\È™YY[™È™KX]]
+ÍÌL
+K‚ˆ›Üˆ
+ÛÛœÝ\œ›ÜˆÙˆ™\Ý[™\œ›ÜœÊHÂˆYˆ
+\œ›Ü‹™\œ›ÜˆOOHÑT•‘T—Ð•RSÑT”“Ô”ËUUÔ‘TURT‘Q
+HÛÛ[YBˆÛÛœÝÛÝ\˜ÙHHÛÝ\˜Ù\Ë™š[™
+ÈOˆË˜ÛÛ™šYËœÛYÈOOH\œ›Ü‹œÛÝ\˜ÙTÛYÊBˆYˆ
+\ÛÝ\˜ÙJHÛÛ[YB‚ˆÛÛœÝÜ™YH]ØZ]Ü™YX[˜YÙ\‹›ØY
+ÛÝ\˜ÙJBˆÛÛœÝ\Ñ^\™Y™Yœ™\ÚX›HBˆÜ™Y	‰‚ˆ
+Ü™YX[˜YÙ\‹š\Ñ^\™Y
+Ü™Y
+HÜ™YX[˜YÙ\‹›™YYÔ™Yœ™\Ú
+Ü™Y
+JH	‰‚ˆ
+Ü™Yœ™Yœ™\ÚÚÙ[ˆ\Ô™[™]Ñ[™Ú[
+ÛÝ\˜ÙJJB‚ˆYˆ
+\Ñ^\™Y™Yœ™\ÚX›JHÂˆ\œ›Ü‹™\œ›ÜˆHÑT•‘T—Ð•RSÑT”“Ô”Ë•ÒÑS—ÑVT‘QˆÙ\ÜÚ[Û“ÙË™XYÊÛÝ\˜ÙH	Ù\œ›Ü‹œÛÝ\˜ÙTÛYßNˆÒÑS—ÑVT‘Q8 %™Yœ™\ÚÞXÛHÚ[[™X
+BˆÛÛ[YBˆB‚ˆÜ™YX[˜YÙ\‹›X\šÔÛÝ\˜ÙS™YYÔ™X]]
+ÛÝ\˜ÙK	ÕÚÙ[ˆZ\ÜÚ[™ÈÜˆ^\™Y	ÊBˆÙ\ÜÚ[Û“ÙËš[™›ÊX\šÙYÛÝ\˜ÙH	Ù\œ›Ü‹œÛÝ\˜ÙTÛYßH\È™YY[™È™KX]]
+BˆB‚ˆÜ[‹™[™
+
+Bˆ™]\›ˆ™\Ý[ŸB‚‹ÊŠ‚ˆ
+ˆ™\Ý[Ùˆ^\™YXÜ™Y[X[™Yœ™\Ú‚ˆ
+‹Âš[\™˜XÙH™Yœ™\Ú^\™YÜ™Y[X[Ô™\Ý[ÂˆÊŠˆ[X™\ˆÙˆÛÝ\˜Ù\ÈÚÜÙHÚÙ[œÈÙ\™HÝXØÙ\ÜÙ[H™Yœ™\ÚY
+‹Âˆ™Yœ™\ÚYÛÝ[ˆ[X™\‚ˆÊŠˆÛÝ\˜Ù\È]˜Z[YÈ™Yœ™\Ú
+›ÜˆØ\›š[™È\Ü^JH
+‹Âˆ˜Z[YÛÝ\˜Ù\Îˆ\œ˜^OÈÛYÎˆÝš[™ÎÈ™X\ÛÛŽˆÝš[™ÈO‚ŸB‚‹ÊŠ‚ˆ
+ˆ™Yœ™\Ú^\™YÐ]]È™[™]ËY[™Ú[ÚÙ[œÈ›ÜˆHÚ]™[ˆÛÝ\˜Ù\Ë‚ˆ
+‚ˆ
+ˆÚYHY™™XÝÈ
+Ø\œšYYžHÚÙ[”™Yœ™\ÚX[˜YÙ\‹™[œÝ\™Qœ™\ÚÚÙ[˜
+N‚ˆ
+ˆHÝXØÙ\ÜÎˆÛÝ\˜ÙK˜ÛÛ™šYËš\Ð]][XØ]YHYH
+[‹[Y[[ÜžH
+ÈÛˆ\ÚÊK‚ˆ
+ˆH˜Z[\™NˆÛÝ\˜ÙK˜ÛÛ™šYËš\Ð]][XØ]YH˜[ÙH
+ÈÛÛ›™XÝ[Û”Ý]\ÈH	Û™YY×Ø]]	Âˆ
+ˆ
+[‹[Y[[ÜžH
+ÈÛˆ\ÚÊKÛÈ\ÔÛÝ\˜ÙU\ØX›J
+H™]\›œÈ˜[ÙH[™HÛÝ\˜ÙH\Âˆ
+ˆ^ÛYYœ›ÛH[[™YÛYÜÈžHØ[\œË‚ˆ
+‚ˆ
+ˆHØ[\ˆ\È™\ÜÛœÚX›H›ÜˆZ[[™ÈÙ\™\œÈQ•Tˆ\È™]\›œÈ8 %]Ø^Bˆ
+ˆHÚ[™ÛHœ™\ÚZ[ÙY\ÈHÛÜœ™XÝÜ™Y[X[È[™HÛÜœ™XÝ\ØX›HÙ]‚ˆ
+ˆ\ÜÝYHÍÌL‚ˆ
+‹Â˜\Þ[˜È[˜Ý[Ûˆ™Yœ™\Ú^\™YÜ™Y[X[ÊˆÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×KˆÚÙ[”™Yœ™\ÚX[˜YÙ\ŽˆÚÙ[”™Yœ™\ÚX[˜YÙ\‚ŠNˆ›ÛZ\ÙO™Yœ™\Ú^\™YÜ™Y[X[Ô™\Ý[ˆÂˆÙ\ÜÚ[Û“ÙË™XYÊ	ÖÓÐ]]HÚXÚÚ[™ÈYˆ[žHÚÙ[œÈ™YY™Yœ™\Ú	ÊB‚ˆÛÛœÝ™YY™Yœ™\ÚH]ØZ]ÚÙ[”™Yœ™\ÚX[˜YÙ\‹™Ù]ÛÝ\˜Ù\Ó™YY[™Ô™Yœ™\Ú
+ÛÝ\˜Ù\ÊBˆYˆ
+™YY™Yœ™\Ú›[™ÝOOH
+HÂˆ™]\›ˆÈ™Yœ™\ÚYÛÝ[ˆ˜Z[YÛÝ\˜Ù\Îˆ×HBˆB‚ˆÙ\ÜÚ[Û“ÙË™XYÊÓÐ]]H™Yœ™\Ú[™È	Û™YY™Yœ™\Ú›[™ÝHÛÝ\˜ÙJÊNˆ	Û™YY™Yœ™\Ú›X\
+ÈOˆË˜ÛÛ™šYËœÛYÊKš›Ú[Š	Ë	Ê_X
+B‚ˆÛÛœÝÈ™Yœ™\ÚY˜Z[YHH]ØZ]ÚÙ[”™Yœ™\ÚX[˜YÙ\‹œ™Yœ™\ÚÛÝ\˜Ù\Ê™YY™Yœ™\Ú
+B‚ˆÛÛœÝ˜Z[YÛÝ\˜Ù\ÈH˜Z[Y›X\
+
+ÈÛÝ\˜ÙK™X\ÛÛˆJHOˆ
+ÂˆÛYÎˆÛÝ\˜ÙK˜ÛÛ™šYËœÛYËˆ™X\ÛÛ‹ˆJJB‚ˆ™]\›ˆÈ™Yœ™\ÚYÛÝ[ˆ™Yœ™\ÚY›[™Ý˜Z[YÛÝ\˜Ù\ÈBŸB‚‹ÊŠ‚ˆ
+ˆ\HœšYÙK[XÜ\Ù\™\ˆ\]\È›Üˆ˜XÚÙ[™È]\ÙH]‚ˆ
+ˆ[YØ]\ÈÈH˜XÚÙ[™	ÜÈÝÛˆ\PœšYÙU\]\Ê
+HY]Ù‚ˆ
+ˆXXÚ˜XÚÙ[™[™\È]ÈÝÛˆÝ˜]YÞHšXH\PœšYÙU\]\Ê
+K‚ˆ
+‹Â˜\Þ[˜È[˜Ý[Ûˆ\PœšYÙU\]\ÊˆYÙ[ˆYÙ[[œÝ[˜ÙKˆÙ\ÜÚ[Û”]ˆÝš[™Ëˆ[˜X›YÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×KˆXÜÙ\™\œÎˆ™XÛÜ™Ýš[™Ë[\Ü
+	ÐØ]K\ÚÜÚ\™YØYÙ[Ø˜XÚÙ[™	ÊK”ÙÓXÜÙ\™\ÛÛ™šYÏ‹ˆÙ\ÜÚ[Û’YˆÝš[™ËˆÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ËˆÛÛ^ˆÝš[™ËˆÛÛÙ\™\•\›ÎˆÝš[™ÂŠNˆ›ÛZ\ÙO›ÚYˆÂˆ]ØZ]YÙ[˜\PœšYÙU\]\ÊÂˆÙ\ÜÚ[Û”]ˆ[˜X›YÛÝ\˜Ù\ËˆXÜÙ\™\œËˆÙ\ÜÚ[Û’YˆÛÜšÜÜXÙT›ÛÝ]ˆÛÛ^ˆÛÛÙ\™\•\›ˆJBŸB‚‹ÊŠ‚ˆ
+ˆ™\ÛÛ™HÛÛ\Ü^HY]Y]H›ÜˆHÛÛØ[‚ˆ
+ˆ™]\›œÈY]Y]HÚ]˜\ÙMY[˜ÛÙYXÛÛˆ›ÜˆšY]Ù\ˆÛÛ\]Xš[]K‚ˆ
+‚ˆ
+ˆ\˜[HÛÛ˜[YHHÛÛ˜[YHœ›ÛHH]™[
+K™Ë‹”ÚÚ[‹›XÜ×Û[™X\—×Û\ÝÚ\ÜÝY\ÈŠBˆ
+ˆ\˜[HÛÛ[œ]HÛÛ[œ]
+\ÙY›ÜˆÚÚ[ÛÛÈÙ]ÚÚ[Y[YšY\ŠBˆ
+ˆ\˜[HÛÜšÜÜXÙT›ÛÝ]H]ÈÛÜšÜÜXÙH›ÜˆØY[™ÈÚÚ[ËÜÛÝ\˜Ù\Âˆ
+ˆ\˜[HÛÝ\˜Ù\ÈHØYYÛÝ\˜Ù\È›ÜˆHÛÜšÜÜXÙBˆ
+‹Â˜ÛÛœÝ”“ÕÔÑT—ÕÓÓÒPÓÓ—Ñ’SSSQHH	ØÚ›ÛYKœÝ™ÉÂ›]œ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚNˆÝš[™È[[™Yš[™Y‚˜\Þ[˜È[˜Ý[ÛˆÙ]œ›ÝÜÙ\•ÛÛXÛÛ‘]U\›
+
+Nˆ›ÛZ\ÙOÝš[™È[™Yš[™YˆÂˆËÈØXÚHZ\ÜÈÙ[[™[ˆ[™Yš[™YYX[œÈ››ÝÛÛ\]YY]‚ˆYˆ
+œ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHOOH[™Yš[™Y
+HÂˆ™]\›ˆœ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHÏÈ[™Yš[™YˆB‚ˆžHÂˆÛÛœÝXÛÛØ[™Y]\ÈHÂˆ›Ú[ŠÙ]ÛÛXÛÛœÑ\Š
+K”“ÕÔÑT—ÕÓÓÒPÓÓ—Ñ’SSSQJKˆËÈ]ˆ˜[˜XÚÈ
+™Y›Ü™HÞ[˜ÈÈ‹ËšØ]KXYÙ[ËÝÛÛZXÛÛœÊBˆ›Ú[Š›ØÙ\ÜË˜ÝÙ
+
+K	Ø\ÉË	Ù[XÝ›Û‰Ë	Ü™\ÛÝ\˜Ù\ÉË	ÝÛÛZXÛÛœÉË”“ÕÔÑT—ÕÓÓÒPÓÓ—Ñ’SSSQJKˆËÈXÚØYÙY˜[˜XÚÈ
+\™\ÛÝ\˜Ù\ÊBˆ›Ú[Š›ØÙ\ÜËœ™\ÛÝ\˜Ù\Ô]	ÝÛÛZXÛÛœÉË”“ÕÔÑT—ÕÓÓÒPÓÓ—Ñ’SSSQJKˆB‚ˆ›Üˆ
+ÛÛœÝXÛÛ”]ÙˆXÛÛØ[™Y]\ÊHÂˆYˆ
+Y^\ÝÔÞ[˜ÊXÛÛ”]
+JHÛÛ[YBˆÛÛœÝ[˜ÛÙYH]ØZ][˜ÛÙRXÛÛ•Ñ]U\›\Þ[˜ÊXÛÛ”]È™\Ú^™Nˆ™\Ú^™RXÛÛY™™\ˆJBˆYˆ
+[˜ÛÙY
+HÂˆœ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHH[˜ÛÙYˆ™]\›ˆ[˜ÛÙYˆBˆB‚ˆœ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHH[ˆHØ]ÚÂˆœ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHH[ˆB‚ˆ™]\›ˆœ›ÝÜÙ\•ÛÛXÛÛ‘]U\›ØXÚHÏÈ[™Yš[™YŸB‚˜\Þ[˜È[˜Ý[Ûˆ™\ÛÛ™UÛÛ\Ü^SY]JˆÛÛ˜[YNˆÝš[™ËˆÛÛ[œ]ˆ™XÛÜ™Ýš[™Ë[šÛ›ÝÛˆ[™Yš[™YˆÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ËˆÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×BŠNˆ›ÛZ\ÙOÛÛ\Ü^SY]H[™Yš[™YˆÂˆËÈÚXÚÈYˆ]	ÜÈ[ˆPÔÛÛ
+›Ü›X]ˆXÜ×ÏÙ\™\”ÛYÏ—×ÏÛÛ˜[YOŠBˆYˆ
+ÛÛ˜[YKœÝ\ÕÚ]
+	ÛXÜ×ÉÊJHÂˆÛÛœÝ\ÈHÛÛ˜[YKœÜ]
+	××ÉÊBˆYˆ
+\Ë›[™ÝHÊHÂˆÛÛœÝÙ\™\”ÛYÈH\ÖÌWBˆÛÛœÝÛÛÛYÈH\ËœÛXÙJŠKš›Ú[Š	××ÉÊB‚ˆËÈ[\›˜[PÔÙ\™\ˆÛÛÈ
+Ù\ÜÚ[Û‹ØÜÊBˆÛÛœÝ[\›˜[XÜÙ\™\œÎˆ™XÛÜ™Ýš[™Ë™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆ	ÜÙ\ÜÚ[Û‰ÎˆÂˆ	ÔÝX›Z][‰Îˆ	ÔÝX›Z][‰Ëˆ	ØØ[ÛIÎˆ	ÓH]Y\žIËˆ	ØÛÛ™šY×Ý˜[Y]IÎˆ	Õ˜[Y]HÛÛ™šYÉËˆ	ÜÚÚ[Ý˜[Y]IÎˆ	Õ˜[Y]HÚÚ[	Ëˆ	ÛY\›XZYÝ˜[Y]IÎˆ	Õ˜[Y]HY\›XZY	Ëˆ	ÜÛÝ\˜ÙWÝ\Ý	Îˆ	Õ\ÝÛÝ\˜ÙIËˆ	ÜÛÝ\˜ÙWÛØ]]ÝšYÙÙ\‰Îˆ	ÓÐ]]	Ëˆ	ÜÛÝ\˜ÙWÙÛÛÙÛWÛØ]]ÝšYÙÙ\‰Îˆ	ÑÛÛÙÛH]]	Ëˆ	ÜÛÝ\˜ÙWÜÛXÚ×ÛØ]]ÝšYÙÙ\‰Îˆ	ÔÛXÚÈ]]	Ëˆ	ÜÛÝ\˜ÙWÛZXÜ›ÜÛÙÛØ]]ÝšYÙÙ\‰Îˆ	ÓZXÜ›ÜÛÙ]]	Ëˆ	ÜÛÝ\˜ÙWØÜ™Y[X[Ü›Û\	Îˆ	Ñ[\ˆÜ™Y[X[ÉËˆ	Ý˜[œÙ›Ü›WÙ]IÎˆ	Õ˜[œÙ›Ü›H]IËˆ	Ü™[™\—Ý[\]IÎˆ	Ô™[™\ˆ[\]IËˆ	Ý\]WÝ\Ù\—Ü™Y™\™[˜Ù\ÉÎˆ	Õ\]H™Y™\™[˜Ù\ÉËˆ	ÜÙ[™Ù]™[Ü\—Ù™YY˜XÚÉÎˆ	ÔÙ[™™YY˜XÚÉËˆ	Øœ›ÝÜÙ\—ÝÛÛ	Îˆ	Ðœ›ÝÜÙ\‰ËˆKˆ	ÚØ]KXYÙ[ËYØÜÉÎˆÂˆ	ÔÙX\˜ÚØ]PYÙ[ÉÎˆ	ÔÙX\˜ÚØÜÉËˆKˆB‚ˆÛÛœÝ[\›˜[Ù\™\ˆH[\›˜[XÜÙ\™\œÖÜÙ\™\”ÛY×BˆYˆ
+[\›˜[Ù\™\ŠHÂˆÛÛœÝ\Ü^S˜[YHH[\›˜[Ù\™\–ÝÛÛÛY×BˆYˆ
+\Ü^S˜[YJHÂˆÛÛœÝ›Ü›X[^™Yœ›ÝÜÙ\•ÛÛH›Ü›X[^™Pœ›ÝÜÙ\•ÛÛ˜[YJÛÛÛYÊBˆ™]\›ˆÂˆ\Ü^S˜[YKˆXÛÛ‘]U\›ˆ›Ü›X[^™Yœ›ÝÜÙ\•ÛÛÈ]ØZ]Ù]œ›ÝÜÙ\•ÛÛXÛÛ‘]U\›
+
+Hˆ[™Yš[™YˆØ]YÛÜžNˆ	Û˜]]™IÈ\ÈÛÛœÝˆBˆBˆB‚ˆËÈ^\›˜[ÛÝ\˜ÙHÛÛÂˆ]ÛÝ\˜ÙTÛYÈHÙ\™\”ÛYÂ‚ˆËÈÜXÚX[Ø\ÙNˆ\KXœšYÙHÙ\™\ˆ[X™YÈÛÝ\˜ÙHÛYÈ[ˆÛÛ˜[YH\È˜\WÞÜÛYßH‚ˆËÈK™Ë‹XÜ×Ø\KXœšYÙW×Ø\WÜÝš\H8¡¤ˆÛÝ\˜ÙTÛYÈHœÝš\H‚ˆYˆ
+ÛÝ\˜ÙTÛYÈOOH	Ø\KXœšYÙIÈ	‰ˆÛÛÛYËœÝ\ÕÚ]
+	Ø\WÉÊJHÂˆÛÝ\˜ÙTÛYÈHÛÛÛYËœÛXÙJ
+BˆB‚ˆÛÛœÝÛÝ\˜ÙHHÛÝ\˜Ù\Ë™š[™
+ÈOˆË˜ÛÛ™šYËœÛYÈOOHÛÝ\˜ÙTÛYÊBˆYˆ
+ÛÝ\˜ÙJHÂˆËÈžHš[KX˜\ÙYXÛÛˆš\œÝ˜[˜XÚÈÈ[[ÚšHXÛÛˆœ›ÛHÛÛ™šYÂˆÛÛœÝXÛÛ‘]U\›HÛÝ\˜ÙKšXÛÛ”]ˆÈ]ØZ][˜ÛÙRXÛÛ•Ñ]U\›\Þ[˜ÊÛÝ\˜ÙKšXÛÛ”]È™\Ú^™Nˆ™\Ú^™RXÛÛY™™\ˆJBˆˆÙ][[ÚšRXÛÛŠÛÝ\˜ÙK˜ÛÛ™šYËšXÛÛŠBˆ™]\›ˆÂˆ\Ü^S˜[YNˆÛÝ\˜ÙK˜ÛÛ™šYË›˜[YKˆXÛÛ‘]U\›ˆ\ØÜš\[ÛŽˆÛÝ\˜ÙK˜ÛÛ™šYËYÛ[™KˆØ]YÛÜžNˆ	ÜÛÝ\˜ÙIÈ\ÈÛÛœÝˆBˆBˆBˆ™]\›ˆ[™Yš[™YˆB‚ˆËÈÚXÚÈYˆ]	ÜÈHÚÚ[ÛÛˆYˆ
+ÛÛ˜[YHOOH	ÔÚÚ[	È	‰ˆÛÛ[œ]
+HÂˆËÈÚÚ[[œ]\È	ÜÚÚ[	È\˜[HÚ]›Ü›X]ˆœÚÚ[ÛYÈˆÜˆÛÜšÜÜXÙRYœÚÚ[ÛYÈ‚ˆÛÛœÝÚÚ[\˜[HHÛÛ[œ]œÚÚ[\ÈÝš[™È[™Yš[™YˆYˆ
+ÚÚ[\˜[JHÂˆËÈ^˜XÝÚÚ[ÛYÈ
+™[[Ý™HÛÜšÜÜXÙH™Yš^Yˆ™\Ù[
+BˆÛÛœÝÚÚ[ÛYÈHÚÚ[\˜[Kš[˜ÛY\Ê	Î‰ÊHÈÚÚ[\˜[KœÜ]
+	Î‰ÊKœÜ
+
+HˆÚÚ[\˜[BˆYˆ
+ÚÚ[ÛYÊHÂˆËÈØYÚÚ[È[™š[™HÛ™H™Z[™È[›ÚÙYˆžHÂˆÛÛœÝÚÚ[ÈHØY[ÚÚ[ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÚÚ[HÚÚ[Ë™š[™
+ÈOˆËœÛYÈOOHÚÚ[ÛYÊBˆYˆ
+ÚÚ[
+HÂˆËÈžHš[KX˜\ÙYXÛÛˆš\œÝ˜[˜XÚÈÈ[[ÚšHXÛÛˆœ›ÛHY]Y]BˆÛÛœÝXÛÛ‘]U\›HÚÚ[šXÛÛ”]ˆÈ]ØZ][˜ÛÙRXÛÛ•Ñ]U\›\Þ[˜ÊÚÚ[šXÛÛ”]È™\Ú^™Nˆ™\Ú^™RXÛÛY™™\ˆJBˆˆÙ][[ÚšRXÛÛŠÚÚ[›Y]Y]KšXÛÛŠBˆ™]\›ˆÂˆ\Ü^S˜[YNˆÚÚ[›Y]Y]K›˜[YKˆXÛÛ‘]U\›ˆ\ØÜš\[ÛŽˆÚÚ[›Y]Y]K™\ØÜš\[Û‹ˆØ]YÛÜžNˆ	ÜÚÚ[	È\ÈÛÛœÝˆBˆBˆHØ]ÚÂˆËÈÚÚ[ÈØY[™È˜Z[YÚÚ\ˆBˆBˆBˆ™]\›ˆ[™Yš[™YˆB‚ˆËÈÓHÛÛXÛÛˆ™\ÛÛ][Ûˆ›Üˆ˜\ÚÛÛ[X[™ÂˆËÈ\œÙ\ÈHÛÛ[X[™Ýš[™ÈÈ]XÝÛ›ÝÛˆÛÛÈ
+Ú]œKØÚÙ\‹]ËŠBˆËÈ[™™\ÛÛ™\ÈZ\ˆœ˜[™XÛÛˆœ›ÛH‹ËšØ]KXYÙ[ËÝÛÛZXÛÛœËÂˆYˆ
+ÛÛ˜[YHOOH	Ð˜\Ú	È	‰ˆÛÛ[œ]Ë˜ÛÛ[X[™
+HÂˆžHÂˆÛÛœÝÛÛXÛÛœÑ\ˆHÙ]ÛÛXÛÛœÑ\Š
+BˆÛÛœÝX]ÚH™\ÛÛ™UÛÛXÛÛŠÝš[™ÊÛÛ[œ]˜ÛÛ[X[™
+KÛÛXÛÛœÑ\ŠBˆYˆ
+X]Ú
+HÂˆ™]\›ˆÂˆ\Ü^S˜[YNˆX]Ú™\Ü^S˜[YKˆXÛÛ‘]U\›ˆX]ÚšXÛÛ‘]U\›ˆØ]YÛÜžNˆ	Û˜]]™IÈ\ÈÛÛœÝˆBˆBˆHØ]ÚÂˆËÈXÛÛˆ™\ÛÛ][Ûˆ\È™\ÝYY™›Ü8 %™]™\ˆÜ˜\ÚHÙ\ÜÚ[Ûˆ›Üˆ]ˆBˆB‚ˆËÈ˜]]™Hœ›ÝÜÙ\ˆÛÛ˜[Y\È
+Ú]Ú›ÛYHXÛÛŠBˆÛÛœÝ›Ü›X[^™Yœ›ÝÜÙ\•ÛÛ˜[YHH›Ü›X[^™Pœ›ÝÜÙ\•ÛÛ˜[YJÛÛ˜[YJBˆYˆ
+›Ü›X[^™Yœ›ÝÜÙ\•ÛÛ˜[YJHÂˆÛÛœÝœ›ÝÜÙ\‘\Ü^S˜[YHH›Ü›X[^™Yœ›ÝÜÙ\•ÛÛ˜[YBˆœÜ]
+	×ÉÊBˆ›X\
+
+\[™^
+HOˆ
+[™^OOHÈ\ˆ\˜Ú\]
+
+KÕ\\Ø\ÙJ
+H
+È\œÛXÙJJJJBˆš›Ú[Š	È	ÊBˆœ™\XÙJ×˜œ›ÝÜÙ\—ÊËÚK	Ðœ›ÝÜÙ\ˆ	ÊB‚ˆ™]\›ˆÂˆ\Ü^S˜[YNˆœ›ÝÜÙ\‘\Ü^S˜[YKˆXÛÛ‘]U\›ˆ]ØZ]Ù]œ›ÝÜÙ\•ÛÛXÛÛ‘]U\›
+
+KˆØ]YÛÜžNˆ	Û˜]]™IÈ\ÈÛÛœÝˆBˆB‚ˆËÈ˜]]™HÛÛ\Ü^H˜[Y\È
+›ÈXÛÛœÈHRH[™\È\ÙHÚ]Z[Z[ˆXÛÛœÊBˆËÈ\È[œÝ\™\ÈÛÛ\Ü^SY]H\È[Ø^\ÈÜ[]Y›ÜˆÛÛœÚ\Ý[\Ü^BˆÛÛœÝ˜]]™UÛÛ˜[Y\Îˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆ	Ô™XY	Îˆ	Ô™XY	Ëˆ	ÕÜš]IÎˆ	ÕÜš]IËˆ	ÑY]	Îˆ	ÑY]	Ëˆ	Ð˜\Ú	Îˆ	Õ\›Z[˜[	Ëˆ	ÑÜ™\	Îˆ	ÔÙX\˜Ú	Ëˆ	ÑÛØ‰Îˆ	Ñš[™š[\ÉËˆ	Õ\ÚÉÎˆ	ÐYÙ[	Ëˆ	ÐYÙ[	Îˆ	ÐYÙ[	Ëˆ	ÕÙX‘™]Ú	Îˆ	Ñ™]ÚT“	Ëˆ	ÕÙX”ÙX\˜Ú	Îˆ	ÕÙXˆÙX\˜Ú	Ëˆ	ÕÙÕÜš]IÎˆ	Õ\]HÙÜÉËˆ	Ó›ÝX›ÛÚÑY]	Îˆ	ÑY]›ÝX›ÛÚÉËˆ	ÒÚ[Ú[	Îˆ	ÒÚ[Ú[	Ëˆ	Õ\ÚÓÝ]]	Îˆ	Õ\ÚÈÝ]]	ËˆB‚ˆÛÛœÝ˜]]™Q\Ü^S˜[YHH˜]]™UÛÛ˜[Y\ÖÝÛÛ˜[YWBˆYˆ
+˜]]™Q\Ü^S˜[YJHÂˆ™]\›ˆÂˆ\Ü^S˜[YNˆ˜]]™Q\Ü^S˜[YKˆØ]YÛÜžNˆ	Û˜]]™IÈ\ÈÛÛœÝˆBˆB‚ˆËÈ[šÛ›ÝÛˆÛÛH›È\Ü^HY]Y]H
+Ú[˜[˜XÚÈÈÛÛ˜[YH[ˆRJBˆ™]\›ˆ[™Yš[™YŸB‚‹ÊŠˆYÙ[\HH[šYšYY˜XÚÙ[™[\™˜XÙH›Üˆ[›ÝšY\œÈ
+‹Â\HYÙ[[œÝ[˜ÙHHYÙ[˜XÚÙ[™‚š[\™˜XÙHX[˜YÙYÙ\ÜÚ[ÛˆÂˆYˆÝš[™ÂˆÛÜšÜÜXÙNˆÛÜšÜÜXÙBˆYÙ[ˆYÙ[[œÝ[˜ÙH[ËÈ^žK[ØYYH[[[š\œÝY\ÜØYÙBˆY\ÜØYÙ\ÎˆY\ÜØYÙV×Bˆ\Ô›ØÙ\ÜÚ[™Îˆ›ÛÛX[‚ˆÊŠˆÙ]Ú[ˆ\Ù\ˆ™\]Y\ÝÈÝÜH[ÝÜÈ]™[ÛÜÈ˜Z[ˆ™Y›Ü™HÛX\š[™È\Ô›ØÙ\ÜÚ[™È
+‹ÂˆÝÜ™\]Y\ÝYÎˆ›ÛÛX[‚ˆ\ÝY\ÜØYÙP]ˆ[X™\‚ˆÝ™X[Z[™Õ^ˆÝš[™ÂˆËÈ[˜Ü™[Y[YXXÚ[YHH™]ÈY\ÜØYÙHÝ\È›ØÙ\ÜÚ[™Ë‚ˆËÈ\ÙYÈ]XÝYˆH›ÛÝË]\Y\ÜØYÙH\ÈÝ\\œÙYYHÝ\œ™[Û™H
+Ý[K\™\]Y\ÝÝX\™
+K‚ˆ›ØÙ\ÜÚ[™ÑÙ[™\˜][ÛŽˆ[X™\‚ˆËÈ“ÕNˆ\™[XÚ[˜XÚÚ[™ÈÝ]H
+[™[™ÕÛÛË\™[ÛÛÝXÚËÛÛÔ\™[X\ˆËÈ[™[™Õ^\™[
+H\È™Y[ˆ™[[Ý™YˆØ]PYÙ[›ÝÈ›ÝšY\È\™[ÛÛ\ÙRYˆËÈ\™XÝHÛˆ[]™[È\Ú[™ÈHÑÉÜÈ]]Üš]]]™H\™[ÝÛÛÝ\ÙWÚYšY[‚ˆËÈÙYNˆXÚØYÙ\ËÜÚ\™YÜÜ˜ËØYÙ[ÝÛÛ[X]Ú[™ËÂˆËÈÙ\ÜÚ[Ûˆ˜[YH
+\Ù\‹YYš[™YÜˆRKYÙ[™\˜]Y
+Bˆ˜[YOÎˆÝš[™Âˆ\Ñ›YÙÙYˆ›ÛÛX[‚ˆÊŠˆÚ]\ˆ\ÈÙ\ÜÚ[Ûˆ\È\˜Ú]™Y
+‹Âˆ\Ð\˜Ú]™YÎˆ›ÛÛX[‚ˆÊŠˆ[Y\Ý[\Ú[ˆÙ\ÜÚ[ÛˆØ\È\˜Ú]™Y
+›Üˆ™][[ÛˆÛXÞJH
+‹Âˆ\˜Ú]™Y]Îˆ[X™\‚ˆÊŠˆ\›Z\ÜÚ[Ûˆ[ÙH›Üˆ\ÈÙ\ÜÚ[Ûˆ
+	ÜØY™IË	Ø\ÚÉË	Ø[ÝËX[	ÊH
+‹Âˆ\›Z\ÜÚ[Û“[ÙOÎˆ\›Z\ÜÚ[Û“[ÙBˆÊŠˆ™]š[Ý\È\›Z\ÜÚ[Ûˆ[ÙH
+™\Ù\™YXÜ›ÜÜÈ™\Ý\È›ÜˆÙ\ÜÚ[Û—ÜÝ]H[ÙU˜[œÚ][ÛˆÛÛ^
+H
+‹Âˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙOÎˆ\›Z\ÜÚ[Û“[ÙBˆÊŠˆÙ[˜[^™YPÔÛY[ÛÛ›Üˆ\ÈÙ\ÜÚ[Û‰ÜÈÛÝ\˜ÙHÛÛ›™XÝ[ÛœÈ
+‹ÂˆXÜÛÛÎˆXÜÛY[ÛÛˆÊŠˆPÔÙ\™\ˆ^ÜÚ[™ÈÛÛÛÛÈÈ^\›˜[ÑÈÝXœ›ØÙ\ÜÙ\È
+‹ÂˆÛÛÙ\™\ÎˆXÜÛÛÙ\™\‚ˆËÈÑÈÙ\ÜÚ[ÛˆQ›ÜˆÛÛ™\œØ][ÛˆÛÛ[Z]BˆÙÔÙ\ÜÚ[Û’YÎˆÝš[™ÂˆËÈÚÙ[ˆ\ØYÙH›Üˆ\Ü^BˆÚÙ[•\ØYÙOÎˆÂˆ[œ]ÚÙ[œÎˆ[X™\‚ˆÝ]]ÚÙ[œÎˆ[X™\‚ˆÝ[ÚÙ[œÎˆ[X™\‚ˆÛÛ^ÚÙ[œÎˆ[X™\‚ˆÛÜÝ\Ùˆ[X™\‚ˆØXÚT™XYÚÙ[œÏÎˆ[X™\‚ˆØXÚPÜ™X][Û•ÚÙ[œÏÎˆ[X™\‚ˆÊŠˆ[Ù[	ÜÈÛÛ^Ú[™ÝÈÚ^™H[ˆÚÙ[œÈ
+œ›ÛHÑÈ[Ù[\ØYÙJH
+‹ÂˆÛÛ^Ú[™ÝÏÎˆ[X™\‚ˆBˆËÈÙ\ÜÚ[ÛˆÝ]\È
+\Ù\‹XÛÛ›ÛY
+HH]\›Z[™\ÈÜ[ˆœÈÛÜÙYˆËÈ[˜[ZXÈÝ]\ÈQ™Y™\™[˜Ú[™ÈÛÜšÜÜXÙHÝ]\ÈÛÛ™šYÂˆÙ\ÜÚ[Û”Ý]\ÏÎˆÝš[™ÂˆËÈ™XYÝ[œ™XY˜XÚÚ[™ÈHQÙˆ\ÝY\ÜØYÙH\Ù\ˆ\È™XYˆ\Ý™XYY\ÜØYÙRYÎˆÝš[™ÂˆÊŠ‚ˆ
+ˆ^XÚ][œ™XY›YÈHÚ[™ÛHÛÝ\˜ÙHÙˆ]›Üˆ‘UÈ˜YÙK‚ˆ
+ˆÙ]ÈYHÚ[ˆ\ÜÚ\Ý[Y\ÜØYÙHÛÛ\]\ÈÚ[H\Ù\ˆ\È“ÕšY]Ú[™Ë‚ˆ
+ˆÙ]È˜[ÙHÚ[ˆ\Ù\ˆšY]ÜÈHÙ\ÜÚ[Ûˆ
+[™›Ý›ØÙ\ÜÚ[™ÊK‚ˆ
+‹Âˆ\Õ[œ™XYÎˆ›ÛÛX[‚ˆËÈ\‹\Ù\ÜÚ[ÛˆÛÝ\˜ÙHÙ[XÝ[Ûˆ
+ÛYÜÈÙˆ[˜X›YÛÝ\˜Ù\ÊBˆ[˜X›YÛÝ\˜ÙTÛYÜÏÎˆÝš[™Ö×BˆËÈX™[È\YYÈ\ÈÙ\ÜÚ[Ûˆ
+Y]]™HYÜËX[žK\\‹\Ù\ÜÚ[ÛŠBˆX™[ÏÎˆÝš[™Ö×BˆËÈÛÜšÚ[™È\™XÝÜžH›Üˆ\ÈÙ\ÜÚ[Ûˆ
+\ÙYžHYÙ[›Üˆ˜\ÚÛÛ[X[™ÊBˆÛÜšÚ[™Ñ\™XÝÜžOÎˆÝš[™ÂˆËÈÑÈÝÙ›ÜˆÙ\ÜÚ[ÛˆÝÜ˜YÙHHÙ]Û˜ÙH]Ü™X][Û‹™]™\ˆÚ[™Ù\Ë‚ˆËÈ[œÝ\™\ÈÑÈØ[ˆš[™Ù\ÜÚ[Ûˆ˜[œØÜš\È™YØ\™\ÜÈÙˆÛÜšÚ[™Ñ\™XÝÜžHÚ[™Ù\Ë‚ˆÙÐÝÙÎˆÝš[™ÂˆËÈÚ]ÚXÚÛÝ]Y]Y]H
+X[˜YÙYÛÜšÝ™YHÈÝ\œ™[ÚXÚÛÝ]
+KÚ[ˆ›Ý[™‚ˆÚXÚÛÝ]Îˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[ÛÚXÚÛÝ]ŒBˆËÈÚ\™YšY]Ù\ˆT“
+YˆÚ\™YšXHšY]Ù\ŠBˆÚ\™Y\›ÎˆÝš[™ÂˆËÈÚ\™YÙ\ÜÚ[ÛˆQ[ˆšY]Ù\ˆ
+›Üˆ™]›ÚÙJBˆÚ\™YYÎˆÝš[™ÂˆËÈ[Ù[È\ÙH›Üˆ\ÈÙ\ÜÚ[Ûˆ
+Ý™\œšY\ÈÛØ˜[ÛÛ™šYÈYˆÙ]
+Bˆ[Ù[ÎˆÝš[™ÂˆËÈHÛÛ›™XÝ[ÛˆÛYÈ›Üˆ\ÈÙ\ÜÚ[Ûˆ
+ØÚÙYY\ˆš\œÝY\ÜØYÙJBˆPÛÛ›™XÝ[ÛÎˆÝš[™ÂˆËÈÚ]\ˆHÛÛ›™XÝ[Ûˆ\ÈØÚÙY
+Ø[››Ý™HÚ[™ÙYY\ˆš\œÝYÙ[Ü™X][ÛŠBˆÛÛ›™XÝ[Û“ØÚÙYÎˆ›ÛÛX[‚ˆËÈ[šÚ[™È]™[›Üˆ\ÈÙ\ÜÚ[Ûˆ
+	ÛÙ™‰Ë	Ý[šÉË	ÛX^	ÊBˆ[šÚ[™Ó]™[Îˆ[šÚ[™Ó]™[ˆËÈÞ\Ý[H›Û\™\Ù]›ÜˆZ[šHYÙ[È
+	ÙY˜][	È	ÛZ[šIÊBˆÞ\Ý[T›Û\™\Ù]Îˆ	ÙY˜][	È	ÛZ[šIÈÝš[™ÂˆËÈ›ÛKÝ\HÙˆH\ÝY\ÜØYÙH
+›Üˆ˜YÙH\Ü^HÚ]Ý]ØY[™ÈY\ÜØYÙ\ÊBˆ\ÝY\ÜØYÙT›ÛOÎˆ	Ý\Ù\‰È	Ø\ÜÚ\Ý[	È	Ü[‰È	ÝÛÛ	È	Ù\œ›Ü‰ÂˆËÈQÙˆH\Ýš[˜[
+›Û‹Z[\›YYX]JH\ÜÚ\Ý[Y\ÜØYÙHH™KXÛÛ\]Y›Üˆ[œ™XY]XÝ[Û‚ˆ\Ýš[˜[Y\ÜØYÙRYÎˆÝš[™ÂˆËÈ\›ˆ˜\Ù[[™Nˆ\Ýš[˜[\ÜÚ\Ý[Y\ÜØYÙHQ]\›ˆÝ\
+[[YK[Û›K›Ý\œÚ\ÝY
+Bˆ\›”Ý\š[˜[Y\ÜØYÙRYÎˆÝš[™ÂˆËÈ^\›˜[Ù\ÜÚ[ÛˆY]Y]H\]\ÈÙY[ˆÚ[H›ØÙ\ÜÚ[™È
+\YYY\ˆ\›ˆÝÜ
+Bˆ[™[™Ñ^\›˜[Y]Y]OÎˆÙ\ÜÚ[Û’XY\‚ˆËÈÝX\™ˆÝ\™\ÜÈ^\›˜[Y]Y]H™]™\Y\ˆ›ÙÜ˜[[X]XÈÜš]\È
+Ù]Ù\ÜÚ[Û”Ý]\ËÜÙ]Ù\ÜÚ[Û“X™[ÊK‚ˆËÈœËØ]Úš\™\È\š[™È]ÛZXÈÜš]H
+[›[šÊÜ™[˜[YJH[™Ø[ˆ™XYÝ[H]K™]™\[™È[‹[Y[[ÜžHÝ]K‚ˆÛY]Y]UÜš]QÝX\™[[Îˆ[X™\‚ˆËÈÚ]\ˆ[ˆ\Þ[˜ÈÜ\˜][Ûˆ\ÈÛ™ÛÚ[™È
+Ú\š[™Ë\][™ÈÚ\™K™]›ÚÚ[™Ë]H™YÙ[™\˜][ÛŠBˆËÈ\ÙY›ÜˆÚ[[Y\ˆY™™XÝÛˆÙ\ÜÚ[Ûˆ]Bˆ\Ð\Þ[˜ÓÜ\˜][Û“Û™ÛÚ[™ÏÎˆ›ÛÛX[‚ˆËÈ™]šY]ÈÙˆš\œÝ\Ù\ˆY\ÜØYÙH
+›ÜˆÚYX˜\ˆ\Ü^H˜[˜XÚÊBˆ™]šY]ÏÎˆÝš[™ÂˆËÈÚ[ˆHÙ\ÜÚ[ÛˆØ\Èš\œÝÜ™X]Y
+\È[Y\Ý[\œ›ÛH”ÓÓ“XY\ŠBˆÜ™X]Y]Îˆ[X™\‚ˆËÈÝ[Y\ÜØYÙHÛÝ[
+™KXÛÛ\]Y[ˆ”ÓÓ“XY\ˆ›Üˆ˜\Ý\ÝØY[™ÊBˆY\ÜØYÙPÛÝ[Îˆ[X™\‚ˆËÈY\ÜØYÙH]Y]YH›Üˆ[™[™È™]ÈY\ÜØYÙ\ÈÚ[H›ØÙ\ÜÚ[™ÂˆËÈÚ[ˆHY\ÜØYÙH\œš]™\È\š[™È›ØÙ\ÜÚ[™ËÙH[\œ\[™]Y]YBˆY\ÜØYÙT]Y]YNˆ\œ˜^OÂˆY\ÜØYÙNˆÝš[™Âˆ]XÚY[ÏÎˆš[P]XÚY[×BˆÝÜ™Y]XÚY[ÏÎˆÝÜ™Y]XÚY[×BˆÜ[ÛœÏÎˆÙ[™Y\ÜØYÙSÜ[ÛœÂˆY\ÜØYÙRYÎˆÝš[™ÈËÈ™KYÙ[™\˜]YQ›ÜˆX]Ú[™ÈÚ]RBˆÜ[Z\ÝXÓY\ÜØYÙRYÎˆÝš[™ÈËÈœ›Û[™	ÜÈQ›Üˆ™[XX›H]™[X]Ú[™ÂˆO‚ˆËÈX\ÙˆÚ[YOˆÛÛ[X[™›ÜˆÚ[[™È˜XÚÙÜ›Ý[™Ú[Âˆ˜XÚÙÜ›Ý[™Ú[ÛÛ[X[™ÎˆX\Ýš[™ËÝš[™Ï‚ˆËÈX\Ùˆ\ÚÒYOˆÝ]][™›È›Üˆ˜XÚÙÜ›Ý[™\ÚÈ™\Ý[Âˆ˜XÚÙÜ›Ý[™\ÚÓÝ]]ÎˆX\Ýš[™ËÈÝ]]š[NˆÝš[™ÎÈÝ[[X\žNˆÝš[™ÎÈÝ]\ÎˆÝš[™ÎÈÛÛ\]Y]ˆ[X™\ˆO‚ˆËÈÚ]\ˆY\ÜØYÙ\È]™H™Y[ˆØYYœ›ÛH\ÚÈ
+›Üˆ^žHØY[™ÊBˆY\ÜØYÙ\ÓØYYˆ›ÛÛX[‚ˆËÈ[™[™È]]™\]Y\Ý˜XÚÚ[™È
+›Üˆ[šYšYY]]›ÝÊBˆ[™[™Ð]]™\]Y\ÝYÎˆÝš[™Âˆ[™[™Ð]]™\]Y\ÝÎˆ]]™\]Y\ÝˆËÈ]]™]žH˜XÚÚ[™È
+›ÜˆZY\Ù\ÜÚ[ÛˆÚÙ[ˆ^\žJBˆËÈÝÜ™H\ÝÙ[Y\ÜØYÙKØ]XÚY[ÈÈ[˜X›H™]žHY\ˆÚÙ[ˆ™Yœ™\Úˆ\ÝÙ[Y\ÜØYÙOÎˆÝš[™Âˆ\ÝÙ[]XÚY[ÏÎˆš[P]XÚY[×Bˆ\ÝÙ[ÝÜ™Y]XÚY[ÏÎˆÝÜ™Y]XÚY[×Bˆ\ÝÙ[Ü[ÛœÏÎˆÙ[™Y\ÜØYÙSÜ[ÛœÂˆËÈ›YÈÈ™]™[[™š[š]H™]žHÛÜÈ
+™\Ù]]Ý\ÙˆXXÚÙ[™Y\ÜØYÙJBˆ]]™]žP][\YÎˆ›ÛÛX[‚ˆËÈ›YÈ[™XØ][™È]]™]žH\È[ˆ›ÙÜ™\ÜÈ
+È™]™[ÛÛ\]H[™\ˆœ›ÛH[\™™\š[™ÊBˆ]]™]žR[”›ÙÜ™\ÜÏÎˆ›ÛÛX[‚ˆËÈÚ]\ˆ\ÈÙ\ÜÚ[Ûˆ\ÈY[ˆœ›ÛHÙ\ÜÚ[Ûˆ\Ý
+K™Ë‹Z[šHY]Ù\ÜÚ[ÛœÊBˆY[Îˆ›ÛÛX[‚ˆœ˜[˜Úœ›ÛSY\ÜØYÙRYÎˆÝš[™ÂˆËÈœ˜[˜ÚÛÛ^Ý˜]YÞN‚ˆËÈHÙËY›ÜšÎˆ›ÝšY\‹[]™[›ÜšÈœ›ÛH\™[ÑÈÙ\ÜÚ[Û‚ˆËÈHÙYYYYœ™\Ú\Ù\ÜÚ[ÛŽˆœ™\Ú˜XÚÙ[™Ù\ÜÚ[ÛˆÙYYYÚ]˜[œØÜš\\Èœ˜[˜ÚÝ]Ù™‚ˆœ˜[˜ÚÛÛ^Ý˜]YÞOÎˆ	ÜÙËY›ÜšÉÈ	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰ÂˆËÈ\™[Ù\ÜÚ[Û‰ÜÈÑÈÙ\ÜÚ[ÛˆQ
+\ÙYÛ›HÚ[ˆœ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÊBˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YÎˆÝš[™ÂˆËÈ\™[Ù\ÜÚ[Û‰ÜÈÝÜ˜YÙH]
+\ÙYÛ›HÚ[ˆœ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÊBˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ÎˆÝš[™ÂˆËÈ\™[Ù\ÜÚ[Û‰ÜÈÙÐÝÙ8 %™YYYÛÈH›ÜšÈÝXœ›ØÙ\ÜÈ\Ù\ÈHÛÜœ™XÝˆËÈ‹Ë˜Û]YKÜ›Ú™XÝËÞØÝÙZ\ÚKÈ\™XÝÜžHÈš[™H\™[	ÜÈÙ\ÜÚ[Ûˆš[K‚ˆœ˜[˜Úœ›ÛTÙÐÝÙÎˆÝš[™ÂˆËÈÑÈ\ÜÚ\Ý[Y\ÜØYÙHURQ]Hœ˜[˜ÚÚ[8 %\ÙY\È™\Ý[YTÙ\ÜÚ[Û]ˆËÈÈš[HH›ÜšÙYÛÛ™\œØ][Ûˆ]Hœ˜[˜ÚÚ[‚ˆœ˜[˜Úœ›ÛTÙÕ\›’YÎˆÝš[™ÂˆËÈÛ™K\ÚÝ›YÈ›ÜˆÙYYYœ˜[˜Ú[ÙHHÙ]YHY\ˆš\œÝ\›ˆÙYY[š™XÝ[Û‹‚ˆœ˜[˜ÚÙYY\YYÎˆ›ÛÛX[‚ˆËÈÛ™K\ÚÝY[ˆÝ[[X\žH[š™XÝYÛˆHš\œÝ\›ˆY\ˆH™[[ÝH˜[œÙ™\‹‚ˆ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žOÎˆÝš[™ÂˆËÈÚ]\ˆH˜[œÙ™\œ™Y\Ù\ÜÚ[ÛˆÝ[[X\žH\È[™XYH™Y[ˆ[š™XÝY‚ˆ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYÎˆ›ÛÛX[‚ˆËÈÚÙ[ˆ™Yœ™\ÚX[˜YÙ\ˆ›ÜˆÐ]]ÚÙ[ˆ™Yœ™\ÚÚ]˜]H[Z][™ÂˆÚÙ[”™Yœ™\ÚX[˜YÙ\ŽˆÚÙ[”™Yœ™\ÚX[˜YÙ\‚ˆËÈY]Y]H›ÜˆÙ\ÜÚ[ÛœÈÜ™X]YžH]]ÛX][ÛœÂˆšYÙÙ\™YžOÎˆÈ]]ÛX][Û“˜[YOÎˆÝš[™ÎÈ]™[ÎˆÝš[™ÎÈ[Y\Ý[\Îˆ[X™\ˆBˆËÈ›ÛZ\ÙH]™\ÛÛ™\ÈÚ[ˆHYÙ[[œÝ[˜ÙH\È™XYH
+›Üˆ]HÙ[ˆÈ]ØZ]
+BˆYÙ[™XYOÎˆ›ÛZ\ÙO›ÚY‚ˆYÙ[™XYT™\ÛÛ™OÎˆ
+
+HOˆ›ÚYˆËÈ\‹\Ù\ÜÚ[Ûˆ[ˆÝ™\œšY\È›ÜˆÑÈÝXœ›ØÙ\ÜÈ
+K™Ë‹S•“ÔP×ÐTÑWÕT“
+K‚ˆËÈÝÜ™YÛˆX[˜YÙYÙ\ÜÚ[ÛˆÛÈ]\œÚ\ÝÈXÜ›ÜÜÈYÙ[™XÜ™X][ÛœÈ
+]]\™]žK]ËŠBˆ[“Ý™\œšY\ÏÎˆ™XÛÜ™Ýš[™ËÝš[™Ï‚ˆËÈ[[YKXY™™XÝ[™È˜XÚÙ[™ÛÛ™šYÈÚYÛ˜]\™HØ\\™YÚ[ˆH]™HYÙ[Ø\ÈÜ™X]YÜ™Yœ™\ÚY‚ˆ˜XÚÙ[™[[YTÚYÛ˜]\™OÎˆÝš[™ÂˆÊŠ‚ˆ
+ˆÚYÛ˜]\™HÝ™\ˆšY[È]Ø[››Ý™H›ÜYØ]YšXH\]WÜ[[YWØÛÛ™šYØˆ
+ˆ
+ÙYH[[YKXÛÛ™šYËÎ˜Z[™\Ý\™\]Z\™YÚYÛ˜]\™X
+KˆÚ[ˆ\ÈšYËˆ
+ˆHYÙ[]\Ý™H\ÜÜÙY
+È™XÜ™X]Y˜]\ˆ[ˆ™Yœ™\ÚY[ˆXÙK‚ˆ
+‹Âˆ˜XÚÙ[™™\Ý\ÚYÛ˜]\™OÎˆÝš[™ÂˆËÈÚ]\ˆH™]š[Ý\È\›ˆØ\È[\œ\Y
+›ÜˆÛÛ^[š™XÝ[ÛˆÛˆ™^Y\ÜØYÙJK‚ˆËÈ\[Y\˜[8 %›Ý\œÚ\ÝYÈ\ÚËˆÛX\™YY\ˆÛ™K\ÚÝ[š™XÝ[Û‹‚ˆØ\Ò[\œ\YÎˆ›ÛÛX[‚ˆÊŠ‚ˆ
+ˆ[[YK[Û›NˆHÑÈY\ÜØYÙHY8¡¤ˆÜ˜Y\ÜÚ\Ý[Y\ÜØYÙHY‚ˆ
+ˆÜ[]YÚ[ˆH^ØÛÛ\]X\œš]™\ÈØ\œžZ[™ÈÙÓY\ÜØYÙRY[™™XYˆ
+ˆÚ[ˆH›ÛÝË]\WÝ\›—Ø[˜ÚÜ˜]™[\œš]™\È
+Y™\œ™YžHÛ™HZXÜ›Ý\ÚÂˆ
+ˆÛÈHÑÉÜÈÙ\ÜÚ[Û‹[X[˜YÙ\ˆ\È\]Y]ÈXYˆ8 %ÙYHØ]KXYÙ[Ë[ÜÜÈÍÎŠK‚ˆ
+ˆØ\Y]WÔÑ×ÓQTÔÐQÑWÒQÐÐPÒWÓSRUÈ›Ý[™Y[[ÜžH[ˆÛ™ÈÙ\ÜÚ[ÛœË‚ˆ
+‹ÂˆTÙÓY\ÜØYÙUÐÜ˜YY\ÜØYÙOÎˆX\Ýš[™ËÝš[™Ï‚ˆËÈÛÝ\˜ÙKXXÝ]˜][Ûˆ]]Ë\™]žH
+Ø]KXYÙ[Ë[ÜÜÈÎ
+KˆÚ[ˆHÛÝ\˜ÙHXÝ]˜]\ÂˆËÈZY]\›‹ÙH™K\Ù[™HÜšYÚ[˜[Y\ÜØYÙHÚ]H–ÏÛYÏˆXÝ]˜]YHˆÝY™š^ˆËÈY\ˆHÚÜ[^KˆH[™[™ÈÛÝ]ÈÙ[™Y\ÜØYÙXY\H\XØ]BˆËÈ”Èœ›ÛHHYØXÞH™[™\™\ˆ]Ý[Ú\ÈHÛY[\ÚYH]]×Ü™]žK‚ˆ]]Ô™]žU[Y\Îˆ™]\›•\O\[ÙˆÙ][Y[Ý]‚ˆ]]Ô™]žT[™[™ÏÎˆÂˆÛÛ[ˆÝš[™ÂˆXY[™S\Îˆ[X™\‚ˆÊŠˆYHY\ˆHš\œÝX]Ú[™ÈÙ[™Y\ÜØYÙHÛÛœÝ[Y\ÈHÛÝÈ]\ˆX]Ú\È›Üˆ
+‹ÂˆÛÛ[Z]Yˆ›ÛÛX[‚ˆBŸB‚˜ÛÛœÝWÔÑ×ÓQTÔÐQÑWÒQÐÐPÒWÓSRUHM‚‚™^Ü[\™˜XÙH]]Ô™]žT[™[™ÒÜÝÂˆ]]Ô™]žT[™[™ÏÎˆÂˆÛÛ[ˆÝš[™ÂˆXY[™S\Îˆ[X™\‚ˆÛÛ[Z]Yˆ›ÛÛX[‚ˆBŸB‚™^Ü[˜Ý[ÛˆÛZ[P]]Ô™]žT[™[™ÊˆÜÝˆ]]Ô™]žT[™[™ÒÜÝˆY\ÜØYÙNˆÝš[™Ëˆ›ÝÓ\ÈH]K››ÝÊ
+KŠNˆ	ÜÙ[™	È	Ù›Ü	ÈÂˆÛÛœÝ[™[™ÈHÜÝ˜]]Ô™]žT[™[™ÂˆYˆ
+[™[™È	‰ˆY\ÜØYÙHOOH[™[™Ë˜ÛÛ[
+HÂˆYˆ
+›ÝÓ\È[™[™Ë™XY[™S\ÊHÂˆYˆ
+[™[™Ë˜ÛÛ[Z]Y
+H™]\›ˆ	Ù›Ü	Âˆ[™[™Ë˜ÛÛ[Z]YHYBˆ™]\›ˆ	ÜÙ[™	ÂˆBˆÜÝ˜]]Ô™]žT[™[™ÈH[™Yš[™Yˆ™]\›ˆ	ÜÙ[™	ÂˆB‚ˆYˆ
+[™[™È	‰ˆ›ÝÓ\ÈH[™[™Ë™XY[™S\ÊHÂˆÜÝ˜]]Ô™]žT[™[™ÈH[™Yš[™YˆB‚ˆ™]\›ˆ	ÜÙ[™	ÂŸB‚‹ÊŠ‚ˆ
+ˆÜ™X]HHX[˜YÙYÙ\ÜÚ[Ûˆœ›ÛH[žHÙ\ÜÚ[Û‹[ZÙHÛÝ\˜ÙH
+Ù\ÜÚ[Û“Y]Y]KÙ\ÜÚ[ÛÛÛ™šYËÝÜ™YÙ\ÜÚ[ÛŠK‚ˆ
+ˆÜ™XYÈ[X]Ú[™ÈšY[Èœ›ÛHHÛÝ\˜ÙHÛÈ™]È\œÚ\Ý[šY[È]]ÛX]XØ[H›ÜYØ]K‚ˆ
+ˆ[[YK[Û›HšY[ÈÙ]Ù[œÚX›HY˜][Ë‚ˆ
+‹Â™^Ü[˜Ý[ÛˆÜ™X]SX[˜YÙYÙ\ÜÚ[ÛŠˆÛÝ\˜ÙNˆÈYˆÝš[™ÈH	ˆ\X[X[˜YÙYÙ\ÜÚ[Û‹ˆÛÜšÜÜXÙNˆÛÜšÜÜXÙKˆÝ™\œšY\ÏÎˆ\X[X[˜YÙYÙ\ÜÚ[Û‹ŠNˆX[˜YÙYÙ\ÜÚ[ÛˆÂˆÛÛœÝÈHÛÝ\˜ÙH\È™XÛÜ™Ýš[™Ë[šÛ›ÝÛ‚ˆÛÛœÝÛÝ\˜ÙQšY[ÈHØš™XÝ™œ›ÛQ[šY\ÊˆØš™XÝ™[šY\ÊÊK™š[\Š
+Ë—JHOˆˆOOH[™Yš[™Y
+Bˆ
+H\È\X[X[˜YÙYÙ\ÜÚ[Û‚‚ˆYˆ
+	Ý[šÚ[™Ó]™[	È[ˆÛÝ\˜ÙQšY[ÊHÂˆËÈÑÎˆ™[[Ý™HYØXÞH	Ý[šÉÈ›Ü›X[^˜][ÛˆY\ˆÛ\œÚ\ÝYÙ\ÜÚ[Û‚ˆËÈXY\œÈ]™H™X[\ÝXØ[HYÙYÝ]XÜ›ÜÜÈ\Ü˜Y\Ë‚ˆÛÛœÝ›Ü›X[^™Y[šÚ[™Ó]™[H›Ü›X[^™U[šÚ[™Ó]™[
+ÛÝ\˜ÙQšY[Ë[šÚ[™Ó]™[
+BˆYˆ
+›Ü›X[^™Y[šÚ[™Ó]™[
+HÂˆÛÝ\˜ÙQšY[Ë[šÚ[™Ó]™[H›Ü›X[^™Y[šÚ[™Ó]™[ˆH[ÙHÂˆ[]HÛÝ\˜ÙQšY[Ë[šÚ[™Ó]™[ˆBˆB‚ˆÛÛœÝX[˜YÙYHÂˆËÈÜ™XY[Ù\ÜÚ[Û‹[ZÙHšY[Èœ›ÛHÛÝ\˜ÙH
+Y˜[YK\›Z\ÜÚ[Û“[ÙKX™[Ë[Ù[]ËŠBˆËÈ\È[œÝ\™\È™]È\œÚ\Ý[šY[È]]ÛX]XØ[H›ÝÈ›ÝYÚÚ]Ý]X[X[ÛÜZ[™Ë‚ˆ‹‹œÛÝ\˜ÙQšY[ËˆËÈ[[YK[Û›HY˜][È
+›Ý\œÚ\ÝY
+BˆÛÜšÜÜXÙKˆYÙ[ˆ[ˆY\ÜØYÙ\Îˆ×Kˆ\Ô›ØÙ\ÜÚ[™Îˆ˜[ÙKˆ\ÝY\ÜØYÙP]ˆ
+Ë›\ÝY\ÜØYÙP]ÏÈË›\Ý\ÙY]ÏÈ]K››ÝÊ
+JH\È[X™\‹ˆÝ™X[Z[™Õ^ˆ	ÉËˆ›ØÙ\ÜÚ[™ÑÙ[™\˜][ÛŽˆˆ\Ñ›YÙÙYˆ
+Ëš\Ñ›YÙÙYÏÈ˜[ÙJH\È›ÛÛX[‹ˆY\ÜØYÙT]Y]YNˆ×Kˆ˜XÚÙÜ›Ý[™Ú[ÛÛ[X[™Îˆ™]ÈX\
+
+Kˆ˜XÚÙÜ›Ý[™\ÚÓÝ]]Îˆ™]ÈX\
+
+KˆY\ÜØYÙ\ÓØYYˆ˜[ÙKˆÚÙ[”™Yœ™\ÚX[˜YÙ\Žˆ™]ÈÚÙ[”™Yœ™\ÚX[˜YÙ\ŠÙ]ÛÝ\˜ÙPÜ™Y[X[X[˜YÙ\Š
+KÂˆÙÎˆ
+\ÙÊHOˆÙ\ÜÚ[Û“ÙË™XYÊ\ÙÊKˆJKˆËÈØ[\ˆÝ™\œšY\È
+\›Z\ÜÚ[Û“[ÙHY˜][Ë[šÚ[™Ó]™[Y\ÜØYÙ\ÓØYY]ËŠBˆ‹‹›Ý™\œšY\ËˆH\ÈX[˜YÙYÙ\ÜÚ[Û‚‚ˆYˆ
+X[˜YÙY˜œ˜[˜Úœ›ÛSY\ÜØYÙRY	‰ˆ[X[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞJHÂˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHHX[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YˆÈ	ÜÙËY›ÜšÉÂˆˆ	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰ÂˆB‚ˆYˆ
+X[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰È	‰ˆX[˜YÙY˜œ˜[˜ÚÙYY\YYOOH[™Yš[™Y
+HÂˆËÈYˆ[ˆÑÈÙ\ÜÚ[ÛˆQ[™XYH^\ÝËš\œÝ\›ˆ\È[™XYH\[™Y‚ˆX[˜YÙY˜œ˜[˜ÚÙYY\YYHH[X[˜YÙYœÙÔÙ\ÜÚ[Û’YˆB‚ˆ™]\›ˆX[˜YÙYŸB‚‹ÊŠ‚ˆ
+ˆ™\ÛÛ™HÝ\ÜÐœ˜[˜Ú[™È›ÜˆHX[˜YÙYÙ\ÜÚ[Û‹‚ˆ
+ˆ™Y™\œÈH]™HYÙ[[œÝ[˜ÙNÈ˜[È˜XÚÈÈYH›Üˆ[˜XÚÙ[™Ë‚ˆ
+‹Â™[˜Ý[Ûˆ™\ÛÛ™TÝ\ÜÐœ˜[˜Ú[™ÊX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛÛX[ˆÂˆËÈYˆYÙ[\È]™K\ÙH]È[œÝ[˜ÙH›Ü\H
+]]Üš]]]™JBˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆ™]\›ˆX[˜YÙY˜YÙ[œÝ\ÜÐœ˜[˜Ú[™ÂˆB‚ˆ™]\›ˆYHËÈY˜][ˆœ˜[˜Ú[™È[˜X›Y›Üˆ[˜XÚÙ[™ÂŸB‚˜ÛÛœÝQUSÕÒÑS—ÕTÐQÑHHÂˆ[œ]ÚÙ[œÎˆÝ]]ÚÙ[œÎˆÝ[ÚÙ[œÎˆˆÛÛ^ÚÙ[œÎˆÛÜÝ\ÙˆŸB‚‹ÊŠ‚ˆ
+ˆÛÛ™\HX[˜YÙYÙ\ÜÚ[ÛˆÈH™[™\™\‹\ÚYHÙ\ÜÚ[ÛˆØš™XÝ‚ˆ
+ˆ\Ù\ÈXÚÔÙ\ÜÚ[Û‘šY[Ê
+H›Üˆ\œÚ\Ý[šY[ÈÛÈ™]ÈšY[È›ÜYØ]H]]ÛX]XØ[K‚ˆ
+‹Â™[˜Ý[ÛˆX[˜YÙYÔÙ\ÜÚ[ÛŠNˆX[˜YÙYÙ\ÜÚ[Û‹Ý™\œšY\ÏÎˆ\X[Ù\ÜÚ[ÛŠNˆÙ\ÜÚ[ÛˆÂˆ]Ú\™YÝÛ™\ÛÝ[ˆ[X™\ˆ[™Yš[™YˆYˆ
+K˜ÚXÚÛÝ]Ë›[ÙHOOH	ÛX[˜YÙY]ÛÜšÝ™YIÈ	‰ˆK˜ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRY
+HÂˆžHÂˆÛÛœÝÛÝ[HÙ]Y˜][Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ë™Ù]ÝÛ™\ÛÝ[
+K˜ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRY
+BˆYˆ
+ÛÝ[ˆ
+HÚ\™YÝÛ™\ÛÝ[HÛÝ[ˆHØ]ÚÂˆÊˆ™YÚ\ÝžH[˜]˜Z[X›H8 %ÛZ]
+‹ÂˆBˆBˆ™]\›ˆÂˆ‹‹œXÚÔÙ\ÜÚ[Û‘šY[ÊJKˆÚ\™YÝÛ™\ÛÝ[ˆËÈ™KXÛÛ\]YšY[Èœ›ÛHXY\ˆ
+›Ý[ˆÑTÔÒSÓ—ÔT”ÒTÕS•Ñ’QSÊBˆ™]šY]ÎˆKœ™]šY]Ëˆ\ÝY\ÜØYÙT›ÛNˆK›\ÝY\ÜØYÙT›ÛKˆÚÙ[•\ØYÙNˆKÚÙ[•\ØYÙKˆY\ÜØYÙPÛÝ[ˆK›Y\ÜØYÙPÛÝ[ˆ\Ýš[˜[Y\ÜØYÙRYˆK›\Ýš[˜[Y\ÜØYÙRYˆËÈ[[YK[Û›HšY[ÂˆÛÜšÜÜXÙRYˆKÛÜšÜÜXÙKšYˆÛÜšÜÜXÙS˜[YNˆKÛÜšÜÜXÙK›˜[YKˆY\ÜØYÙ\Îˆ×Kˆ\Ô›ØÙ\ÜÚ[™ÎˆKš\Ô›ØÙ\ÜÚ[™ËˆÙ\ÜÚ[Û‘›Û\”]ˆÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+KÛÜšÜÜXÙKœ›ÛÝ]KšY
+KˆÝ\ÜÐœ˜[˜Ú[™Îˆ™\ÛÛ™TÝ\ÜÐœ˜[˜Ú[™ÊJKˆ‹‹›Ý™\œšY\ËˆH\ÈÙ\ÜÚ[Û‚ŸB‚‹ËÈ\™›Ü›X[˜ÙNˆ˜]ÚTÈ[H]™[ÈÈ™YXÙH™[™\™\ˆØY˜ÛÛœÝSWÐUÒÒS•T•SÓTÈHLËÈ›\Ú˜]ÚY[\È]™\žHL\Â‚š[\™˜XÙH[™[™Ñ[HÂˆ[NˆÝš[™Âˆ\›’YÎˆÝš[™ÂŸB‚™^ÜÛ\ÜÈÙ\ÜÚ[Û“X[˜YÙ\ˆ[\[Y[ÈTÙ\ÜÚ[Û“X[˜YÙ\ˆÂˆš]˜]HÙ\ÜÚ[ÛœÎˆX\Ýš[™ËX[˜YÙYÙ\ÜÚ[ÛˆH™]ÈX\
+
+BˆËÈ[H˜]Ú[™È›Üˆ\™›Ü›X[˜ÙHH™YXÙ\ÈTÈ]™[Èœ›ÛHL
+ËÜÙXÈÈŒŒÜÙXÂˆš]˜]H[™[™Ñ[\ÎˆX\Ýš[™Ë[™[™Ñ[OˆH™]ÈX\
+
+Bˆš]˜]H[Q›\Ú[Y\œÎˆX\Ýš[™Ë›ÙR”Ë•[Y[Ý]ˆH™]ÈX\
+
+BˆËÈÛÛ™šYÈØ]Ú\œÈ›Üˆ]™H\]\È
+ÛÝ\˜Ù\Ë]ËŠHHÛ™H\ˆÛÜšÜÜXÙBˆš]˜]HÛÛ™šYÕØ]Ú\œÎˆX\Ýš[™ËÛÛ™šYÕØ]Ú\ˆH™]ÈX\
+
+BˆËÈ]]ÛX][ÛˆÞ\Ý[\È›ÜˆÛÜšÜÜXÙH]™[]]ÛX][ÛœÈHÛ™H\ˆÛÜšÜÜXÙH
+[˜ÛY\ÈØÚY[\‹Y™š[™Ë[™[™\œÊBˆš]˜]H]]ÛX][Û”Þ\Ý[\ÎˆX\Ýš[™Ë]]ÛX][Û”Þ\Ý[OˆH™]ÈX\
+
+BˆËÈ[™[™ÈÜ™Y[X[™\]Y\Ý™\ÛÛ™\œÈ
+Ù^YYžH™\]Y\ÝY
+Bˆš]˜]H[™[™ÐÜ™Y[X[™\ÛÛ™\œÎˆX\Ýš[™Ë
+™\ÜÛœÙNˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÜ™Y[X[™\ÜÛœÙJHOˆ›ÚYˆH™]ÈX\
+
+BˆËÈ\›Z\ÜÚ[Ûˆ™\]Y\ÝY]Y]H˜XÚÚ[™È
+Ù^YYžH™\]Y\ÝY
+Bˆš]˜]H[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝÎˆX\Ýš[™ËÂˆÙ\ÜÚ[Û’YˆÝš[™Âˆ\OÎˆ	Ø˜\Ú	È	Ùš[WÝÜš]IÈ	ÛXÜÛ]]][Û‰È	Ø\WÛ]]][Û‰È	ØYZ[—Ø\›Ý˜[	ÂˆÛÛ[X[™\ÚÎˆÝš[™ÂˆOˆH™]ÈX\
+
+BˆËÈš]š[YÙY\›Ý˜[š[™[™È
+È]Y]ÙÙÙ\‚ˆš]˜]Hš]š[YÙY^XÝ][Ûœ›ÚÙ\ˆH™]Èš]š[YÙY^XÝ][Ûœ›ÚÙ\ŠÙ\ÜÚ[Û“ÙÊBˆËÈÙ\ÜÚ[Û‹[ØØ[YZ[ˆ™[Y[X™\ˆÚ[™ÝÜÈ
+^XÝÛÛ[X[™\Úš[™[™ÊBˆš]˜]HYZ[”™[Y[X™\\›Ý˜[ÎˆX\Ýš[™ËÂˆÜ™X]Y]ˆ[X™\‚ˆ^\™\Ð]ˆ[X™\‚ˆÛÝ\˜ÙT™\]Y\ÝYˆÝš[™ÂˆOˆH™]ÈX\
+
+BˆËÈ›ÛZ\ÙHY\XØ][Ûˆ›Üˆ^žK[ØY[™ÈY\ÜØYÙ\È
+™]™[È˜XÙHÛÛ™][ÛœÊBˆš]˜]HY\ÜØYÙSØY[™Ô›ÛZ\Ù\ÎˆX\Ýš[™Ë›ÛZ\ÙO›ÚYˆH™]ÈX\
+
+BˆÊŠ‚ˆ
+ˆ˜XÚÈÚXÚÙ\ÜÚ[ÛˆH\Ù\ˆ\ÈXÝ]™[HšY]Ú[™È
+\ˆÛÜšÜÜXÙJK‚ˆ
+ˆX\ÙˆÛÜšÜÜXÙRYOˆÙ\ÜÚ[Û’Yˆ\ÙYÈ]\›Z[™HYˆHÙ\ÜÚ[ÛˆÚÝ[™Bˆ
+ˆX\šÙY\È[œ™XYÚ[ˆ\ÜÚ\Ý[ÛÛ\]\ÈHYˆ\Ù\ˆ\ÈšY]Ú[™È]Û‰ÝX\šÈ[œ™XY‚ˆ
+‹Âˆš]˜]HXÝ]™UšY]Ú[™ÔÙ\ÜÚ[ÛŽˆX\Ýš[™ËÝš[™ÏˆH™]ÈX\
+
+BˆÊŠˆÛÛÜ™[˜]\ÈÝ\\[š]X[^˜][ÛˆØZ]\œÈœ›ÛHTÈ[™\œËˆ
+‹Âˆš]˜]H[š]Ø]HH™]È[š]Ø]J
+BˆËÈÊJH[™^ˆ\ÚÒY8¡¤ˆÙ\ÜÚ[Û’Y›Üˆ˜XÚÙÜ›Ý[™\ÚÈÝ]]ÛÚÝ\
+]›ÚYÈÊŠHÙ\ÜÚ[ÛˆØØ[ŠBˆš]˜]H\ÚÓÝ]][™^ˆX\Ýš[™ËÝš[™ÏˆH™]ÈX\
+
+BˆÊŠ‚ˆ
+ˆ\‹\Ù\ÜÚ[Ûˆ[‹Y›YÚ[[YK\™Yœ™\Ú›ÛZ\ÙKˆ[œÝ\™\È\]T[[YPÛÛ™šYØˆ
+ˆ
+ÜˆH\ÜÜÙJHØ[››ÝÝ™\›\Ú][›Ý\ˆ™Yœ™\ÚÔˆÚ]HÙ[™\]ˆ
+ˆÙ]ÜÜ™X]PYÙ[ÛˆHØ[YHÙ\ÜÚ[Û‹ˆÚ]Ý]\ÈÙ\šX[^˜][Û‹Bˆ
+ˆÐU‘X]šYÙÙ\™Y™Yœ™\Ú[™HÙ[™Y\ÜØYÙX]šYÙÙ\™Y™Yœ™\ÚØ[ˆ›Ýˆ
+ˆÙYHYÙ[š\Ô›ØÙ\ÜÚ[™Ê
+OY˜[ÙX›Ýš\™H\]T[[YPÛÛ™šYØ[™Bˆ
+ˆÝXœ›ØÙ\ÜÈØ[ˆ˜XÙHH™\Ý[[™ÈÚ]YØZ[œÝHÝ[\[™[™È\]K‚ˆ
+‹Âˆš]˜]HYÙ[™Yœ™\ÚØÚÜÎˆX\Ýš[™Ë›ÛZ\ÙO›ÚYˆH™]ÈX\
+
+BˆÊŠˆ[Û›ÝÛšXÈÛØÚÈÈ[œÝ\™HÝšXÝH[˜Ü™X\Ú[™ÈY\ÜØYÙH[Y\Ý[\È
+‹Âˆš]˜]H\Ý[Y\Ý[\H‚ˆÊŠ‚ˆ
+ˆÜ[Û˜[š[™\ˆ[œÝ[YžHHY\ÜØYÚ[™ËYØ]]Ø^H›ÛÝÝ˜\ˆÚ[ˆÙ]ˆ
+ˆ^XÝ]T›Û\]]ÛX][Û˜Ø[È]Y\ˆÜ™X][™ÈHÙ\ÜÚ[ÛˆÚÜÙHX]Ú\‚ˆ
+ˆXÛ\™Y[YÜ˜[UÜXØÛÈH™]ÈÙ\ÜÚ[Ûˆ\È›Ý[™ÈH[YÜ˜[H›Ü[Bˆ
+ˆÜXÈ[ˆHÛÜšÜÜXÙIÜÈZ\™YÝ\\™Ü›Ý\ˆ™\ÝYY™›Ü8 %˜Z[\™\È]\Ýˆ
+ˆ›Ý›ØÚÈHÙ\ÜÚ[Û‹‚ˆ
+‹Âˆš]˜]H]]ÛX][Ûš[™\Îˆ
+[œ]ˆÂˆÛÜšÜÜXÙRYˆÝš[™ÂˆÙ\ÜÚ[Û’YˆÝš[™ÂˆÜXÓ˜[YNˆÝš[™ÂˆJHOˆ›ÛZ\ÙO›ÚY‚‚ˆÊŠ‚ˆ
+ˆÙ[˜[^™YÙ]\ˆ›ÜˆÙ\ÜÚ[Ûˆ›ØÙ\ÜÚ[™ÈÝ]K‚ˆ
+ˆ]]ÛX]XØ[H›ÝYšY\ÈHÝÙ\ˆX[˜YÙ\ˆÛˆ˜[œÚ][ÛœÈ
+Yx¡¤™˜[ÙK˜[Ùx¡¤YJBˆ
+ˆÛÈØ[\œÈÛ‰Ý™YYÈ™[Y[X™\ˆÈØ[Û”Ù\ÜÚ[Û”Ý\YÛÛ”Ù\ÜÚ[Û”ÝÜY‚ˆ
+‹Âˆš]˜]HÙ]›ØÙ\ÜÚ[™ÊX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹›ØÙ\ÜÚ[™Îˆ›ÛÛX[ŠNˆ›ÚYÂˆÛÛœÝØ\ÈHX[˜YÙYš\Ô›ØÙ\ÜÚ[™ÂˆX[˜YÙYš\Ô›ØÙ\ÜÚ[™ÈH›ØÙ\ÜÚ[™ÂˆYˆ
+]Ø\È	‰ˆ›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û”[[YRÛÚÜË›Û”Ù\ÜÚ[Û”Ý\Y
+
+BˆH[ÙHYˆ
+Ø\È	‰ˆ\›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û”[[YRÛÚÜË›Û”Ù\ÜÚ[Û”ÝÜY
+
+BˆBˆB‚ˆÊŠˆØZ][[[š]X[^™J
+H\ÈÛÛ\]Y
+Ù\ÜÚ[ÛœÈØYYœ›ÛH\ÚÊK‚ˆ
+ˆ™\ÛÛ™\È[[YYX][HYˆ[™XYH[š]X[^™Yˆ
+‹ÂˆØZ]›Ü’[š]
+
+Nˆ›ÛZ\ÙO›ÚYˆÂˆ™]\›ˆ\Ëš[š]Ø]KØZ]
+
+BˆB‚ˆÊŠ‚ˆ
+ˆ[œÝ[H]]ÛX][Û¸¡¤ÜXÈš[™\‹ˆÚ\™YžHHY\ÜØYÚ[™ËYØ]]Ø^Bˆ
+ˆ›ÛÝÝ˜\ÛÈÙ\ÜÚ[Û“X[˜YÙ\ˆÙ\Û‰Ý™YYÈ[\ÜHY\ÜØYÚ[™Âˆ
+ˆXÚØYÙH
+]›ÚYÈHXÚØYÙK[]™[Ú\˜Ý[\ˆ\[™[˜ÞJK‚ˆ
+‹ÂˆÙ]]]ÛX][Ûš[™\Šˆ›Žˆ
+[œ]ˆÈÛÜšÜÜXÙRYˆÝš[™ÎÈÙ\ÜÚ[Û’YˆÝš[™ÎÈÜXÓ˜[YNˆÝš[™ÈJHOˆ›ÛZ\ÙO›ÚY‹ˆ
+Nˆ›ÚYÂˆ\Ë˜]]ÛX][Ûš[™\ˆH›‚ˆB‚ˆš]˜]Hœ›ÝÜÙ\”[™SX[˜YÙ\ŽˆPœ›ÝÜÙ\”[™SX[˜YÙ\ˆ[H[ˆš]˜]HœÔÙ\™\ŽˆœÔÙ\™\ˆ[H[ˆš]˜]H™[[ÝPœ\ÈH™]ÈX\Ýš[™Ë™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\Š
+BˆÊŠˆ[›™Y\ÚÝÜÛY[\ˆÙ\ÜÚ[Ûˆ›ÜˆÛY[˜œ›ÝÜÙ\Žš[›ÚÙX›Ý][™Ëˆ
+‹Âˆš]˜]Hœ›ÝÜÙ\’ÜÝžPØ[˜\ÈH™]ÈX\Ýš[™ËÝš[™ÏŠ
+Bˆš]˜]H]™[Ú[šÎˆ]™[Ú[šÈ[H[‚ˆÙ]]™[Ú[šÊÚ[šÎˆ]™[Ú[šÊNˆ›ÚYÂˆ\Ë™]™[Ú[šÈHÚ[šÂˆB‚ˆÙ]œ›ÝÜÙ\”[™SX[˜YÙ\ŠœNˆPœ›ÝÜÙ\”[™SX[˜YÙ\ŠNˆ›ÚYÂˆ\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\ˆHœBˆœKœÙ]Ù\ÜÚ[Û”]™\ÛÛ™\Š
+Ù\ÜÚ[Û’Y
+HOˆ\Ë™Ù]Ù\ÜÚ[Û”]
+Ù\ÜÚ[Û’Y
+JBˆB‚ˆÊŠ‚ˆ
+ˆ›ÝšYHHÔÈ”ÈÙ\™\ˆÛÈ™[[ÝHÛY[ÈØ[ˆÜÝœ›ÝÜÙ\ˆÛÛË‚ˆ
+‚ˆ
+ˆÚ[ˆØ[YHÓHXÝ]˜]\ÈH™[[ÝKXœšYÙHÛÙH]ˆ\‹\Ù\ÜÚ[Û‚ˆ
+ˆ™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\˜[œÝ[˜Ù\È\™HÜ™X]Y^š[HžBˆ
+ˆÐ[šÈÙ]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŸK[™Hœ›ÝÜÙ\‹ZÜÝÛY[\Âˆ
+ˆ™\ÛÛ™YšXHÐ[šÈÙ]œ›ÝÜÙ\’ÜÝÛY[HÚ]Ø\Xš[]KX]Ø\™H˜[˜XÚË‚ˆ
+‚ˆ
+ˆØØ[[XÝ›ÛˆØ[\œÈÈ›Ý™YYÈØ[\È8 %^H[™XYBˆ
+ˆØ[Ù]œ›ÝÜÙ\”[™SX[˜YÙ\ŠœJXÚ]H[‹\›ØÙ\ÜÈ”KÚXÚZÙ\Âˆ
+ˆ™XÙY[˜ÙHÝ™\ˆH™[[ÝHœšYÙH[ˆÐ[šÈÙ]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŸK‚ˆ
+‹ÂˆÙ]œÔÙ\™\ŠÙ\™\ŽˆœÔÙ\™\ŠNˆ›ÚYÂˆ\ËœœÔÙ\™\ˆHÙ\™\‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÖØœ›ÝÜÙ\‹\[™WHÙ]œÔÙ\™\ˆØ[Y8 %™[[ÝHœ›ÝÜÙ\ˆœšYÙH\È›ÝÈ]˜Z[X›IÊBˆB‚ˆÊŠ‚ˆ
+ˆ™\ÛÛ™HHÐ[šÈPœ›ÝÜÙ\”[™SX[˜YÙ\ŸH]ÝÛœÈH\Ù\‰ÜÈØØ[œ›ÝÜÙ\‚ˆ
+ˆ›ÜˆHÚ]™[ˆÙ\ÜÚ[Û‹ˆ™]\›œÎ‚ˆ
+‚ˆ
+ˆKˆHØØ[KZ[š™XÝYœ›ÝÜÙ\”[™SX[˜YÙ\˜Ú[ˆ™\Ù[
+[XÝ›ÛˆÛY[ÛË[ØØ]Yˆ
+ˆÚ]HYÙ[
+K™YØ\™\ÜÈÙˆÙ\ÜÚ[Û‹‚ˆ
+ˆ‹ˆHÙ\ÜÚ[Û‹X›Ý[™Ð[šÈ™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\ŸHÚ[ˆœÔÙ\™\˜\ÈÙ]‚ˆ
+ˆØXÚY[ˆ™[[ÝPœ\ØÛÈ™\X]ÛÚÝ\ÈÛ‰Ý[ØØ]K‚ˆ
+ˆËˆ[Ú[ˆ\™IÜÈ™Z]\ˆHØØ[”H›Üˆ[ˆ”ÈÙ\™\‹‚ˆ
+‹ÂˆÙ]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÚYˆÝš[™ÊNˆPœ›ÝÜÙ\”[™SX[˜YÙ\ˆ[ÂˆYˆ
+\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\ŠH™]\›ˆ\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\‚ˆYˆ
+]\ËœœÔÙ\™\ŠH™]\›ˆ[‚ˆÛÛœÝØXÚYH\Ëœ™[[ÝPœ\Ë™Ù]
+ÚY
+BˆYˆ
+ØXÚY
+H™]\›ˆØXÚY‚ˆÛÛœÝÙ\ÜÚ[ÛˆH\ËœÙ\ÜÚ[ÛœË™Ù]
+ÚY
+BˆYˆ
+\Ù\ÜÚ[ÛŠH™]\›ˆ[‚ˆÛÛœÝœšYÙHH™]È™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\ŠÂˆÙ\ÜÚ[Û’YˆÚYˆÛÜšÜÜXÙRYˆÙ\ÜÚ[Û‹ÛÜšÜÜXÙKšYˆœÔÙ\™\Žˆ\ËœœÔÙ\™\‹ˆÙ]ÜÝÛY[ˆ
+
+HOˆ\Ë™Ù]œ›ÝÜÙ\’ÜÝÛY[
+ÚY
+KˆJBˆ\Ëœ™[[ÝPœ\ËœÙ]
+ÚYœšYÙJBˆ™]\›ˆœšYÙBˆB‚ˆÊŠ‚ˆ
+ˆ™XÛÜ™ÚXÚ\ÚÝÜÛY[ÚÝ[ÜÝ\ÈÙ\ÜÚ[Û‰ÜÈœ›ÝÜÙ\‹ˆØ[Yˆ
+ˆÚ]Ý˜ÛY[Yœ›ÛHHÙ\ÜÚ[ÛœËœÙ[™Y\ÜØYÙX”È[™\ˆÛÈBˆ
+ˆYÙ[	ÜÈœ›ÝÜÙ\—ÊˆÛÛÈ›Ý]H˜XÚÈÈHÛY[]ÜÝYHY\ÜØYÙK‚ˆ
+‚ˆ
+ˆ›Ë[ÜÚ[ˆØ[\ÛY[Y\È[™Yš[™Y8 %™\Ù\™\ÈH^\Ý[™È[‚ˆ
+ˆ
+]È™XÛÛ›™XÝYÛY[ÈÛÛ[YHÛ[™ÈHÜÝ›ÛJK‚ˆ
+‹Âˆš]˜]HÙ]\ÝY\ÜØYÙPÛY[Y
+ÚYˆÝš[™ËØ[\ÛY[YˆÝš[™È[™Yš[™Y
+Nˆ›ÚYÂˆYˆ
+XØ[\ÛY[Y
+H™]\›‚ˆ\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\ËœÙ]
+ÚYØ[\ÛY[Y
+BˆB‚ˆÊŠ‚ˆ
+ˆØ[YžHH˜[œÜÜ›ÛÝÝ˜\ÛˆÛÛY[\ØÛÛ›™XÝYˆ›ÜÈ[žBˆ
+ˆ[œÈ[žHÛY[YÛÈH™^œ›ÝÜÙ\ˆÛÛØ[™K\™\ÛÛ™\ÈšXBˆ
+ˆÐ[šÈš[™ÛY[ÕÚ]Ø\Xš[]_H[œÝXYÙˆžZ[™ÈÈÚ\ÈHXYÛY[‚ˆ
+‹ÂˆÛÛY[\ØÛÛ›™XÝY
+ÛY[YˆÝš[™ÊNˆ›ÚYÂˆ›Üˆ
+ÛÛœÝÜÚY[›™YHÙˆ\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\ÊHÂˆYˆ
+[›™YOOHÛY[Y
+H\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\Ë™[]JÚY
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆ[›™YÛY[š\œÝÚ]˜[˜XÚÈÈ[žHÛÛ›™XÝYÛY[›ÜˆHÛÜšÜÜXÙBˆ
+ˆ]Y™\\Ù\ÈÛY[˜œ›ÝÜÙ\Žš[›ÚÙXˆH˜[˜XÚÈ[™\È™XÛÛ›™XÝ]Ú]Bˆ
+ˆ™]ËXÛY[YÛÈHYÙ[\Û‰ÝÝXÚÈØZ][™È›Üˆ[›Ý\ˆ\Ù\ˆY\ÜØYÙK‚ˆ
+‹Âˆš]˜]HÙ]œ›ÝÜÙ\’ÜÝÛY[
+ÚYˆÝš[™ÊNˆÝš[™È[ÂˆYˆ
+]\ËœœÔÙ\™\ŠH™]\›ˆ[ˆÛÛœÝ[›™YH\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\Ë™Ù]
+ÚY
+BˆYˆ
+[›™Y	‰ˆ\ËœœÔÙ\™\‹š\ÐÛY[Ø\Xš[]J[›™YÓQS•Ð”“ÕÔÑT—ÒS•“ÒÑJJHÂˆ™]\›ˆ[›™YˆBˆÛÛœÝÙ\ÜÚ[ÛˆH\ËœÙ\ÜÚ[ÛœË™Ù]
+ÚY
+BˆYˆ
+\Ù\ÜÚ[ÛŠH™]\›ˆ[ˆÛÛœÝØ[™Y]\ÈH\ËœœÔÙ\™\‹™š[™ÛY[ÕÚ]Ø\Xš[]JˆÓQS•Ð”“ÕÔÑT—ÒS•“ÒÑKˆÈÛÜšÜÜXÙRYˆÙ\ÜÚ[Û‹ÛÜšÜÜXÙKšYKˆ
+BˆÛÛœÝ˜[˜XÚÈHØ[™Y]\ÖÌBˆYˆ
+Y˜[˜XÚÊH™]\›ˆ[ˆ\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\ËœÙ]
+ÚY˜[˜XÚÊBˆ™]\›ˆ˜[˜XÚÂˆB‚ˆÊŠˆ™]\›œÈHÝšXÝH[˜Ü™X\Ú[™È[Y\Ý[\
+\ÊKˆÚ[ˆ]K››ÝÊ
+HÛÛY\ÈÚ]ˆ
+ˆH™]š[Ý\È˜[YK[˜Ü™[Y[ÈžHHÈ™\Ù\™H]™[Ü™\š[™Ëˆ
+‹Âˆš]˜]H[Û›ÝÛšXÊ
+Nˆ[X™\ˆÂˆÛÛœÝ›ÝÈH]K››ÝÊ
+Bˆ\Ë›\Ý[Y\Ý[\H›ÝÈˆ\Ë›\Ý[Y\Ý[\È›ÝÈˆ\Ë›\Ý[Y\Ý[\
+ÈBˆ™]\›ˆ\Ë›\Ý[Y\Ý[\ˆB‚ˆš]˜]HÙ]YZ[”™[Y[X™\’Ù^JÙ\ÜÚ[Û’YˆÝš[™ËÛÛ[X[™\ÚˆÝš[™ÊNˆÝš[™ÈÂˆ™]\›ˆ	ÜÙ\ÜÚ[Û’YN‰ØÛÛ[X[™\ÚXˆB‚ˆš]˜]H\ÐXÝ]™PYZ[”™[Y[X™\\›Ý˜[
+Ù\ÜÚ[Û’YˆÝš[™ËÛÛ[X[™\ÚˆÝš[™ÊNˆ›ÛÛX[ˆÂˆÛÛœÝÙ^HH\Ë™Ù]YZ[”™[Y[X™\’Ù^JÙ\ÜÚ[Û’YÛÛ[X[™\Ú
+BˆÛÛœÝ[žHH\Ë˜YZ[”™[Y[X™\\›Ý˜[Ë™Ù]
+Ù^JBˆYˆ
+Y[žJHÂˆ™]\›ˆ˜[ÙBˆB‚ˆYˆ
+]K››ÝÊ
+Hˆ[žK™^\™\Ð]
+HÂˆ\Ë˜YZ[”™[Y[X™\\›Ý˜[Ë™[]JÙ^JBˆ\Ëœš]š[YÙY^XÝ][Ûœ›ÚÙ\‹˜]Y]]™[
+	Üš]š[YÙYÜ™[Y[X™\—ÝÚ[™Ý×Ù^\™Y	ËÂˆÙ\ÜÚ[Û’YˆÛÛ[X[™\ÚˆÛÝ\˜ÙT™\]Y\ÝYˆ[žKœÛÝ\˜ÙT™\]Y\ÝYˆ^\™\Ð]ˆ[žK™^\™\Ð]ˆJBˆ™]\›ˆ˜[ÙBˆB‚ˆ™]\›ˆYBˆB‚ˆš]˜]HÝÜ™PYZ[”™[Y[X™\\›Ý˜[
+Ù\ÜÚ[Û’YˆÝš[™ËÛÛ[X[™\ÚˆÝš[™ËÛÝ\˜ÙT™\]Y\ÝYˆÝš[™Ë™[Y[X™\‘›Ü“Z[]\Îˆ[X™\ŠNˆ›ÚYÂˆÛÛœÝ›Ý[™YZ[]\ÈHX]›Z[ŠX]›X^
+X]™›ÛÜŠ™[Y[X™\‘›Ü“Z[]\ÊKJKPVÐQRS—Ô‘SQSP‘T—ÓRS•UTÊBˆÛÛœÝ›ÝÈH]K››ÝÊ
+BˆÛÛœÝ^\™\Ð]H›ÝÈ
+È›Ý[™YZ[]\È
+ˆŒ
+ˆL‚ˆ\Ë˜YZ[”™[Y[X™\\›Ý˜[ËœÙ]
+\Ë™Ù]YZ[”™[Y[X™\’Ù^JÙ\ÜÚ[Û’YÛÛ[X[™\Ú
+KÂˆÜ™X]Y]ˆ›ÝËˆ^\™\Ð]ˆÛÝ\˜ÙT™\]Y\ÝYˆJB‚ˆ\Ëœš]š[YÙY^XÝ][Ûœ›ÚÙ\‹˜]Y]]™[
+	Üš]š[YÙYÜ™[Y[X™\—ÝÚ[™Ý×ÜÝÜ™Y	ËÂˆÙ\ÜÚ[Û’YˆÛÛ[X[™\ÚˆÛÝ\˜ÙT™\]Y\ÝYˆ™[Y[X™\‘›Ü“Z[]\Îˆ›Ý[™YZ[]\ËˆÜ™X]Y]ˆ›ÝËˆ^\™\Ð]ˆJBˆB‚ˆš]˜]HÛX\YZ[”™[Y[X™\\›Ý˜[Ñ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’YˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝ™Yš^H	ÜÙ\ÜÚ[Û’YN˜ˆ›Üˆ
+ÛÛœÝÙ^HÙˆ\Ë˜YZ[”™[Y[X™\\›Ý˜[ËšÙ^\Ê
+JHÂˆYˆ
+Ù^KœÝ\ÕÚ]
+™Yš^
+JHÂˆ\Ë˜YZ[”™[Y[X™\\›Ý˜[Ë™[]JÙ^JBˆBˆBˆB‚ˆš]˜]HÛX\”[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝÑ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’YˆÝš[™ÊNˆ›ÚYÂˆ›Üˆ
+ÛÛœÝÜ™\]Y\ÝYY]Y]WHÙˆ\Ëœ[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝË™[šY\Ê
+JHÂˆYˆ
+Y]Y]KœÙ\ÜÚ[Û’YOOHÙ\ÜÚ[Û’Y
+HÂˆ\Ëœ[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝË™[]J™\]Y\ÝY
+BˆBˆBˆB‚ˆÊŠ‚ˆ
+ˆ\H^\›˜[Ù\ÜÚ[ÛˆXY\ˆY]Y]HÈ[‹[Y[[ÜžHÝ]H[™[Z]RH]™[Ë‚ˆ
+ˆ™]\›œÈYHYˆ[žH[‹[Y[[ÜžHY]Y]HšY[Ú[™ÙY‚ˆ
+‹Âˆš]˜]H\Q^\›˜[Ù\ÜÚ[Û“Y]Y]JX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹XY\ŽˆÙ\ÜÚ[Û’XY\ŠNˆ›ÛÛX[ˆÂˆÛÛœÝÙ\ÜÚ[Û’YHX[˜YÙYšYˆ]Ú[™ÙYH˜[ÙB‚ˆËÈX™[ÂˆÛÛœÝÛX™[ÈH”ÓÓ‹œÝš[™ÚYžJX[˜YÙY›X™[ÈÏÈ×JBˆÛÛœÝ™]ÓX™[ÈH”ÓÓ‹œÝš[™ÚYžJXY\‹›X™[ÈÏÈ×JBˆYˆ
+ÛX™[ÈOOH™]ÓX™[ÊHÂˆX[˜YÙY›X™[ÈHXY\‹›X™[Âˆ\ËœÙ[™]™[
+È\Nˆ	ÛX™[×ØÚ[™ÙY	ËÙ\ÜÚ[Û’YX™[ÎˆXY\‹›X™[ÈÏÈ×HKX[˜YÙYÛÜšÜÜXÙKšY
+BˆÚ[™ÙYHYBˆB‚ˆËÈ›YÙÙYˆYˆ
+
+X[˜YÙYš\Ñ›YÙÙYÏÈ˜[ÙJHOOH
+XY\‹š\Ñ›YÙÙYÏÈ˜[ÙJJHÂˆX[˜YÙYš\Ñ›YÙÙYHXY\‹š\Ñ›YÙÙYÏÈ˜[ÙBˆ\ËœÙ[™]™[
+ˆÈ\NˆXY\‹š\Ñ›YÙÙYÈ	ÜÙ\ÜÚ[Û—Ù›YÙÙY	Èˆ	ÜÙ\ÜÚ[Û—Ý[™›YÙÙY	ËÙ\ÜÚ[Û’YKˆX[˜YÙYÛÜšÜÜXÙKšYˆ
+BˆÚ[™ÙYHYBˆB‚ˆËÈÙ\ÜÚ[ÛˆÝ]\ÂˆYˆ
+X[˜YÙYœÙ\ÜÚ[Û”Ý]\ÈOOHXY\‹œÙ\ÜÚ[Û”Ý]\ÊHÂˆX[˜YÙYœÙ\ÜÚ[Û”Ý]\ÈHXY\‹œÙ\ÜÚ[Û”Ý]\Âˆ\ËœÙ[™]™[
+È\Nˆ	ÜÙ\ÜÚ[Û—ÜÝ]\×ØÚ[™ÙY	ËÙ\ÜÚ[Û’YÙ\ÜÚ[Û”Ý]\ÎˆXY\‹œÙ\ÜÚ[Û”Ý]\ÈÏÈ	ÉÈKX[˜YÙYÛÜšÜÜXÙKšY
+BˆÚ[™ÙYHYBˆB‚ˆËÈ˜[YBˆYˆ
+X[˜YÙY›˜[YHOOHXY\‹›˜[YJHÂˆX[˜YÙY›˜[YHHXY\‹›˜[YBˆ\ËœÙ[™]™[
+È\Nˆ	Û˜[YWØÚ[™ÙY	ËÙ\ÜÚ[Û’Y˜[YNˆXY\‹›˜[YHKX[˜YÙYÛÜšÜÜXÙKšY
+BˆÚ[™ÙYHYBˆB‚ˆYˆ
+Ú[™ÙY
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê^\›˜[Y]Y]HÚ[™ÙH]XÝY›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+B‚ˆËÈ™]™[Ý[H[™[™ÈÜš]\Èœ›ÛH™]™\[™È^\›˜[K]\]YY]Y]K‚ˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK˜Ø[˜Ù[
+Ù\ÜÚ[Û’Y
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆB‚ˆ™]\›ˆÚ[™ÙYˆB‚ˆÊŠ‚ˆ
+ˆÙ]\ÛÛ™šYÕØ]Ú\ˆ›ÜˆHÛÜšÜÜXÙHÈœ›ØYØ\Ý]™H\]\Âˆ
+ˆ
+ÛÝ\˜Ù\ÈYYÜ™[[Ý™YÝZYK›YÚ[™Ù\Ë]ËŠBˆ
+ˆØ[YXYÙ\›H]›ÛÝ›Üˆ[ÛÜšÜÜXÙ\È
+]]ÛX][ÛœËÜØÚY[\ŠH[™ˆ
+ˆÛˆÛY[ÛÛ›™XÝ
+ÑUÕÓÔ’ÔÔPÑHÈÕÒUÒÕÓÔ’ÔÔPÑJK‚ˆ
+ˆY[\Ý[8 %™]\›œÈ[[YYX][HYˆ[™XYHØ]Ú[™Ë‚ˆ
+ˆÛÜšÜÜXÙRY]\Ý™HHÛØ˜[ÛÛ™šYÈQ
+Ú]H™[™\™\ˆÛ›ÝÜÊK‚ˆ
+‹ÂˆÙ]\ÛÛ™šYÕØ]Ú\ŠÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÚYÂˆËÈÚXÚÈYˆ[™XYHØ]Ú[™È\ÈÛÜšÜÜXÙBˆYˆ
+\Ë˜ÛÛ™šYÕØ]Ú\œËš\ÊÛÜšÜÜXÙT›ÛÝ]
+JHÂˆ™]\›ˆËÈ[™XYHØ]Ú[™È\ÈÛÜšÜÜXÙBˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ][™È\ÛÛ™šYÕØ]Ú\ˆ›ÜˆÛÜšÜÜXÙNˆ	ÝÛÜšÜÜXÙRYH
+	ÝÛÜšÜÜXÙT›ÛÝ]JX
+B‚ˆÛÛœÝØ[˜XÚÜÎˆÛÛ™šYÕØ]Ú\Ø[˜XÚÜÈHÂˆÛ”ÛÝ\˜Ù\Ó\ÝÚ[™ÙNˆ\Þ[˜È
+ÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×JHOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÝ\˜Ù\È\ÝÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙT›ÛÝ]H
+	ÜÛÝ\˜Ù\Ë›[™ÝHÛÝ\˜Ù\ÊX
+Bˆ\Ë˜œ›ØYØ\ÝÛÝ\˜Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRYÛÝ\˜Ù\ÊBˆ]ØZ]\Ëœ™[ØYÛÝ\˜Ù\Ñ›Ü•ÛÜšÜÜXÙJÛÜšÜÜXÙT›ÛÝ]
+BˆKˆÛ”ÛÝ\˜ÙPÚ[™ÙNˆ\Þ[˜È
+ÛYÎˆÝš[™ËÛÝ\˜ÙNˆØYYÛÝ\˜ÙH[
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÝ\˜ÙH	ÉÜÛYßIÈÚ[™ÙY˜ÛÝ\˜ÙHÈ	Ý\]Y	Èˆ	Ù[]Y	ÊBˆÛÛœÝÛÝ\˜Ù\ÈHØYÛÜšÜÜXÙTÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+Bˆ\Ë˜œ›ØYØ\ÝÛÝ\˜Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRYÛÝ\˜Ù\ÊBˆ]ØZ]\Ëœ™[ØYÛÝ\˜Ù\Ñ›Ü•ÛÜšÜÜXÙJÛÜšÜÜXÙT›ÛÝ]
+BˆKˆÛ”ÛÝ\˜ÙQÝZYPÚ[™ÙNˆ
+ÛÝ\˜ÙTÛYÎˆÝš[™ÊHOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÝ\˜ÙHÝZYHÚ[™ÙYˆ	ÜÛÝ\˜ÙTÛYßX
+BˆËÈœ›ØYØ\ÝH\]YÛÝ\˜Ù\È\ÝÛÈÚYX˜\ˆXÚÜÈ\ÝZYHÚ[™Ù\ÂˆËÈ›ÝNˆÝZYHÚ[™Ù\ÈÛ‰Ý™\]Z\™HÙ\ÜÚ[ÛˆÛÝ\˜ÙH™[ØY
+›ÈÙ\™\ˆÚ[™Ù\ÊBˆÛÛœÝÛÝ\˜Ù\ÈHØYÛÜšÜÜXÙTÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+Bˆ\Ë˜œ›ØYØ\ÝÛÝ\˜Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRYÛÝ\˜Ù\ÊBˆKˆÛ”Ý]\ÐÛÛ™šYÐÚ[™ÙNˆ
+
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ]\ÈÛÛ™šYÈÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë˜œ›ØYØ\ÝÝ]\Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRY
+BˆKˆÛ”Ý]\ÒXÛÛÚ[™ÙNˆ
+ÝÛÜšÜÜXÙRYˆÝš[™ËXÛÛ‘š[[˜[YNˆÝš[™ÊHOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ]\ÈXÛÛˆÚ[™ÙYˆ	ÚXÛÛ‘š[[˜[Y_H[ˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë˜œ›ØYØ\ÝÝ]\Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRY
+BˆKˆÛ“X™[ÛÛ™šYÐÚ[™ÙNˆ
+
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊX™[ÛÛ™šYÈÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë˜œ›ØYØ\ÝX™[ÐÚ[™ÙY
+ÛÜšÜÜXÙRY
+BˆËÈ[Z]X™[ÛÛ™šYÐÚ[™ÙH]™[šXH]]ÛX][Û”Þ\Ý[BˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[K™[Z]X™[ÛÛ™šYÐÚ[™ÙJ
+K˜Ø]Ú
+
+\œ›ÜŠHOˆÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠÐ]]ÛX][Ûœ×H˜Z[YÈ[Z]X™[ÛÛ™šYÐÚ[™ÙN˜\œ›ÜŠBˆJBˆBˆKˆÛ]]ÛX][ÛœÐÛÛ™šYÐÚ[™ÙNˆ
+
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›Ê]]ÛX][ÛœÈÛÛ™šYÈÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙRYX
+BˆËÈ™[ØY]]ÛX][ÛœÈÛÛ™šYÈšXH]]ÛX][Û”Þ\Ý[BˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆÛÛœÝ™\Ý[H]]ÛX][Û”Þ\Ý[Kœ™[ØYÛÛ™šYÊ
+BˆYˆ
+™\Ý[™\œ›ÜœË›[™ÝOOH
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™[ØYY	Ü™\Ý[˜]]ÛX][ÛÛÝ[H]]ÛX][ÛœÈ›ÜˆÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈ™[ØY]]ÛX][ÛœÈ›ÜˆÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYN˜™\Ý[™\œ›ÜœÊBˆBˆBˆËÈ›ÝYžH™[™\™\ˆÈ™K\™XY]]ÛX][ÛœËšœÛÛ‚ˆ\Ë˜œ›ØYØ\Ý]]ÛX][ÛœÐÚ[™ÙY
+ÛÜšÜÜXÙRY
+BˆKˆÛ“PÛÛ›™XÝ[ÛœÐÚ[™ÙNˆ
+
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊHÛÛ›™XÝ[ÛœÈÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë˜œ›ØYØ\ÝPÛÛ›™XÝ[ÛœÐÚ[™ÙY
+
+BˆKˆÛ\[YPÚ[™ÙNˆ
+[YJHOˆÂˆÙ\ÜÚ[Û“ÙËš[™›Ê\[YHÚ[™ÙY
+Bˆ\Ë˜œ›ØYØ\Ý\[YPÚ[™ÙY
+[YJBˆKˆÛ‘Y˜][\›Z\ÜÚ[ÛœÐÚ[™ÙNˆ
+
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÑY˜][\›Z\ÜÚ[ÛœÈÚ[™ÙY	ÊBˆ\Ë˜œ›ØYØ\ÝY˜][\›Z\ÜÚ[ÛœÐÚ[™ÙY
+
+BˆKˆÛ”ÚÚ[Ó\ÝÚ[™ÙNˆ\Þ[˜È
+ÚÚ[ÊHOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚÚ[È\ÝÚ[™ÙY[ˆ	ÝÛÜšÜÜXÙT›ÛÝ]H
+	ÜÚÚ[Ë›[™ÝHÚÚ[ÊX
+Bˆ\Ë˜œ›ØYØ\ÝÚÚ[ÐÚ[™ÙY
+ÛÜšÜÜXÙRYÚÚ[ÊBˆKˆÛ”ÚÚ[Ú[™ÙNˆ\Þ[˜È
+ÛYËÚÚ[
+HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚÚ[	ÉÜÛYßIÈÚ[™ÙY˜ÚÚ[È	Ý\]Y	Èˆ	Ù[]Y	ÊBˆËÈœ›ØYØ\Ý\]Y\ÝÈRBˆÛÛœÝÈØY[ÚÚ[ÈHH]ØZ][\Ü
+	ÐØ]K\ÚÜÚ\™YÜÚÚ[ÉÊBˆÛÛœÝÚÚ[ÈHØY[ÚÚ[ÊÛÜšÜÜXÙT›ÛÝ]
+Bˆ\Ë˜œ›ØYØ\ÝÚÚ[ÐÚ[™ÙY
+ÛÜšÜÜXÙRYÚÚ[ÊBˆK‚ˆËÈÙ\ÜÚ[ÛˆY]Y]HÚ[™Ù\È
+Y]ÈÈÙ\ÜÚ[Û‹šœÛÛ›XY\œÊK‚ˆËÈ]XÝÈÚ[™Ù\Èœ›ÛH›Ý[\›˜[Üš]\È
+Ù[ŠH[™^\›˜[ÛÝ\˜Ù\ÂˆËÈ
+Ý\ˆ[œÝ[˜Ù\ËØÜš\ËX[X[Y]ÊK‚ˆÛ”Ù\ÜÚ[Û“Y]Y]PÚ[™ÙNˆ
+Ù\ÜÚ[Û’YXY\ŠHOˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+H™]\›‚‚ˆËÈÚXÚÈYˆ\È\ÈÝ\ˆÝÛˆÜš]HXÚÚ[™È˜XÚÈšXHœËØ]Ú
+
+K‚ˆËÈÙ[‹]Üš]\ÈÛ‰Ý™YY[‹[Y[[ÜžHÞ[˜È
+[™XYH\È]JK]ˆËÈÝ[™YYÈ›ÝYžHH]]ÛX][ÛˆÞ\Ý[H›Üˆ]™[X]Ú[™Ë‚ˆÛÛœÝ[˜ÛÛZ[™ÔÚYÛ˜]\™HHÙ]XY\“Y]Y]TÚYÛ˜]\™JXY\ŠBˆÛÛœÝ\ÝÜš][”ÚYÛ˜]\™HHÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™Ù]\ÝÜš][”ÚYÛ˜]\™JÙ\ÜÚ[Û’Y
+BˆÛÛœÝ\ÔÙ[•Üš]HHHJ\ÝÜš][”ÚYÛ˜]\™H	‰ˆ[˜ÛÛZ[™ÔÚYÛ˜]\™HOOH\ÝÜš][”ÚYÛ˜]\™JB‚ˆËÈ›Üˆ^\›˜[Üš]\ÎˆÞ[˜È[‹[Y[[ÜžHÝ]H
+È[Z]RH]™[Ë‚ˆËÈÚÚ\›ÜˆÙ[‹]Üš]\ÈÈ]›ÚY™YY˜XÚÈÛÜÈ
+\ÜXÚX[HÛˆÚ[™ÝÜÂˆËÈÚ\™HœËØ]Úš\™\ÈYÙÜ™\ÜÚ]™[Nˆ[›[šÈ
+È™[˜[YHHŠÈ]™[ÊK‚ˆYˆ
+Z\ÔÙ[•Üš]JHÂˆËÈY™\ˆ^\›˜[Y]Y]H\XØ][ÛˆÚ[Ž‚ˆËÈKˆÙ\ÜÚ[Ûˆ\ÈXÝ]™[H›ØÙ\ÜÚ[™È
+YÙ[[›š[™ÊKÔ‚ˆËÈ‹ˆÙ\ÜÚ[ÛˆØ\È\ÝÜš][ˆ›ÙÜ˜[[X]XØ[H
+Ù]ÜÙ\ÜÚ[Û—ÜÝ]\ËÛX™[ÈÛÛ
+BˆËÈ8 %œËØ]Úš\™\È\š[™È]ÛZXÈÜš]H
+[›[šÊÜ™[˜[YJH[™Ø[ˆ™XYÝ[H]BˆÛÛœÝ\ÕÜš]QÝX\™HX[˜YÙY—ÛY]Y]UÜš]QÝX\™[[	‰ˆ]K››ÝÊ
+HX[˜YÙY—ÛY]Y]UÜš]QÝX\™[[ˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™È\ÕÜš]QÝX\™
+HÂˆX[˜YÙYœ[™[™Ñ^\›˜[Y]Y]HHXY\‚ˆYˆ
+\ÕÜš]QÝX\™
+HÂˆÙ\ÜÚ[Û“ÙËš[™›ÊY™\œ™Y^\›˜[Y]Y]H\]H›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH
+™XÙ[›ÙÜ˜[[X]XÈÜš]JX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊY™\œ™Y^\›˜[Y]Y]H\]H›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH
+›ØÙ\ÜÚ[™ÈXÝ]™JX
+BˆBˆH[ÙHÂˆ\Ë˜\Q^\›˜[Ù\ÜÚ[Û“Y]Y]JX[˜YÙYXY\ŠBˆBˆB‚ˆËÈ[Ø^\È›ÝYžH]]ÛX][ÛˆÞ\Ý[H8 %]Ù\È]ÈÝÛˆY™š[™È[™™YYÂˆËÈÈÙYH›ÝÙ[‹]Üš]\È[™^\›˜[Ú[™Ù\È›Üˆ]™[X]Ú[™Ë‚ˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[K\]TÙ\ÜÚ[Û“Y]Y]JÙ\ÜÚ[Û’YÂˆ\›Z\ÜÚ[Û“[ÙNˆXY\‹œ\›Z\ÜÚ[Û“[ÙKˆX™[ÎˆXY\‹›X™[Ëˆ\Ñ›YÙÙYˆXY\‹š\Ñ›YÙÙYˆÙ\ÜÚ[Û”Ý]\ÎˆXY\‹œÙ\ÜÚ[Û”Ý]\ËˆÙ\ÜÚ[Û“˜[YNˆXY\‹›˜[YKˆJK˜Ø]Ú
+
+\œ›ÜŠHOˆÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠÐ]]ÛX][Ûœ×H˜Z[YÈ\]HÙ\ÜÚ[ÛˆY]Y]N˜\œ›ÜŠBˆJBˆBˆKˆB‚ˆÛÛœÝØ]Ú\ˆH™]ÈÛÛ™šYÕØ]Ú\ŠÛÜšÜÜXÙT›ÛÝ]Ø[˜XÚÜÊBˆØ]Ú\‹œÝ\
+
+Bˆ\Ë˜ÛÛ™šYÕØ]Ú\œËœÙ]
+ÛÜšÜÜXÙT›ÛÝ]Ø]Ú\ŠB‚ˆËÈ[š]X[^™H]]ÛX][Û”Þ\Ý[H›Üˆ\ÈÛÜšÜÜXÙH
+[˜ÛY\ÈØÚY[\‹[™\œË[™]™[ÙÙÚ[™ÊBˆYˆ
+]\Ë˜]]ÛX][Û”Þ\Ý[\Ëš\ÊÛÜšÜÜXÙT›ÛÝ]
+JHÂˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH™]È]]ÛX][Û”Þ\Ý[JÂˆÛÜšÜÜXÙT›ÛÝ]ˆÛÜšÜÜXÙRYˆ[˜X›TØÚY[\ŽˆYKˆÛ”›Û\Ô™XYNˆ\Þ[˜È
+›Û\ÊHOˆÂˆËÈ^XÝ]H›Û\]]ÛX][ÛœÈžHÜ™X][™È™]ÈÙ\ÜÚ[ÛœÂˆÛÛœÝÙ]YH]ØZ]›ÛZ\ÙK˜[Ù]Y
+ˆ›Û\Ë›X\
+
+[™[™ÊHO‚ˆ\Ë™^XÝ]T›Û\]]ÛX][ÛŠÂˆÛÜšÜÜXÙRYˆÛÜšÜÜXÙT›ÛÝ]ˆ›Û\ˆ[™[™Ëœ›Û\ˆX™[Îˆ[™[™Ë›X™[Ëˆ\›Z\ÜÚ[Û“[ÙNˆ[™[™Ëœ\›Z\ÜÚ[Û“[ÙKˆY[[ÛœÎˆ[™[™Ë›Y[[ÛœËˆPÛÛ›™XÝ[ÛŽˆ[™[™Ë›PÛÛ›™XÝ[Û‹ˆ[Ù[ˆ[™[™Ë›[Ù[ˆ[šÚ[™Ó]™[ˆ[™[™Ë[šÚ[™Ó]™[ˆ]]ÛX][Û“˜[YNˆ[™[™Ë˜]]ÛX][Û“˜[YKˆ[YÜ˜[UÜXÎˆ[™[™Ë[YÜ˜[UÜXËˆJBˆ
+Bˆ
+B‚ˆËÈÜš]H[œšXÚY\ÝÜžH[šY\È
+Ú]Ù\ÜÚ[ÛˆQÈ[™›Û\Ý[[X\šY\ÊBˆ›Üˆ
+ÛÛœÝÚY™\Ý[HÙˆÙ]Y™[šY\Ê
+JHÂˆÛÛœÝ[™[™ÈH›Û\ÖÚYBˆYˆ
+\[™[™Ë›X]Ú\’Y
+HÛÛ[YB‚ˆÛÛœÝ[žHHÜ™X]T›Û\\ÝÜžQ[žJÂˆX]Ú\’Yˆ[™[™Ë›X]Ú\’YˆÚÎˆ™\Ý[œÝ]\ÈOOH	Ù[š[Y	ËˆÙ\ÜÚ[Û’Yˆ™\Ý[œÝ]\ÈOOH	Ù[š[Y	ÈÈ™\Ý[˜[YKœÙ\ÜÚ[Û’Yˆ[™Yš[™Yˆ›Û\ˆ[™[™Ëœ›Û\ˆ\œ›ÜŽˆ™\Ý[œÝ]\ÈOOH	Ü™Z™XÝY	ÈÈÝš[™Ê™\Ý[œ™X\ÛÛŠHˆ[™Yš[™YˆJB‚ˆ\[™]]ÛX][Û’\ÝÜžQ[žJÛÜšÜÜXÙT›ÛÝ][žJK˜Ø]Ú
+HOˆÙ\ÜÚ[Û“ÙËØ\›Š	ÖÐ]]ÛX][Ûœ×H˜Z[YÈÜš]H\ÝÜžN‰ËJJB‚ˆYˆ
+™\Ý[œÝ]\ÈOOH	Ü™Z™XÝY	ÊHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠÐ]]ÛX][Ûœ×H˜Z[YÈ^XÝ]H›Û\XÝ[Ûˆ	ÚY
+È_N˜™\Ý[œ™X\ÛÛŠBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÐ]]ÛX][Ûœ×HÜ™X]YÙ\ÜÚ[Ûˆ	Ü™\Ý[˜[YKœÙ\ÜÚ[Û’YHœ›ÛH›Û\XÝ[Û˜
+BˆBˆBˆKˆÛ‘\œ›ÜŽˆ
+]™[\œ›ÜŠHOˆÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ]]ÛX][Ûˆ˜Z[Y›Üˆ	Ù]™[N˜\œ›Ü‹›Y\ÜØYÙJBˆKˆJBˆ\Ë˜]]ÛX][Û”Þ\Ý[\ËœÙ]
+ÛÜšÜÜXÙT›ÛÝ]]]ÛX][Û”Þ\Ý[JBˆÙ\ÜÚ[Û“ÙËš[™›Ê[š]X[^™Y]]ÛX][Û”Þ\Ý[H›ÜˆÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYX
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆX[X[H›ÝYžHHÛÛ™šYÕØ]Ú\ˆÙˆHš[HÚ[™ÙK‚ˆ
+ˆÛÜšØ\›Ý[™›Üˆ[‰ÜÈœËØ]ÚÛˆ[^›Ý]XÝ[™È]ÛZXÈ™[˜[Y\Ë‚ˆ
+‹Âˆ›ÝYžPÛÛ™šYÑš[PÚ[™ÙJÛÜšÜÜXÙT›ÛÝ]ˆÝš[™Ë™[]]™T]ˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝØ]Ú\ˆH\Ë˜ÛÛ™šYÕØ]Ú\œË™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆØ]Ú\Ë››ÝYžQš[PÚ[™ÙJ™[]]™T]
+BˆB‚ˆÊŠ‚ˆ
+ˆ™[ØYÛÝ\˜Ù\È›Üˆ[Ù\ÜÚ[ÛœÈ[ˆHÛÜšÜÜXÙKÚÚ\[™ÈÜÙHÝ\œ™[H›ØÙ\ÜÚ[™Ë‚ˆ
+‹Âˆš]˜]H\Þ[˜È™[ØYÛÝ\˜Ù\Ñ›Ü•ÛÜšÜÜXÙJÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆ›Üˆ
+ÛÛœÝ×ËX[˜YÙYHÙˆ\ËœÙ\ÜÚ[ÛœÊHÂˆYˆ
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]OOHÛÜšÜÜXÙT›ÛÝ]
+HÂˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚÚ\[™ÈÛÝ\˜ÙH™[ØY›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYH
+›ØÙ\ÜÚ[™ÊX
+BˆÛÛ[YBˆBˆ]ØZ]\Ëœ™[ØYÙ\ÜÚ[Û”ÛÝ\˜Ù\ÊX[˜YÙY
+BˆBˆBˆB‚ˆš]˜]Hœ›ØYØ\ÝÛÝ\˜Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRYˆÝš[™ËÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×JNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœÛÝ\˜Ù\ËÒS‘ÑQÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYKÛÜšÜÜXÙRYÛÝ\˜Ù\ÊBˆB‚ˆš]˜]Hœ›ØYØ\ÝÝ]\Ù\ÐÚ[™ÙY
+ÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Êœ›ØYØ\Ý[™ÈÝ]\Ù\ÈÚ[™ÙY›Üˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœÝ]\Ù\ËÒS‘ÑQÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYKÛÜšÜÜXÙRY
+BˆB‚ˆš]˜]Hœ›ØYØ\ÝX™[ÐÚ[™ÙY
+ÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Êœ›ØYØ\Ý[™ÈX™[ÈÚ[™ÙY›Üˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SË›X™[ËÒS‘ÑQÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYKÛÜšÜÜXÙRY
+BˆB‚ˆš]˜]Hœ›ØYØ\Ý]]ÛX][ÛœÐÚ[™ÙY
+ÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Êœ›ØYØ\Ý[™È]]ÛX][ÛœÈÚ[™ÙY›Üˆ	ÝÛÜšÜÜXÙRYX
+Bˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SË˜]]ÛX][ÛœËÒS‘ÑQÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYKÛÜšÜÜXÙRY
+BˆB‚ˆš]˜]Hœ›ØYØ\Ý\[YPÚ[™ÙY
+[YNˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YØÛÛ™šYÉÊK•[YSÝ™\œšY\È[
+Nˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Êœ›ØYØ\Ý[™È\[YHÚ[™ÙY
+Bˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SË[YKTÐÒS‘ÑQÈÎˆ	Ø[	ÈK[YJBˆB‚ˆš]˜]Hœ›ØYØ\ÝPÛÛ›™XÝ[ÛœÐÚ[™ÙY
+
+Nˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ðœ›ØYØ\Ý[™ÈHÛÛ›™XÝ[ÛœÈÚ[™ÙY	ÊBˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SË›PÛÛ›™XÝ[ÛœËÒS‘ÑQÈÎˆ	Ø[	ÈJBˆB‚ˆš]˜]Hœ›ØYØ\ÝÚÚ[ÐÚ[™ÙY
+ÛÜšÜÜXÙRYˆÝš[™ËÚÚ[Îˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜÚÚ[ÉÊK“ØYYÚÚ[×JNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Êœ›ØYØ\Ý[™ÈÚÚ[ÈÚ[™ÙY
+	ÜÚÚ[Ë›[™ÝHÚÚ[ÊX
+Bˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœÚÚ[ËÒS‘ÑQÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYKÛÜšÜÜXÙRYÚÚ[ÊBˆB‚ˆš]˜]Hœ›ØYØ\ÝY˜][\›Z\ÜÚ[ÛœÐÚ[™ÙY
+
+Nˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ðœ›ØYØ\Ý[™ÈY˜][\›Z\ÜÚ[ÛœÈÚ[™ÙY	ÊBˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœ\›Z\ÜÚ[ÛœË‘QUS×ÐÒS‘ÑQÈÎˆ	Ø[	ÈK[
+BˆB‚ˆÊŠ‚ˆ
+ˆ™[ØYÛÝ\˜Ù\È›ÜˆHÙ\ÜÚ[ÛˆÚ][ˆXÝ]™HYÙ[‚ˆ
+ˆØ[YžHÛÛ™šYÕØ]Ú\ˆÚ[ˆÛÝ\˜ÙHš[\ÈÚ[™ÙHÛˆ\ÚË‚ˆ
+ˆYˆYÙ[\È[
+Ù\ÜÚ[Ûˆ\Û‰ÝÙ[[žHY\ÜØYÙ\ÊKÚÚ\Hœ™\ÚZ[\[œÈÛˆ™^Y\ÜØYÙK‚ˆ
+‹Âˆš]˜]H\Þ[˜È™[ØYÙ\ÜÚ[Û”ÛÝ\˜Ù\ÊX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛZ\ÙO›ÚYˆÂˆYˆ
+[X[˜YÙY˜YÙ[
+H™]\›ˆËÈ›ÈYÙ[H›Ý[™ÈÈ\]H
+œ™\ÚZ[Ûˆ™^Y\ÜØYÙJB‚ˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÙ\ÜÚ[Û“ÙËš[™›Ê™[ØY[™ÈÛÝ\˜Ù\È›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+B‚ˆËÈ™[ØY[ÛÝ\˜Ù\Èœ›ÛH\ÚÈ
+Ø]KXYÙ[ËYØÜÈ\È[Ø^\È]˜Z[X›H\ÈPÔÙ\™\ŠBˆÛÛœÝ[ÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆX[˜YÙY˜YÙ[œÙ][ÛÝ\˜Ù\Ê[ÛÝ\˜Ù\ÊB‚ˆËÈ™XZ[PÔ[™THÙ\™\œÈ›ÜˆÙ\ÜÚ[Û‰ÜÈ[˜X›YÛÝ\˜Ù\ÂˆÛÛœÝ[˜X›YÛYÜÈHX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×BˆÛÛœÝ[˜X›YÛÝ\˜Ù\ÈH[ÛÝ\˜Ù\Ë™š[\ŠÈO‚ˆ[˜X›YÛYÜËš[˜ÛY\ÊË˜ÛÛ™šYËœÛYÊH	‰ˆ\ÔÛÝ\˜ÙU\ØX›JÊBˆ
+BˆËÈ\ÜÈÙ\ÜÚ[Ûˆ]ÛÈ\™ÙHTH™\ÜÛœÙ\ÈØ[ˆ™HØ]™YÈÙ\ÜÚ[Ûˆ›Û\‚ˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]X[˜YÙYšY
+BˆÛÛœÝÈXÜÙ\™\œË\TÙ\™\œÈHH]ØZ]Z[Ù\™\œÑœ›ÛTÛÝ\˜Ù\Ê[˜X›YÛÝ\˜Ù\ËÙ\ÜÚ[Û”]X[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\‹X[˜YÙY˜YÙ[Ë™Ù]Ý[[X\š^™PØ[˜XÚÊ
+JBˆÛÛœÝ[[™YÛYÜÈH[˜X›YÛÝ\˜Ù\Ë›X\
+ÈOˆË˜ÛÛ™šYËœÛYÊB‚ˆËÈ\]HœšYÙK[XÜ\Ù\™\ˆÛÛ™šYËØÜ™Y[X[È›Üˆ˜XÚÙ[™È]™YY]ˆ]ØZ]\PœšYÙU\]\ÊX[˜YÙY˜YÙ[Ù\ÜÚ[Û”][˜X›YÛÝ\˜Ù\ËXÜÙ\™\œËX[˜YÙYšYÛÜšÜÜXÙT›ÛÝ]	ÜÛÝ\˜ÙH™[ØY	ËX[˜YÙYœÛÛÙ\™\Ë\›
+B‚ˆ]ØZ]X[˜YÙY˜YÙ[œÙ]ÛÝ\˜ÙTÙ\™\œÊXÜÙ\™\œË\TÙ\™\œË[[™YÛYÜÊB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÝ\˜Ù\È™[ØYY›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYNˆ	ÓØš™XÝšÙ^\ÊXÜÙ\™\œÊK›[™ÝHPÔ	ÓØš™XÝšÙ^\Ê\TÙ\™\œÊK›[™ÝHTX
+BˆB‚ˆÊŠ‚ˆ
+ˆ™Z[š]X[^™H]][XØ][Ûˆ[š\›Û›Y[˜\šXX›\Ë‚ˆ
+ˆØ[\ÈY\ˆÛ˜›Ø\™[™ÈÜˆÙ][™ÜÈÚ[™Ù\ÈÈXÚÈ\™]ÈÜ™Y[X[Ë‚ˆ
+‚ˆ
+ˆÑPÕT’UH“ÕNˆ\ÙH[ˆ˜\œÈ\™H›ÜYØ]YÈHÑÈÝXœ›ØÙ\ÜÈšXHÜ[ÛœËË‚ˆ
+ˆ[‰ÜÈ]]ÛX]XÈ™[ˆØY[™È\È\ØX›Y[ˆHÝXœ›ØÙ\ÜÈ
+KY[‹Yš[OKÙ]‹Û[
+Bˆ
+ˆÈ™]™[H\Ù\‰ÜÈ›Ú™XÝ™[ˆœ›ÛH[š™XÝ[™ÈS•“ÔP×ÐTWÒÑVH[™Ý™\œšY[™Âˆ
+ˆÐ]]]]8 %Û]YHÛÙHš[Üš]^™\ÈTHÙ^HÝ™\ˆÐ]]ÚÙ[ˆÚ[ˆ›Ý\™HÙ]‚ˆ
+ˆÙYNˆÎ‹ËÙÚ]X‹˜ÛÛKÛZÚ[XœËÚØ]KXYÙ[Ë[ÜÜËÚ\ÜÝY\ËÌÎBˆ
+‹ÂˆÊŠ‚ˆ
+ˆ™Z[š]X[^™H]][XØ][Ûˆ[š\›Û›Y[˜\šXX›\Ë‚ˆ
+‚ˆ
+ˆ\Ù\ÈHY˜][HÛÛ›™XÝ[ÛˆÈ]\›Z[™HÚXÚÜ™Y[X[ÈÈÙ]‚ˆ
+‚ˆ
+ˆ\˜[HÛÛ›™XÝ[Û”ÛYÈHÜ[Û˜[ÛÛ›™XÝ[ÛˆÛYÈÈ\ÙH
+Ý™\œšY\ÈY˜][
+Bˆ
+‹Âˆ\Þ[˜È™Z[š]X[^™P]]
+ÛÛ›™XÝ[Û”ÛYÏÎˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆžHÂˆÛÛœÝX[˜YÙ\ˆHÙ]Ü™Y[X[X[˜YÙ\Š
+B‚ˆËÈÙ]HÛÛ›™XÝ[ÛˆÈ\ÙH
+^XÚ]\˜[Y]\ˆÜˆY˜][
+BˆÛÛœÝÛYÈHÛÛ›™XÝ[Û”ÛYÈÙ]Y˜][PÛÛ›™XÝ[ÛŠ
+BˆYˆ
+\ÛYÊHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ó›ÈHÛÛ›™XÝ[ÛˆÛYÈ]˜Z[X›H›Üˆ™Z[š]X[^™P]]	ÊBˆBˆÛÛœÝÛÛ›™XÝ[ÛˆHÛYÈÈÙ]PÛÛ›™XÝ[ÛŠÛYÊHˆ[‚ˆËÈ™\ÝÜ™HX[˜YÙY]][ˆ˜\œÈÈZ\ˆ˜\Ù[[™H™Y›Ü™H\Z[™È\ÈÛÛ›™XÝ[Û‹‚ˆ™\Ù]X[˜YÙY[›ÜXÐ]][•˜\œÊ
+B‚ˆYˆ
+XÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ›ÈHÛÛ›™XÝ[Ûˆ›Ý[™›ÜˆÛYÎˆ	ÜÛYßX
+Bˆ™\Ù]Ý[[X\š^˜][ÛÛY[
+
+Bˆ™]\›‚ˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê™Z[š]X[^š[™È]]›ÜˆÛÛ›™XÝ[ÛŽˆ	ÜÛYßH
+	ØÛÛ›™XÝ[Û‹˜]]\_JX
+B‚ˆËÈ™\ÛÛ™H]][ˆ˜\œÈšXHÚ\™Y][]H
+›ÝšY\‹XYÛ›ÜÝXÊBˆÛÛœÝ™\Ý[H]ØZ]™\ÛÛ™P]][•˜\œÊÛÛ›™XÝ[Û‹ÛYÈKX[˜YÙ\‹Ù]˜[YÛ]YSÐ]]ÚÙ[ŠB‚ˆYˆ
+\™\Ý[œÝXØÙ\ÜÊHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ]]™\ÛÛ][Ûˆ˜Z[Y›Üˆ	ÜÛYßNˆ	Ü™\Ý[Ø\›š[™ßX
+BˆH[ÙHÂˆËÈ\H™\ÛÛ™Y[ˆ˜\œÈÈ›ØÙ\ÜË™[‚ˆ›Üˆ
+ÛÛœÝÚÙ^K˜[YWHÙˆØš™XÝ™[šY\Ê™\Ý[™[•˜\œÊJHÂˆ›ØÙ\ÜË™[–ÚÙ^WHH˜[YBˆBˆÙ\ÜÚ[Û“ÙËš[™›Ê]][ˆ˜\œÈÙ]›ÜˆÛÛ›™XÝ[ÛŽˆ	ÜÛYßX
+BˆB‚ˆËÈ™\Ù]ØXÚYÝ[[X\š^˜][ÛˆÛY[ÛÈ]XÚÜÈ\™]ÈÜ™Y[X[ËØ˜\ÙHT“ˆ™\Ù]Ý[[X\š^˜][ÛÛY[
+
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ñ˜Z[YÈ™Z[š]X[^™H]]‰Ë\œ›ÜŠBˆ›ÝÈ\œ›Ü‚ˆBˆB‚ˆ\Þ[˜È[š]X[^™J
+Nˆ›ÛZ\ÙO›ÚYˆÂˆžHÂˆËÈ˜XÚÙš[Z\ÜÚ[™È[Ù[Ø\œ˜^\ÈÛˆ^\Ý[™ÈHÛÛ›™XÝ[ÛœÂˆZYÜ˜]SYØXÞSPÛÛ›™XÝ[ÛœÐÛÛ™šYÊ
+B‚ˆËÈš^Y˜][PÛÛ›™XÝ[ÛˆYˆ]Ú[ÈÈH›Û‹Y^\Ý[ÛÛ›™XÝ[Û‚ˆZYÜ˜]SÜœ[™YY˜][ÛÛ›™XÝ[ÛœÊ
+B‚ˆËÈZYÜ˜]HYØXÞHÜ™Y[X[ÈÈHÛÛ›™XÝ[Ûˆ›Ü›X]
+Û™K][YHZYÜ˜][ÛŠBˆËÈ\È[œÝ\™\ÈÜ™Y[X[ÈØ]™Y™Y›Ü™HHÛÛ›™XÝ[ÛœÈ\™H]˜Z[X›HšXHH™]ÈÞ\Ý[Bˆ]ØZ]ZYÜ˜]SYØXÞPÜ™Y[X[Ê
+B‚ˆËÈÙ]\]][XØ][Ûˆ[š\›Û›Y[˜\šXX›\È
+Üš]XØ[›ÜˆÑÈÈÛÜšÊBˆ]ØZ]\Ëœ™Z[š]X[^™P]]
+
+B‚ˆËÈXYÙ\›HXÝ]˜]HÛÛ™šYÕØ]Ú\ˆ
+È]]ÛX][Û”Þ\Ý[H›Üˆ]™\žHÛÜšÜÜXÙHÛÂˆËÈHØÚY[\ˆ[™]™[[™\œÈÝ\]›ÛÝ8 %›Ý^š[HÛˆš\œÝˆËÈÛY[ÛÛ›™XÝˆ\È\ÈÜš]XØ[›ÜˆXY\ÜÈÙ\™\œÈÚ\™H›ÈRHX^BˆËÈ]™\ˆÛÛ›™XÝY]ØÚY[YÙ]™[Yš]™[ˆ]]ÛX][ÛœÈ]\ÝÝ[š\™K‚ˆÛÛœÝÛÜšÜÜXÙ\ÈHÙ]ÛÜšÜÜXÙ\Ê
+Bˆ›Üˆ
+ÛÛœÝÛÜšÜÜXÙHÙˆÛÜšÜÜXÙ\ÊHÂˆ\ËœÙ]\ÛÛ™šYÕØ]Ú\ŠÛÜšÜÜXÙKœ›ÛÝ]ÛÜšÜÜXÙKšY
+BˆB‚ˆËÈØY^\Ý[™ÈÙ\ÜÚ[ÛœÈœ›ÛH\ÚÂˆ\Ë›ØYÙ\ÜÚ[ÛœÑœ›ÛQ\ÚÊ
+B‚ˆËÈÚYÛ˜[][š]X[^˜][Ûˆ\ÈÛÛ\]H8 %TÈ[™\œÈØZ][™ÈÛˆ[š]Ø]HÚ[›ØÙYYˆ\Ëš[š]Ø]K›X\šÔ™XYJ
+BˆHØ]Ú
+\œ›ÜŠHÂˆ\Ëš[š]Ø]K›X\šÑ˜Z[Y
+\œ›ÜŠBˆ›ÝÈ\œ›Ü‚ˆBˆB‚ˆËÈØY[^\Ý[™ÈÙ\ÜÚ[ÛœÈœ›ÛH\ÚÈ[ÈY[[ÜžH
+Y]Y]HÛ›HHY\ÜØYÙ\È\™H^žK[ØYY
+Bˆš]˜]HØYÙ\ÜÚ[ÛœÑœ›ÛQ\ÚÊ
+Nˆ›ÚYÂˆžHÂˆÛÛœÝÛÜšÜÜXÙ\ÈHÙ]ÛÜšÜÜXÙ\Ê
+Bˆ]Ý[Ù\ÜÚ[ÛœÈH‚ˆËÈ]\˜]HÝ™\ˆXXÚÛÜšÜÜXÙH[™ØY]ÈÙ\ÜÚ[ÛœÂˆ›Üˆ
+ÛÛœÝÛÜšÜÜXÙHÙˆÛÜšÜÜXÙ\ÊHÂˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HÛÜšÜÜXÙKœ›ÛÝ]ˆ\Ëœ™XÛÝ™\”ÝYÙYÙ\ÜÚ[Û‘[][ÛœÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÙ\ÜÚ[Û“Y]Y]HH\ÝÝÜ™YÙ\ÜÚ[ÛœÊÛÜšÜÜXÙT›ÛÝ]
+BˆËÈØYÛÜšÜÜXÙHÛÛ™šYÈÛ˜ÙH\ˆÛÜšÜÜXÙH›ÜˆY˜][ÛÜšÚ[™È\™XÝÜžBˆÛÛœÝÜÐÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÜÑY˜][ÛÜšÚ[™Ñ\ˆHÜÐÛÛ™šYÏË™Y˜][ÏËÛÜšÚ[™Ñ\™XÝÜžB‚ˆ›Üˆ
+ÛÛœÝY]HÙˆÙ\ÜÚ[Û“Y]Y]JHÂˆËÈÜ™X]HX[˜YÙYÙ\ÜÚ[Ûˆœ›ÛHY]Y]HÛ›H
+Y\ÜØYÙ\È^žK[ØYYÛˆ[X[™
+BˆËÈ\È˜[X]XØ[H™YXÙ\ÈY[[ÜžH\ØYÙH]Ý\\HY\ÜØYÙ\È\™HØYYˆËÈÚ[ˆÙ]Ù\ÜÚ[ÛŠ
+H\ÈØ[Y›ÜˆHÜXÚYšXÈÙ\ÜÚ[Û‚ˆÛÛœÝX[˜YÙYHÜ™X]SX[˜YÙYÙ\ÜÚ[ÛŠY]KÛÜšÜÜXÙKÂˆ[˜X›YÛÝ\˜ÙTÛYÜÎˆ[™Yš[™YËÈØYYÚ]Y\ÜØYÙ\ÂˆÛÜšÚ[™Ñ\™XÝÜžNˆY]KÛÜšÚ[™Ñ\™XÝÜžHÏÈÜÑY˜][ÛÜšÚ[™Ñ\‹ˆJB‚ˆËÈZYÜ˜][ÛŽˆÛX\ˆÜœ[™YPÛÛ›™XÝ[Ûˆ™Y™\™[˜Ù\È
+K™Ë‹Y\ˆÛÛ›™XÝ[ÛˆØ\È[]Y
+BˆYˆ
+X[˜YÙY›PÛÛ›™XÝ[ÛŠHÂˆÛÛœÝÛÛ›ˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠX[˜YÙY›PÛÛ›™XÝ[Û‹[™Yš[™Y
+BˆYˆ
+XÛÛ›ŠHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\ÜÚ[Ûˆ	ÛY]KšYH\ÈÜœ[™YPÛÛ›™XÝ[Ûˆ‰ÛX[˜YÙY›PÛÛ›™XÝ[ÛŸH‹ÛX\š[™Ø
+BˆX[˜YÙY›PÛÛ›™XÝ[ÛˆH[™Yš[™YˆX[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙYH˜[ÙBˆBˆB‚ˆËÈ[š]X[^™H[ÙK[X[˜YÙ\ˆÝ]H›Üˆ™\ÝÜ™YÙ\ÜÚ[ÛœÈ]™[ˆ™Y›Ü™HYÙ[Ü™X][Û‹‚ˆËÈ\ÈÙY\ÈXYÛ›ÜÝXÜËÙY™™XÝ]™H[ÙH[YÛ™YÚ]\œÚ\ÝYÙ\ÜÚ[ÛˆY]Y]K‚ˆÙ]\›Z\ÜÚ[Û“[ÙJY]KšYX[˜YÙYœ\›Z\ÜÚ[Û“[ÙHÏÈ	Ø\ÚÉËÈÚ[™ÙYžNˆ	Ü™\ÝÜ™IÈJBˆYˆ
+X[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJHÂˆY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJY]KšYX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJBˆB‚ˆ\ËœÙ\ÜÚ[ÛœËœÙ]
+Y]KšYX[˜YÙY
+B‚ˆËÈ[š]X[^™HÙ\ÜÚ[ÛˆY]Y]H[ˆ]]ÛX][Û”Þ\Ý[H›ÜˆY™š[™ÂˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[KœÙ][š]X[Ù\ÜÚ[Û“Y]Y]JY]KšYÂˆ\›Z\ÜÚ[Û“[ÙNˆY]Kœ\›Z\ÜÚ[Û“[ÙKˆX™[ÎˆY]K›X™[Ëˆ\Ñ›YÙÙYˆY]Kš\Ñ›YÙÙYˆÙ\ÜÚ[Û”Ý]\ÎˆY]KœÙ\ÜÚ[Û”Ý]\ËˆÙ\ÜÚ[Û“˜[YNˆX[˜YÙY›˜[YKˆJBˆB‚ˆÝ[Ù\ÜÚ[ÛœÊÊÂˆBˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊØYY	ÝÝ[Ù\ÜÚ[ÛœßHÙ\ÜÚ[ÛœÈœ›ÛH\ÚÈ
+Y]Y]HÛ›JX
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ñ˜Z[YÈØYÙ\ÜÚ[ÛœÈœ›ÛH\ÚÎ‰Ë\œ›ÜŠBˆBˆB‚ˆËÈÝ\™\ÜÈœËØ]ÚY]Y]K\™]™\]™[È›ÜˆHÚ[™ÝÈ[ˆÚXÚÝ\ˆÝÛ‚ˆËÈ]ÛZXÈÜš]HÛÛ\]\ËˆÙYHÛ”Ù\ÜÚ[Û“Y]Y]PÚ[™ÙK‚ˆš]˜]HÙ]Y]Y]UÜš]QÝX\™
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÚYÂˆX[˜YÙY—ÛY]Y]UÜš]QÝX\™[[H]K››ÝÊ
+H
+ÈQUQUWÕÔ’UWÑÕPT‘ÓTÂˆB‚ˆÊŠ‚ˆ
+ˆ\œÚ\ÝHÙ\ÜÚ[ÛˆÈ\ÚÈ
+\Þ[˜ËÚ]X›Ý[˜Ú[™È[ˆH\œÚ\Ý[˜ÙH]Y]YJK‚ˆ
+‚ˆ
+ˆÛÛ\Ù\ÜÚ[Ûˆ]ˆYˆY\ÜØYÙ\È]™[‰Ý™Y[ˆ^žK[ØYYY]Y˜]H[Bˆ
+ˆÞ[˜Ú›Û›Ý\ÛHœ›ÛHH”ÓÓ“š\œÝ8 %Ý\Ú\ÙHHÛ˜\ÚÝÙH[œ]Y]YBˆ
+ˆÛÝ[Üš]HY\ÜØYÙ\Îˆ×XÝ™\ˆH™X[Y\ÜØYÙ\ÈÛˆ\ÚËˆY˜][Û‚ˆ
+ˆ[X™\˜][HÙ\È“ÕÝXÚ\œÚ\Ý[Y]Y]HšY[È
+˜[YKX™[Ëˆ
+ˆÙ\ÜÚ[Û”Ý]\ËPÛÛ›™XÝ[Û‹‹‹ŠH™XØ]\ÙHHØ[\ˆX^H]™H\Ýˆ
+ˆ]]]Y[NÈH[‹[Y[[ÜžH]]][Ûˆ]\ÝÚ[ˆÝ™\ˆÚ]	ÜÈÛˆ\ÚË‚ˆ
+ˆØYÝÜ™YÙ\ÜÚ[Û˜\ÈÞ[˜Ú›Û›Ý\È
+Þ[˜ÈœÈ™XYÊKÛÈH[\™H]ˆ
+ˆÝ^\ÈÞ[˜È8 %›ÈZXÜ›Ý\ÚÈ˜XÙHÚ[™ÝÈ™]ÙY[ˆHØY[™H[œ]Y]YK‚ˆ
+‹Âˆš]˜]H\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÚYÂˆYˆ
+[X[˜YÙY›Y\ÜØYÙ\ÓØYY
+HÂˆ\ËšY˜]SY\ÜØYÙ\Ñ›ÜÛÛ\œÚ\Ý
+X[˜YÙY
+BˆBˆ\Ë™[œ]Y]YT\œÚ\Ý
+X[˜YÙY
+BˆB‚ˆËÈÛÛ\\œÚ\ÝY˜][Û‹ˆZ\œ›ÜœÈHY\ÜØYÙ\ËÜ]Y]YK\™XÛÝ™\žH[ˆÙ‚ˆËÈØYY\ÜØYÙ\Ñœ›ÛQ\ÚÈ]ÚÚ\ÈHY]Y]HšY[Þ[˜ÜËˆÙ]ÂˆËÈY\ÜØYÙ\ÓØYY]YHÛÈÝXœÙ\]Y[\œÚ\ÝÙ\ÜÚ[ÛˆØ[ÈZÙHH˜\Ý]‚ˆËÈÝXœÙ\]Y[[œÝ\™SY\ÜØYÙ\ÓØYYØ[È[ÛÈÚÜXÚ\˜ÝZ]ÚXÚ\Èš[™H8 %ˆËÈ]Y]YH™XÛÝ™\žH\È[™XYH[ˆ\™K‚ˆš]˜]HY˜]SY\ÜØYÙ\Ñ›ÜÛÛ\œÚ\Ý
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÚYÂˆÙ\ÜÚ[Û“ÙË™XYÊÛÛ[ØYšYÙÙ\™Y›Üˆ\œÚ\ÝÙ\ÜÚ[ÛˆÛˆ	ÛX[˜YÙYšYX
+BˆÛÛœÝÝÜ™YHØYÝÜ™YÙ\ÜÚ[ÛŠX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]X[˜YÙYšY
+BˆYˆ
+ÝÜ™Y
+HÂˆX[˜YÙY›Y\ÜØYÙ\ÈH
+ÝÜ™Y›Y\ÜØYÙ\È×JK›X\
+ÝÜ™YÓY\ÜØYÙJBˆX[˜YÙYÚÙ[•\ØYÙHHÝÜ™YÚÙ[•\ØYÙBˆËÈY™\œ™Y[ØYšY[È
+[[[Û˜[H[™Yš[™YY\ˆÝ\\ÙYBˆËÈØYÙ\ÜÚ[ÛœÑœ›ÛQ\ÚÊKˆÜ[]Hœ›ÛH\ÚÈÛ›HYˆ›Ý[™XYHÙ][‚ˆËÈY[[ÜžH8 %HØ[\ˆX^H]™H]]]Y[HšXHÙ]Ù\ÜÚ[Û”ÛÝ\˜Ù\È]Ë‚ˆYˆ
+X[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈOOH[™Yš[™Y
+HX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈHÝÜ™Y™[˜X›YÛÝ\˜ÙTÛYÜÂˆYˆ
+X[˜YÙY›\Ý™XYY\ÜØYÙRYOOH[™Yš[™Y
+HX[˜YÙY›\Ý™XYY\ÜØYÙRYHÝÜ™Y›\Ý™XYY\ÜØYÙRYˆYˆ
+X[˜YÙYš\Õ[œ™XYOOH[™Yš[™Y
+HX[˜YÙYš\Õ[œ™XYHÝÜ™Yš\Õ[œ™XYˆYˆ
+X[˜YÙYœÚ\™Y\›OOH[™Yš[™Y
+HX[˜YÙYœÚ\™Y\›HÝÜ™YœÚ\™Y\›ˆYˆ
+X[˜YÙYœÚ\™YYOOH[™Yš[™Y
+HX[˜YÙYœÚ\™YYHÝÜ™YœÚ\™YYˆYˆ
+X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHOOH[™Yš[™Y
+HX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHHÝÜ™Y˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žBˆYˆ
+X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYOOH[™Yš[™Y
+HX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYHÝÜ™Y˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YY‚ˆËÈ]Y]YH™XÛÝ™\žNˆš[™Üœ[™Y]Y]YYY\ÜØYÙ\Èœ›ÛHÜ˜\ÚÜ™\Ý\[™™K\]Y]YH[K‚ˆÛÛœÝÜœ[™Y]Y]YYHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠHO‚ˆKœ›ÛHOOH	Ý\Ù\‰È	‰ˆKš\Ô]Y]YYOOHYBˆ
+BˆYˆ
+Üœ[™Y]Y]YY›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™XÛÝ™\š[™È	ÛÜœ[™Y]Y]YY›[™ÝH]Y]YYY\ÜØYÙJÊH›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+Bˆ›Üˆ
+ÛÛœÝ\ÙÈÙˆÜœ[™Y]Y]YY
+HÂˆX[˜YÙY›Y\ÜØYÙT]Y]YKœ\Ú
+ÂˆY\ÜØYÙNˆ\ÙË˜ÛÛ[ˆY\ÜØYÙRYˆ\ÙËšYˆ]XÚY[Îˆ[™Yš[™YˆÝÜ™Y]XÚY[Îˆ\ÙË˜]XÚY[ËˆÜ[ÛœÎˆ[™Yš[™YˆJBˆBˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™È	‰ˆX[˜YÙY›Y\ÜØYÙT]Y]YK›[™Ýˆ
+HÂˆÙ][[YYX]J
+
+HOˆÂˆ\Ëœ›ØÙ\ÜÓ™^]Y]YYY\ÜØYÙJX[˜YÙYšY
+BˆJBˆBˆBˆÙ\ÜÚ[Û“ÙË™XYÊÛÛZY˜]Y	ÛX[˜YÙY›Y\ÜØYÙ\Ë›[™ÝHY\ÜØYÙ\È›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+BˆBˆX[˜YÙY›Y\ÜØYÙ\ÓØYYHYBˆB‚ˆËÈZ[HÝÜ™YÙ\ÜÚ[ÛˆÛ˜\ÚÝ[™[™]ÈH\œÚ\Ý[˜ÙH]Y]YK‚ˆËÈØ[\ˆ]\Ý[œÝ\™HX[˜YÙY›Y\ÜØYÙ\ÓØYY\ÈYK‚ˆš]˜]H[œ]Y]YT\œÚ\Ý
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÚYÂˆžHÂˆËÈš[\ˆÝ]˜[œÚY[Ý]\ÈY\ÜØYÙ\È
+›ÙÜ™\ÜÈ[™XØ]ÜœÈZÙHÛÛ\XÝ[™Ë‹‹ˆŠBˆËÈ\œ›ÜˆY\ÜØYÙ\È\™H›ÝÈ\œÚ\ÝYÚ]šXÚšY[È›ÜˆXYÛ›ÜÝXÜÂˆÛÛœÝ\œÚ\ÝX›SY\ÜØYÙ\ÈHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠHO‚ˆKœ›ÛHOOH	ÜÝ]\ÉÂˆ
+B‚ˆÛÛœÝÝÜ™YÙ\ÜÚ[ÛŽˆÝÜ™YÙ\ÜÚ[ÛˆHÂˆ‹‹œXÚÔÙ\ÜÚ[Û‘šY[ÊX[˜YÙY
+KˆÛÜšÜÜXÙT›ÛÝ]ˆX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÜ™X]Y]ˆX[˜YÙY˜Ü™X]Y]ÏÈ]K››ÝÊ
+Kˆ\Ý\ÙY]ˆ]K››ÝÊ
+KˆY\ÜØYÙ\Îˆ\œÚ\ÝX›SY\ÜØYÙ\Ë›X\
+Y\ÜØYÙUÔÝÜ™Y
+KˆÚÙ[•\ØYÙNˆX[˜YÙYÚÙ[•\ØYÙHÏÈQUSÕÒÑS—ÕTÐQÑKˆH\ÈÝÜ™YÙ\ÜÚ[Û‚‚ˆËÈ]Y]YH›Üˆ\Þ[˜È\œÚ\Ý[˜ÙHÚ]X›Ý[˜Ú[™ÂˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™[œ]Y]YJÝÜ™YÙ\ÜÚ[ÛŠBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈ]Y]YHÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYH›Üˆ\œÚ\Ý[˜ÙN˜\œ›ÜŠBˆBˆB‚ˆËÈ›\ÚHÜXÚYšXÈÙ\ÜÚ[Ûˆ[[YYX][H
+Ø[ÛˆÙ\ÜÚ[ÛˆÛÜÙKÜÝÚ]Ú
+K‚ˆËÈÛÛ\\œÚ\ÝY˜][Ûˆ\ÈÞ[˜Ú›Û›Ý\ËÛÈžHH[YHÙH™XXÚ\™HBˆËÈ]Y]YH[™XYH\È[ˆ[žHÚ[™]™\ˆ\œÚ\ÝÙ\ÜÚ[ÛˆØ\È\ÝØ[Y‚ˆ\Þ[˜È›\ÚÙ\ÜÚ[ÛŠÙ\ÜÚ[Û’YˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+Ù\ÜÚ[Û’Y
+BˆB‚ˆËÈ›\Ú[[™[™ÈÙ\ÜÚ[ÛœÈ
+Ø[Ûˆ\]Z]
+K‚ˆ\Þ[˜È›\Ú[Ù\ÜÚ[ÛœÊ
+Nˆ›ÛZ\ÙO›ÚYˆÂˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú[
+
+BˆB‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈ[šYšYY]]™\]Y\Ý[\œÂˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆÊŠ‚ˆ
+ˆÙ][X[‹\™XYX›H\ØÜš\[Ûˆ›Üˆ]]™\]Y\Ýˆ
+‹Âˆš]˜]HÙ]]]™\]Y\Ý\ØÜš\[ÛŠ™\]Y\Ýˆ]]™\]Y\Ý
+NˆÝš[™ÈÂˆÝÚ]Ú
+™\]Y\Ý\JHÂˆØ\ÙH	ØÜ™Y[X[	Î‚ˆ™]\›ˆ]][XØ][Ûˆ™\]Z\™Y›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙS˜[Y_XˆØ\ÙH	ÛØ]]	Î‚ˆ™]\›ˆÐ]]]][XØ][Ûˆ›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙS˜[Y_XˆØ\ÙH	ÛØ]]YÛÛÙÛIÎ‚ˆ™]\›ˆÚYÛˆ[ˆÚ]ÛÛÙÛH›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙS˜[Y_XˆØ\ÙH	ÛØ]]\ÛXÚÉÎ‚ˆ™]\›ˆÚYÛˆ[ˆÚ]ÛXÚÈ›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙS˜[Y_XˆØ\ÙH	ÛØ]][ZXÜ›ÜÛÙ	Î‚ˆ™]\›ˆÚYÛˆ[ˆÚ]ZXÜ›ÜÛÙ›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙS˜[Y_XˆBˆB‚ˆÊŠ‚ˆ
+ˆ›Ü›X]]]™\Ý[Y\ÜØYÙHÈÙ[™˜XÚÈÈYÙ[ˆ
+‹Âˆš]˜]H›Ü›X]]]™\Ý[Y\ÜØYÙJ™\Ý[ˆ]]™\Ý[
+NˆÝš[™ÈÂˆYˆ
+™\Ý[œÝXØÙ\ÜÊHÂˆ]\ÙÈH]][XØ][ÛˆÛÛ\]Y›Üˆ	Ü™\Ý[œÛÝ\˜ÙTÛYßK˜ˆYˆ
+™\Ý[™[XZ[
+H\ÙÈ
+ÏHÚYÛ™Y[ˆ\È	Ü™\Ý[™[XZ[K˜ˆYˆ
+™\Ý[ÛÜšÜÜXÙJH\ÙÈ
+ÏHÛÛ›™XÝYÈÛÜšÜÜXÙNˆ	Ü™\Ý[ÛÜšÜÜXÙ_K˜ˆ\ÙÈ
+ÏH	ÈÜ™Y[X[È]™H™Y[ˆØ]™Y‰Âˆ™]\›ˆ\ÙÂˆBˆYˆ
+™\Ý[˜Ø[˜Ù[Y
+HÂˆ™]\›ˆ]][XØ][ÛˆØ[˜Ù[Y›Üˆ	Ü™\Ý[œÛÝ\˜ÙTÛYßK˜ˆBˆ™]\›ˆ]][XØ][Ûˆ˜Z[Y›Üˆ	Ü™\Ý[œÛÝ\˜ÙTÛYßNˆ	Ü™\Ý[™\œ›Üˆ	Õ[šÛ›ÝÛˆ\œ›Ü‰ßXˆB‚‚ˆÊŠ‚ˆ
+ˆÛÛ\]H[ˆ]]™\]Y\Ý[™Ù[™™\Ý[˜XÚÈÈYÙ[ˆ
+ˆ\È\]\ÈH]]Y\ÜØYÙHÝ]\È[™Ù[™ÈH˜ZÙY\Ù\ˆY\ÜØYÙBˆ
+‹Âˆ\Þ[˜ÈÛÛ\]P]]™\]Y\Ý
+Ù\ÜÚ[Û’YˆÝš[™Ë™\Ý[ˆ]]™\Ý[
+Nˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝÛÛ\]H]]™\]Y\ÝHÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›‚ˆB‚ˆËÈš[™[™\]HH[™[™È]]\™\]Y\ÝY\ÜØYÙBˆÛÛœÝ]]Y\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HO‚ˆKœ›ÛHOOH	Ø]]\™\]Y\Ý	È	‰‚ˆK˜]]™\]Y\ÝYOOH™\Ý[œ™\]Y\ÝY	‰‚ˆK˜]]Ý]\ÈOOH	Ü[™[™ÉÂˆ
+B‚ˆYˆ
+]]Y\ÜØYÙJHÂˆ]]Y\ÜØYÙK˜]]Ý]\ÈH™\Ý[œÝXØÙ\ÜÈÈ	ØÛÛ\]Y	È‚ˆ™\Ý[˜Ø[˜Ù[YÈ	ØØ[˜Ù[Y	Èˆ	Ù˜Z[Y	Âˆ]]Y\ÜØYÙK˜]]\œ›ÜˆH™\Ý[™\œ›Ü‚ˆ]]Y\ÜØYÙK˜]][XZ[H™\Ý[™[XZ[ˆ]]Y\ÜØYÙK˜]]ÛÜšÜÜXÙHH™\Ý[ÛÜšÜÜXÙBˆB‚ˆËÈ[Z]]]ØÛÛ\]Y]™[È\]HRBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ø]]ØÛÛ\]Y	ËˆÙ\ÜÚ[Û’Yˆ™\]Y\ÝYˆ™\Ý[œ™\]Y\ÝYˆÝXØÙ\ÜÎˆ™\Ý[œÝXØÙ\ÜËˆØ[˜Ù[Yˆ™\Ý[˜Ø[˜Ù[Yˆ\œ›ÜŽˆ™\Ý[™\œ›Ü‹ˆKX[˜YÙYÛÜšÜÜXÙKšY
+B‚ˆËÈÜ™X]H˜ZÙY\Ù\ˆY\ÜØYÙHÚ]™\Ý[ˆÛÛœÝ™\Ý[ÛÛ[H\Ë™›Ü›X]]]™\Ý[Y\ÜØYÙJ™\Ý[
+B‚ˆËÈÛX\ˆ[™[™È]]Ý]BˆX[˜YÙYœ[™[™Ð]]™\]Y\ÝYH[™Yš[™YˆX[˜YÙYœ[™[™Ð]]™\]Y\ÝH[™Yš[™Y‚ˆËÈ]]ËY[˜X›HHÛÝ\˜ÙH[ˆHÙ\ÜÚ[ÛˆY\ˆÝXØÙ\ÜÙ[]]ˆYˆ
+™\Ý[œÝXØÙ\ÜÈ	‰ˆ™\Ý[œÛÝ\˜ÙTÛYÊHÂˆÛÛœÝÛYÔÙ]H™]ÈÙ]
+X[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×JBˆYˆ
+\ÛYÔÙ]š\Ê™\Ý[œÛÝ\˜ÙTÛYÊJHÂˆÛYÔÙ]˜Y
+™\Ý[œÛÝ\˜ÙTÛYÊBˆX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈH\œ˜^K™œ›ÛJÛYÔÙ]
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê]]ËY[˜X›YÛÝ\˜ÙH	Ü™\Ý[œÛÝ\˜ÙTÛYßH[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YHY\ˆ]]
+BˆB‚ˆËÈÛX\ˆ[žH™Yœ™\ÚÛÛÛÝÛˆÛÈHÛÝ\˜ÙH\È[[YYX][H\ØX›BˆX[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\‹˜ÛX\ÛÛÛÝÛŠ™\Ý[œÛÝ\˜ÙTÛYÊBˆB‚ˆËÈ\œÚ\ÝÙ\ÜÚ[ÛˆÚ]\]Y]]Y\ÜØYÙH[™[˜X›YÛÝ\˜Ù\Âˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+B‚ˆËÈ\]HœšYÙK[XÜ\Ù\™\ˆÛÛ™šYËØÜ™Y[X[È›Üˆ˜XÚÙ[™È]™YY]ˆYˆ
+™\Ý[œÝXØÙ\ÜÈ	‰ˆ™\Ý[œÛÝ\˜ÙTÛYÈ	‰ˆX[˜YÙY˜YÙ[
+HÂˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]X[˜YÙYšY
+BˆÛÛœÝ[˜X›YÛYÜÈHX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×BˆÛÛœÝ[ÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝ[˜X›YÛÝ\˜Ù\ÈH[ÛÝ\˜Ù\Ë™š[\ŠÈO‚ˆ[˜X›YÛYÜËš[˜ÛY\ÊË˜ÛÛ™šYËœÛYÊH	‰ˆ\ÔÛÝ\˜ÙU\ØX›JÊBˆ
+BˆÛÛœÝÈXÜÙ\™\œÈHH]ØZ]Z[Ù\™\œÑœ›ÛTÛÝ\˜Ù\Êˆ[˜X›YÛÝ\˜Ù\ËÙ\ÜÚ[Û”]X[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\‚ˆ
+Bˆ]ØZ]\PœšYÙU\]\ÊX[˜YÙY˜YÙ[Ù\ÜÚ[Û”][˜X›YÛÝ\˜Ù\ËXÜÙ\™\œËX[˜YÙYšYÛÜšÜÜXÙT›ÛÝ]	ÜÛÝ\˜ÙH]]	ËX[˜YÙYœÛÛÙ\™\Ë\›
+BˆB‚ˆËÈÙ[™H™\Ý[\ÈH™]ÈY\ÜØYÙHÈ™\Ý[YHÛÛ™\œØ][Û‚ˆËÈ\ÙH[\H\œ˜^\È›Üˆ]XÚY[ÈÚ[˜ÙH\È\ÈHÞ\Ý[KYÙ[™\˜]YY\ÜØYÙBˆ]ØZ]\ËœÙ[™Y\ÜØYÙJÙ\ÜÚ[Û’Y™\Ý[ÛÛ[×K×KßJB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê]]™\]Y\ÝÛÛ\]Y›Üˆ	Ü™\Ý[œÛÝ\˜ÙTÛYßNˆ	Ü™\Ý[œÝXØÙ\ÜÈÈ	ÜÝXØÙ\ÜÉÈˆ	Ù˜Z[Y	ßX
+BˆB‚ˆÊŠ‚ˆ
+ˆ[™HÜ™Y[X[[œ]œ›ÛHHRH
+›Üˆ›Û‹SÐ]]]]
+Bˆ
+ˆØ[YÚ[ˆ\Ù\ˆÝX›Z]ÈÜ™Y[X[ÈšXHH[›[™H›Ü›Bˆ
+‹Âˆ\Þ[˜È[™PÜ™Y[X[[œ]
+ˆÙ\ÜÚ[Û’YˆÝš[™Ëˆ™\]Y\ÝYˆÝš[™Ëˆ™\ÜÛœÙNˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÜ™Y[X[™\ÜÛœÙBˆ
+Nˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙYËœ[™[™Ð]]™\]Y\Ý
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý[™HÜ™Y[X[[œ]H›È[™[™È]]™\]Y\Ý›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝ™\]Y\ÝHX[˜YÙYœ[™[™Ð]]™\]Y\Ý\ÈÜ™Y[X[]]™\]Y\ÝˆYˆ
+™\]Y\Ýœ™\]Y\ÝYOOH™\]Y\ÝY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÜ™Y[X[™\]Y\ÝQZ\ÛX]Úˆ^XÝY	Ü™\]Y\Ýœ™\]Y\ÝYKÛÝ	Ü™\]Y\ÝYX
+Bˆ™]\›‚ˆB‚ˆYˆ
+™\ÜÛœÙK˜Ø[˜Ù[Y
+HÂˆ]ØZ]\Ë˜ÛÛ\]P]]™\]Y\Ý
+Ù\ÜÚ[Û’YÂˆ™\]Y\ÝYˆÛÝ\˜ÙTÛYÎˆ™\]Y\ÝœÛÝ\˜ÙTÛYËˆÝXØÙ\ÜÎˆ˜[ÙKˆØ[˜Ù[YˆYKˆJBˆ™]\›‚ˆB‚ˆžHÂˆËÈÝÜ™HÜ™Y[X[È\Ú[™È^\Ý[™ÈÛÜšÜÜXÙHQ^˜XÝ[Ûˆ]\›‚ˆÛÛœÝÜ™YX[˜YÙ\ˆHÙ]Ü™Y[X[X[˜YÙ\Š
+BˆËÈ^˜XÝÛÜšÜÜXÙHQœ›ÛH›ÛÝ]
+\ÝÙYÛY[Ùˆ]
+BˆÛÛœÝÜÒYH˜\Ù[˜[YJX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+HX[˜YÙYÛÜšÜÜXÙKšY‚ˆYˆ
+™\]Y\Ý›[ÙHOOH	Ø˜\ÚXÉÊHÂˆËÈÝÜ™H˜[YH\È”ÓÓˆÝš[™ÈÝ\Ù\›˜[YK\ÜÝÛÜ™HHÜ™Y[X[[X[˜YÙ\‹È\œÙ\È]›Üˆ˜\ÚXÈ]]ˆ]ØZ]Ü™YX[˜YÙ\‹œÙ]
+ˆÈ\Nˆ	ÜÛÝ\˜ÙWØ˜\ÚXÉËÛÜšÜÜXÙRYˆÜÒYÛÝ\˜ÙRYˆ™\]Y\ÝœÛÝ\˜ÙTÛYÈKˆÈ˜[YNˆ”ÓÓ‹œÝš[™ÚYžJÈ\Ù\›˜[YNˆ™\ÜÛœÙK\Ù\›˜[YK\ÜÝÛÜ™ˆ™\ÜÛœÙKœ\ÜÝÛÜ™JHBˆ
+BˆH[ÙHYˆ
+™\]Y\Ý›[ÙHOOH	Ø™X\™\‰ÊHÂˆ]ØZ]Ü™YX[˜YÙ\‹œÙ]
+ˆÈ\Nˆ	ÜÛÝ\˜ÙWØ™X\™\‰ËÛÜšÜÜXÙRYˆÜÒYÛÝ\˜ÙRYˆ™\]Y\ÝœÛÝ\˜ÙTÛYÈKˆÈ˜[YNˆ™\ÜÛœÙK˜[YHHBˆ
+BˆH[ÙHYˆ
+™\]Y\Ý›[ÙHOOH	Û][KZXY\‰ÊHÂˆËÈÝÜ™H][KZXY\ˆÜ™Y[X[È\È”ÓÓˆÈ‘PTKRÑVHŽˆ‹‹‹ˆ‹‘PTPÐUSÓ‹RÑVHŽˆ‹‹‹ˆˆBˆ]ØZ]Ü™YX[˜YÙ\‹œÙ]
+ˆÈ\Nˆ	ÜÛÝ\˜ÙWØ\ZÙ^IËÛÜšÜÜXÙRYˆÜÒYÛÝ\˜ÙRYˆ™\]Y\ÝœÛÝ\˜ÙTÛYÈKˆÈ˜[YNˆ”ÓÓ‹œÝš[™ÚYžJ™\ÜÛœÙKšXY\œÊHBˆ
+BˆH[ÙHÂˆËÈXY\ˆÜˆ]Y\žHH›Ý\ÙHTHÙ^HÝÜ˜YÙBˆ]ØZ]Ü™YX[˜YÙ\‹œÙ]
+ˆÈ\Nˆ	ÜÛÝ\˜ÙWØ\ZÙ^IËÛÜšÜÜXÙRYˆÜÒYÛÝ\˜ÙRYˆ™\]Y\ÝœÛÝ\˜ÙTÛYÈKˆÈ˜[YNˆ™\ÜÛœÙK˜[YHHBˆ
+BˆB‚ˆËÈ\]HÛÝ\˜ÙHÛÛ™šYÈÈX\šÈ\È]][XØ]YˆÛÛœÝÈX\šÔÛÝ\˜ÙP]][XØ]YHH]ØZ][\Ü
+	ÐØ]K\ÚÜÚ\™YÜÛÝ\˜Ù\ÉÊBˆX\šÔÛÝ\˜ÙP]][XØ]Y
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]™\]Y\ÝœÛÝ\˜ÙTÛYÊB‚ˆËÈX\šÈÛÝ\˜ÙH\È[œÙY[ˆÛÈœ™\ÚÝZYH\È[š™XÝYÛˆ™^Y\ÜØYÙBˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆX[˜YÙY˜YÙ[›X\šÔÛÝ\˜ÙU[œÙY[Š™\]Y\ÝœÛÝ\˜ÙTÛYÊBˆB‚ˆ]ØZ]\Ë˜ÛÛ\]P]]™\]Y\Ý
+Ù\ÜÚ[Û’YÂˆ™\]Y\ÝYˆÛÝ\˜ÙTÛYÎˆ™\]Y\ÝœÛÝ\˜ÙTÛYËˆÝXØÙ\ÜÎˆYKˆJBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈØ]™HÜ™Y[X[È›Üˆ	Ü™\]Y\ÝœÛÝ\˜ÙTÛYßN˜\œ›ÜŠBˆ]ØZ]\Ë˜ÛÛ\]P]]™\]Y\Ý
+Ù\ÜÚ[Û’YÂˆ™\]Y\ÝYˆÛÝ\˜ÙTÛYÎˆ™\]Y\ÝœÛÝ\˜ÙTÛYËˆÝXØÙ\ÜÎˆ˜[ÙKˆ\œ›ÜŽˆ\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ	Ñ˜Z[YÈØ]™HÜ™Y[X[ÉËˆJBˆBˆB‚ˆÙ]ÛÜšÜÜXÙ\Ê
+NˆÛÜšÜÜXÙV×HÂˆ™]\›ˆÙ]ÛÜšÜÜXÙ\Ê
+BˆB‚ˆÙ]ÛÜšÜÜXÙ\Ò[™›Ê
+NˆÛÜšÜÜXÙR[™›Ö×HÂˆ™]\›ˆÙ]ÛÜšÜÜXÙ\Ê
+K›X\
+
+È›ÛÝ]Ü™X]Y]‹‹š[™›ÈJHOˆ[™›ÊBˆB‚ˆÙ]XÝ]™TÙ\ÜÚ[ÛÛÝ[
+ÛÜšÜÜXÙRYÎˆÝš[™ÊNˆ[X™\ˆÂˆ]ÛÝ[Hˆ›Üˆ
+ÛÛœÝX[˜YÙYÙˆ\ËœÙ\ÜÚ[ÛœË˜[Y\Ê
+JHÂˆYˆ
+ÛÜšÜÜXÙRY	‰ˆX[˜YÙYÛÜšÜÜXÙKšYOOHÛÜšÜÜXÙRY
+HÛÛ[YBˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÛÝ[
+ÊÂˆBˆ™]\›ˆÛÝ[ˆB‚ˆÙ]ÛÜšÜÜXÙP]]ÛX][Û”Ý[[X\žJÛÜšÜÜXÙRYˆÝš[™ÊNˆÈ]]ÛX][ÛÛÝ[ˆ[X™\ŽÈØÚY[\”[›š[™Îˆ›ÛÛX[ˆHÂˆÛÛœÝÛÜšÜÜXÙHHÙ]ÛÜšÜÜXÙPžS˜[YSÜ’Y
+ÛÜšÜÜXÙRY
+BˆYˆ
+]ÛÜšÜÜXÙJH™]\›ˆÈ]]ÛX][ÛÛÝ[ˆØÚY[\”[›š[™Îˆ˜[ÙHB‚ˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙKœ›ÛÝ]
+BˆYˆ
+X]]ÛX][Û”Þ\Ý[JH™]\›ˆÈ]]ÛX][ÛÛÝ[ˆØÚY[\”[›š[™Îˆ˜[ÙHB‚ˆÛÛœÝÛÛ™šYÈH]]ÛX][Û”Þ\Ý[K™Ù]ÛÛ™šYÊ
+Bˆ]]]ÛX][ÛÛÝ[HˆYˆ
+ÛÛ™šYÊHÂˆ›Üˆ
+ÛÛœÝX]Ú\œÈÙˆØš™XÝ˜[Y\ÊÛÛ™šYË˜]]ÛX][ÛœÊJHÂˆ]]ÛX][ÛÛÝ[
+ÏHX]Ú\œÏË›[™ÝÏÈˆBˆB‚ˆ™]\›ˆÂˆ]]ÛX][ÛÛÝ[ˆËÈØÚY[\”Ù\šXÙH\È[›š[™ÈYˆHÞ\Ý[HØ\ÈÜ™X]YÚ][˜X›TØÚY[\‚ˆØÚY[\”[›š[™ÎˆX]]ÛX][Û”Þ\Ý[Kš\Ñ\ÜÜÙY
+
+KˆBˆB‚ˆÙ]XÝ]™TÙ\ÜÚ[ÛœÒ[™›Ê
+NˆXÝ]™TÙ\ÜÚ[Û’[™›Ö×HÂˆÛÛœÝ™\Ý[ˆXÝ]™TÙ\ÜÚ[Û’[™›Ö×HH×Bˆ›Üˆ
+ÛÛœÝX[˜YÙYÙˆ\ËœÙ\ÜÚ[ÛœË˜[Y\Ê
+JHÂˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÛÛ[YB‚ˆ]Ý]\ÎˆÙ\ÜÚ[Û”›ØÙ\ÜÚ[™ÔÝ]\ÈH	Ü›ØÙ\ÜÚ[™ÉÂˆYˆ
+X[˜YÙYœÝÜ™\]Y\ÝY
+HÝ]\ÈH	ÚYIÂ‚ˆ™\Ý[œ\Ú
+ÂˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆÛÜšÜÜXÙRYˆX[˜YÙYÛÜšÜÜXÙKšYˆÛÜšÜÜXÙS˜[YNˆX[˜YÙYÛÜšÜÜXÙK›˜[YKˆ]NˆX[˜YÙY›˜[YH[™Yš[™YˆÝ]\ËˆšYÙÙ\™YžNˆX[˜YÙYšYÙÙ\™YžBˆÈÈ]]ÛX][Û“˜[YNˆX[˜YÙYšYÙÙ\™YžK˜]]ÛX][Û“˜[YHÏÈ	Õ[šÛ›ÝÛ‰Ë[Y\Ý[\ˆX[˜YÙYšYÙÙ\™YžK[Y\Ý[\ÏÈBˆˆ[™Yš[™YˆÜ™X]Y]ˆX[˜YÙY›\ÝY\ÜØYÙP]ˆJBˆBˆ™]\›ˆ™\Ý[ˆB‚ˆÊŠ‚ˆ
+ˆ™[ØY[Ù\ÜÚ[ÛœÈœ›ÛH\ÚË‚ˆ
+ˆ\ÙYY\ˆ[\Ü[™ÈÙ\ÜÚ[ÛœÈÈ™Yœ™\ÚH[‹[Y[[ÜžHÙ\ÜÚ[Ûˆ\Ý‚ˆ
+‹Âˆ™[ØYÙ\ÜÚ[ÛœÊ
+Nˆ›ÚYÂˆ\Ë›ØYÙ\ÜÚ[ÛœÑœ›ÛQ\ÚÊ
+BˆB‚ˆÙ]Ù\ÜÚ[ÛœÊÛÜšÜÜXÙRYÎˆÝš[™ÊNˆÙ\ÜÚ[Û–×HÂˆËÈ™]\›œÈÙ\ÜÚ[ÛˆY]Y]HÛ›HHY\ÜØYÙ\È\™H“Õ[˜ÛYYÈØ]™HY[[ÜžBˆËÈ\ÙHÙ]Ù\ÜÚ[ÛŠY
+HÈØYY\ÜØYÙ\È›ÜˆHÜXÚYšXÈÙ\ÜÚ[Û‚ˆ]Ù\ÜÚ[ÛœÈH\œ˜^K™œ›ÛJ\ËœÙ\ÜÚ[ÛœË˜[Y\Ê
+JB‚ˆËÈš[\ˆžHÛÜšÜÜXÙHYˆÜXÚYšYY
+\ÙYÚ[ˆÝÚ]Ú[™ÈÛÜšÜÜXÙ\ÊBˆYˆ
+ÛÜšÜÜXÙRY
+HÂˆÙ\ÜÚ[ÛœÈHÙ\ÜÚ[ÛœË™š[\ŠHOˆKÛÜšÜÜXÙKšYOOHÛÜšÜÜXÙRY
+BˆB‚ˆ™]\›ˆÙ\ÜÚ[ÛœÂˆ›X\
+HOˆX[˜YÙYÔÙ\ÜÚ[ÛŠJJBˆœÛÜ
+
+KŠHOˆ
+‹›\ÝY\ÜØYÙP]ÏÈ
+HH
+K›\ÝY\ÜØYÙP]ÏÈ
+JBˆB‚ˆÊŠ‚ˆ
+ˆYÙÜ™YØ]H[œ™XYÝ]HXÜ›ÜÜÈ[ÛÜšÜÜXÙ\Ë‚ˆ
+ˆ^ÛY\ÈY[ˆ[™\˜Ú]™YÙ\ÜÚ[ÛœÈœ›ÛHÛÝ[ËÚ[™XØ]ÜœË‚ˆ
+‹ÂˆÙ][œ™XYÝ[[X\žJ
+Nˆ[œ™XYÝ[[X\žHÂˆÛÛœÝžUÛÜšÜÜXÙNˆ™XÛÜ™Ýš[™Ë[X™\ˆHßBˆÛÛœÝ\Õ[œ™XYžUÛÜšÜÜXÙNˆ™XÛÜ™Ýš[™Ë›ÛÛX[ˆHßB‚ˆ›Üˆ
+ÛÛœÝÛÜšÜÜXÙHÙˆÙ]ÛÜšÜÜXÙ\Ê
+JHÂˆžUÛÜšÜÜXÙVÝÛÜšÜÜXÙKšYHHˆ\Õ[œ™XYžUÛÜšÜÜXÙVÝÛÜšÜÜXÙKšYHH˜[ÙBˆB‚ˆ›Üˆ
+ÛÛœÝÙ\ÜÚ[ÛˆÙˆ\ËœÙ\ÜÚ[ÛœË˜[Y\Ê
+JHÂˆYˆ
+Ù\ÜÚ[Û‹šY[ˆÙ\ÜÚ[Û‹š\Ð\˜Ú]™Y
+HÛÛ[YBˆYˆ
+\Ù\ÜÚ[Û‹š\Õ[œ™XY
+HÛÛ[YB‚ˆÛÛœÝÛÜšÜÜXÙRYHÙ\ÜÚ[Û‹ÛÜšÜÜXÙKšYˆžUÛÜšÜÜXÙVÝÛÜšÜÜXÙRYHH
+žUÛÜšÜÜXÙVÝÛÜšÜÜXÙRYHÏÈ
+H
+ÈBˆ\Õ[œ™XYžUÛÜšÜÜXÙVÝÛÜšÜÜXÙRYHHYBˆB‚ˆÛÛœÝÝ[[œ™XYÙ\ÜÚ[ÛœÈHØš™XÝ˜[Y\ÊžUÛÜšÜÜXÙJKœ™YXÙJ
+Ý[KÛÝ[
+HOˆÝ[H
+ÈÛÝ[
+B‚ˆ™]\›ˆÂˆÝ[[œ™XYÙ\ÜÚ[ÛœËˆžUÛÜšÜÜXÙKˆ\Õ[œ™XYžUÛÜšÜÜXÙKˆBˆB‚ˆÊŠ‚ˆ
+ˆ™Yœ™\Ú˜YÙHÛÝ[œ›ÛHÝ\œ™[[œ™XYÝ]K‚ˆ
+ˆØ[YžH™[™\™\ˆÛˆ[Ý[8 %[œÝ\™\È˜YÙH\ÈÙ]]™[ˆYˆH[š]X[ˆ
+ˆ[Z][œ™XYÝ[[X\žPÚ[™ÙY
+
+Hš\™Y™Y›Ü™HH™[™\™\ˆØ\È™XYK‚ˆ
+‹Âˆ™Yœ™\Ú˜YÙJ
+Nˆ›ÚYÂˆÛÛœÝÝ[[X\žHH\Ë™Ù][œ™XYÝ[[X\žJ
+BˆÙ\ÜÚ[Û”[[YRÛÚÜË\]P˜YÙPÛÝ[
+Ý[[X\žKÝ[[œ™XYÙ\ÜÚ[ÛœÊBˆB‚ˆÊŠ‚ˆ
+ˆœ›ØYØ\ÝÛØ˜[[œ™XYÝ[[X\žHÈ[ÛÜšÜÜXÙHÚ[™ÝÜË‚ˆ
+‹Âˆš]˜]H[Z][œ™XYÝ[[X\žPÚ[™ÙY
+
+Nˆ›ÚYÂˆÛÛœÝÝ[[X\žHH\Ë™Ù][œ™XYÝ[[X\žJ
+B‚ˆËÈ\]H˜YÙHšXH[[YHÛÚÈ8 %ÜÝXÚY\ÈÚ]\‹ÚÝÈÈ™[™\ˆ˜YÙ\ÂˆÙ\ÜÚ[Û”[[YRÛÚÜË\]P˜YÙPÛÝ[
+Ý[[X\žKÝ[[œ™XYÙ\ÜÚ[ÛœÊB‚ˆYˆ
+]\Ë™]™[Ú[šÊH™]\›‚‚ˆËÈœ›ØYØ\ÝÈ™[™\™\œÈ›ÜˆRH\]\È
+Ù\ÜÚ[Ûˆ\ÝÝË]ËŠBˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœÙ\ÜÚ[ÛœË•S”‘PQÔÕSSPT–WÐÒS‘ÑQÈÎˆ	Ø[	ÈKÝ[[X\žJBˆB‚ˆÊŠ‚ˆ
+ˆÙ]HÚ[™ÛHÙ\ÜÚ[ÛˆžHQÚ][Y\ÜØYÙ\ÈØYY‚ˆ
+ˆ\ÙY›Üˆ^žHØY[™ÈÙ\ÜÚ[ÛˆY\ÜØYÙ\ÈÚ[ˆÙ\ÜÚ[Ûˆ\ÈÙ[XÝY‚ˆ
+ˆY\ÜØYÙ\È\™HØYYœ›ÛH\ÚÈÛˆš\œÝXØÙ\ÜÈÈ™YXÙHY[[ÜžH\ØYÙK‚ˆ
+‹Âˆ\Þ[˜ÈÙ]Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’YˆÝš[™ÊNˆ›ÛZ\ÙOÙ\ÜÚ[Ûˆ[ˆÂˆÛÛœÝHH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[JH™]\›ˆ[‚ˆËÈ^žK[ØYY\ÜØYÙ\Èœ›ÛH\ÚÈYˆ›ÝY]ØYYˆ]ØZ]\Ë™[œÝ\™SY\ÜØYÙ\ÓØYY
+JB‚ˆ™]\›ˆX[˜YÙYÔÙ\ÜÚ[ÛŠKÈY\ÜØYÙ\ÎˆK›Y\ÜØYÙ\ÈJBˆB‚ˆÊŠ‚ˆ
+ˆ[œÝ\™HY\ÜØYÙ\È\™HØYY›ÜˆHX[˜YÙYÙ\ÜÚ[Û‹‚ˆ
+ˆ\Ù\È›ÛZ\ÙHY\XØ][ÛˆÈ™]™[˜XÙHÛÛ™][ÛœÈÚ[ˆ][\Bˆ
+ˆÛÛ˜Ý\œ™[Ø[È
+K™Ë‹˜\YÙ\ÜÚ[ÛˆÝÚ]Ú\È
+ÈY\ÜØYÙHÙ[™
+HžBˆ
+ˆÈØYY\ÜØYÙ\ÈÚ[][[™[Ý\ÛK‚ˆ
+‹Âˆš]˜]H\Þ[˜È[œÝ\™SY\ÜØYÙ\ÓØYY
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛZ\ÙO›ÚYˆÂˆYˆ
+X[˜YÙY›Y\ÜØYÙ\ÓØYY
+H™]\›‚‚ˆËÈY\XØ]HÛÛ˜Ý\œ™[ØYÈH™]\›ˆ^\Ý[™È›ÛZ\ÙHYˆ[™XYHØY[™ÂˆÛÛœÝ^\Ý[™Ô›ÛZ\ÙHH\Ë›Y\ÜØYÙSØY[™Ô›ÛZ\Ù\Ë™Ù]
+X[˜YÙYšY
+BˆYˆ
+^\Ý[™Ô›ÛZ\ÙJHÂˆ™]\›ˆ^\Ý[™Ô›ÛZ\ÙBˆB‚ˆÛÛœÝØY›ÛZ\ÙHH\Ë›ØYY\ÜØYÙ\Ñœ›ÛQ\ÚÊX[˜YÙY
+Bˆ\Ë›Y\ÜØYÙSØY[™Ô›ÛZ\Ù\ËœÙ]
+X[˜YÙYšYØY›ÛZ\ÙJB‚ˆžHÂˆ]ØZ]ØY›ÛZ\ÙBˆHš[˜[HÂˆ\Ë›Y\ÜØYÙSØY[™Ô›ÛZ\Ù\Ë™[]JX[˜YÙYšY
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆ[\›˜[ˆØYY\ÜØYÙ\Èœ›ÛH\ÚÈÝÜ˜YÙH[ÈHX[˜YÙYÙ\ÜÚ[Û‹‚ˆ
+‹Âˆš]˜]H\Þ[˜ÈØYY\ÜØYÙ\Ñœ›ÛQ\ÚÊX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝÝÜ™YÙ\ÜÚ[ÛˆHØYÝÜ™YÙ\ÜÚ[ÛŠX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]X[˜YÙYšY
+BˆYˆ
+ÝÜ™YÙ\ÜÚ[ÛŠHÂˆX[˜YÙY›Y\ÜØYÙ\ÈH
+ÝÜ™YÙ\ÜÚ[Û‹›Y\ÜØYÙ\È×JK›X\
+ÝÜ™YÓY\ÜØYÙJBˆX[˜YÙYÚÙ[•\ØYÙHHÝÜ™YÙ\ÜÚ[Û‹ÚÙ[•\ØYÙBˆX[˜YÙY›\Ý™XYY\ÜØYÙRYHÝÜ™YÙ\ÜÚ[Û‹›\Ý™XYY\ÜØYÙRYˆX[˜YÙYš\Õ[œ™XYHÝÜ™YÙ\ÜÚ[Û‹š\Õ[œ™XYËÈ^XÚ][œ™XY›YÈ›Üˆ‘UÈ˜YÙHÝ]HXXÚ[™BˆX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈHÝÜ™YÙ\ÜÚ[Û‹™[˜X›YÛÝ\˜ÙTÛYÜÂˆX[˜YÙYœÚ\™Y\›HÝÜ™YÙ\ÜÚ[Û‹œÚ\™Y\›ˆX[˜YÙYœÚ\™YYHÝÜ™YÙ\ÜÚ[Û‹œÚ\™YYˆËÈÞ[˜È˜[YHœ›ÛH\ÚÈH[œÝ\™\È]H\œÚ\Ý[˜ÙHXÜ›ÜÜÈ^žHØY[™ÂˆX[˜YÙY›˜[YHHÝÜ™YÙ\ÜÚ[Û‹›˜[YBˆËÈ™\ÝÜ™HHÛÛ›™XÝ[ÛˆÝ]HH[œÝ\™\ÈÛÜœ™XÝ›ÝšY\ˆÛˆ™\Ý[YBˆYˆ
+ÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŠHÂˆX[˜YÙY›PÛÛ›™XÝ[ÛˆHÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[Û‚ˆBˆYˆ
+ÝÜ™YÙ\ÜÚ[Û‹˜ÛÛ›™XÝ[Û“ØÚÙY
+HÂˆX[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙYHÝÜ™YÙ\ÜÚ[Û‹˜ÛÛ›™XÝ[Û“ØÚÙYˆBˆËÈÞ[˜È˜[œÙ™\œ™YÙ\ÜÚ[ÛˆÝ[[X\žHÝ]Hœ›ÛH\ÚÂˆX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHHÝÜ™YÙ\ÜÚ[Û‹˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žBˆX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYHÝÜ™YÙ\ÜÚ[Û‹˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYˆÙ\ÜÚ[Û“ÙË™XYÊ^žK[ØYY	ÛX[˜YÙY›Y\ÜØYÙ\Ë›[™ÝHY\ÜØYÙ\È›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+B‚ˆËÈ]Y]YH™XÛÝ™\žNˆš[™Üœ[™Y]Y]YYY\ÜØYÙ\Èœ›ÛHÜ˜\ÚÜ™\Ý\[™™K\]Y]YH[BˆÛÛœÝÜœ[™Y]Y]YYHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠHO‚ˆKœ›ÛHOOH	Ý\Ù\‰È	‰ˆKš\Ô]Y]YYOOHYBˆ
+BˆYˆ
+Üœ[™Y]Y]YY›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™XÛÝ™\š[™È	ÛÜœ[™Y]Y]YY›[™ÝH]Y]YYY\ÜØYÙJÊH›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+Bˆ›Üˆ
+ÛÛœÝ\ÙÈÙˆÜœ[™Y]Y]YY
+HÂˆX[˜YÙY›Y\ÜØYÙT]Y]YKœ\Ú
+ÂˆY\ÜØYÙNˆ\ÙË˜ÛÛ[ˆY\ÜØYÙRYˆ\ÙËšYˆ]XÚY[Îˆ[™Yš[™YËÈ]XÚY[È[™XYHÝÜ™YÛˆ\ÚÂˆÝÜ™Y]XÚY[Îˆ\ÙË˜]XÚY[ËˆÜ[ÛœÎˆ[™Yš[™YˆJBˆBˆËÈ›ØÙ\ÜÈ]Y]YHÚ[ˆÙ\ÜÚ[Ûˆ™XÛÛY\ÈXÝ]™H
+Ú[™HšYÙÙ\™YžHš\œÝY\ÜØYÙHÜˆ[\˜XÝ[ÛŠBˆËÈ\ÙHÙ][[YYX]HÈ]›ÚY›ØÚÚ[™ÈHØY[™[ÝÈÙ\ÜÚ[ÛˆÝ]HÈÙ]BˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™È	‰ˆX[˜YÙY›Y\ÜØYÙT]Y]YK›[™Ýˆ
+HÂˆÙ][[YYX]J
+
+HOˆÂˆ\Ëœ›ØÙ\ÜÓ™^]Y]YYY\ÜØYÙJX[˜YÙYšY
+BˆJBˆBˆBˆBˆX[˜YÙY›Y\ÜØYÙ\ÓØYYHYBˆB‚ˆÊŠ‚ˆ
+ˆÙ]Hš[\Þ\Ý[H]ÈHÙ\ÜÚ[Û‰ÜÈ›Û\‚ˆ
+‹ÂˆÙ]Ù\ÜÚ[Û”]
+Ù\ÜÚ[Û’YˆÝš[™ÊNˆÝš[™È[ÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+H™]\›ˆ[ˆ™]\›ˆÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+BˆB‚ˆ\Þ[˜ÈÜ™X]TÙ\ÜÚ[ÛŠÛÜšÜÜXÙRYˆÝš[™ËÜ[ÛœÏÎˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÜ™X]TÙ\ÜÚ[Û“Ü[ÛœÊNˆ›ÛZ\ÙOÙ\ÜÚ[ÛˆÂˆÛÛœÝÛÜšÜÜXÙHHÙ]ÛÜšÜÜXÙPžS˜[YSÜ’Y
+ÛÜšÜÜXÙRY
+BˆYˆ
+]ÛÜšÜÜXÙJHÂˆ›ÝÈ™]È\œ›ÜŠÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYH›Ý›Ý[™
+BˆB‚ˆËÈÙ]™]ÈÙ\ÜÚ[ÛˆY˜][Èœ›ÛHÛÜšÜÜXÙHÛÛ™šYÈ
+Ú]ÛØ˜[˜[˜XÚÊBˆËÈÜ[ÛœËœ\›Z\ÜÚ[Û“[ÙHÝ™\œšY\ÈHÛÜšÜÜXÙHY˜][
+\ÙYžHY]ÜÝ™\ˆ›Üˆ]]ËY^XÝ]JBˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HÛÜšÜÜXÙKœ›ÛÝ]ˆÛÛœÝÜÐÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÛØ˜[Y˜][ÈHØYÛÛ™šYÑY˜][Ê
+B‚ˆËÈ™XY\›Z\ÜÚ[Ûˆ[ÙHœ›ÛHÛÜšÜÜXÙHÛÛ™šYË˜[˜XÚÈÈÛØ˜[Y˜][ÂˆÛÛœÝY˜][\›Z\ÜÚ[Û“[ÙHHÜ[ÛœÏËœ\›Z\ÜÚ[Û“[ÙBˆÏÈÜÐÛÛ™šYÏË™Y˜][ÏËœ\›Z\ÜÚ[Û“[ÙBˆÏÈÛØ˜[Y˜][ËÛÜšÜÜXÙQY˜][Ëœ\›Z\ÜÚ[Û“[ÙB‚ˆÛÛœÝ\Ù\‘Y˜][ÛÜšÚ[™Ñ\ˆHÜÐÛÛ™šYÏË™Y˜][ÏËÛÜšÚ[™Ñ\™XÝÜžH[™Yš[™YˆËÈ™\ÛÛ™H[šÚ[™È]™[Ú]Ø[\‹Yš\œÝ™XÙY[˜ÙKX]Ú[™È\›Z\ÜÚ[Û“[ÙHX›Ý™N‚ˆËÈØ[\ˆÝ™\œšYH8¡¤ˆÛÜšÜÜXÙHY˜][8¡¤ˆÛØ˜[Y˜][‚ˆËÈ›Ü›X[^™U[šÚ[™Ó]™[
+
+HÛ\˜]\È[™Yš[™YÝ[šÛ›ÝÛˆ[œ]Ë‚ˆÛÛœÝY˜][[šÚ[™Ó]™[Bˆ›Ü›X[^™U[šÚ[™Ó]™[
+Ü[ÛœÏË[šÚ[™Ó]™[
+BˆÏÈ›Ü›X[^™U[šÚ[™Ó]™[
+ÜÐÛÛ™šYÏË™Y˜][ÏË[šÚ[™Ó]™[
+BˆÏÈÙ]Y˜][[šÚ[™Ó]™[
+
+BˆËÈÙ]Y˜][[Ù[œ›ÛHÛÜšÜÜXÙHÛÛ™šYÈ
+\ÙYÚ[ˆ›ÈÙ\ÜÚ[Û‹\ÜXÚYšXÈ[Ù[\ÈÙ]
+BˆÛÛœÝY˜][[Ù[HÜÐÛÛ™šYÏË™Y˜][ÏË›[Ù[ˆËÈÙ]Y˜][[˜X›YÛÝ\˜Ù\Èœ›ÛHÛÜšÜÜXÙHÛÛ™šYÂˆÛÛœÝY˜][[˜X›YÛÝ\˜ÙTÛYÜÈHÜ[ÛœÏË™[˜X›YÛÝ\˜ÙTÛYÜÈÏÈÜÐÛÛ™šYÏË™Y˜][ÏË™[˜X›YÛÝ\˜ÙTÛYÜÂ‚ˆËÈ™\ÛÛ™H[Ù[Y\ˆ[È
+	Ù˜\Ý	ÈÈ	ÙY˜][	ÊHÈXÝX[[Ù[QË‚ˆËÈY]ÜÝ™\ˆ\Ù\ÈY\ˆ[È[œÝXYÙˆ\™ÛÙY[›ÜXÈ[Ù[˜[Y\ÂˆËÈÛÈHšYÚ[Ù[\ÈÙ[XÝY™YØ\™\ÜÈÙˆHXÝ]™HH›ÝšY\‹‚ˆ]™\ÛÛ™Y[Ù[Ü[ÛˆHÜ[ÛœÏË›[Ù[Y˜][[Ù[ˆYˆ
+™\ÛÛ™Y[Ù[Ü[ÛˆOOH	Ù˜\Ý	È™\ÛÛ™Y[Ù[Ü[ÛˆOOH	ÙY˜][	ÊHÂˆÛÛœÝY\ÛÛ›™XÝ[ÛˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠˆÜ[ÛœÏË›PÛÛ›™XÝ[Û‹ˆÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆ
+BˆYˆ
+Y\ÛÛ›™XÝ[ÛŠHÂˆ™\ÛÛ™Y[Ù[Ü[ÛˆH™\ÛÛ™Y[Ù[Ü[ÛˆOOH	Ù˜\Ý	ÂˆÈ
+Ù]Z[šS[Ù[
+Y\ÛÛ›™XÝ[ÛŠHÏÈY\ÛÛ›™XÝ[Û‹™Y˜][[Ù[ÏÈY˜][[Ù[
+Bˆˆ
+Y\ÛÛ›™XÝ[Û‹™Y˜][[Ù[ÏÈY˜][[Ù[
+BˆH[ÙHÂˆ™\ÛÛ™Y[Ù[Ü[ÛˆHY˜][[Ù[ˆBˆB‚ˆËÈ™\ÛÛ™H˜XÚÙ[™\™Ù]X\›H›Üˆœ˜[˜Ú[™ÈÛXÞHÚXÚÜË‚ˆÛÛœÝ\™Ù]˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆÜ[ÛœÏË›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆ™\ÛÛ™Y[Ù[Ü[Û‹ˆJBˆÛÛœÝ\™Ù]›ÝšY\•\HH\™Ù]˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛËœ›ÝšY\•\BˆÏÈ
+\™Ù]˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH	ÜIÈÈ	ÜIÈˆ	Ø[›ÜXÉÊBˆÛÛœÝ\™Ù]P]]›ÝšY\ˆH\™Ù]˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛËœP]]›ÝšY\‚‚ˆËÈ™\ÛÛ™HÛÜšÚ[™È\™XÝÜžHœ›ÛHÜ[ÛœÎ‚ˆËÈH	Ý\Ù\—ÙY˜][	ÈÜˆ[™Yš[™Yˆ\ÙHÛÜšÜÜXÙIÜÈÛÛ™šYÝ\™YY˜][ˆËÈH	Û›Û™IÎˆ›ÈÛÜšÚ[™È\™XÝÜžH
+[\HÝš[™ÈYX[œÈÙ\ÜÚ[Ûˆ›Û\ˆÛ›JBˆËÈHXœÛÛ]H]ˆ\ÙH\ËZ\Âˆ]™\ÛÛ™YÛÜšÚ[™Ñ\ŽˆÝš[™È[™Yš[™YˆYˆ
+Ü[ÛœÏËÛÜšÚ[™Ñ\™XÝÜžHOOH	Û›Û™IÊHÂˆ™\ÛÛ™YÛÜšÚ[™Ñ\ˆH[™Yš[™YËÈ›ÈÛÜšÚ[™È\™XÝÜžBˆH[ÙHYˆ
+Ü[ÛœÏËÛÜšÚ[™Ñ\™XÝÜžHOOH	Ý\Ù\—ÙY˜][	ÈÜ[ÛœÏËÛÜšÚ[™Ñ\™XÝÜžHOOH[™Yš[™Y
+HÂˆ™\ÛÛ™YÛÜšÚ[™Ñ\ˆH\Ù\‘Y˜][ÛÜšÚ[™Ñ\‚ˆH[ÙHÂˆ™\ÛÛ™YÛÜšÚ[™Ñ\ˆHÜ[ÛœËÛÜšÚ[™Ñ\™XÝÜžBˆB‚ˆËÈ˜[Y]Hœ˜[˜Ú™\]Y\Ý\Yœ›ÛÛÈœ˜[˜ÚY]Y]H\ÈÛ›HÙ]›Üˆ˜[Yœ˜[˜Ú\Ë‚ˆËÈ\È™]™[ÈÜ™X][™ÈÙ\ÜÚ[ÛœÈ]ÛZ[HÈ™Hœ˜[˜ÚY]Û‰Ý]™HÛÜYY\ÝÜžK‚ˆ]˜[Y]Yœ˜[˜ÚˆÂˆÛÝ\˜ÙTÙ\ÜÚ[Û’YˆÝš[™ÂˆÛÝ\˜ÙSY\ÜØYÙRYˆÝš[™ÂˆÛÝ\˜ÙTÙ\ÜÚ[ÛŽˆÝÜ™YÙ\ÜÚ[Û‚ˆœ˜[˜ÚYˆ[X™\‚ˆœ˜[˜ÚÛÛ^Ý˜]YÞNˆ	ÜÙËY›ÜšÉÈ	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰Âˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YÎˆÝš[™Âˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ÎˆÝš[™Âˆœ˜[˜Úœ›ÛTÙÐÝÙÎˆÝš[™Âˆœ˜[˜Úœ›ÛTÙÕ\›’YÎˆÝš[™ÂˆÛÝ\˜ÙT›ÝšY\Îˆ	Ø[›ÜXÉÈ	ÜIÂˆH[™Yš[™Y‚ˆYˆ
+Ü[ÛœÏË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YÜ[ÛœÏË˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+HÂˆYˆ
+[Ü[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Y[Ü[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆZ\ÜÚ[™Èœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YÜˆœ˜[˜Úœ›ÛSY\ÜØYÙRY	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆJBˆ›ÝÈ™]È\œ›ÜŠ	Ò[˜[Yœ˜[˜Ú™\]Y\Ýˆ›Ýœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Y[™œ˜[˜Úœ›ÛSY\ÜØYÙRY\™H™\]Z\™Y	ÊBˆB‚ˆÛÛœÝÛÝ\˜ÙSX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ü[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Y
+BˆYˆ
+ÛÝ\˜ÙSX[˜YÙY
+HÂˆYˆ
+ÛÝ\˜ÙSX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]OOHÛÜšÜÜXÙT›ÛÝ]
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆÛÝ\˜ÙHÙ\ÜÚ[Ûˆ™[Û™ÜÈÈY™™\™[ÛÜšÜÜXÙIËÂˆÛÜšÜÜXÙRYˆ\™Ù]ÛÜšÜÜXÙT›ÛÝ]ˆÛÜšÜÜXÙT›ÛÝ]ˆÛÝ\˜ÙUÛÜšÜÜXÙT›ÛÝ]ˆÛÝ\˜ÙSX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆJBˆ›ÝÈ™]È\œ›ÜŠ	Ò[˜[Yœ˜[˜Ú™\]Y\ÝˆÛÝ\˜ÙHÙ\ÜÚ[Ûˆ™[Û™ÜÈÈHY™™\™[ÛÜšÜÜXÙIÊBˆB‚ˆËÈ›\ÚÛÝ\˜ÙHÙ\ÜÚ[ÛˆÈ\ÚÈÈ[œÝ\™H]\ÝY\ÜØYÙH\Ý\È]˜Z[X›H›Üˆœ˜[˜ÚÛÜK‚ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠÛÝ\˜ÙSX[˜YÙY
+Bˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+ÛÝ\˜ÙSX[˜YÙYšY
+BˆB‚ˆÛÛœÝÛÝ\˜ÙTÙ\ÜÚ[ÛˆHØYÝÜ™YÙ\ÜÚ[ÛŠÛÜšÜÜXÙT›ÛÝ]Ü[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Y
+BˆYˆ
+\ÛÝ\˜ÙTÙ\ÜÚ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆÛÝ\˜ÙHÙ\ÜÚ[Ûˆ›Ý›Ý[™Ûˆ\ÚÉËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆJBˆ›ÝÈ™]È\œ›ÜŠ[˜[Yœ˜[˜Ú™\]Y\ÝˆÛÝ\˜ÙHÙ\ÜÚ[Ûˆ	ÛÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YH›Ý›Ý[™
+BˆB‚ˆÛÛœÝÛÝ\˜ÙP˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆÛÝ\˜ÙSX[˜YÙYË›PÛÛ›™XÝ[ÛˆÛÝ\˜ÙTÙ\ÜÚ[Û‹›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆÛÝ\˜ÙSX[˜YÙYË›[Ù[ÛÝ\˜ÙTÙ\ÜÚ[Û‹›[Ù[ˆJBˆÛÛœÝÛÝ\˜ÙT›ÝšY\•\HHÛÝ\˜ÙP˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛËœ›ÝšY\•\BˆÏÈ
+ÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH	ÜIÈÈ	ÜIÈˆ	Ø[›ÜXÉÊBˆÛÛœÝÛÝ\˜ÙTP]]›ÝšY\ˆHÛÝ\˜ÙP˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛËœP]]›ÝšY\‚‚ˆÛÛœÝ›ÝšY\“Z\ÛX]ÚHÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH\™Ù]˜XÚÙ[™ÛÛ^œ›ÝšY\‚ˆÛÛœÝ›ÝšY\•\SZ\ÛX]ÚHÛÝ\˜ÙT›ÝšY\•\HOOH\™Ù]›ÝšY\•\BˆÛÛœÝP]]›ÝšY\“Z\ÛX]ÚBˆÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH	ÜIÈ	‰ˆÛÝ\˜ÙTP]]›ÝšY\ˆOOH\™Ù]P]]›ÝšY\‚‚ˆYˆ
+›ÝšY\“Z\ÛX]Ú›ÝšY\•\SZ\ÛX]ÚP]]›ÝšY\“Z\ÛX]Ú
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆÛÝ\˜ÙH[™\™Ù]›ÝšY\œÈ\™H[˜ÛÛ\]X›IËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÛÝ\˜ÙT›ÝšY\ŽˆÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆÛÝ\˜ÙT›ÝšY\•\KˆÛÝ\˜ÙTP]]›ÝšY\‹ˆ\™Ù]›ÝšY\Žˆ\™Ù]˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆ\™Ù]›ÝšY\•\Kˆ\™Ù]P]]›ÝšY\‹ˆJBˆ›ÝÈ™]È\œ›ÜŠ	Ðœ˜[˜Ú[™È\ÈÛ›HÝ\ÜYÚ][ˆHØ[YH›ÝšY\‹Ø˜XÚÙ[™ˆÝÚ]Ú\È[™[ÛÛ›™XÝ[Ûˆ[™žHYØZ[‹‰ÊBˆB‚ˆÛÛœÝœ˜[˜ÚYHÛÝ\˜ÙTÙ\ÜÚ[Û‹›Y\ÜØYÙ\Ë™š[™[™^
+HOˆKšYOOHÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+BˆYˆ
+œ˜[˜ÚYOOHLJHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆY\ÜØYÙH›Ý›Ý[™[ˆÛÝ\˜ÙHÙ\ÜÚ[Û‰ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆJBˆ›ÝÈ™]È\œ›ÜŠ[˜[Yœ˜[˜Ú™\]Y\ÝˆY\ÜØYÙH	ÛÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYH›Ý›Ý[™[ˆÛÝ\˜ÙHÙ\ÜÚ[Û˜
+BˆB‚ˆËÈ™]Èœ˜[˜Ú\È[Ø^\È\ÙHÝšXÝ›ÝšY\‹[]™[ÑÈ›ÜšÈÙ[X[XÜË‚ˆËÈÙYYY[ÙH™[XZ[œÈÛ›H›ÜˆYØXÞHÙ\ÜÚ[ÛœÈÜ™X]Y™Y›Ü™HÝšXÝ›ÜšÈØ\È[™›Ü˜ÙY‚ˆÛÛœÝœ˜[˜ÚÛÛ^Ý˜]YÞNˆ	ÜÙËY›ÜšÉÈ	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰ÈH	ÜÙËY›ÜšÉÂ‚ˆÛÛœÝœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YHœ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÂˆÈ
+ÛÝ\˜ÙSX[˜YÙYËœÙÔÙ\ÜÚ[Û’YÛÝ\˜ÙTÙ\ÜÚ[Û‹œÙÔÙ\ÜÚ[Û’Y
+Bˆˆ[™Yš[™YˆÛÛœÝœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]Hœ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÂˆÈÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]Ü[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Y
+Bˆˆ[™Yš[™YˆËÈØ\\™H\™[	ÜÈÙÐÝÙÛÈHÚ[ÑÈÝXœ›ØÙ\ÜÈØ[ˆš[™H\™[	ÜÂˆËÈÙ\ÜÚ[Ûˆš[H
+ÝÜ™Y[™\ˆ‹Ë˜Û]YKÜ›Ú™XÝËÞØÝÙZ\ÚKÊK‚ˆÛÛœÝœ˜[˜Úœ›ÛTÙÐÝÙHœ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÂˆÈ
+ÛÝ\˜ÙSX[˜YÙYËœÙÐÝÙÛÝ\˜ÙTÙ\ÜÚ[Û‹œÙÐÝÙ
+Bˆˆ[™Yš[™Y‚ˆËÈ›ÝšY\‹[˜]]™Hœ˜[˜Ú[˜ÚÜˆ]œ˜[˜ÚÚ[‚ˆËÈHÛ]YNˆ\ÜÚ\Ý[Y\ÜØYÙHURQ
+™\Ý[YTÙ\ÜÚ[Û]
+K]Û›HÚ[ˆ[˜ÚÜˆ[™XYÙBˆËÈX]Ú\ÈH\™[ÑÈÙ\ÜÚ[Ûˆ™Z[™È™\Ý[YY‚ˆËÈHNˆÙ\ÜÚ[Ûˆ[žHQØYYœ›ÛHÚYXØ\ˆ
+K]\›‹X[˜ÚÜœËšœÛÛŠBˆÛÛœÝœ˜[˜ÚY\ÜØYÙHHÛÝ\˜ÙTÙ\ÜÚ[Û‹›Y\ÜØYÙ\ÖØœ˜[˜ÚYBˆ]œ˜[˜Úœ›ÛTÙÕ\›’YˆÝš[™È[™Yš[™YˆYˆ
+œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÊHÂˆYˆ
+ÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH	ÜIÊHÂˆYˆ
+œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]
+HÂˆœ˜[˜Úœ›ÛTÙÕ\›’YH]ØZ]Ù]U\›[˜ÚÜŠœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]Ü[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+BˆYˆ
+Xœ˜[˜Úœ›ÛTÙÕ\›’Y
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÔHœ˜[˜Ú[˜ÚÜˆZ\ÜÚ[™Îˆ˜[[™È˜XÚÈÈ[Z\ÝÜžH›ÜšÈ›Üˆ\Èœ˜[˜Ú	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆJBˆBˆBˆH[ÙHYˆ
+ÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\ˆOOH	Ø[›ÜXÉÊHÂˆYˆ
+œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]	‰ˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Y
+HÂˆÛÛœÝ[˜ÚÜˆH]ØZ]Ù]Û]YU\›[˜ÚÜŠœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]Ü[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+BˆYˆ
+X[˜ÚÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÐÛ]YHœ˜[˜Ú[˜ÚÜˆZ\ÜÚ[™Îˆ˜[[™È˜XÚÈÈ[Z\ÝÜžH›ÜšÈ›Üˆ\Èœ˜[˜Ú	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆJBˆH[ÙHYˆ
+X[˜ÚÜ‹œÙÓY\ÜØYÙU]ZYZ\ÐÛ]YSY\ÜØYÙU]ZY
+[˜ÚÜ‹œÙÓY\ÜØYÙU]ZY
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÐÛ]YHœ˜[˜Ú[˜ÚÜˆX[›Ü›YYˆ˜[[™È˜XÚÈÈ[Z\ÝÜžH›ÜšÈ›Üˆ\Èœ˜[˜Ú	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆ[˜ÚÜ”ÙÔÙ\ÜÚ[Û’Yˆ[˜ÚÜ‹œÙÔÙ\ÜÚ[Û’YˆJBˆH[ÙHYˆ
+[˜ÚÜ‹œÙÔÙ\ÜÚ[Û’YOOHœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Y
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÐÛ]YHœ˜[˜Ú[˜ÚÜˆ[™XYÙHZ\ÛX]Úˆ˜[[™È˜XÚÈÈ[Z\ÝÜžH›ÜšÈ›Üˆ\Èœ˜[˜Ú	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆ[˜ÚÜ”ÙÔÙ\ÜÚ[Û’Yˆ[˜ÚÜ‹œÙÔÙ\ÜÚ[Û’Yˆ\™[ÙÔÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YˆJBˆH[ÙHÂˆœ˜[˜Úœ›ÛTÙÕ\›’YH[˜ÚÜ‹œÙÓY\ÜØYÙU]ZYˆBˆBˆH[ÙHÂˆœ˜[˜Úœ›ÛTÙÕ\›’YHœ˜[˜ÚY\ÜØYÙOË\›’YˆBˆB‚ˆYˆ
+œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈ	‰ˆXœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Y
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜Ú˜[Y][Ûˆ˜Z[YˆÙËY›ÜšÈ™\]Z\™\È\™[ÑÈÙ\ÜÚ[ÛˆQ	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÛÝ\˜ÙT›ÝšY\ŽˆÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆ\™Ù]›ÝšY\Žˆ\™Ù]˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆJBˆ›ÝÈ™]È\œ›ÜŠ	ÐØ[››ÝÜ™X]Hœ˜[˜ÚY]ˆ\™[Ù\ÜÚ[ÛˆÑÈÛÛ^\È›Ý[š]X[^™YˆÙ[™Û™HY\ÜØYÙH[ˆH\™[Ù\ÜÚ[Ûˆ[™žHYØZ[‹‰ÊBˆB‚ˆ˜[Y]Yœ˜[˜ÚHÂˆÛÝ\˜ÙTÙ\ÜÚ[Û’YˆÜ[ÛœË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û’YˆÛÝ\˜ÙSY\ÜØYÙRYˆÜ[ÛœË˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆÛÝ\˜ÙTÙ\ÜÚ[Û‹ˆœ˜[˜ÚYˆœ˜[˜ÚÛÛ^Ý˜]YÞKˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆœ˜[˜Úœ›ÛTÙÐÝÙˆœ˜[˜Úœ›ÛTÙÕ\›’YˆÛÝ\˜ÙT›ÝšY\ŽˆÛÝ\˜ÙP˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ðœ˜[˜Ú˜[Y][ÛˆÝXØÙYYY	ËÂˆÛÜšÜÜXÙRYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆ˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆ˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙSY\ÜØYÙRYˆœ˜[˜ÚÛÛ^Ý˜]YÞNˆ˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚÛÛ^Ý˜]YÞKˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YˆH]˜[Y]Yœ˜[˜Ú˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YˆÛÜYYY\ÜØYÙPÛÝ[ˆ˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚY
+ÈKˆJBˆB‚ˆËÈ\ÙHÝÜ˜YÙH^Y\ˆÈÜ™X]H[™\œÚ\ÝHÙ\ÜÚ[Û‚ˆÛÛœÝÝÜ™YÙ\ÜÚ[ÛˆH]ØZ]Ü™X]TÝÜ™YÙ\ÜÚ[ÛŠÛÜšÜÜXÙT›ÛÝ]Âˆ˜[YNˆÜ[ÛœÏË›˜[YKˆ\›Z\ÜÚ[Û“[ÙNˆY˜][\›Z\ÜÚ[Û“[ÙKˆÛÜšÚ[™Ñ\™XÝÜžNˆ™\ÛÛ™YÛÜšÚ[™Ñ\‹ˆY[ŽˆÜ[ÛœÏËšY[‹ˆÙ\ÜÚ[Û”Ý]\ÎˆÜ[ÛœÏËœÙ\ÜÚ[Û”Ý]\ËˆX™[ÎˆÜ[ÛœÏË›X™[Ëˆ\Ñ›YÙÙYˆÜ[ÛœÏËš\Ñ›YÙÙYˆJB‚ˆËÈœ˜[˜ÚˆÛÜHY\ÜØYÙ\Èœ›ÛHÛÝ\˜ÙHÙ\ÜÚ[Ûˆ\È[™[˜ÛY[™ÈHœ˜[˜ÚÚ[ˆYˆ
+˜[Y]Yœ˜[˜Ú
+HÂˆÛÛœÝœ˜[˜ÚYÝÜ™YHØYÝÜ™YÙ\ÜÚ[ÛŠÛÜšÜÜXÙT›ÛÝ]ÝÜ™YÙ\ÜÚ[Û‹šY
+BˆYˆ
+Xœ˜[˜ÚYÝÜ™Y
+HÂˆ›ÝÈ™]È\œ›ÜŠ˜Z[YÈØY™]ÛHÜ™X]YÙ\ÜÚ[Ûˆ	ÜÝÜ™YÙ\ÜÚ[Û‹šYH›Üˆœ˜[˜ÚÛÜX
+BˆB‚ˆÛÛœÝÛÝ\˜ÙSY\ÜØYÙ\ÈH˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û‹›Y\ÜØYÙ\ËœÛXÙJ˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚY
+ÈJB‚ˆËÈ™K[X\[X™YY]ÎˆÛÝ\˜ÙHY\ÜØYÙ\ÈÙ\™HØYYÚ]^[™Ù\ÜÚ[Û”]
+ÛÝ\˜ÙQ\ŠKˆËÈÛÈ^HÛÛZ[ˆXœÛÛ]H]ÈÈH
+œÛÝ\˜ÙJˆÙ\ÜÚ[Ûˆ\™XÝÜžKˆÚ[ˆØ]™YÈBˆËÈœ˜[˜ÚÙ\ÜÚ[Û‹XZÙTÙ\ÜÚ[Û”]ÜX›H\Ù\ÈH
+˜œ˜[˜Ú
+ˆ\ˆ8 %ÚXÚÛÛ‰ÝX]Ú‚ˆËÈš^ˆ™\XÙHÛÝ\˜ÙH\ˆ]ÈÚ]œ˜[˜Ú\ˆ]ÈÛÈÚÙ[š^˜][ÛˆÛÜšÜÈÛˆØ]™K‚ˆÛÛœÝÛÝ\˜ÙQ\ˆH›Ü›X[^™T]
+Ù]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û’Y
+JBˆÛÛœÝœ˜[˜Ú\ˆH›Ü›X[^™T]
+Ù]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]ÝÜ™YÙ\ÜÚ[Û‹šY
+JBˆYˆ
+ÛÝ\˜ÙQ\ˆOOHœ˜[˜Ú\ŠHÂˆœ˜[˜ÚYÝÜ™Y›Y\ÜØYÙ\ÈHÛÝ\˜ÙSY\ÜØYÙ\Ë›X\
+HOˆÂˆÛÛœÝœÛÛˆH”ÓÓ‹œÝš[™ÚYžJJBˆYˆ
+ZœÛÛ‹š[˜ÛY\ÊÛÝ\˜ÙQ\ŠJH™]\›ˆBˆ™]\›ˆ”ÓÓ‹œ\œÙJœÛÛ‹œ™\XÙP[
+ÛÝ\˜ÙQ\‹œ˜[˜Ú\ŠJH\ÈÝÜ™YY\ÜØYÙBˆJBˆH[ÙHÂˆœ˜[˜ÚYÝÜ™Y›Y\ÜØYÙ\ÈHÛÝ\˜ÙSY\ÜØYÙ\ÂˆB‚ˆœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛSY\ÜØYÙRYH˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙSY\ÜØYÙRYˆYˆ
+˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÊHÂˆœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YH˜[Y]Yœ˜[˜Ú˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]H˜[Y]Yœ˜[˜Ú˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÐÝÙH˜[Y]Yœ˜[˜Ú˜œ˜[˜Úœ›ÛTÙÐÝÙˆœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÕ\›’YH˜[Y]Yœ˜[˜Ú˜œ˜[˜Úœ›ÛTÙÕ\›’YˆH[ÙHÂˆ[]Hœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆ[]Hœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆ[]Hœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÐÝÙˆ[]Hœ˜[˜ÚYÝÜ™Y˜œ˜[˜Úœ›ÛTÙÕ\›’YˆB‚ˆËÈÛÛ™\œØ][Û‹Xœ˜[˜ÚÚ\™YÝÛ™\œÚ\ˆHÚ[œ›ÛHHX[˜YÙY]ÛÜšÝ™YBˆËÈÙ\ÜÚ[ÛˆÚ\™\ÈHØ[YHX[˜YÙYÛÜšÝ™YH
+ŒHÙ\È›ÝÛZ[Hš[\Þ\Ý[BˆËÈ\ÛÛ][Ûˆ™]ÙY[ˆ›ÝšY\‹[˜]]™HÛÛ™\œØ][Ûˆœ˜[˜Ú\ÊKˆ[š\š]BˆËÈ\™[	ÜÈÚXÚÛÝ]Y]Y]H[™ÛÜšÝ™YHÛÜšÚ[™È\™XÝÜžHÈÙÈÝÙ‚ˆYˆ
+˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û‹˜ÚXÚÛÝ]
+HÂˆÛÛœÝ\™[ÚXÚÛÝ]H˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û‹˜ÚXÚÛÝ]ˆœ˜[˜ÚYÝÜ™Y˜ÚXÚÛÝ]H\™[ÚXÚÛÝ]ˆœ˜[˜ÚYÝÜ™YÛÜšÚ[™Ñ\™XÝÜžHH\™[ÚXÚÛÝ]˜ÚXÚÛÝ]]ˆœ˜[˜ÚYÝÜ™YœÙÐÝÙH\™[ÚXÚÛÝ]˜ÚXÚÛÝ]]ˆB‚ˆ]ØZ]Ø]™TÝÜ™YÙ\ÜÚ[ÛŠœ˜[˜ÚYÝÜ™Y
+B‚ˆËÈ›ÜYØ]HHH\›‹X[˜ÚÜˆÚYXØ\ˆ[ÈHœ˜[˜ÚÛÈHÝÛœÝ™X[BˆËÈœ˜[˜ÚØ[ˆÝ[™\ÛÛ™H[˜ÚÜœÈ›ÜˆY\ÜØYÙ\ÈÛÜYY\™Hœ›ÛHBˆËÈÛÝ\˜ÙKˆÚ]Ý]\ÈÝ\œ˜[˜Ú[Ù‹Xœ˜[˜ÚÚ[[H˜[È˜XÚÈÂˆËÈ[Z\ÝÜžH›ÜšÈ8 %ÙYHØ]KXYÙ[Ë[ÜÜÈÍÎ‹‚ˆYˆ
+ˆ˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈ	‰‚ˆ˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙT›ÝšY\ˆOOH	ÜIÂˆ
+HÂˆžHÂˆ]ØZ]ÛÜTU\›[˜ÚÜœÑ›Üœ˜[˜Ú
+ˆÛÝ\˜ÙQ\‹ˆœ˜[˜Ú\‹ˆœ˜[˜ÚYÝÜ™Y›Y\ÜØYÙ\Ë›X\
+
+JHOˆKšY
+Kˆ
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ñ˜Z[YÈÛÜHH\›‹X[˜ÚÜœÈÚYXØ\ˆÈœ˜[˜Ú	ËÂˆ\œ‹ˆÛÝ\˜ÙTÙ\ÜÚ[Û’Yˆ˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û’Yˆœ˜[˜ÚÙ\ÜÚ[Û’YˆÝÜ™YÙ\ÜÚ[Û‹šYˆJBˆBˆBˆB‚ˆËÈ™\ÛÛ™HÛÛ›™XÝ[Û‹Ü›ÝšY\‹Ø]]Û[Ù[\Ú[™ÈH›ÝšY\‹XYÛ›ÜÝXÈ˜XÚÙ[™™\ÛÛ™\‹‚ˆËÈ™]\ÙH™XÛÛ\]Y\™Ù]ÛÛ^ÛÈœ˜[˜Ú˜[Y][Ûˆ[™Ù\ÜÚ[ÛˆÛÛœÝXÝ[ÛˆÚ\™HHØ[YH\™Ù]Y[]K‚ˆÛÛœÝ™\ÛÛ™YÛÛ^H\™Ù]˜XÚÙ[™ÛÛ^ˆÛÛœÝ™\ÛÛ™Y[Ù[H™\ÛÛ™YÛÛ^œ™\ÛÛ™Y[Ù[‚ˆËÈÙÈZ[šHYÙ[Ù\ÜÚ[ÛˆÜ™X][Û‚ˆYˆ
+Ü[ÛœÏËœÞ\Ý[T›Û\™\Ù]OOH	ÛZ[šIÈÜ[ÛœÏË›[Ù[
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê<'é%ˆÜ™X][™ÈZ[šHYÙ[Ù\ÜÚ[ÛŽˆ[Ù[IÜ™\ÛÛ™Y[Ù[KÞ\Ý[T›Û\™\Ù]IÛÜ[ÛœÏËœÞ\Ý[T›Û\™\Ù]X
+BˆB‚ˆÛÛœÝ\Ðœ˜[˜ÚHH]˜[Y]Yœ˜[˜Ú‚ˆÛÛœÝX[˜YÙYHÜ™X]SX[˜YÙYÙ\ÜÚ[ÛŠÝÜ™YÙ\ÜÚ[Û‹ÛÜšÜÜXÙKÂˆ\›Z\ÜÚ[Û“[ÙNˆY˜][\›Z\ÜÚ[Û“[ÙKˆÛÜšÚ[™Ñ\™XÝÜžNˆ™\ÛÛ™YÛÜšÚ[™Ñ\‹ˆ[Ù[ˆ™\ÛÛ™Y[Ù[ˆPÛÛ›™XÝ[ÛŽˆÜ[ÛœÏË›PÛÛ›™XÝ[Û‹ˆ[šÚ[™Ó]™[ˆY˜][[šÚ[™Ó]™[ˆÞ\Ý[T›Û\™\Ù]ˆÜ[ÛœÏËœÞ\Ý[T›Û\™\Ù]ˆ[˜X›YÛÝ\˜ÙTÛYÜÎˆY˜][[˜X›YÛÝ\˜ÙTÛYÜËˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆ˜[Y]Yœ˜[˜ÚËœÛÝ\˜ÙSY\ÜØYÙRYˆœ˜[˜ÚÛÛ^Ý˜]YÞNˆ˜[Y]Yœ˜[˜ÚË˜œ˜[˜ÚÛÛ^Ý˜]YÞKˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆ˜[Y]Yœ˜[˜ÚË˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆ˜[Y]Yœ˜[˜ÚË˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆœ˜[˜Úœ›ÛTÙÐÝÙˆ˜[Y]Yœ˜[˜ÚË˜œ˜[˜Úœ›ÛTÙÐÝÙˆœ˜[˜Úœ›ÛTÙÕ\›’Yˆ˜[Y]Yœ˜[˜ÚË˜œ˜[˜Úœ›ÛTÙÕ\›’Yˆœ˜[˜ÚÙYY\YYˆ˜[Y]Yœ˜[˜ÚÈ˜[Y]Yœ˜[˜Ú˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈˆ[™Yš[™YˆY\ÜØYÙ\ÓØYYˆZ\Ðœ˜[˜ÚËÈœ˜[˜ÚYÙ\ÜÚ[ÛœÎˆ^žK[ØYY\ÜØYÙ\Èœ›ÛH”ÓÓ“ˆJB‚ˆËÈXYÙ\›HØYY\ÜØYÙ\È›Üˆœ˜[˜ÚYÙ\ÜÚ[ÛœÈÛÈH™[™\™\ˆÙ]ÈH[ˆËÈÛÛ™\œØ][Ûˆ[[YYX][H
+™YYY›ÜˆØÜ›Û]ËX›ÝÛHÛˆ[™[Ü[ŠBˆYˆ
+\Ðœ˜[˜Ú
+HÂˆ]ØZ]\Ë™[œÝ\™SY\ÜØYÙ\ÓØYY
+X[˜YÙY
+B‚ˆÛÛœÝ™\]Z\™\Ðœ˜[˜Ú™Y›YÚHX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÂˆYˆ
+™\]Z\™\Ðœ˜[˜Ú™Y›YÚ
+HÂˆËÈ[™›Ü˜ÙHœ˜[˜ÚÛÜœ™XÝ™\ÜÈ]Ü™X][Ûˆ[YK‚ˆËÈHœ˜[˜Ú\ÈÛ›H˜[YYˆ˜XÚÙ[™ÛÛ^Ø[ˆ™H\ÝX›\ÚY›ÝËˆËÈ›ÝY™\œ™YÈHš\œÝ\Ù\ˆY\ÜØYÙK‚ˆžHÂˆ]ØZ]\Ë™Ù]ÜÜ™X]PYÙ[
+X[˜YÙY
+Bˆ]ØZ]X[˜YÙY˜YÙ[K™[œÝ\™Pœ˜[˜Ú™XYJ
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ðœ˜[˜ÚÜ™X][Ûˆ˜Z[Y\š[™È˜XÚÙ[™™Y›YÚ[™ÚZÙIËÂˆÛÜšÜÜXÙRYˆÙ\ÜÚ[Û’YˆÝÜ™YÙ\ÜÚ[Û‹šYˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û’Yˆ˜[Y]Yœ˜[˜ÚËœÛÝ\˜ÙTÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆ˜[Y]Yœ˜[˜ÚËœÛÝ\˜ÙSY\ÜØYÙRYˆœ˜[˜ÚÛÛ^Ý˜]YÞNˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞKˆ\œ›ÜŽˆ\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠKˆJB‚ˆ]ØZ]›Û˜XÚÑ˜Z[Yœ˜[˜ÚÜ™X][ÛŠÂˆX[˜YÙYˆÛÜšÜÜXÙT›ÛÝ]ˆÙ\ÜÚ[Û’YˆÝÜ™YÙ\ÜÚ[Û‹šYˆ[]Qœ›ÛT[[YTÙ\ÜÚ[ÛœÎˆ
+Y
+HOˆÂˆÛÛœÝHH\ËœÙ\ÜÚ[ÛœË™Ù]
+Y
+BˆYˆ
+OË˜]]Ô™]žU[Y\ŠHÂˆÛX\•[Y[Ý]
+K˜]]Ô™]žU[Y\ŠBˆK˜]]Ô™]žU[Y\ˆH[™Yš[™YˆBˆYˆ
+JHK˜]]Ô™]žT[™[™ÈH[™Yš[™Yˆ\ËœÙ\ÜÚ[ÛœË™[]JY
+BˆKˆ[]TÝÜ™YÙ\ÜÚ[Û‹ˆJB‚ˆ›ÝÈ™]È\œ›ÜŠˆÛÝ[›ÝÜ™X]Hœ˜[˜Úˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠ_Xˆ
+BˆBˆBˆB‚ˆËÈÛÛ™\œØ][Û‹Xœ˜[˜ÚÚ\™YÝÛ™\œÚ\ˆZ\œ›ÜˆH\™[	ÜÈÚXÚÛÝ]ÛÂˆËÈH[‹[Y[[ÜžHÚ[[™™YÚ\Ý\ˆ]\È[ˆY][Û˜[ÝÛ™\ˆÙˆHÚ\™YˆËÈX[˜YÙYÛÜšÝ™YHÛÈ™[[Ý˜[\È›ØÚÙYÚ[H\ÈÝÛ™\ˆ™[XZ[œË‚ˆYˆ
+˜[Y]Yœ˜[˜ÚËœÛÝ\˜ÙTÙ\ÜÚ[Û‹˜ÚXÚÛÝ]
+HÂˆÛÛœÝ\™[ÚXÚÛÝ]H˜[Y]Yœ˜[˜ÚœÛÝ\˜ÙTÙ\ÜÚ[Û‹˜ÚXÚÛÝ]ˆX[˜YÙY˜ÚXÚÛÝ]H\™[ÚXÚÛÝ]ˆX[˜YÙYÛÜšÚ[™Ñ\™XÝÜžHH\™[ÚXÚÛÝ]˜ÚXÚÛÝ]]ˆX[˜YÙYœÙÐÝÙH\™[ÚXÚÛÝ]˜ÚXÚÛÝ]]ˆYˆ
+\™[ÚXÚÛÝ]›[ÙHOOH	ÛX[˜YÙY]ÛÜšÝ™YIÈ	‰ˆ\™[ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRY
+HÂˆžHÂˆ\Ë™Ù]Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ë˜YÝÛ™\Š\™[ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRYÝÜ™YÙ\ÜÚ[Û‹šY
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ñ˜Z[YÈ™YÚ\Ý\ˆÛÛ™\œØ][Û‹Xœ˜[˜ÚÛÜšÝ™YHÝÛ™\‰ËÂˆÙ\ÜÚ[Û’YˆÝÜ™YÙ\ÜÚ[Û‹šYˆX[˜YÙYÛÜšÝ™YRYˆ\™[ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRYˆ\œ‹ˆJBˆBˆBˆB‚ˆËÈ[š]X[^™H[ÙK[X[˜YÙ\ˆÝ]H[[YYX][HÈ]›ÚYRKÙ[™›Ü˜Ù[Y[˜XÙ\ÂˆËÈ™Y›Ü™HHYÙ[[œÝ[˜ÙH\È^š[HÜ™X]Y‚ˆÙ]\›Z\ÜÚ[Û“[ÙJÝÜ™YÙ\ÜÚ[Û‹šYX[˜YÙYœ\›Z\ÜÚ[Û“[ÙHÏÈ	Ø\ÚÉËÈÚ[™ÙYžNˆ	Ü™\ÝÜ™IÈJBˆYˆ
+X[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJHÂˆY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJÝÜ™YÙ\ÜÚ[Û‹šYX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJBˆB‚ˆ\ËœÙ\ÜÚ[ÛœËœÙ]
+ÝÜ™YÙ\ÜÚ[Û‹šYX[˜YÙY
+B‚ˆËÈ[š]X[^™HÙ\ÜÚ[ÛˆY]Y]H[ˆ]]ÛX][Û”Þ\Ý[H›ÜˆY™š[™ÂˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[KœÙ][š]X[Ù\ÜÚ[Û“Y]Y]JÝÜ™YÙ\ÜÚ[Û‹šYÂˆ\›Z\ÜÚ[Û“[ÙNˆÝÜ™YÙ\ÜÚ[Û‹œ\›Z\ÜÚ[Û“[ÙKˆX™[ÎˆÝÜ™YÙ\ÜÚ[Û‹›X™[Ëˆ\Ñ›YÙÙYˆÝÜ™YÙ\ÜÚ[Û‹š\Ñ›YÙÙYˆÙ\ÜÚ[Û”Ý]\ÎˆÝÜ™YÙ\ÜÚ[Û‹œÙ\ÜÚ[Û”Ý]\ËˆÙ\ÜÚ[Û“˜[YNˆX[˜YÙY›˜[YKˆJBˆB‚ˆ™]\›ˆX[˜YÙYÔÙ\ÜÚ[ÛŠX[˜YÙY\Ðœ˜[˜ÚÈÈY\ÜØYÙ\ÎˆX[˜YÙY›Y\ÜØYÙ\ÈHˆ[™Yš[™Y
+BˆB‚ˆš]˜]H\Þ[˜È\ÜÜÙSX[˜YÙYYÙ[[[YJX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹™X\ÛÛŽˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝÙ\ÜÚ[Û’YHX[˜YÙYšY‚ˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆžHÂˆYˆ
+X[˜YÙY˜YÙ[™\ÜÜÙQ›Ü”™\Ý\
+HÂˆ]ØZ]X[˜YÙY˜YÙ[™\ÜÜÙQ›Ü”™\Ý\
+
+BˆH[ÙHÂˆX[˜YÙY˜YÙ[™\ÜÜÙJ
+BˆBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\ÜÜÙHYÙ[›Üˆ	ÜÙ\ÜÚ[Û’YH\š[™È	Ü™X\ÛÛŸNˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ\œ›ÜŸX
+BˆBˆB‚ˆYˆ
+X[˜YÙYœÛÛÙ\™\ŠHÂˆžHÂˆ]ØZ]X[˜YÙYœÛÛÙ\™\‹œÝÜ
+
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈÝÜÛÛÙ\™\ˆ›Üˆ	ÜÙ\ÜÚ[Û’YH\š[™È	Ü™X\ÛÛŸNˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ\œ›ÜŸX
+BˆBˆB‚ˆYˆ
+X[˜YÙY›XÜÛÛ
+HÂˆžHÂˆ]ØZ]X[˜YÙY›XÜÛÛ™\ØÛÛ›™XÝ[
+
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\ØÛÛ›™XÝPÔÛÛ›Üˆ	ÜÙ\ÜÚ[Û’YH\š[™È	Ü™X\ÛÛŸNˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ\œ›ÜŸX
+BˆBˆB‚ˆX[˜YÙY˜YÙ[H[ˆX[˜YÙYœÛÛÙ\™\ˆH[™Yš[™YˆX[˜YÙY›XÜÛÛH[™Yš[™YˆX[˜YÙY™[“Ý™\œšY\ÈH[™Yš[™YˆX[˜YÙY˜YÙ[™XYHH[™Yš[™YˆX[˜YÙY˜YÙ[™XYT™\ÛÛ™HH[™Yš[™YˆX[˜YÙY˜˜XÚÙ[™[[YTÚYÛ˜]\™HH[™Yš[™YˆX[˜YÙY˜˜XÚÙ[™™\Ý\ÚYÛ˜]\™HH[™Yš[™Yˆ[œ™YÚ\Ý\”Ù\ÜÚ[Û”ØÛÜYÛÛØ[˜XÚÜÊÙ\ÜÚ[Û’Y
+BˆB‚ˆÊŠ‚ˆ
+ˆ™Yœ™\Ú[ˆ^\Ý[™ÈYÙ[	ÜÈ[[YHÛÛ™šYÈ[ˆXÙHÚ[ˆHÙ\ÜÚ[Û‰ÜÂˆ
+ˆ™\ÛÛ™YÛÛ›™XÝ[ÛˆÚYÛ˜]\™H\ÈšYYœ›ÛHÚ]HYÙ[Ø\ÈÜ™X]Yˆ
+ˆÚ]ˆ›Ë[ÜÈÚ[ˆHYÙ[Ù\Û‰Ý^\ÝÚ[ˆHÚYÛ˜]\™HÝ[ˆ
+ˆX]Ú\ËÜˆÚ[ˆHYÙ[\ÈZY\Ý™X[H
+HØ]H\ÈYÙ[š\Ô›ØÙ\ÜÚ[™Ê
+Xˆ
+ˆ8 %X[˜YÙYš\Ô›ØÙ\ÜÚ[™Ø\È›Ý\ÙY™XØ]\ÙHÙ[™Y\ÜØYÙX›\È]™Y›Ü™Bˆ
+ˆØ[[™ÈÙ]ÜÜ™X]PYÙ[ÚXÚÛÝ[XZÙH]™\žHÙ[™\]™Yœ™\ÚXYˆ
+ˆÛÙJK‚ˆ
+‚ˆ
+ˆÛÛ˜Ý\œ™[˜ÞNˆ\‹\Ù\ÜÚ[ÛˆÙ\šX[^˜][ÛˆšXHYÙ[™Yœ™\ÚØÚÜØˆHÙXÛÛ™ˆ
+ˆØ[\ˆ
+K™ËˆÙ[™Y\ÜØYÙX\œš]š[™ÈZYXÐU‘X\™Yœ™\Ú
+H]ØZ]ÈBˆ
+ˆ[‹Y›YÚ™Yœ™\Ú[ˆ™KY]˜[X]\Èœ›ÛHHÜÝ\™Yœ™\ÚÝ]H8 %ÛÈBˆ
+ˆÝXœÙ\]Y[YÙ[˜Ú]
+
+X\ÈÙ[Û›HY\ˆHÝXœ›ØÙ\ÜÈ\È\YYˆ
+ˆH[[YH\]H
+ÜˆHYÙ[\È™Y[ˆ\ÜÜÙY›Üˆ™XÜ™X][ÛŠK‚ˆ
+‚ˆ
+ˆH[\ˆ\Ý[™ÝZ\Ú\ÈÛÈÚ[™ÈÙˆšY‚ˆ
+ˆH™\Ý\\™\]Z\™Y
+›ÝšY\‹Ø]]ÜÛYËÜP]]›ÝšY\ŠNˆÛÙ\ÈÝ˜ZYÚˆ
+ˆÈ\ÜÜÙH
+È™XÜ™X]H™XØ]\ÙH\]WÜ[[YWØÛÛ™šYØØ[››Ý[Bˆ
+ˆ™K\›Ý]HÜ™Y[X[Ü›ÝšY\ˆÝ]H[ˆH]™HÝXœ›ØÙ\ÜË‚ˆ
+ˆH[‹\XÙHØY™H
+[Ù[Ø˜\ÙU\›ØÝ\ÝÛQ[™Ú[ØÝ\ÝÛS[Ù[ÊNˆ][\Âˆ
+ˆYÙ[\]T[[YPÛÛ™šYØ[™˜[È˜XÚÈÈ\ÜÜÙHYˆH˜XÚÙ[™ˆ
+ˆØ[‰Ý\HH\]K‚ˆ
+‹Âˆš]˜]H\Þ[˜ÈžT™Yœ™\ÚYÙ[[[YJX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹™X\ÛÛŽˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆËÈÙ\šX[^™HYØZ[œÝ[žH[‹Y›YÚ™Yœ™\ÚÛˆ\ÈÙ\ÜÚ[Û‹ˆHØZ]\‚ˆËÈÙ\Û‰Ý›ÜYØ]HHš[ÜˆØ[	ÜÈ\œ›ÜœÈ8 %ÜÙH\™HÙÙÙY]BˆËÈÜšYÚ[ˆØ[Ú]K‚ˆÛÛœÝ[™›YÚH\Ë˜YÙ[™Yœ™\ÚØÚÜË™Ù]
+X[˜YÙYšY
+BˆYˆ
+[™›YÚ
+HÂˆ]ØZ][™›YÚ˜Ø]Ú
+
+
+HOˆ[™Yš[™Y
+BˆB‚ˆYˆ
+[X[˜YÙY˜YÙ[
+H™]\›‚‚ˆÛÛœÝÛÜšÜÜXÙPÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆÛÛœÝ˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆÛÜšÜÜXÙPÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆX[˜YÙY›[Ù[ˆJBˆÛÛœÝÛÛ›™XÝ[ÛˆH˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‚ˆÛÛœÝÚYÒ[œ]HÂˆÛÛ›™XÝ[Û‹ˆ›ÝšY\Žˆ˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆ]]\Nˆ˜XÚÙ[™ÛÛ^˜]]\Kˆ™\ÛÛ™Y[Ù[ˆ˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[ˆBˆÛÛœÝ[[YTÚYÛ˜]\™HHZ[˜XÚÙ[™[[YTÚYÛ˜]\™JÚYÒ[œ]
+BˆÛÛœÝ™\Ý\ÚYÛ˜]\™HHZ[™\Ý\™\]Z\™YÚYÛ˜]\™JÚYÒ[œ]
+B‚ˆYˆ
+[X[˜YÙY˜˜XÚÙ[™[[YTÚYÛ˜]\™H[X[˜YÙY˜˜XÚÙ[™™\Ý\ÚYÛ˜]\™JHÂˆX[˜YÙY˜˜XÚÙ[™[[YTÚYÛ˜]\™HH[[YTÚYÛ˜]\™BˆX[˜YÙY˜˜XÚÙ[™™\Ý\ÚYÛ˜]\™HH™\Ý\ÚYÛ˜]\™Bˆ™]\›‚ˆB‚ˆÛÛœÝ™\Ý\™\]Z\™YHX[˜YÙY˜˜XÚÙ[™™\Ý\ÚYÛ˜]\™HOOH™\Ý\ÚYÛ˜]\™BˆÛÛœÝ[[YPÚ[™ÙYHX[˜YÙY˜˜XÚÙ[™[[YTÚYÛ˜]\™HOOH[[YTÚYÛ˜]\™B‚ˆYˆ
+\™\Ý\™\]Z\™Y	‰ˆ\[[YPÚ[™ÙY
+H™]\›‚‚ˆYˆ
+X[˜YÙY˜YÙ[š\Ô›ØÙ\ÜÚ[™Ê
+JHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê[[YHÛÛ™šYÈÚ[™ÙY›Üˆ	ÛX[˜YÙYšYNÈY™\œš[™È™Yœ™\Ú[[Ù\ÜÚ[Ûˆ\ÈYH
+	Ü™X\ÛÛŸJX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝÛÜšÈH\Ëœ[YÙ[[[YT™Yœ™\Ú
+ˆX[˜YÙYˆ˜XÚÙ[™ÛÛ^ˆ[[YTÚYÛ˜]\™Kˆ™\Ý\ÚYÛ˜]\™Kˆ™\Ý\™\]Z\™Yˆ™X\ÛÛ‹ˆ
+BˆËÈ˜XÚÈHÛÜšÈÛÈÛÛ˜Ý\œ™[Ø[\œÈÙ\šX[^™KˆÝØ[ÝÈ\œ›ÜœÈÛˆBˆËÈ˜XÚÙY›ÛZ\ÙH8 %H]ØZ]\ˆÚÝ[‰ÝÙ]ÛÛY[Û™H[ÙIÜÈ^Ù\[ÛŽÂˆËÈ\œ›ÜœÈ\™HÙÙÙY[œÚYH[YÙ[[[YT™Yœ™\Ú‚ˆÛÛœÝ˜XÚÙYHÛÜšË[Š
+
+HOˆ[™Yš[™Y
+
+HOˆ[™Yš[™Y
+Bˆ\Ë˜YÙ[™Yœ™\ÚØÚÜËœÙ]
+X[˜YÙYšY˜XÚÙY
+BˆžHÂˆ]ØZ]ÛÜšÂˆHš[˜[HÂˆËÈÛÛ˜Ý\œ™[Ø[\œÈ]ØZ]Y˜XÚÙY™Y›Ü™H™XXÚ[™È\ÈÚ[[™ˆËÈXXÚ™YÚ\Ý\™YZ\ˆÝÛˆÛÜšÈÙ\šX[KÛÈHÛÝ\È[Ø^\ÈÝ\œÂˆËÈÈÛX\ˆÚ[ˆÝ\ˆÝÛˆÛÜšÈ™\ÛÛ™\Ë‚ˆYˆ
+\Ë˜YÙ[™Yœ™\ÚØÚÜË™Ù]
+X[˜YÙYšY
+HOOH˜XÚÙY
+HÂˆ\Ë˜YÙ[™Yœ™\ÚØÚÜË™[]JX[˜YÙYšY
+BˆBˆBˆB‚ˆš]˜]H\Þ[˜È[YÙ[[[YT™Yœ™\Ú
+ˆX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹ˆ˜XÚÙ[™ÛÛ^ˆ™]\›•\O\[Ùˆ™\ÛÛ™P˜XÚÙ[™ÛÛ^‹ˆ[[YTÚYÛ˜]\™NˆÝš[™Ëˆ™\Ý\ÚYÛ˜]\™NˆÝš[™Ëˆ™\Ý\™\]Z\™Yˆ›ÛÛX[‹ˆ™X\ÛÛŽˆÝš[™Ëˆ
+Nˆ›ÛZ\ÙO›ÚYˆÂˆYˆ
+™\Ý\™\]Z\™Y
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™\Ý\\™\]Z\™YšY[Ú[™ÙY›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYNÈ™XÜ™X][™È˜XÚÙ[™[[YH
+	Ü™X\ÛÛŸJX
+Bˆ]ØZ]\Ë™\ÜÜÙSX[˜YÙYYÙ[[[YJX[˜YÙY	Ü™\Ý\\™\]Z\™Y[[YHÚ[™ÙIÊBˆ™]\›‚ˆB‚ˆÛÛœÝÛÛ›™XÝ[ÛˆH˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‚ˆ]™Yœ™\ÚYH˜[ÙBˆYˆ
+X[˜YÙY˜YÙ[Ë\]T[[YPÛÛ™šYÊHÂˆžHÂˆ™Yœ™\ÚYH]ØZ]X[˜YÙY˜YÙ[\]T[[YPÛÛ™šYÊÂˆ[Ù[ˆ˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[ˆ›ÝšY\•\NˆÛÛ›™XÝ[ÛËœ›ÝšY\•\Kˆ]]\Nˆ˜XÚÙ[™ÛÛ^˜]]\Kˆ[[YNˆÛÛ›™XÝ[ÛˆÈÂˆ˜\ÙU\›ˆÛÛ›™XÝ[Û‹˜˜\ÙU\›ˆP]]›ÝšY\ŽˆÛÛ›™XÝ[Û‹œP]]›ÝšY\‹ˆÝ\ÝÛQ[™Ú[ˆÛÛ›™XÝ[Û‹˜Ý\ÝÛQ[™Ú[ˆÝ\ÝÛS[Ù[ÎˆÛÛ›™XÝ[Û‹›[Ù[ÏË›X\
+[Ù[OˆÂˆYˆ
+\[Ùˆ[Ù[OOH	ÜÝš[™ÉÊH™]\›ˆ[Ù[ˆÛÛœÝÝ\ÜÒ[XYÙ\ÈH\[Ùˆ[Ù[œÝ\ÜÒ[XYÙ\ÈOOH	Ø›ÛÛX[‰ÈÈ[Ù[œÝ\ÜÒ[XYÙ\Èˆ[™Yš[™YˆYˆ
+[Ù[˜ÛÛ^Ú[™ÝÈÝ\ÜÒ[XYÙ\ÈOOH[™Yš[™Y
+HÂˆ™]\›ˆÂˆYˆ[Ù[šYˆ‹‹Š[Ù[˜ÛÛ^Ú[™ÝÈÈÈÛÛ^Ú[™ÝÎˆ[Ù[˜ÛÛ^Ú[™ÝÈHˆßJKˆ‹‹ŠÝ\ÜÒ[XYÙ\ÈOOH[™Yš[™YÈÈÝ\ÜÒ[XYÙ\ÈHˆßJKˆBˆBˆ™]\›ˆ[Ù[šYˆJKˆHˆ[™Yš[™YˆJBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š[[YHÛÛ™šYÈ[‹\XÙH™Yœ™\Ú˜Z[Y›Üˆ	ÛX[˜YÙYšYNˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ\œ›ÜŸX
+BˆBˆB‚ˆYˆ
+™Yœ™\ÚY
+HÂˆX[˜YÙY˜˜XÚÙ[™[[YTÚYÛ˜]\™HH[[YTÚYÛ˜]\™BˆX[˜YÙY˜˜XÚÙ[™™\Ý\ÚYÛ˜]\™HH™\Ý\ÚYÛ˜]\™BˆÙ\ÜÚ[Û“ÙËš[™›Ê™Yœ™\ÚY[[YHÛÛ™šYÈ›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYH
+	Ü™X\ÛÛŸJX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™XÜ™X][™È˜XÚÙ[™[[YH›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYHY\ˆÛÛ™šYÈÚ[™ÙH
+	Ü™X\ÛÛŸJX
+Bˆ]ØZ]\Ë™\ÜÜÙSX[˜YÙYYÙ[[[YJX[˜YÙY	Ü[[YHÛÛ™šYÈ™Yœ™\Ú	ÊBˆBˆB‚ˆÊŠ‚ˆ
+ˆ\ÚHÛÛ›™XÝ[Û‰ÜÈ[[YH\]\È
+K™ËˆÝ\ÜÒ[XYÙ\ØÙÙÛJHÈ]™\žBˆ
+ˆXÝ]™HÙ\ÜÚ[Ûˆ]\Ù\È]ˆØ[Yœ›ÛHHPÛÛ›™XÝ[ÛœË”ÐU‘X[™\‚ˆ
+ˆÛÈØ\Xš[]HÚ[™Ù\È™XXÚ]™HHÝXœ›ØÙ\ÜÙ\È[[YYX][H[œÝXYÙ‚ˆ
+ˆØZ][™È›ÜˆH™^Ù[™È^š[H›ÝXÙHHÚYÛ˜]\™HšY‚ˆ
+‹Âˆ\Þ[˜È™Yœ™\ÚÛÛ›™XÝ[Û”[[YJÛÛ›™XÝ[Û”ÛYÎˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆ›Üˆ
+ÛÛœÝX[˜YÙYÙˆ\ËœÙ\ÜÚ[ÛœË˜[Y\Ê
+JHÂˆYˆ
+X[˜YÙY›PÛÛ›™XÝ[ÛˆOOHÛÛ›™XÝ[Û”ÛYÊHÛÛ[YBˆžHÂˆ]ØZ]\ËžT™Yœ™\ÚYÙ[[[YJX[˜YÙY	ØÛÛ›™XÝ[Ûˆ\]IÊBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š™Yœ™\ÚÛÛ›™XÝ[Û”[[YH˜Z[Y›Üˆ	ÛX[˜YÙYšYNˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ\œ›ÜŸX
+BˆBˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ]ÜˆÜ™X]HYÙ[›ÜˆHÙ\ÜÚ[Ûˆ
+^žHØY[™ÊBˆ
+ˆÜ™X]\ÈH\›ÜšX]H˜XÚÙ[™YÙ[˜\ÙYÛˆHÛÛ›™XÝ[Û‹‚ˆ
+‚ˆ
+ˆ›ÝšY\ˆ™\ÛÛ][ÛˆÜ™\Ž‚ˆ
+ˆKˆÙ\ÜÚ[Û‹›PÛÛ›™XÝ[Ûˆ
+ØÚÙYY\ˆš\œÝY\ÜØYÙJBˆ
+ˆ‹ˆÛÜšÜÜXÙK™Y˜][Ë™Y˜][PÛÛ›™XÝ[Û‚ˆ
+ˆËˆÛØ˜[Y˜][PÛÛ›™XÝ[Û‚ˆ
+ˆˆ˜[˜XÚÎˆ›ÈÛÛ›™XÝ[ÛˆÛÛ™šYÝ\™Yˆ
+‹Âˆš]˜]H\Þ[˜ÈÙ]ÜÜ™X]PYÙ[
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛZ\ÙOYÙ[[œÝ[˜ÙOˆÂˆËÈ™Yœ™\Ú[[YHÛÛ™šYÈ[‹\XÙHÚ[ˆHÛÛ›™XÝ[Ûˆ\ÈšYYÚ[˜ÙBˆËÈHYÙ[Ø\ÈÜ™X]YˆX^H[Ý]X[˜YÙY˜YÙ[YˆH[‹\XÙBˆËÈ™Yœ™\Ú˜Z[Ë[ˆÚXÚØ\ÙHHÜ™X]Hœ˜[˜Ú™[ÝÈ™XZ[È]‚ˆ]ØZ]\ËžT™Yœ™\ÚYÙ[[[YJX[˜YÙY	ÜÙ[™\]™Yœ™\Ú	ÊB‚ˆÛÛœÝÛÜšÜÜXÙPÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆÛÛœÝ˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆÛÜšÜÜXÙPÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆX[˜YÙY›[Ù[ˆJBˆÛÛœÝÛÛ›™XÝ[ÛˆH˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‚ˆÛÛœÝÚYÒ[œ]HÂˆÛÛ›™XÝ[Û‹ˆ›ÝšY\Žˆ˜XÚÙ[™ÛÛ^œ›ÝšY\‹ˆ]]\Nˆ˜XÚÙ[™ÛÛ^˜]]\Kˆ™\ÛÛ™Y[Ù[ˆ˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[ˆBˆÛÛœÝ[[YTÚYÛ˜]\™HHZ[˜XÚÙ[™[[YTÚYÛ˜]\™JÚYÒ[œ]
+BˆÛÛœÝ™\Ý\ÚYÛ˜]\™HHZ[™\Ý\™\]Z\™YÚYÛ˜]\™JÚYÒ[œ]
+B‚ˆYˆ
+[X[˜YÙY˜YÙ[
+HÂˆÛÛœÝ[™H\™‹œÝ\
+	ØYÙ[˜Ü™X]IËÈÙ\ÜÚ[Û’YˆX[˜YÙYšYJB‚ˆËÈØÚÈHÛÛ›™XÝ[ÛˆY\ˆš\œÝ™\ÛÛ][Û‚ˆËÈ\È[œÝ\™\ÈHÙ\ÜÚ[Ûˆ[Ø^\È\Ù\ÈHØ[YH›ÝšY\‚ˆYˆ
+ÛÛ›™XÝ[Ûˆ	‰ˆ[X[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙY
+HÂˆX[˜YÙY›PÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û‹œÛYÂˆX[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙYHYBˆÙ\ÜÚ[Û“ÙËš[™›ÊØÚÙYÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYHÈÛÛ›™XÝ[Ûˆ‰ØÛÛ›™XÝ[Û‹œÛYßH˜
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+B‚ˆËÈÙY\™[™\™\ˆÙ\ÜÚ[ÛˆØ\Xš[]Y\È[ˆÞ[˜ÈÚ[ˆ]]Ë[ØÚÚ[™ÈHÛÛ›™XÝ[Û‹‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ØÛÛ›™XÝ[Û—ØÚ[™ÙY	ËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆÛÛ›™XÝ[Û”ÛYÎˆÛÛ›™XÝ[Û‹œÛYËˆÝ\ÜÐœ˜[˜Ú[™Îˆ™\ÛÛ™TÝ\ÜÐœ˜[˜Ú[™ÊX[˜YÙY
+KˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆÛÛœÝ›ÝšY\ˆH˜XÚÙ[™ÛÛ^œ›ÝšY\‚ˆYˆ
+ÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê\Ú[™ÈHÛÛ›™XÝ[Ûˆ‰ØÛÛ›™XÝ[Û‹œÛYßHˆ
+	ØÛÛ›™XÝ[Û‹œ›ÝšY\•\_JH›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›Š›ÈHÛÛ›™XÝ[Ûˆ›Ý[™›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYK\Ú[™ÈY˜][[›ÜXÈ›ÝšY\˜
+BˆB‚ˆËÈÙ]Ù\ÜÚ[Ûˆ\™XÝÜžH›ÜˆÛÛY]Y]HÜ›ÜÜË\›ØÙ\ÜÈÚ\š[™Ë‚ˆËÈHÑÈÝXœ›ØÙ\ÜÈ™XYÈÐUWÔÑTÔÒSÓ—ÑTˆÈÜš]HÛÛ[Y]Y]KšœÛÛŽÂˆËÈHXZ[ˆ›ØÙ\ÜÈ™XYÈ]šXHÛÛY]Y]TÝÜ™KœÙ]Ù\ÜÚ[Û‘\Š
+K‚ˆÛÛœÝÙ\ÜÚ[Û‘\‘›Ü“Y]Y]HHÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]X[˜YÙYšY
+Bˆ›ØÙ\ÜË™[‹’ÐUWÔÑTÔÒSÓ—ÑTˆHÙ\ÜÚ[Û‘\‘›Ü“Y]Y]BˆÛÛY]Y]TÝÜ™KœÙ]Ù\ÜÚ[Û‘\ŠÙ\ÜÚ[Û‘\‘›Ü“Y]Y]JB‚ˆËÈÙ]\YÙ[™XYH›ÛZ\ÙHÛÈ]HÙ[™\˜][ÛˆØ[ˆ]ØZ]YÙ[Ü™X][Û‚ˆX[˜YÙY˜YÙ[™XYHH™]È›ÛZ\ÙO›ÚYŠˆOˆÈX[˜YÙY˜YÙ[™XYT™\ÛÛ™HHˆJB‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈÛÛ[[ÛˆÙ]\ˆÛÝ\˜Ù\ËPÔÛÛÙ\ÜÚ[ÛˆÛÛ™šYÂˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]X[˜YÙYšY
+BˆÛÛœÝ[˜X›YÛYÜÈHX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×BˆÛÛœÝ[ÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\ÊX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆÛÛœÝ[˜X›YÛÝ\˜Ù\ÈH[ÛÝ\˜Ù\Ë™š[\ŠÈO‚ˆ[˜X›YÛYÜËš[˜ÛY\ÊË˜ÛÛ™šYËœÛYÊH	‰ˆ\ÔÛÝ\˜ÙU\ØX›JÊBˆ
+B‚ˆËÈZ[Ù\™\ˆÛÛ™šYÜÈ›Üˆ[˜X›YÛÝ\˜Ù\ÂˆÛÛœÝÈXÜÙ\™\œË\TÙ\™\œÈHH]ØZ]Z[Ù\™\œÑœ›ÛTÛÝ\˜Ù\Ê[˜X›YÛÝ\˜Ù\ËÙ\ÜÚ[Û”]X[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\ŠB‚ˆËÈÜ™X]HÙ[˜[^™YPÔÛY[ÛÛ
+[˜XÚÙ[™È\ÙH]
+BˆX[˜YÙY›XÜÛÛH™]ÈXÜÛY[ÛÛ
+ÈXYÎˆ
+\ÙÊHOˆÙ\ÜÚ[Û“ÙË™XYÊ\ÙÊKÛÜšÜÜXÙT›ÛÝ]ˆX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û”]JB‚ˆËÈ˜XÚÙ[™È][ˆ\È^\›˜[ÝXœ›ØÙ\ÜÙ\È™YY[ˆÛÛÙ\™\‚ˆ]ÛÛÙ\™\•\›ˆÝš[™È[™Yš[™YˆYˆ
+˜XÚÙ[™ÛÛ^˜Ø\Xš[]Y\Ë›™YYÒÛÛÙ\™\ŠHÂˆX[˜YÙYœÛÛÙ\™\ˆH™]ÈXÜÛÛÙ\™\ŠX[˜YÙY›XÜÛÛÈXYÎˆ
+\ÙÊHOˆÙ\ÜÚ[Û“ÙË™XYÊ\ÙÊHJBˆX[˜YÙY›XÜÛÛ›Û•ÛÛÐÚ[™ÙYH
+
+HOˆX[˜YÙYœÛÛÙ\™\Ë››ÝYžUÛÛÐÚ[™ÙY
+
+BˆÛÛÙ\™\•\›H]ØZ]X[˜YÙYœÛÛÙ\™\‹œÝ\
+
+Bˆ]ØZ]X[˜YÙY›XÜÛÛœÞ[˜ÊXÜÙ\™\œÊHËÈ[œÝ\™HÛÛ\ÈÛÛÈ™Y›Ü™HÑÈÛÛ›™XÝÂˆB‚ˆËÈ\‹\Ù\ÜÚ[Ûˆ[ˆÝ™\œšY\ÂˆÛÛœÝZ[šS[Ù[HÛÛ›™XÝ[ÛˆÈ
+Ù]Z[šS[Ù[
+ÛÛ›™XÝ[ÛŠHÏÈÛÛ›™XÝ[Û‹™Y˜][[Ù[
+Hˆ[™Yš[™YˆÛÛœÝ[“Ý™\œšY\Îˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆÐUWÕÓÔ’ÔÔPÑWÔUˆX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆËÈ\ÜÈZ[šH[Ù[ÈÑÈÝXœ›ØÙ\ÜÈÛÈZ[Z[ˆÛÛÈZÙHÙX‘™]ÚˆËÈ\ÙHHÛÜœ™XÝ[Ù[›ÜˆÝ[[X\š^˜][Ûˆ
+[œÝXYÙˆ\™ÛÙYZZÝJBˆ‹‹ŠZ[šS[Ù[ÈÈS•“ÔP×ÑQUSÒRRÕWÓSÑSˆZ[šS[Ù[HˆßJKˆBˆX[˜YÙY™[“Ý™\œšY\ÈH[“Ý™\œšY\Â‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈÛÛ[[ÛˆÙ\ÜÚ[Ûˆ
+ÈØ[˜XÚÈÛÛ™šYÈ
+Y[XØ[›Üˆ[˜XÚÙ[™ÊBˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆÛÛœÝÙ\ÜÚ[ÛÛÛ™šYÈHÂˆYˆX[˜YÙYšYˆÛÜšÜÜXÙT›ÛÝ]ˆX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÙÔÙ\ÜÚ[Û’YˆX[˜YÙYœÙÔÙ\ÜÚ[Û’Yˆœ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈÈX[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Yˆ[™Yš[™Yˆœ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈÈX[˜YÙY˜œ˜[˜Úœ›ÛTÙ\ÜÚ[Û”]ˆ[™Yš[™Yˆœ˜[˜Úœ›ÛTÙÐÝÙˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈÈX[˜YÙY˜œ˜[˜Úœ›ÛTÙÐÝÙˆ[™Yš[™Yˆœ˜[˜Úœ›ÛTÙÕ\›’YˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙËY›ÜšÉÈÈX[˜YÙY˜œ˜[˜Úœ›ÛTÙÕ\›’Yˆ[™Yš[™Yˆœ˜[˜Úœ›ÛSY\ÜØYÙRYˆX[˜YÙY˜œ˜[˜Úœ›ÛSY\ÜØYÙRYˆÜ™X]Y]ˆX[˜YÙY›\ÝY\ÜØYÙP]ˆ\Ý\ÙY]ˆX[˜YÙY›\ÝY\ÜØYÙP]ˆÛÜšÚ[™Ñ\™XÝÜžNˆX[˜YÙYÛÜšÚ[™Ñ\™XÝÜžKˆÙÐÝÙˆX[˜YÙYœÙÐÝÙˆ[Ù[ˆX[˜YÙY›[Ù[ˆPÛÛ›™XÝ[ÛŽˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆ\›Z\ÜÚ[Û“[ÙNˆX[˜YÙYœ\›Z\ÜÚ[Û“[ÙKˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙNˆX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKˆB‚ˆÛÛœÝÛ”ÙÔÙ\ÜÚ[Û’Y\]HH
+ÙÔÙ\ÜÚ[Û’YˆÝš[™ÊHOˆÂˆX[˜YÙYœÙÔÙ\ÜÚ[Û’YHÙÔÙ\ÜÚ[Û’YˆËÈ™]\™Hœ˜[˜Ú[Û›H›ÜšÈY]Y]H›ÝÈ]Ú[Ù\ÜÚ[Ûˆ\È\ÝX›\ÚYˆYˆ
+X[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’Y
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Êœ˜[˜Ú›ÜšÈ\ÝX›\ÚY›Üˆ	ÛX[˜YÙYšYNˆÚ[IÜÙÔÙ\ÜÚ[Û’YK™]\š[™È\™[›ÜšÈY]Y]H
+\™[IÛX[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YJX
+BˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YH[™Yš[™YˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÐÝÙH[™Yš[™YˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÕ\›’YH[™Yš[™YˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÑÈÙ\ÜÚ[ÛˆQØ\\™Y›Üˆ	ÛX[˜YÙYšYNˆ	ÜÙÔÙ\ÜÚ[Û’YX
+BˆBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+X[˜YÙYšY
+BˆB‚ˆÛÛœÝÛ”ÙÔÙ\ÜÚ[Û’YÛX\™YH
+
+HOˆÂˆX[˜YÙYœÙÔÙ\ÜÚ[Û’YH[™Yš[™YˆÙ\ÜÚ[Û“ÙËš[™›ÊÑÈÙ\ÜÚ[ÛˆQÛX\™Y›Üˆ	ÛX[˜YÙYšYH
+™\Ý[YH™XÛÝ™\žJX
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+X[˜YÙYšY
+BˆB‚ˆÛÛœÝÛœ˜[˜Ú›ÜšÒ[˜[Y]YH
+
+HOˆÂˆX[˜YÙYœÙÔÙ\ÜÚ[Û’YH[™Yš[™YˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YH[™Yš[™YˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÐÝÙH[™Yš[™YˆX[˜YÙY˜œ˜[˜Úœ›ÛTÙÕ\›’YH[™Yš[™YˆÙ\ÜÚ[Û“ÙËš[™›Êœ˜[˜Ú›ÜšÈ[˜[Y]Y›Üˆ	ÛX[˜YÙYšYNˆÛX\™Y[›ÜšÈY]Y]X
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+X[˜YÙYšY
+BˆB‚ˆÛÛœÝÙ]™XÛÝ™\žSY\ÜØYÙ\ÈH
+
+HOˆÂˆÛÛœÝ™[]˜[Y\ÜØYÙ\ÈHX[˜YÙY›Y\ÜØYÙ\Âˆ™š[\ŠHOˆKœ›ÛHOOH	Ý\Ù\‰ÈKœ›ÛHOOH	Ø\ÜÚ\Ý[	ÊBˆ™š[\ŠHOˆ[Kš\Ò[\›YYX]JBˆœÛXÙJMŠBˆ™]\›ˆ™[]˜[Y\ÜØYÙ\Ë›X\
+HOˆ
+Âˆ\NˆKœ›ÛH\È	Ý\Ù\‰È	Ø\ÜÚ\Ý[	ËˆÛÛ[ˆK˜ÛÛ[ˆJJBˆB‚ˆÛÛœÝÙ]œ˜[˜Ú˜[˜XÚÓY\ÜØYÙ\ÈH
+
+HOˆÂˆYˆ
+[X[˜YÙY˜œ˜[˜Úœ›ÛSY\ÜØYÙRY
+H™]\›ˆ×Bˆ™]\›ˆX[˜YÙY›Y\ÜØYÙ\Âˆ™š[\ŠHOˆKœ›ÛHOOH	Ý\Ù\‰ÈKœ›ÛHOOH	Ø\ÜÚ\Ý[	ÊBˆ™š[\ŠHOˆ[Kš\Ò[\›YYX]JBˆ›X\
+HOˆ
+Âˆ\NˆKœ›ÛH\È	Ý\Ù\‰È	Ø\ÜÚ\Ý[	ËˆÛÛ[ˆK˜ÛÛ[ˆJJBˆB‚ˆÛÛœÝÙ]œ˜[˜ÚÙYYY\ÜØYÙ\ÈH
+
+HOˆÂˆYˆ
+X[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰ÊH™]\›ˆ×BˆYˆ
+X[˜YÙY˜œ˜[˜ÚÙYY\YY
+H™]\›ˆ×B‚ˆÛÛœÝÙYYY\ÜØYÙ\ÈHX[˜YÙY›Y\ÜØYÙ\Âˆ™š[\ŠHOˆKœ›ÛHOOH	Ý\Ù\‰ÈKœ›ÛHOOH	Ø\ÜÚ\Ý[	ÊBˆ™š[\ŠHOˆ[Kš\Ò[\›YYX]JB‚ˆ™]\›ˆÙYYY\ÜØYÙ\Ë›X\
+HOˆ
+Âˆ\NˆKœ›ÛH\È	Ý\Ù\‰È	Ø\ÜÚ\Ý[	ËˆÛÛ[ˆK˜ÛÛ[ˆJJBˆB‚ˆÛÛœÝX\šÐœ˜[˜ÚÙYY\YYH
+
+HOˆÂˆYˆ
+X[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞHOOH	ÜÙYYYYœ™\Ú\Ù\ÜÚ[Û‰ÊH™]\›‚ˆYˆ
+X[˜YÙY˜œ˜[˜ÚÙYY\YY
+H™]\›‚ˆX[˜YÙY˜œ˜[˜ÚÙYY\YYHYBˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ðœ˜[˜ÚÙYYÛÛ^\YY	ËÂˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆÝ˜]YÞNˆX[˜YÙY˜œ˜[˜ÚÛÛ^Ý˜]YÞKˆJBˆB‚ˆÛÛœÝÙ]˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHH
+
+HOˆÂˆÛÛœÝÝ[[X\žHHX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYÈ[ˆ
+X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHÏÈ[
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ˜[œÙ™\‹XÛÛ^HÙ]˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žH›Üˆ	ÛX[˜YÙYšYNˆ\YYIÛX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYK\×ÜÝ[[X\žOIÈH[X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\ž_K™]\›š[™ÏIÜÝ[[X\žHÈ	ÜÝ[[X\žK›[™ÝHÚ\œØˆ	Û[	ßX
+Bˆ™]\›ˆÝ[[X\žBˆB‚ˆÛÛœÝX\šÕ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYH
+
+HOˆÂˆYˆ
+X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YY[X[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žJH™]\›‚ˆX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYHYBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê	Õ˜[œÙ™\œ™YÙ\ÜÚ[ÛˆÝ[[X\žH\YY	ËÂˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆJBˆB‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈÛÛœÝXÝ˜XÚÙ[™šXH˜XÝÜžBˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆX[˜YÙY˜YÙ[HÜ™X]P˜XÚÙ[™œ›ÛT™\ÛÛ™YÛÛ^
+ÂˆÛÛ^ˆ˜XÚÙ[™ÛÛ^ˆÜÝ[[YNˆZ[˜XÚÙ[™ÜÝ[[YPÛÛ^
+
+KˆÛÜ™PÛÛ™šYÎˆÂˆÛÜšÜÜXÙNˆX[˜YÙYÛÜšÜÜXÙKˆZ[šS[Ù[ˆ[šÚ[™Ó]™[ˆX[˜YÙY[šÚ[™Ó]™[ˆÙ\ÜÚ[ÛŽˆÙ\ÜÚ[ÛÛÛ™šYËˆÛ”ÙÔÙ\ÜÚ[Û’Y\]KˆÛ”ÙÔÙ\ÜÚ[Û’YÛX\™YˆÛœ˜[˜Ú›ÜšÒ[˜[Y]YˆÙ]™XÛÝ™\žSY\ÜØYÙ\ËˆÙ]œ˜[˜Ú˜[˜XÚÓY\ÜØYÙ\ËˆÙ]œ˜[˜ÚÙYYY\ÜØYÙ\ËˆX\šÐœ˜[˜ÚÙYY\YYˆÙ]˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žKˆX\šÕ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYˆXÜÛÛˆX[˜YÙY›XÜÛÛˆÛÛÙ\™\•\›ˆ[“Ý™\œšY\ËˆËÈÛ]YK\ÜXÚYšXÂˆ\ÒXY\ÜÎˆPQÑS•Ñ“QÔË™Y˜][[Ù\Ñ[˜X›YˆÚÚ\ÛÛ™šYÕØ]Ú\ŽˆYKËÈÙ\™\ˆÝÛœÈÛÜšÜÜXÙK[]™[ÛÛ™šYÕØ]Ú\ˆ8 %Û‰Ý\XØ]H[ˆYÙ[Âˆ]]ÛX][Û”Þ\Ý[Nˆ\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+KˆÞ\Ý[T›Û\™\Ù]ˆX[˜YÙYœÞ\Ý[T›Û\™\Ù]ˆXYÓ[ÙNˆÜ]›Ü›OËš\ÑXYÓ[ÙHÈÈ[˜X›YˆYKÙÑš[T]ˆÜ]›Ü›K™Ù]ÙÑš[T]ËŠ
+HHˆ[™Yš[™Yˆ[˜X›LSPÛÛ^ˆ]ØZ]
+\Þ[˜È
+
+HOˆÈÛÛœÝÈÙ][˜X›LSPÛÛ^HH]ØZ][\Ü
+	ÐØ]K\ÚÜÚ\™YØÛÛ™šYËÜÝÜ˜YÙIÊNÈ™]\›ˆÙ][˜X›LSPÛÛ^
+
+NÈJJ
+KˆËÈ[XYÙH™\Ú^™HØ[˜XÚÈ8 %™]™[ÈÝ™\œÚ^™Y[XYÙ\Èœ›ÛH[\š[™ÈÛÛ™\œØ][Ûˆ\ÝÜžBˆÛ’[XYÙT™\Ú^™Nˆ\Þ[˜È
+š[T]ˆÝš[™ËX^Ú^™Pž]\Îˆ[X™\ŠNˆ›ÛZ\ÙOÝš[™È[ˆOˆÂˆžHÂˆÛÛœÝY™™\ˆH]ØZ]™XYš[Jš[T]
+BˆÛÛœÝ™\Ý[H]ØZ]™\Ú^™R[XYÙQ›ÜTJY™™\‹ÈX^Ú^™Pž]\ÈJBˆYˆ
+\™\Ý[
+H™]\›ˆ[‚ˆËÈÜš]HÈÙ\ÜÚ[Ûˆ\\™XÝÜžH
+ÛX[™Y\Ú]Ù\ÜÚ[ÛŠBˆÛÛœÝÙ\ÜÚ[Û•\\ˆH›Ú[ŠÙ\ÜÚ[Û”]	Ý\	ÊBˆ]ØZ]ZÙ\ŠÙ\ÜÚ[Û•\\‹È™XÝ\œÚ]™NˆYHJBˆÛÛœÝ^H™\Ý[™›Ü›X]OOH	ÚœYÉÈÈ	ÚœÉÈˆ	Ü™ÉÂˆÛÛœÝÝ]]H›Ú[ŠÙ\ÜÚ[Û•\\‹™\Ú^™YIÜ˜[™ÛUURQ
+
+_K‰Ù^X
+Bˆ]ØZ]Üš]Qš[JÝ]]™\Ý[˜Y™™\ŠB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê[XYÙH™\Ú^™Y›Üˆ™XYˆ	ÊY™™\‹›[™ÝÈLÈL
+KÑš^Y
+J_SPˆ8¡¤ˆ	Ê™\Ý[˜Y™™\‹›[™ÝÈLÈL
+KÑš^Y
+J_SPˆ
+8¡¤ˆ	Ü™\Ý[ÚYpåÉÜ™\Ý[šZYÚJX
+Bˆ™]\›ˆÝ]]ˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ò[XYÙH™\Ú^™H˜Z[Y‰Ë\œŠBˆ™]\›ˆ[ˆBˆKˆËÈÛÝ\˜ÙHÛÛ™šYÜÈ›ÜˆÜÝ[š]
+
+H8 %˜XÚÙ[™ÈÙ]\Z\ˆÝÛˆœšYÙKØÛÛ™šYÂˆ[š]X[ÛÝ\˜Ù\ÎˆÂˆ[˜X›YÛÝ\˜Ù\ËˆXÜÙ\™\œËˆ\TÙ\™\œËˆ[˜X›YÛYÜËˆKˆKˆJH\ÈYÙ[[œÝ[˜ÙB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÜ™X]Y	Ü›ÝšY\ŸHYÙ[›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYH
+[Ù[ˆ	Ø˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[JIÛX[˜YÙYœÙÔÙ\ÜÚ[Û’YÈ	È
+™\Ý[Z[™ÊIÈˆ	ÉßX
+B‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈÜÝXÛÛœÝXÝ[ÛŽˆXYÈØ[˜XÚË]]Ø[˜XÚËÜÝ[š]
+
+BˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆX[˜YÙY˜YÙ[›Û‘XYÈH
+\ÙÎˆÝš[™ÊHOˆÂˆÛÛœÝX\šÙ\ˆH	××ÔT“RTÔÒSÓ—Ð“ÐÒ××ÉÂˆYˆ
+\ÙËš[˜ÛY\ÊX\šÙ\ŠJHÂˆÛÛœÝYH\ÙËš[™^ÙŠX\šÙ\ŠBˆÛÛœÝ^[ØY˜]ÈH\ÙËœÛXÙJY
+ÈX\šÙ\‹›[™Ý
+BˆžHÂˆÛÛœÝ^[ØYH”ÓÓ‹œ\œÙJ^[ØY˜]ÊH\ÈÂˆÙ\ÜÚ[Û’YˆÝš[™ÂˆÛÛ˜[YNˆÝš[™ÂˆY™™XÝ]™S[ÙNˆÝš[™Âˆ[ÙU™\œÚ[ÛŽˆ[X™\‚ˆÚ[™ÙYžNˆÝš[™ÂˆÚ[™ÙY]ˆÝš[™Âˆ™X\ÛÛŽˆÝš[™ÂˆBˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÕÛÛ›ØÚÙYžH\›Z\ÜÚ[Ûˆ[ÙIË^[ØY
+Bˆ™]\›‚ˆHØ]ÚÂˆËÈ˜[›ÝYÚÈZ[ˆÙÙÚ[™ÈÚ[ˆ^[ØY\œÚ[™È˜Z[ÂˆBˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê\ÙÊBˆB‚ˆËÈ[šYšYY]]Ø[˜XÚÈ8 %™\XÙ\È\‹X˜XÚÙ[™ÛÚ]Ü]]™\]Z\™YÛÛ‘Ú]X]]™\]Z\™YˆX[˜YÙY˜YÙ[›Û˜XÚÙ[™]]™\]Z\™YH
+™X\ÛÛŽˆÝš[™ÊHOˆÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜XÚÙ[™]]™\]Z\™Y›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYNˆ	Ü™X\ÛÛŸX
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[™›ÉËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆY\ÜØYÙNˆ]][XØ][Ûˆ™\]Z\™Yˆ	Ü™X\ÛÛŸXˆ]™[ˆ	Ù\œ›Ü‰ËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆËÈ[ˆÜÝZ[š]
+]][š™XÝ[ÛŠH8 %XXÚ˜XÚÙ[™[™\È]ÈÝÛ‚ˆÛÛœÝÜÝ[š]™\Ý[H]ØZ]X[˜YÙY˜YÙ[œÜÝ[š]
+
+BˆYˆ
+ÜÝ[š]™\Ý[˜]]Ø\›š[™ÊHÂˆÙ\ÜÚ[Û“ÙËØ\›Š]]Ø\›š[™È›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYNˆ	ÜÜÝ[š]™\Ý[˜]]Ø\›š[™ßX
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[™›ÉËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆY\ÜØYÙNˆÜÝ[š]™\Ý[˜]]Ø\›š[™Ëˆ]™[ˆÜÝ[š]™\Ý[˜]]Ø\›š[™Ó]™[	Ù\œ›Ü‰ËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆËÈÚ\™H\\™ÙH™\ÜÛœÙH[™[™È[ˆHPÔÛÛ
+[˜XÚÙ[™ÊBˆYˆ
+X[˜YÙY›XÜÛÛ	‰ˆX[˜YÙY˜YÙ[
+HÂˆX[˜YÙY›XÜÛÛœÙ]Ý[[X\š^™PØ[˜XÚÊX[˜YÙY˜YÙ[™Ù]Ý[[X\š^™PØ[˜XÚÊ
+JBˆB‚ˆËÈÚ\™H\œ›ÝÜÙ\ˆ[™HÛÛÈ8 %Y\™ÙHœ›ÝÜÙ\”[™Q›œÈ[ÈÙ\ÜÚ[ÛˆØ[˜XÚÜÂˆËÈÛÈœ›ÝÜÙ\—ÊˆÛÛÈØ[ˆ[YØ]HÈœ›ÝÜÙ\”[™SX[˜YÙ\‹‚ˆËÂˆËÈ[Ø^\È™YÚ\Ý\ˆÚ[ˆRUTˆHØØ[”H\ÈÙ]Ôˆ[ˆ”ÈÙ\™\ˆ\ÂˆËÈ]˜Z[X›H
+ÚXÚ]ÈÙ]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[Û˜^š[HZ[BˆËÈ™[[ÝPœ›ÝÜÙ\”[™SX[˜YÙ\ŠKˆØ[È˜Z[\‹[Y]ÙÚ]ˆËÈ”“ÕÔÑT—Ó“×ÐÐTP“WÐÓQS•Yˆ›È\ÚÝÜÛY[\ÈÛÛ›™XÝY[œÝXYˆËÈÙˆÛÛ[˜]˜Z[X›H‹‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÖØœ›ÝÜÙ\‹\[™WH”ˆØ]HÚXÚÉËÂˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆ\ÓØØ[œNˆH]\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\‹ˆ\ÔœÔÙ\™\ŽˆH]\ËœœÔÙ\™\‹ˆJBˆYˆ
+\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\ˆ\ËœœÔÙ\™\ŠHÂˆÛÛœÝÚYHX[˜YÙYšYˆÛÛœÝœHH\Ë™Ù]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÚY
+BˆYˆ
+XœJHÂˆ›ÝÈ™]È\œ›ÜŠ	Ðœ›ÝÜÙ\ˆ[™HX[˜YÙ\ˆ[˜]˜Z[X›H\Ü]H\ÜÚ[™ÈHØ]H8 %\È\ÈHYË‰ÊBˆBˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÖØœ›ÝÜÙ\‹\[™WH”ˆ›ØÚÈ™\ÛÛ™Y”IËÂˆÙ\ÜÚ[Û’YˆÚYˆœRÚ[™ˆ\Ë˜œ›ÝÜÙ\”[™SX[˜YÙ\ˆOOHœHÈ	ÛØØ[	Èˆ	Ü™[[ÝIËˆJB‚ˆÛÛœÝÛÜšÜÜXÙRYHX[˜YÙYÛÜšÜÜXÙKšYˆÛÛœÝ™\ÛÛ™TÙ\ÜÚ[Ûœ›ÝÜÙ\’[œÝ[˜ÙHH\Þ[˜È
+ÛÛ˜[YNˆÝš[™ËÜ[ÛœÏÎˆÈÚÝÏÎˆ›ÛÛX[ˆJNˆ›ÛZ\ÙOÝš[™ÏˆOˆÂˆÛÛœÝ[œÝ[˜ÙRYH]ØZ]œK˜Ü™X]Q›Ü”Ù\ÜÚ[Û\Þ[˜ÊÚYÂˆÚÝÎˆÜ[ÛœÏËœÚÝÈÏÈ˜[ÙKˆÛÜšÜÜXÙRYˆJBˆÛÛœÝ[™›ÈH]ØZ]œK™Ù][œÝ[˜ÙP\Þ[˜Ê[œÝ[˜ÙRY
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊØœ›ÝÜÙ\‹\[™WHÛÛ\™Ù]™\ÛÛ™Yˆ	ÝÛÛ˜[Y_HÙ\ÜÚ[ÛIÜÚYH[œÝ[˜ÙOIÚ[œÝ[˜ÙRYHÝÛ™\•\OIÚ[™›ÏË›ÝÛ™\•\HÏÈ	Ý[šÛ›ÝÛ‰ßHÝÛ™\”Ù\ÜÚ[Û’YIÚ[™›ÏË›ÝÛ™\”Ù\ÜÚ[Û’YÏÈ	Û›Û™IßHš\ÚX›OIÚ[™›ÏËš\Õš\ÚX›HÏÈ˜[Ù_X
+Bˆ™]\›ˆ[œÝ[˜ÙRYˆB‚ˆÛÛœÝ™\ÛÛ™SY™XÞXÛUÚ[™ÝÕ\™Ù]H\Þ[˜È
+ÛÛ[X[™ˆ	Ü™[X\ÙIÈ	ØÛÜÙIÈ	ÚYIË™\]Y\ÝY[œÝ[˜ÙRYÎˆÝš[™ÊHOˆÂˆÛÛœÝÚ[™ÝÜÈH]ØZ]œK›\Ý[œÝ[˜Ù\Ð\Þ[˜Ê
+B‚ˆYˆ
+Ú[™ÝÜË›[™ÝOOH
+HÂˆ™]\›ˆÈÚ[™ÝÜË™X\ÛÛŽˆ	Ó›Èœ›ÝÜÙ\ˆÚ[™ÝÜÈ\™H]˜Z[X›Kˆ\ÙH›Ü[ˆˆš\œÝ‰ÈBˆB‚ˆÛÛœößn½¶‰žËkºwµçX[˜YÙYÛÜšÝ™Y\Ë™\ÜÚ]ÜžHÜÊKˆ
+‹Âˆš]˜]HÚ]Ù\šXÙ\Ò[œÝ[˜ÙNˆÚ]Ù\šXÙ\È[H[ˆš]˜]HÙ]Ú]Ù\šXÙ\Ê
+NˆÚ]Ù\šXÙ\ÈÂˆYˆ
+]\Ë™Ú]Ù\šXÙ\Ò[œÝ[˜ÙJHÂˆ\Ë™Ú]Ù\šXÙ\Ò[œÝ[˜ÙHHÙ]Y˜][Ú]Ù\šXÙ\Ê
+BˆBˆ™]\›ˆ\Ë™Ú]Ù\šXÙ\Ò[œÝ[˜ÙBˆB‚ˆÊŠ‚ˆ
+ˆÝ™\œšYHHÚ]ÛXZ[ˆÙ\šXÙ\Ëˆ›ÛÝÝ˜\Ú\™\ÈHØ[YH[œÝ[˜ÙH\ÙYžBˆ
+ˆH”È[™\œÈÛÈÚXÚÛÝ]™\\˜][Ûˆ[™™XY[Û›HÚ]”ÜÈÚ\™HÛ™Bˆ
+ˆ™YÚ\ÝžKÛ]]][Û‹[ØÚËˆ\ÝÈ[š™XÝ[\\›ÛÝYÙ\šXÙ\Ë‚ˆ
+‹ÂˆÙ]Ú]Ù\šXÙ\ÊÙ\šXÙ\ÎˆÚ]Ù\šXÙ\ÊNˆ›ÚYÂˆ\Ë™Ú]Ù\šXÙ\Ò[œÝ[˜ÙHHÙ\šXÙ\ÂˆB‚ˆÊŠ‚ˆ
+ˆØ[˜XÚÈ]™\]Y\ÝÈ[ˆ[[YYX]HÚ]Ý]\È™Yœ™\Ú›ÜˆHÙ\ÜÚ[Û‹‚ˆ
+ˆ[œÝ[YžHHÚ]”È[™\œÈÛÈYÙ[\›ˆÛÛ\][Ûˆ
+[™]\‹ˆ
+ˆ\Z\ÜÝYYÚ]XÝ[ÛœÊHØ[ˆ™Yœ™\ÚHÚ[™Ù\ÈÝ\™˜XÙHÚ]Ý]ØZ][™È›Ü‚ˆ
+ˆHÛØ[\ØÙYÛXÚÈ
+ÜXÎˆ™Yœ™\Ú[[YYX][HY\ˆYÙ[\›‚ˆ
+ˆÛÛ\][ÛŠKˆ›Ë[ÜÚ[ˆHÙ\ÜÚ[Û‰ÜÈÚXÚÛÝ]\È›ÝÝXœØÜšX™Y‚ˆ
+‹Âˆš]˜]HÚ]Ý]\Ô™Yœ™\Ú\Žˆ
+
+Ù\ÜÚ[Û’YˆÝš[™ÊHOˆ›ÚY
+H[H[‚ˆÊŠˆ[œÝ[HYÙ[]\›ˆÈ\XXÝ[ÛˆÚ]Ý]\È™Yœ™\Ú\‹ˆ
+‹ÂˆÙ]Ú]Ý]\Ô™Yœ™\Ú\Š™Yœ™\Úˆ
+Ù\ÜÚ[Û’YˆÝš[™ÊHOˆ›ÚY
+Nˆ›ÚYÂˆ\Ë™Ú]Ý]\Ô™Yœ™\Ú\ˆH™Yœ™\ÚˆB‚ˆÊŠ‚ˆ
+ˆ[\K\Ù\ÜÚ[ÛˆÚXÚÛÝ]™\\˜][ÛˆØ]KˆÙYHTÙ\ÜÚ[Û“X[˜YÙ\‹œ™\\™PÚXÚÛÝ]‚ˆ
+‚ˆ
+ˆÜ™\š[™È
+X[˜YÙYÛÜšÝ™YJN‚ˆ
+ˆKˆ™\šYžHHÙ\ÜÚ[Ûˆ\È[\H
+›ÈY\ÜØYÙ\Ë›ÈÑÈÙ\ÜÚ[ÛˆQ›ÈYÙ[
+K‚ˆ
+ˆ‹ˆ™\ÛÛ™H™\ÜÚ]ÜžH
+È˜\ÙK\™YˆY[]Hœ›ÛHH[[\™XÝÜžK‚ˆ
+ˆËˆÜ™X]HH›Ýš\Ú[Û˜[ÛÜšÝ™YH
+ÈØ]KXYÙ[ÏÚÙ[˜œ˜[˜Ú‚ˆ
+ˆˆ\HÛÜšÝ™YZ[˜ÛYX‚ˆ
+ˆKˆ™K]™\šYžHH[\HØ]K[ˆš[™ÚXÚÛÝ]Y]Y]H
+ÈÛÜšÚ[™Ñ\™XÝÜžBˆ
+ˆ
+ÈÙÐÝÙ]ÛZXØ[H[™\œÚ\Ý‚ˆ
+ˆYˆš[™[™È˜Z[ËHÝ[XÛX[ˆ›Ýš\Ú[Û˜[ÛÜšÝ™YKØœ˜[˜Ú\È™[[Ý™Y‚ˆ
+‹Âˆ\Þ[˜È™\\™PÚXÚÛÝ]
+ˆÙ\ÜÚ[Û’YˆÝš[™Ëˆ[[ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÚXÚÛÝ]™\\™R[[ˆ
+Nˆ›ÛZ\ÙO[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÚXÚÛÝ]™\\™T™\Ý[ˆÂˆYˆ
+Z\ÑÚ]ÛÜšÜÜXÙUŒQ[˜X›Y
+
+JHÂˆ›ÝÈ™]È\œ›ÜŠ	ÑÚ]ÛÜšÜÜXÙH™X]\™H\È›Ý[˜X›Y‰ÊBˆBˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆ›ÝÈ™]È\œ›ÜŠÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+BˆB‚ˆ\Ë˜\ÜÙ\[\TÙ\ÜÚ[Û‘Ø]JX[˜YÙY
+B‚ˆÛÛœÝÚ]H\Ë™Ù]Ú]Ù\šXÙ\Ê
+BˆÛÛœÝÛÜšÚ[™Ñ\™XÝÜžHH[[ÛÜšÚ[™Ñ\™XÝÜžBˆÛÛœÝÝH]ØZ]Ú]œ™\ÜÚ]ÜžK™Ù]ÛÛ^
+ÛÜšÚ[™Ñ\™XÝÜžJBˆYˆ
+XÝš\ÑÚ]™\ÜÚ]ÜžHXÝœ™\ÜÚ]ÜžT›ÛÝXÝ™Ú]ÛÛ[[Û‘\ŠHÂˆ›ÝÈ™]È\œ›ÜŠ	ÔÙ[XÝY\™XÝÜžH\È›Ý[œÚYHHÚ]™\ÜÚ]ÜžK‰ÊBˆB‚ˆËÈY[\Ý[˜ÙNˆH™\X]Y™\]Y\ÝÛ›HÝXØÙYYÈÚ[ˆ]È[[[ˆËÈ
+[ÙH
+È™\ÜÚ]ÜžH
+È˜\ÙH™YŠHX]Ú\ÈH\œÚ\ÝY™XYH™XÛÜ™È[žBˆËÈY™™\™[[[\È™Z™XÝYˆÝœ™\ÜÚ]ÜžT›ÛÝ\ÈÛÛ\\™YYØZ[œÝˆËÈ›ÝH™XÛÜ™Y™\ÜÚ]ÜžH›ÛÝ[™ÚXÚÛÝ]]ÛÈH™K\™\]Y\ÝXYBˆËÈœ›ÛH[œÚYHH™\\™YÛÜšÝ™YHÝ[™\ÛÛ™\È\ÈHØ[YH[[‚ˆÛÛœÝ^\Ý[™ÈHX[˜YÙY˜ÚXÚÛÝ]ˆYˆ
+^\Ý[™ÊHÂˆÛÛœÝØ[YS[ÙHH^\Ý[™Ë›[ÙHOOH[[›[ÙBˆÛÛœÝØ[YT™\ÈBˆ^\Ý[™Ëœ™\ÜÚ]ÜžT›ÛÝOOHÝœ™\ÜÚ]ÜžT›ÛÝˆ^\Ý[™Ë˜ÚXÚÛÝ]]OOHÝœ™\ÜÚ]ÜžT›ÛÝˆ]Ø[YR[[H˜[ÙBˆYˆ
+[[›[ÙHOOH	ØÝ\œ™[	ÊHÂˆØ[YR[[HØ[YS[ÙH	‰ˆØ[YT™\ÂˆH[ÙHÂˆÛÛœÝ[[˜\ÙT™YˆH[[˜˜\ÙT™YˆÝ˜Ý\œ™[œ˜[˜ÚÝ™Y˜][™Y‚ˆØ[YR[[HØ[YS[ÙH	‰ˆØ[YT™\È	‰ˆ^\Ý[™Ë˜˜\ÙT™YˆOOH[[˜\ÙT™Y‚ˆBˆYˆ
+Ø[YR[[
+HÂˆ™]\›ˆÂˆÚXÚÛÝ]ˆ^\Ý[™ËˆÛÜšÚ[™Ñ\™XÝÜžNˆ^\Ý[™Ë˜ÚXÚÛÝ]]ˆÙÐÝÙˆX[˜YÙYœÙÐÝÙÏÈ^\Ý[™Ë˜ÚXÚÛÝ]]ˆBˆBˆ›ÝÈ™]È\œ›ÜŠ	ÔÙ\ÜÚ[ÛˆÚXÚÛÝ]\È[™XYH™\\™YÚ]HY™™\™[[[‰ÊBˆB‚ˆYˆ
+[[›[ÙHOOH	ØÝ\œ™[	ÊHÂˆÛÛœÝÚXÚÛÝ]ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[ÛÚXÚÛÝ]ŒHHÂˆØÚ[XU™\œÚ[ÛŽˆKˆ[ÙNˆ	ØÝ\œ™[	Ëˆ™\ÜÚ]ÜžT›ÛÝˆÝœ™\ÜÚ]ÜžT›ÛÝˆÚXÚÛÝ]]ˆÝœ™\ÜÚ]ÜžT›ÛÝˆœ˜[˜Ú]™\\˜][ÛŽˆÝ˜Ý\œ™[œ˜[˜Úˆ˜\ÙT™YŽˆ[ˆX[˜YÙYÛÜšÝ™YRYˆ[ˆ^XÝYœ˜[˜Úˆ[ˆBˆ\Ë˜š[™ÚXÚÛÝ]
+X[˜YÙYÚXÚÛÝ]ÛÜšÚ[™Ñ\™XÝÜžJBˆËÈ™Y™\ˆH\˜X›H\œÚ\Ý™Y›Ü™H™]\›š[™ÈÝXØÙ\ÜÎˆš[™ÚXÚÛÝ]ˆËÈ[œ]Y]Y\ÈHX›Ý[˜ÙYÜš]KÛÈ›\Ú]ÛÈH™\Ý\Ü™\Ý[YH[[YYX][BˆËÈY\ˆ™\\˜][Ûˆ™\ÝÜ™\ÈHØ[YHÚXÚÛÝ]
+PÍJK‚ˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+Bˆ™]\›ˆÈÚXÚÛÝ]ÛÜšÚ[™Ñ\™XÝÜžKÙÐÝÙˆX[˜YÙYœÙÐÝÙÏÈÛÜšÚ[™Ñ\™XÝÜžHBˆB‚ˆËÈX[˜YÙY]ÛÜšÝ™YBˆÛÛœÝ˜\ÙT™YˆH[[˜˜\ÙT™YˆÝ˜Ý\œ™[œ˜[˜ÚÝ™Y˜][™Y‚ˆYˆ
+X˜\ÙT™YŠHÂˆ›ÝÈ™]È\œ›ÜŠ	ÐH˜\ÙH™Yˆ\È™\]Z\™YÈÜ™X]HH™]ÈÛÜšÝ™YK‰ÊBˆB‚ˆÛÛœÝÈ™XÛÜ™[˜ÛYHHH]ØZ]Ú]ÛÜšÝ™Y\Ë˜Ü™X]UÛÜšÝ™YJÂˆÛÜšÜÜXÙRYˆX[˜YÙYÛÜšÜÜXÙKšYˆÙ\ÜÚ[Û’Yˆ™\ÜÚ]ÜžT›ÛÝˆÝœ™\ÜÚ]ÜžT›ÛÝˆÚ]ÛÛ[[Û‘\ŽˆÝ™Ú]ÛÛ[[Û‘\‹ˆ˜\ÙT™Y‹ˆJB‚ˆËÈ™K]™\šYžHHØ]HY\ˆH\Þ[˜ÈÛÜšÝ™YHÜ™X][ÛŽÈHÛÛ˜Ý\œ™[Ù[™ˆËÈÛÝ[]™HY˜[˜ÙYHÙ\ÜÚ[Û‹ˆYˆÛËX\ˆÝÛˆHÛX[ˆ›Ýš\Ú[Û˜[‚ˆžHÂˆ\Ë˜\ÜÙ\[\TÙ\ÜÚ[Û‘Ø]JX[˜YÙY
+BˆHØ]Ú
+Ø]Q\œŠHÂˆ]ØZ]Ú]ÛÜšÝ™Y\Ëœ™[[Ý™UÛÜšÝ™YJ™XÛÜ™›X[˜YÙYÛÜšÝ™YRYÙ\ÜÚ[Û’Y
+Bˆ›ÝÈØ]Q\œ‚ˆB‚ˆÛÛœÝÚXÚÛÝ]ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[ÛÚXÚÛÝ]ŒHHÂˆØÚ[XU™\œÚ[ÛŽˆKˆ[ÙNˆ	ÛX[˜YÙY]ÛÜšÝ™YIËˆ™\ÜÚ]ÜžT›ÛÝˆÝœ™\ÜÚ]ÜžT›ÛÝˆÚXÚÛÝ]]ˆ™XÛÜ™˜ÚXÚÛÝ]]ˆœ˜[˜Ú]™\\˜][ÛŽˆ™XÛÜ™™^XÝYœ˜[˜Úˆ˜\ÙT™Y‹ˆX[˜YÙYÛÜšÝ™YRYˆ™XÛÜ™›X[˜YÙYÛÜšÝ™YRYˆ^XÝYœ˜[˜Úˆ™XÛÜ™™^XÝYœ˜[˜ÚˆB‚ˆžHÂˆ\Ë˜š[™ÚXÚÛÝ]
+X[˜YÙYÚXÚÛÝ]™XÛÜ™˜ÚXÚÛÝ]]
+BˆÚ]œ™YÚ\ÝžKœÙ]Ý]J™XÛÜ™›X[˜YÙYÛÜšÝ™YRY	Ü™XYIÊBˆËÈ\˜X›H\œÚ\ÝÛÈ™\Ý\Ü™\Ý[YH[[YYX][HY\ˆ™\\˜][Ûˆ™]\›œÂˆËÈÈHØ[YHX[˜YÙYÛÜšÝ™YH
+PÍJK‚ˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆHØ]Ú
+š[™\œŠHÂˆËÈÙ\ÜÚ[Ûˆ\]H˜Z[Y8 %][\ÛX[ˆ›Ýš\Ú[Û˜[ÛX[\‚ˆ]ØZ]Ú]ÛÜšÝ™Y\Ëœ™[[Ý™UÛÜšÝ™YJ™XÛÜ™›X[˜YÙYÛÜšÝ™YRYÙ\ÜÚ[Û’Y
+K˜Ø]Ú
+
+
+HOˆßJBˆ›ÝÈš[™\œ‚ˆB‚ˆ™]\›ˆÂˆÚXÚÛÝ]ˆÛÜšÚ[™Ñ\™XÝÜžNˆ™XÛÜ™˜ÚXÚÛÝ]]ˆÙÐÝÙˆX[˜YÙYœÙÐÝÙÏÈ™XÛÜ™˜ÚXÚÛÝ]]ˆØ\›š[™ÜÎˆ[˜ÛYKœÚÚ\YÞ[[[šÜÈˆˆÈØÚÚ\Y	Ú[˜ÛYKœÚÚ\YÞ[[[šÜßHÞ[[[šÊÊHÚ[H\Z[™ÈÛÜšÝ™YZ[˜ÛYK˜Bˆˆ[™Yš[™YˆBˆB‚ˆÊŠ‚ˆ
+ˆ™\ÛÛ™HHX[˜YÙY]ÛÜšÝ™YHY[]H›ÜˆHÙ\ÜÚ[Ûˆœ›ÛH]È\œÚ\ÝYˆ
+ˆÚXÚÛÝ]Y]Y]H[™H™YÚ\ÝžH8 %™]™\ˆHÛY[\Ý\YY]ÚYˆBˆ
+ˆ™\]Y\Ý[™ÈÙ\ÜÚ[Ûˆ]\Ý™HH™XÛÜ™YÝÛ™\ˆÙˆHÛÜšÝ™YK‚ˆ
+‹Âˆš]˜]H™\ÛÛ™SÝÛ™YÛÜšÝ™YRY
+Ù\ÜÚ[Û’YˆÝš[™ÊNˆÝš[™ÈÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+H›ÝÈ™]È\œ›ÜŠÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+BˆÛÛœÝX[˜YÙYÛÜšÝ™YRYHX[˜YÙY˜ÚXÚÛÝ]Ë›X[˜YÙYÛÜšÝ™YRYˆYˆ
+X[˜YÙY˜ÚXÚÛÝ]Ë›[ÙHOOH	ÛX[˜YÙY]ÛÜšÝ™YIÈ[X[˜YÙYÛÜšÝ™YRY
+HÂˆ›ÝÈ™]È\œ›ÜŠ	ÔÙ\ÜÚ[Ûˆ\È›ÈX[˜YÙYÛÜšÝ™YHÈ™[[Ý™K‰ÊBˆBˆÛÛœÝÚ]H\Ë™Ù]Ú]Ù\šXÙ\Ê
+BˆÛÛœÝ™XÛÜ™HÚ]œ™YÚ\ÝžK™Ù]
+X[˜YÙYÛÜšÝ™YRY
+BˆYˆ
+\™XÛÜ™
+HÂˆ›ÝÈ™]È\œ›ÜŠ	ÓX[˜YÙYÛÜšÝ™YH™XÛÜ™›Ý›Ý[™›Üˆ\ÈÙ\ÜÚ[Û‹‰ÊBˆBˆYˆ
+\™XÛÜ™›ÝÛ™\”Ù\ÜÚ[Û’YËš[˜ÛY\ÊÙ\ÜÚ[Û’Y
+JHÂˆ›ÝÈ™]È\œ›ÜŠ	ÔÙ\ÜÚ[ÛˆÙ\È›ÝÝÛˆ\ÈX[˜YÙYÛÜšÝ™YK‰ÊBˆBˆ™]\›ˆX[˜YÙYÛÜšÝ™YRYˆB‚ˆÊŠ‚ˆ
+ˆ[œÜXÝX[˜YÙY]ÛÜšÝ™YH™[[Ý˜[š\ÚÈ›ÜˆH™\]Y\Ý[™ÈÙ\ÜÚ[Û‹ˆY[]Bˆ
+ˆ\È™\ÛÛ™YÙ\™\‹\ÚYHœ›ÛHHÙ\ÜÚ[Û‰ÜÈ\œÚ\ÝYÚXÚÛÝ]‚ˆ
+‹Âˆ\Þ[˜È[œÜXÝX[˜YÙYÛÜšÝ™YT™[[Ý˜[
+ˆÙ\ÜÚ[Û’YˆÝš[™Ëˆ
+Nˆ›ÛZ\ÙO[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK•ÛÜšÝ™YT™[[Ý˜[š\ÚÏˆÂˆÛÛœÝX[˜YÙYÛÜšÝ™YRYH\Ëœ™\ÛÛ™SÝÛ™YÛÜšÝ™YRY
+Ù\ÜÚ[Û’Y
+Bˆ™]\›ˆ\Ë™Ù]Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ëš[œÜXÝ™[[Ý˜[
+X[˜YÙYÛÜšÝ™YRYÙ\ÜÚ[Û’Y
+BˆB‚ˆÊŠ‚ˆ
+ˆ™[[Ý™HHX[˜YÙYÛÜšÝ™YHÝÛ™YžHH™\]Y\Ý[™ÈÙ\ÜÚ[Û‹ˆY[]H\Âˆ
+ˆ™\ÛÛ™YÙ\™\‹\ÚYHœ›ÛHHÙ\ÜÚ[Û‰ÜÈ\œÚ\ÝYÚXÚÛÝ]ÈHÛY[ˆ
+ˆ™]™\ˆÝ\Y\ÈHÛÜšÝ™YH]ÜˆQˆ›ØÚÙYÚ[H[›Ý\ˆÙ\ÜÚ[ÛˆÝÛœÂˆ
+ˆ]ˆ›Ü˜ÙXÛÝ™\›œÈ[˜ÛÛ[Z]YÝ[š\]YHÛÜšÈÛ›K›ÝY[]HØY™]K‚ˆ
+‹Âˆ\Þ[˜È™[[Ý™SX[˜YÙYÛÜšÝ™YJˆÙ\ÜÚ[Û’YˆÝš[™ËˆÜ[ÛœÏÎˆÈ›Ü˜ÙOÎˆ›ÛÛX[ŽÈ^XÝYÛÛ™š\›X][ÛÎˆÛÜšÝ™YT™[[Ý˜[ÛÛ™š\›X][ÛˆKˆ
+Nˆ›ÛZ\ÙO[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK•ÛÜšÝ™YT™[[Ý˜[™\Ý[ˆÂˆYˆ
+Z\ÑÚ]ÛÜšÜÜXÙUŒQ[˜X›Y
+
+JHÂˆ›ÝÈ™]È\œ›ÜŠ	ÑÚ]ÛÜšÜÜXÙH™X]\™H\È›Ý[˜X›Y‰ÊBˆBˆÛÛœÝX[˜YÙYÛÜšÝ™YRYH\Ëœ™\ÛÛ™SÝÛ™YÛÜšÝ™YRY
+Ù\ÜÚ[Û’Y
+Bˆ™]\›ˆ\Ë™Ù]Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ëœ™[[Ý™UÛÜšÝ™YJX[˜YÙYÛÜšÝ™YRYÙ\ÜÚ[Û’YÜ[ÛœÊBˆB‚ˆÊŠ‚ˆ
+ˆ™[[Ý™H\ÈÙ\ÜÚ[Û‰ÜÈX[˜YÙYÛÜšÝ™YH™Y›Ü™H[][™ÈHÙ\ÜÚ[Û‹ˆBˆ
+ˆ]]Üš]]]™Hš[™Ù\œš[ÛÛ\\š\ÛÛˆ[™™[[Ý˜[\[ˆÙÙ]\ˆ[™\ˆBˆ
+ˆ™\ÜÚ]ÜžH]]][ÛˆØÚËÛÈHZ\ÛX]ÚØ[››Ý™H\ØÛÝ™\™YÛ›HY\‚ˆ
+ˆHÙ\ÜÚ[Ûˆ\È[™XYH™Y[ˆÜÝ‚ˆ
+‚ˆ
+ˆ™YHÝ]ÛÛY\Ë[X™\˜][H\Ý[˜ÝÛÈ™[[Ý™SX[˜YÙYÛÜšÝ™YX\ÈØY™H›Ü‚ˆ
+ˆ[žHØ[\ˆÈ\ÜÈ8 %[˜ÛY[™È[˜][™YÛX[\]Ø[››Ý[œÜXÝBˆ
+ˆÙ\ÜÚ[Ûˆš\œÝ‚ˆ
+‚ˆ
+ˆH›Ý[™Ë]Ë\™[[Ý™Xˆ\™H\È›ÈØ]K[ÝÛ™YÚXÚÛÝ]È™[[Ý™H
+™X]\™Bˆ
+ˆ\ØX›Y›ÈX[˜YÙYÚXÚÛÝ]›È™YÚ\ÝžH™XÛÜ™Üˆ\ÈÙ\ÜÚ[Ûˆ\È›Ýˆ
+ˆH™XÛÜ™YÝÛ™\ŠKˆ[][Ûˆ›ØÙYYÈ›Ü›X[NÈHÛY[[X›Ý]ˆ
+ˆ™[[Ý˜[]\Ý™]™\ˆ›ØÚÈ[][™ÈHÙ\ÜÚ[Ûˆ]\È›Ý[™ÈÈÛX[ˆ\‚ˆ
+ˆH›ØÚÙYˆH™X[™[[Ý˜[ÝX\™™Z™XÝY]8 %[›Ý\ˆÙ\ÜÚ[ÛˆÝ[ÝÛœÂˆ
+ˆHÛÜšÝ™YK]ÛÈ[˜ÛÛ[Z]YÜˆ[š\]YHÛÜšÈ[™›Ü˜ÙXØ\È›Ýˆ
+ˆÚ]™[‹ÜˆY[]H™]˜[Y][Ûˆ˜Z[YˆHØ[\ˆX›ÜÈ[\™[K‚ˆ
+ˆH™[[Ý™Yˆ™[[Ý˜[ÛÛ\]Y[™Ù\ÜÚ[Ûˆ[][ÛˆX^H›ØÙYY‚ˆ
+‹Âˆš]˜]H\Þ[˜È™[[Ý™SX[˜YÙYÛÜšÝ™YP™Y›Ü™TÙ\ÜÚ[Û‘[][ÛŠˆÙ\ÜÚ[Û’YˆÝš[™ËˆÜ[ÛœÏÎˆÈ›Ü˜ÙOÎˆ›ÛÛX[ŽÈ^XÝYÛÛ™š\›X][ÛÎˆÛÜšÝ™YT™[[Ý˜[ÛÛ™š\›X][ÛˆKˆ
+Nˆ›ÛZ\ÙOˆÈÝ]ÛÛYNˆ	Û›Ý[™Ë]Ë\™[[Ý™IÈBˆÈÝ]ÛÛYNˆ	Ü™[[Ý™Y	ÎÈ™\Ý[ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK•ÛÜšÝ™YT™[[Ý˜[™\Ý[BˆÈÝ]ÛÛYNˆ	Ø›ØÚÙY	ÎÈ™\Ý[ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK•ÛÜšÝ™YT™[[Ý˜[™\Ý[BˆˆÂˆYˆ
+Z\ÑÚ]ÛÜšÜÜXÙUŒQ[˜X›Y
+
+JH™]\›ˆÈÝ]ÛÛYNˆ	Û›Ý[™Ë]Ë\™[[Ý™IÈBˆ]X[˜YÙYÛÜšÝ™YRYˆÝš[™ÂˆžHÂˆX[˜YÙYÛÜšÝ™YRYH\Ëœ™\ÛÛ™SÝÛ™YÛÜšÝ™YRY
+Ù\ÜÚ[Û’Y
+BˆHØ]ÚÂˆËÈ›ÈX[˜YÙYÚXÚÛÝ]›È™YÚ\ÝžH™XÛÜ™Üˆ›Ý[ˆÝÛ™\ˆ8 %[YX[‚ˆËÈ\™H\È›Ý[™È\ÈÙ\ÜÚ[ÛˆX^H™[[Ý™K‚ˆ™]\›ˆÈÝ]ÛÛYNˆ	Û›Ý[™Ë]Ë\™[[Ý™IÈBˆB‚ˆžHÂˆÛÛœÝ™\Ý[H]ØZ]\Ë™Ù]Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ëœ™[[Ý™UÛÜšÝ™YJˆX[˜YÙYÛÜšÝ™YRYˆÙ\ÜÚ[Û’YˆÂˆ›Ü˜ÙNˆÜ[ÛœÏË™›Ü˜ÙKˆ^XÝYÛÛ™š\›X][ÛŽˆÜ[ÛœÏË™^XÝYÛÛ™š\›X][Û‹ˆKˆ
+BˆYˆ
+™\Ý[˜›ØÚÙY
+H™]\›ˆÈÝ]ÛÛYNˆ	Ø›ØÚÙY	Ë™\Ý[Bˆ™]\›ˆÈÝ]ÛÛYNˆ	Ü™[[Ý™Y	Ë™\Ý[BˆHØ]Ú
+\œŠHÂˆ™]\›ˆÂˆÝ]ÛÛYNˆ	Ø›ØÚÙY	Ëˆ™\Ý[ˆÂˆ™[[Ý™Yˆ˜[ÙKˆœ˜[˜Ú[™Yˆ˜[ÙKˆ›ØÚÙYˆYKˆ›ØÚÙY™X\ÛÛŽˆ\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆÝš[™Ê\œŠKˆKˆBˆBˆB‚ˆÊŠ‚ˆ
+ˆ]ÛZXØ[HYHH\œÚ\ÝYÙ\ÜÚ[ÛˆÚ]Ý]\Ý›ÞZ[™È]ˆH›ØÚÙYˆ
+ˆÚXÚÛÝ]™[[Ý˜[™[˜[Y\È\È\™XÝÜžH˜XÚËÚ[HHÝXØÙ\ÜÙ[ÛÛXš[™Yˆ
+ˆ[][Ûˆ™[[Ý™\ÈHÛXœÝÛ™HÛ›HY\ˆ[[YHÛX[\ÛÛ\]\Ë‚ˆ
+‹Âˆš]˜]H\Þ[˜ÈÝYÙTÙ\ÜÚ[Û”ÝÜ˜YÙQ›Ü‘[][ÛŠˆÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ËˆÙ\ÜÚ[Û’YˆÝš[™ËˆX[˜YÙYÛÜšÝ™YRYˆÝš[™Ëˆ
+Nˆ›ÛZ\ÙOÈÜšYÚ[˜[]ˆÝš[™ÎÈÝYÙY]ˆÝš[™ÎÈ˜[œØXÝ[Û”]ˆÝš[™ÈH[ˆÂˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+Ù\ÜÚ[Û’Y
+BˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK˜Ø[˜Ù[
+Ù\ÜÚ[Û’Y
+BˆÛÛœÝÜšYÚ[˜[]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+BˆYˆ
+Y^\ÝÔÞ[˜ÊÜšYÚ[˜[]
+JH™]\›ˆ[ˆÛÛœÝ˜[œØXÝ[Û”›ÛÝH›Ú[ŠÛÜšÜÜXÙT›ÛÝ]	ËšØ]K\Ù\ÜÚ[Û‹Y[][ÛœÉÊBˆÛÛœÝ˜[œØXÝ[Û”]H›Ú[Š˜[œØXÝ[Û”›ÛÝ˜[™ÛUURQ
+
+JBˆÛÛœÝÝYÙY]H›Ú[Š˜[œØXÝ[Û”]	ÜÙ\ÜÚ[Û‰ÊBˆZÙ\”Þ[˜Ê˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYHJBˆÜš]Qš[TÞ[˜Êˆ›Ú[Š˜[œØXÝ[Û”]	Ý˜[œØXÝ[Û‹šœÛÛ‰ÊKˆ”ÓÓ‹œÝš[™ÚYžJÈÙ\ÜÚ[Û’YX[˜YÙYÛÜšÝ™YRYJKˆ	Ý]Ž	Ëˆ
+Bˆ™[˜[YTÞ[˜ÊÜšYÚ[˜[]ÝYÙY]
+Bˆ™]\›ˆÈÜšYÚ[˜[]ÝYÙY]˜[œØXÝ[Û”]BˆB‚ˆš]˜]H™\ÝÜ™TÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙJˆÝYÙY‚ˆÈÜšYÚ[˜[]ˆÝš[™ÎÈÝYÙY]ˆÝš[™ÎÈ˜[œØXÝ[Û”]ˆÝš[™ÈBˆ[ˆ
+Nˆ›ÚYÂˆYˆ
+\ÝYÙYY^\ÝÔÞ[˜ÊÝYÙYœÝYÙY]
+JH™]\›‚ˆ™[˜[YTÞ[˜ÊÝYÙYœÝYÙY]ÝYÙY›ÜšYÚ[˜[]
+Bˆ›TÞ[˜ÊÝYÙY˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYK›Ü˜ÙNˆYHJBˆB‚ˆš]˜]Hš[˜[^™TÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙJˆÝYÙY‚ˆÈÜšYÚ[˜[]ˆÝš[™ÎÈÝYÙY]ˆÝš[™ÎÈ˜[œØXÝ[Û”]ˆÝš[™ÈBˆ[ˆ
+Nˆ›ÚYÂˆYˆ
+\ÝYÙY
+H™]\›‚ˆ›TÞ[˜ÊÝYÙY˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYK›Ü˜ÙNˆYHJBˆB‚ˆÊŠ‚ˆ
+ˆ™XÛÝ™\ˆHÜ˜\ÚZ[\œ\YÛÛXš[™Y[]H™Y›Ü™H›Ü›X[Ù\ÜÚ[Û‚ˆ
+ˆ\ØÛÝ™\žKˆHÝ[]˜XÚÙYÝ[\™\Ù[ÚXÚÛÝ]YX[œÈ™[[Ý˜[™]™\‚ˆ
+ˆÛÛ\]Y[™HÙ\ÜÚ[Ûˆ\È™\ÝÜ™YˆÝ\Ú\ÙHHY[ˆ˜[œØXÝ[Ûˆ\Âˆ
+ˆš[˜[^™YÛÈ›ÈÝ[HXY\ˆØ[ˆ™\Ý\œ™XÝH[™Û[™ÈÙ\ÜÚ[Û‹‚ˆ
+‹Âˆš]˜]H™XÛÝ™\”ÝYÙYÙ\ÜÚ[Û‘[][ÛœÊÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝ˜[œØXÝ[Û”›ÛÝH›Ú[ŠÛÜšÜÜXÙT›ÛÝ]	ËšØ]K\Ù\ÜÚ[Û‹Y[][ÛœÉÊBˆYˆ
+Y^\ÝÔÞ[˜Ê˜[œØXÝ[Û”›ÛÝ
+JH™]\›‚ˆ›Üˆ
+ÛÛœÝ[žHÙˆ™XY\”Þ[˜Ê˜[œØXÝ[Û”›ÛÝÈÚ]š[U\\ÎˆYHJJHÂˆYˆ
+Y[žKš\Ñ\™XÝÜžJ
+JHÛÛ[YBˆÛÛœÝ˜[œØXÝ[Û”]H›Ú[Š˜[œØXÝ[Û”›ÛÝ[žK›˜[YJBˆÛÛœÝX\šÙ\”]H›Ú[Š˜[œØXÝ[Û”]	Ý˜[œØXÝ[Û‹šœÛÛ‰ÊBˆÛÛœÝÝYÙY]H›Ú[Š˜[œØXÝ[Û”]	ÜÙ\ÜÚ[Û‰ÊBˆžHÂˆYˆ
+Y^\ÝÔÞ[˜ÊX\šÙ\”]
+HY^\ÝÔÞ[˜ÊÝYÙY]
+JHÂˆ›TÞ[˜Ê˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYK›Ü˜ÙNˆYHJBˆÛÛ[YBˆBˆÛÛœÝX\šÙ\ˆH”ÓÓ‹œ\œÙJ™XYš[TÞ[˜ÊX\šÙ\”]	Ý]Ž	ÊJH\ÈÂˆÙ\ÜÚ[Û’YÎˆÝš[™ÂˆX[˜YÙYÛÜšÝ™YRYÎˆÝš[™ÂˆBˆYˆ
+[X\šÙ\‹œÙ\ÜÚ[Û’Y[X\šÙ\‹›X[˜YÙYÛÜšÝ™YRY
+HÂˆ›TÞ[˜Ê˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYK›Ü˜ÙNˆYHJBˆÛÛ[YBˆBˆÛÛœÝÜšYÚ[˜[]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]X\šÙ\‹œÙ\ÜÚ[Û’Y
+BˆÛÛœÝ™XÈH\Ë™Ù]Ú]Ù\šXÙ\Ê
+Kœ™YÚ\ÝžK™Ù]
+X\šÙ\‹›X[˜YÙYÛÜšÝ™YRY
+BˆYˆ
+™XÈ	‰ˆ^\ÝÔÞ[˜Ê™XË˜ÚXÚÛÝ]]
+H	‰ˆY^\ÝÔÞ[˜ÊÜšYÚ[˜[]
+JHÂˆ™[˜[YTÞ[˜ÊÝYÙY]ÜšYÚ[˜[]
+BˆBˆ›TÞ[˜Ê˜[œØXÝ[Û”]È™XÝ\œÚ]™NˆYK›Ü˜ÙNˆYHJBˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠˆ˜Z[YÈ™XÛÝ™\ˆÝYÙYÙ\ÜÚ[Ûˆ[][Ûˆ]	Ý˜[œØXÝ[Û”]N˜ˆ\œ‹ˆ
+BˆBˆBˆB‚ˆÊŠ‚ˆ
+ˆ]ØZ]H˜XÚÙ[™[ÝÛ™YX\™ÝÛˆÛÛ˜XÝ™Y›Ü™H™XY[™ÈÜˆ™[[Ýš[™ÈBˆ
+ˆX[˜YÙYÚXÚÛÝ]ˆH™Z™XÝ[Ûˆ]\ÈÛÛ™\Y[ÈH›ØÚÙY™\Ý[žBˆ
+ˆHØ[\‹[™H™Z™XÝ[Ûˆ[™\ˆ\È]XÚY™Y›Ü™HH[Y[Ý]˜XÙBˆ
+ˆÛÈH]H˜XÚÙ[™˜Z[\™HØ[››Ý™XÛÛYH[ˆ[š[™Y™Z™XÝ[Û‹‚ˆ
+‹Âˆš]˜]H\Þ[˜ÈØZ]›ÜYÙ[]ZY\ØÙ[˜ÙJˆÙ\ÜÚ[Û’YˆÝš[™ËˆX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹ˆ[Y[Ý]\ÈHQÑS•ÔURQTÐÑWÕSQSÕUÓTËˆ
+Nˆ›ÛZ\ÙO›ÛÛX[ˆÂˆÛÛœÝYÙ[HX[˜YÙY˜YÙ[ˆYˆ
+XYÙ[
+H™]\›ˆYB‚ˆÛÛœÝX\™ÝÛˆH›ÛZ\ÙKœ™\ÛÛ™J
+Bˆ[Š
+
+HOˆYÙ[œ]ZY\ØÙQ›Ü•X\™ÝÛŠX›Ü™X\ÛÛ‹•\Ù\”ÝÜ
+JBˆ[Šˆ
+
+HOˆYKˆ
+\œ›ÜŠHOˆÂˆÙ\ÜÚ[Û“ÙËØ\›ŠˆYÙ[X\™ÝÛˆ›Üˆ	ÜÙ\ÜÚ[Û’YHØ\È›ÝÛÛ™š\›YYˆ	Ù\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠ_Xˆ
+Bˆ™]\›ˆ˜[ÙBˆKˆ
+B‚ˆ][Y[Ý][™Nˆ™]\›•\O\[ÙˆÙ][Y[Ý]ˆ[™Yš[™YˆÛÛœÝ[Y[Ý]H™]È›ÛZ\ÙO›ÛÛX[Š
+™\ÛÛ™JHOˆÂˆ[Y[Ý][™HHÙ][Y[Ý]
+
+
+HOˆ™\ÛÛ™J˜[ÙJK[Y[Ý]\ÊBˆJB‚ˆÛÛœÝ]ZY\ØÙYH]ØZ]›ÛZ\ÙKœ˜XÙJÝX\™ÝÛ‹[Y[Ý]JBˆYˆ
+[Y[Ý][™JHÛX\•[Y[Ý]
+[Y[Ý][™JBˆYˆ
+\]ZY\ØÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠˆYÙ[›Üˆ	ÜÙ\ÜÚ[Û’YHY›ÝÛÛ™š\›HX\™ÝÛˆÚ][ˆ	Ý[Y[Ý]\ß[\ÎÈ›Ý™X][™È]ÈÚXÚÛÝ]\ÈØY™HÈ™[[Ý™Xˆ
+BˆBˆ™]\›ˆ]ZY\ØÙYˆB‚ˆÊŠˆ›ÝÈ[›\ÜÈHÙ\ÜÚ[Ûˆ\È[\H
+›ÈY\ÜØYÙ\Ë›ÈÑÈÙ\ÜÚ[Û‹›ÈYÙ[
+Kˆ
+‹Âˆš]˜]H\ÜÙ\[\TÙ\ÜÚ[Û‘Ø]JX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÚYÂˆYˆ
+ˆX[˜YÙY›Y\ÜØYÙ\Ë›[™ÝˆˆX[˜YÙYœÙÔÙ\ÜÚ[Û’YˆX[˜YÙY˜YÙ[ˆX[˜YÙYš\Ô›ØÙ\ÜÚ[™Âˆ
+HÂˆ›ÝÈ™]È\œ›ÜŠˆ	ÐÚXÚÛÝ]™\\˜][Ûˆ\ÈÛ›H[ÝÙYÛˆ[ˆ[\HÙ\ÜÚ[Ûˆ
+›ÈY\ÜØYÙ\Ë›ÈÑÈÙ\ÜÚ[Û‹›È]™HYÙ[
+K‰Ëˆ
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆš[™ÚXÚÛÝ]Y]Y]KÛÜšÚ[™Ñ\™XÝÜžK[™[š]X[ÙÐÝÙ]ÛZXØ[K‚ˆ
+ˆH[\K\Ù\ÜÚ[ÛˆØ]HÝX\˜[Y\ÈÙÐÝÙ\ÈÝ[ØY™HÈÚ[™ÙK‚ˆ
+‹Âˆš]˜]Hš[™ÚXÚÛÝ]
+ˆX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹ˆÚXÚÛÝ]ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[ÛÚXÚÛÝ]ŒKˆ™\ÛÛ™YÛÜšÚ[™Ñ\ŽˆÝš[™Ëˆ
+Nˆ›ÚYÂˆX[˜YÙY˜ÚXÚÛÝ]HÚXÚÛÝ]ˆX[˜YÙYÛÜšÚ[™Ñ\™XÝÜžHH™\ÛÛ™YÛÜšÚ[™Ñ\‚ˆX[˜YÙYœÙÐÝÙH™\ÛÛ™YÛÜšÚ[™Ñ\‚ˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆX[˜YÙY˜YÙ[\]UÛÜšÚ[™Ñ\™XÝÜžJ™\ÛÛ™YÛÜšÚ[™Ñ\ŠBˆX[˜YÙY˜YÙ[\]TÙÐÝÙ
+™\ÛÛ™YÛÜšÚ[™Ñ\ŠBˆBˆ[˜[Y]PÛÛ^š[PØXÚJ™\ÛÛ™YÛÜšÚ[™Ñ\ŠBˆ[˜[Y]TÚÚ[ÐØXÚJ
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+ˆÈ\Nˆ	ÝÛÜšÚ[™×Ù\™XÝÜžWØÚ[™ÙY	ËÙ\ÜÚ[Û’YˆX[˜YÙYšYÛÜšÚ[™Ñ\™XÝÜžNˆ™\ÛÛ™YÛÜšÚ[™Ñ\ˆKˆX[˜YÙYÛÜšÜÜXÙKšYˆ
+BˆB‚ˆÊŠ‚ˆ
+ˆ\]HH[Ù[›ÜˆHÙ\ÜÚ[Û‚ˆ
+ˆ\ÜÈ[ÈÛX\ˆHÙ\ÜÚ[Û‹\ÜXÚYšXÈ[Ù[
+Ú[\ÙHÛØ˜[ÛÛ™šYÊBˆ
+ˆ\˜[HÛÛ›™XÝ[ÛˆHÜ[Û˜[HÛÛ›™XÝ[ÛˆÛYÈ
+Û›H\YYYˆ›Ý[™XYHØÚÙY
+Bˆ
+‹Âˆ\Þ[˜È\]TÙ\ÜÚ[Û“[Ù[
+Ù\ÜÚ[Û’YˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™Ë[Ù[ˆÝš[™È[ÛÛ›™XÝ[ÛÎˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ\]TÙ\ÜÚ[Û“[Ù[HÙ\ÜÚ[Û’YIÜÙ\ÜÚ[Û’YK[Ù[IÛ[Ù[KÛÛ›™XÝ[ÛIØÛÛ›™XÝ[ÛŸX
+BˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙY
+HÂˆX[˜YÙY›[Ù[H[Ù[ÏÈ[™Yš[™YˆËÈ[ÛÈ\]HÛÛ›™XÝ[ÛˆYˆ›ÝšYY[™›Ý[™XYHØÚÙYˆYˆ
+ÛÛ›™XÝ[Ûˆ	‰ˆ[X[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙY
+HÂˆX[˜YÙY›PÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û‚ˆBˆËÈ\œÚ\ÝÈ\ÚÈ
+[˜ÛYHÛÛ›™XÝ[ÛˆYˆ]Ø\È\]Y
+BˆÛÛœÝ\]\ÎˆÈ[Ù[ÎˆÝš[™ÎÈPÛÛ›™XÝ[ÛÎˆÝš[™ÈHHÈ[Ù[ˆ[Ù[ÏÈ[™Yš[™YBˆYˆ
+ÛÛ›™XÝ[Ûˆ	‰ˆ[X[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙY
+HÂˆ\]\Ë›PÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û‚ˆBˆ]ØZ]\]TÙ\ÜÚ[Û“Y]Y]JX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y\]\ÊBˆËÈ\]HYÙ[[Ù[Yˆ][™XYH^\ÝÈ
+ZÙ\ÈY™™XÝÛˆ™^]Y\žJBˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆËÈ˜[˜XÚÈÚZ[ŽˆÙ\ÜÚ[Ûˆ[Ù[ˆÛÜšÜÜXÙHY˜][ˆÛÛ›™XÝ[ÛˆY˜][ˆÛÛœÝÜÐÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆÛÛœÝÙ\ÜÚ[ÛÛÛ›ˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠX[˜YÙY›PÛÛ›™XÝ[Û‹ÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[ÛŠBˆÛÛœÝY™™XÝ]™S[Ù[H[Ù[ÏÈÜÐÛÛ™šYÏË™Y˜][ÏË›[Ù[ÏÈÙ\ÜÚ[ÛÛÛ›Ë™Y˜][[Ù[BˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ\]TÙ\ÜÚ[Û“[Ù[HØ[[™ÈYÙ[œÙ][Ù[
+	ÙY™™XÝ]™S[Ù[JHØYÙ[^\ÝÏIÈH[X[˜YÙY˜YÙ[KÛÛ›™XÝ[Û“ØÚÙYIÛX[˜YÙY˜ÛÛ›™XÝ[Û“ØÚÙYWX
+BˆX[˜YÙY˜YÙ[œÙ][Ù[
+Y™™XÝ]™S[Ù[
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÝ\]TÙ\ÜÚ[Û“[Ù[H›ÈYÙ[Y][Ù[Ú[\HÛˆ™^YÙ[Ü™X][Û˜
+BˆBˆËÈ›ÝYžH™[™\™\ˆÙˆH[Ù[Ú[™ÙBˆ\ËœÙ[™]™[
+È\Nˆ	ÜÙ\ÜÚ[Û—Û[Ù[ØÚ[™ÙY	ËÙ\ÜÚ[Û’Y[Ù[KX[˜YÙYÛÜšÜÜXÙKšY
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH[Ù[\]YÎˆ	Û[Ù[ÏÈ	ÊÛØ˜[ÛÛ™šYÊIßX
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆ\]HHÛÛ[ÙˆHÜXÚYšXÈY\ÜØYÙH[ˆHÙ\ÜÚ[Û‚ˆ
+ˆ\ÙYžH™]šY]ÈÚ[™ÝÈÈØ]™HY]YÛÛ[˜XÚÈÈHÜšYÚ[˜[Y\ÜØYÙBˆ
+‹Âˆ\]SY\ÜØYÙPÛÛ[
+Ù\ÜÚ[Û’YˆÝš[™ËY\ÜØYÙRYˆÝš[™ËÛÛ[ˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]HY\ÜØYÙNˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›‚ˆB‚ˆÛÛœÝY\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOHY\ÜØYÙRY
+BˆYˆ
+[Y\ÜØYÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]HY\ÜØYÙNˆY\ÜØYÙH	ÛY\ÜØYÙRYH›Ý›Ý[™[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆËÈ\]HHY\ÜØYÙHÛÛ[ˆY\ÜØYÙK˜ÛÛ[HÛÛ[ˆËÈ\œÚ\ÝH\]YÙ\ÜÚ[Û‚ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê\]YY\ÜØYÙH	ÛY\ÜØYÙRYHÛÛ[[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆB‚ˆÊŠ‚ˆ
+ˆY[ˆ[››Ý][ÛˆÈHY\ÜØYÙH[™\œÚ\ÝHÙ\ÜÚ[Û‹‚ˆ
+‹ÂˆYY\ÜØYÙP[››Ý][ÛŠÙ\ÜÚ[Û’YˆÝš[™ËY\ÜØYÙRYˆÝš[™Ë[››Ý][ÛŽˆ›Û“[X›OY\ÜØYÙVÉØ[››Ý][ÛœÉ×O–Û[X™\—JNˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›‚ˆB‚ˆÛÛœÝY\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOHY\ÜØYÙRY
+BˆYˆ
+[Y\ÜØYÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆY\ÜØYÙH	ÛY\ÜØYÙRYH›Ý›Ý[™[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆYˆ
+X[››Ý][ÛËšYX[››Ý][ÛË\™Ù]ËœÙ[XÝÜœÏË›[™Ý
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆ[˜[Y[››Ý][Ûˆ^[ØY›ÜˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆYˆ
+[››Ý][Û‹\™Ù]œÛÝ\˜ÙK›Y\ÜØYÙRYOOHY\ÜØYÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆ\™Ù]ÛÝ\˜ÙK›Y\ÜØYÙRYZ\ÛX]Ú
+	Ø[››Ý][Û‹\™Ù]œÛÝ\˜ÙK›Y\ÜØYÙRYHOOH	ÛY\ÜØYÙRYJX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝØY™P[››Ý][ÛŽˆ›Û“[X›OY\ÜØYÙVÉØ[››Ý][ÛœÉ×O–Û[X™\—HHÂˆ‹‹˜[››Ý][Û‹ˆØÚ[XU™\œÚ[ÛŽˆKˆ\™Ù]ˆÂˆ‹‹˜[››Ý][Û‹\™Ù]ˆÛÝ\˜ÙNˆÂˆ‹‹˜[››Ý][Û‹\™Ù]œÛÝ\˜ÙKˆÙ\ÜÚ[Û’YˆY\ÜØYÙRYˆKˆKˆB‚ˆÛÛœÝ[››Ý][Ûž]\ÈHY™™\‹˜ž]S[™Ý
+”ÓÓ‹œÝš[™ÚYžJØY™P[››Ý][ÛŠK	Ý]Ž	ÊBˆYˆ
+[››Ý][Ûž]\ÈˆPVÐS““ÕUSÓ—Ò”ÓÓ—Ð–UTÊHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆ^[ØYÛÈ\™ÙH
+	Ø[››Ý][Ûž]\ßHž]\Èˆ	ÓPVÐS““ÕUSÓ—Ò”ÓÓ—Ð–UTßJHÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝ^\Ý[™ÈHY\ÜØYÙK˜[››Ý][ÛœÈÏÈ×BˆYˆ
+^\Ý[™ËœÛÛYJHOˆKšYOOHØY™P[››Ý][Û‹šY
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆ\XØ]H[››Ý][ÛˆY	ÜØY™P[››Ý][Û‹šYHÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆYˆ
+^\Ý[™Ë›[™ÝHPVÐS““ÕUSÓ”×ÔT—ÓQTÔÐQÑJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝY[››Ý][ÛŽˆ\‹[Y\ÜØYÙH[Z]™XXÚY
+	ÓPVÐS““ÕUSÓ”×ÔT—ÓQTÔÐQÑ_JHÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆY\ÜØYÙK˜[››Ý][ÛœÈHË‹‹™^\Ý[™ËØY™P[››Ý][Û—Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+È\Nˆ	ÛY\ÜØYÙWØ[››Ý][Ûœ×Ý\]Y	ËÙ\ÜÚ[Û’YY\ÜØYÙRY[››Ý][ÛœÎˆY\ÜØYÙK˜[››Ý][ÛœÈKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆÊŠ‚ˆ
+ˆ]Ú[ˆ^\Ý[™È[››Ý][ÛˆÛˆHY\ÜØYÙK‚ˆ
+‹Âˆ\]SY\ÜØYÙP[››Ý][ÛŠˆÙ\ÜÚ[Û’YˆÝš[™ËˆY\ÜØYÙRYˆÝš[™Ëˆ[››Ý][Û’YˆÝš[™Ëˆ]Úˆ\X[›Û“[X›OY\ÜØYÙVÉØ[››Ý][ÛœÉ×O–Û[X™\—O‚ˆ
+Nˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›‚ˆB‚ˆÛÛœÝY\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOHY\ÜØYÙRY
+BˆYˆ
+[Y\ÜØYÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆY\ÜØYÙH	ÛY\ÜØYÙRYH›Ý›Ý[™[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝ^\Ý[™ÈHY\ÜØYÙK˜[››Ý][ÛœÈÏÈ×BˆÛÛœÝYH^\Ý[™Ë™š[™[™^
+HOˆKšYOOH[››Ý][Û’Y
+BˆYˆ
+YOOHLJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆ[››Ý][Ûˆ	Ø[››Ý][Û’YH›Ý›Ý[™ÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆYˆ
+]Ú\™Ù]ËœÛÝ\˜ÙOË›Y\ÜØYÙRY	‰ˆ]Ú\™Ù]œÛÝ\˜ÙK›Y\ÜØYÙRYOOHY\ÜØYÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆ\™Ù]ÛÝ\˜ÙK›Y\ÜØYÙRYZ\ÛX]Ú[ˆ]Ú
+	Ü]Ú\™Ù]œÛÝ\˜ÙK›Y\ÜØYÙRYHOOH	ÛY\ÜØYÙRYJX
+Bˆ™]\›‚ˆB‚ˆYˆ
+]Ú\™Ù]ËœÙ[XÝÜœÈ	‰ˆ]Ú\™Ù]œÙ[XÝÜœË›[™ÝOOH
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆ[\HÙ[XÝÜœÈ]Ú›Üˆ[››Ý][Ûˆ	Ø[››Ý][Û’YHÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝÝ\œ™[H^\Ý[™ÖÚYHBˆÛÛœÝ\]YHÂˆ‹‹˜Ý\œ™[ˆ‹‹œ]ÚˆYˆÝ\œ™[šYˆØÚ[XU™\œÚ[ÛŽˆÝ\œ™[œØÚ[XU™\œÚ[Û‹ˆ\™Ù]ˆ]Ú\™Ù]ˆÈÂˆ‹‹˜Ý\œ™[\™Ù]ˆ‹‹œ]Ú\™Ù]ˆÛÝ\˜ÙNˆÂˆ‹‹˜Ý\œ™[\™Ù]œÛÝ\˜ÙKˆ‹‹Š]Ú\™Ù]œÛÝ\˜ÙHÏÈßJKˆÙ\ÜÚ[Û’YˆY\ÜØYÙRYˆKˆBˆˆÂˆ‹‹˜Ý\œ™[\™Ù]ˆÛÝ\˜ÙNˆÂˆ‹‹˜Ý\œ™[\™Ù]œÛÝ\˜ÙKˆÙ\ÜÚ[Û’YˆY\ÜØYÙRYˆKˆKˆ\]Y]ˆ]K››ÝÊ
+KˆB‚ˆÛÛœÝ\]Yž]\ÈHY™™\‹˜ž]S[™Ý
+”ÓÓ‹œÝš[™ÚYžJ\]Y
+K	Ý]Ž	ÊBˆYˆ
+\]Yž]\ÈˆPVÐS““ÕUSÓ—Ò”ÓÓ—Ð–UTÊHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý\]H[››Ý][ÛŽˆ^[ØYÛÈ\™ÙH
+	Ý\]Yž]\ßHž]\Èˆ	ÓPVÐS““ÕUSÓ—Ò”ÓÓ—Ð–UTßJH›Üˆ[››Ý][Ûˆ	Ø[››Ý][Û’YHÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝ™^HË‹‹™^\Ý[™×Bˆ™^ÚYHH\]YˆY\ÜØYÙK˜[››Ý][ÛœÈH™^ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+È\Nˆ	ÛY\ÜØYÙWØ[››Ý][Ûœ×Ý\]Y	ËÙ\ÜÚ[Û’YY\ÜØYÙRY[››Ý][ÛœÎˆY\ÜØYÙK˜[››Ý][ÛœÈKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆÊŠ‚ˆ
+ˆ™[[Ý™H[ˆ[››Ý][Ûˆœ›ÛHHY\ÜØYÙH[™\œÚ\ÝHÙ\ÜÚ[Û‹‚ˆ
+‹Âˆ™[[Ý™SY\ÜØYÙP[››Ý][ÛŠÙ\ÜÚ[Û’YˆÝš[™ËY\ÜØYÙRYˆÝš[™Ë[››Ý][Û’YˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý™[[Ý™H[››Ý][ÛŽˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›‚ˆB‚ˆÛÛœÝY\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOHY\ÜØYÙRY
+BˆYˆ
+[Y\ÜØYÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý™[[Ý™H[››Ý][ÛŽˆY\ÜØYÙH	ÛY\ÜØYÙRYH›Ý›Ý[™[ˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆÛÛœÝ^\Ý[™ÈHY\ÜØYÙK˜[››Ý][ÛœÈÏÈ×BˆYˆ
+Y^\Ý[™ËœÛÛYJHOˆKšYOOH[››Ý][Û’Y
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý™[[Ý™H[››Ý][ÛŽˆ[››Ý][Ûˆ	Ø[››Ý][Û’YH›Ý›Ý[™ÛˆY\ÜØYÙH	ÛY\ÜØYÙRYX
+Bˆ™]\›‚ˆB‚ˆY\ÜØYÙK˜[››Ý][ÛœÈH^\Ý[™Ë™š[\ŠHOˆKšYOOH[››Ý][Û’Y
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+È\Nˆ	ÛY\ÜØYÙWØ[››Ý][Ûœ×Ý\]Y	ËÙ\ÜÚ[Û’YY\ÜØYÙRY[››Ý][ÛœÎˆY\ÜØYÙK˜[››Ý][ÛœÈKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆ\Þ[˜È[]TÙ\ÜÚ[ÛŠˆÙ\ÜÚ[Û’YˆÝš[™ËˆÜ[ÛœÏÎˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[Û‘[]SÜ[ÛœËˆ
+Nˆ›ÛZ\ÙO[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”Ù\ÜÚ[Û‘[]T™\Ý[ˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý[]HÙ\ÜÚ[ÛŽˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›ˆÈ[]Yˆ˜[ÙHBˆB‚ˆËÈÙ]ÛÜšÜÜXÙHÛYÈ™Y›Ü™H[][™ÂˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]‚ˆËÈ]ZY\ØÙHHYÙ[‘Q“Ô‘H[ž][™È™XYÈÜˆ™[[Ý™\ÈHÚXÚÛÝ]ˆH]™BˆËÈ\›ˆÜš]\È[ÈHÛÜšÝ™YKÛÈ[œÜXÝ[™È™[[Ý˜[š\ÚÈÜˆ™[[Ýš[™ÈBˆËÈÚXÚÛÝ]Ú[H][œÈÛÝ[\ØØ\™š[\ÈH\ÝXÝ]™HÛÛ™š\›X][Û‚ˆËÈ™]™\ˆÛÝ[Y
+ÜXÎˆPÌNJKˆX[˜YÙY]ÛÜšÝ™YH™[[Ý˜[Ø[È\È]™[ˆÚ[‚ˆËÈHÙ\ÜÚ[Û‹Ø˜XÚÙ[™›YÜÈ™\ÜYK™XØ]\ÙHHÝÛœÈH\œÚ\Ý[Ú[ˆËÈÝ]ÚYHÜÙH[™™\œ™Y\›ˆ›YÜË‚ˆ]YÙ[]ZY\ØÙYHYBˆYˆ
+X[˜YÙY˜YÙ[	‰ˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÈÜ[ÛœÏËœ™[[Ý™SX[˜YÙYÛÜšÝ™YJJHÂˆYÙ[]ZY\ØÙYH]ØZ]\ËØZ]›ÜYÙ[]ZY\ØÙ[˜ÙJÙ\ÜÚ[Û’YX[˜YÙY
+BˆB‚ˆËÈX[˜YÙY]ÛÜšÝ™YH™[[Ý˜[\È[ˆÜZ[ˆ^˜HÝ\
+ÜXÎˆPÌN8 $ÐPÌNJKˆ]ÂˆËÈ]]Üš]]]™HÛÛ™š\›X][ÛˆÚXÚÈ[™™[[Ý˜[ÛÛ\]HÚ[HHÙ\ÜÚ[Û‚ˆËÈÝ[^\ÝËˆYˆ[ž][™ÈÚ[™ÙYY\ˆHX[ÙÈ[œÜXÝ[Û‹BˆËÈÜ\˜][ÛˆÝÜÈ™Y›Ü™HÝÛ™\œÚ\ÜˆÙ\ÜÚ[ÛˆÝ]H\ÈÝXÚY‚ˆ]ÛÛ\]YÛÜšÝ™YT™[[Ý˜[‚ˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK•ÛÜšÝ™YT™[[Ý˜[™\Ý[ˆ[™Yš[™Yˆ]ÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙN‚ˆÈÜšYÚ[˜[]ˆÝš[™ÎÈÝYÙY]ˆÝš[™ÎÈ˜[œØXÝ[Û”]ˆÝš[™ÈBˆ[ˆ[™Yš[™YˆYˆ
+Ü[ÛœÏËœ™[[Ý™SX[˜YÙYÛÜšÝ™YJHÂˆËÈ™[[Ý˜[™\]Z\™\ÈH˜XÚÙ[™]\È
+˜ÛÛ™š\›YY
+ˆ]ÝÜYˆ[œÜXÝ[™ÂˆËÈ[™›Ü˜ÙK\™[[Ýš[™ÈHÚXÚÛÝ]]HÝXœ›ØÙ\ÜÈX^HÝ[™HÜš][™ÈÂˆËÈÛÝ[\ØØ\™ÛÜšÈ›ÈÛÛ™š\›X][Ûˆ]™\ˆÛÝ[YÛÈHÙYÙYYÙ[ˆËÈ›ØÚÜÈ™[[Ý˜[8 %[™\™Y›Ü™H\È[][Ûˆ8 %˜]\ˆ[ˆ˜XÚ[™È]‚ˆËÈ[][™ÈHÙ\ÜÚ[ÛˆÚ]Ý]H™[[Ý˜[Ü[Ûˆ™]™\ˆÝXÚ\ÈBˆËÈÚXÚÛÝ][™Ý^\È]˜Z[X›K‚ˆYˆ
+XYÙ[]ZY\ØÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Šˆ™Y\Ú[™ÈX[˜YÙY]ÛÜšÝ™YH™[[Ý˜[›Üˆ	ÜÙ\ÜÚ[Û’YNˆYÙ[Y›ÝÛÛ™š\›H]ÝÜYˆ
+Bˆ™]\›ˆÂˆ[]Yˆ˜[ÙKˆÛÜšÝ™YT™[[Ý˜[ˆÂˆ™[[Ý™Yˆ˜[ÙKˆœ˜[˜Ú[™Yˆ˜[ÙKˆ›ØÚÙYˆYKˆ›ØÚÙY™X\ÛÛŽ‚ˆ	ÕHYÙ[\È›Ýš[š\ÚYÝÜ[™ËÛÈ]ÈÛÜšÝ™YHØ[››Ý™H™[[Ý™YØY™[HY]ˆžHYØZ[ˆ[ˆH[ÛY[‰ËˆKˆBˆBˆ]ÝÛ™YÛÜšÝ™YRYˆÝš[™È[H[ˆYˆ
+\ÑÚ]ÛÜšÜÜXÙUŒQ[˜X›Y
+
+JHÂˆžHÂˆÝÛ™YÛÜšÝ™YRYH\Ëœ™\ÛÛ™SÝÛ™YÛÜšÝ™YRY
+Ù\ÜÚ[Û’Y
+BˆHØ]ÚÂˆËÈH™[[Ý˜[[\È\›[\ÜÈÚ[ˆ\ÈÙ\ÜÚ[ÛˆÝÛœÈ›ÈÚXÚÛÝ]‚ˆBˆBˆYˆ
+ÝÛ™YÛÜšÝ™YRY
+HÂˆžHÂˆÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙHH]ØZ]\ËœÝYÙTÙ\ÜÚ[Û”ÝÜ˜YÙQ›Ü‘[][ÛŠˆÛÜšÜÜXÙT›ÛÝ]ˆÙ\ÜÚ[Û’YˆÝÛ™YÛÜšÝ™YRYˆ
+BˆHØ]Ú
+\œŠHÂˆ™]\›ˆÂˆ[]Yˆ˜[ÙKˆÛÜšÝ™YT™[[Ý˜[ˆÂˆ™[[Ý™Yˆ˜[ÙKˆœ˜[˜Ú[™Yˆ˜[ÙKˆ›ØÚÙYˆYKˆ›ØÚÙY™X\ÛÛŽˆHÙ\ÜÚ[ÛˆÛÝ[›Ý™HÝYÙY›ÜˆØY™H[][ÛŽˆ	Ù\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆÝš[™Ê\œŠ_XˆKˆBˆBˆB‚ˆÛÛœÝ™[[Ý˜[H]ØZ]\Ëœ™[[Ý™SX[˜YÙYÛÜšÝ™YP™Y›Ü™TÙ\ÜÚ[Û‘[][ÛŠÙ\ÜÚ[Û’YÂˆ›Ü˜ÙNˆÜ[ÛœË™›Ü˜ÙUÛÜšÝ™YT™[[Ý˜[ˆ^XÝYÛÛ™š\›X][ÛŽˆÜ[ÛœËÛÜšÝ™YT™[[Ý˜[ÛÛ™š\›X][Û‹ˆJBˆYˆ
+™[[Ý˜[›Ý]ÛÛYHOOH	Ø›ØÚÙY	ÊHÂˆžHÂˆ\Ëœ™\ÝÜ™TÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙJÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙHÏÈ[
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠˆ˜Z[YÈ™\ÝÜ™HÙ\ÜÚ[ÛˆÝÜ˜YÙHY\ˆ›ØÚÙYÛÜšÝ™YH™[[Ý˜[›Üˆ	ÜÙ\ÜÚ[Û’YN˜ˆ\œ‹ˆ
+BˆBˆ™]\›ˆÈ[]Yˆ˜[ÙKÛÜšÝ™YT™[[Ý˜[ˆ™[[Ý˜[œ™\Ý[BˆBˆYˆ
+™[[Ý˜[›Ý]ÛÛYHOOH	Ü™[[Ý™Y	ÊHÛÛ\]YÛÜšÝ™YT™[[Ý˜[H™[[Ý˜[œ™\Ý[ˆB‚ˆËÈ›ÜX[˜YÙY]ÛÜšÝ™YHÝÛ™\œÚ\›Üˆ\ÈÙ\ÜÚ[Û‹ˆ[][™ÈHÙ\ÜÚ[Ûˆ™]™\‚ˆËÈ™[[Ý™\ÈHÚXÚÛÝ]Ûˆ]ÈÝÛŽÈ]Û›H™[X\Ù\ÈHÝÛ™\ˆ™Y™\™[˜ÙHÛÂˆËÈÚ\™Y[ÝÛ™\ˆÛÝ[ÈÝ^HÛÜœ™XÝˆÚ[ˆ^XÚ]™[[Ý˜[Ø\È™\]Y\ÝYˆËÈH™YÚ\ÝžH™XÛÜ™\È[™XYHÛÛ™H[™\È\ÈH\›[\ÜÈ›Ë[Ü‚ˆYˆ
+X[˜YÙY˜ÚXÚÛÝ]Ë›[ÙHOOH	ÛX[˜YÙY]ÛÜšÝ™YIÈ	‰ˆX[˜YÙY˜ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRY
+HÂˆžHÂˆ\Ë™Ù]Ú]Ù\šXÙ\Ê
+KÛÜšÝ™Y\Ëœ™[[Ý™SÝÛ™\ŠX[˜YÙY˜ÚXÚÛÝ]›X[˜YÙYÛÜšÝ™YRYÙ\ÜÚ[Û’Y
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ™[X\ÙHÛÜšÝ™YHÝÛ™\œÚ\›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆBˆB‚ˆËÈ™]›ÚÙHÚ\™HYˆÙ\ÜÚ[ÛˆØ\ÈÚ\™Y
+™]™[Üœ[™YšY]Ù\ˆÛÜY\ÊBˆYˆ
+X[˜YÙYœÚ\™YY
+HÂˆžHÂˆÛÛœÝÈ’QUÑT—ÕT“HH]ØZ][\Ü
+	ÐØ]K\ÚÜÚ\™YØœ˜[™[™ÉÊBˆÛÛœÝ™\ÜÛœÙHH]ØZ]™]Ú
+ˆ	Õ’QUÑT—ÕT“KÜËØ\KÉÛX[˜YÙYœÚ\™YYXˆÈY]Ùˆ	ÑSUIËÚYÛ˜[ˆX›ÜÚYÛ˜[[Y[Ý]
+L
+HBˆ
+BˆYˆ
+\™\ÜÛœÙK›ÚÊHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ™]›ÚÙHÚ\™H›Üˆ	ÜÙ\ÜÚ[Û’YNˆ	Ü™\ÜÛœÙKœÝ]\ßX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê™]›ÚÙYÚ\™H›Üˆ[]YÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ™]›ÚÙHÚ\™H›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œ›ÜŠBˆBˆB‚ˆËÈÛX[ˆ\[H›\Ú[Y\œÈÈ™]™[Üœ[™Y[Y\œÂˆÛÛœÝ[Y\ˆH\Ë™[Q›\Ú[Y\œË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[Y\ŠHÂˆÛX\•[Y[Ý]
+[Y\ŠBˆ\Ë™[Q›\Ú[Y\œË™[]JÙ\ÜÚ[Û’Y
+BˆBˆ\Ëœ[™[™Ñ[\Ë™[]JÙ\ÜÚ[Û’Y
+Bˆ\Ë˜ÛX\YZ[”™[Y[X™\\›Ý˜[Ñ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+Bˆ\Ë˜ÛX\”[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝÑ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+B‚ˆËÈØ[˜Ù[[žH[™[™È\œÚ\Ý[˜ÙHÜš]H
+Ù\ÜÚ[Ûˆ\È™Z[™È[]Y›È™YYÈØ]™JBˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK˜Ø[˜Ù[
+Ù\ÜÚ[Û’Y
+B‚ˆËÈÛX[ˆ\Ù\ÜÚ[Û‹\ØÛÜYÛÛØ[˜XÚÜÈÈ™]™[Y[[ÜžHXØÝ[][][Û‚ˆ[œ™YÚ\Ý\”Ù\ÜÚ[Û”ØÛÜYÛÛØ[˜XÚÜÊÙ\ÜÚ[Û’Y
+B‚ˆËÈ\Ý›ÞHœ›ÝÜÙ\ˆ[œÝ[˜Ù\È›Ý[™È\ÈÙ\ÜÚ[Û‚ˆÛÛœÝÙ\ÜÚ[ÛœHH\Ë™Ù]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆYˆ
+Ù\ÜÚ[ÛœJHÂˆžHÂˆÙ\ÜÚ[ÛœK™\Ý›ÞQ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆHØ]Ú
+\œŠHÂˆËÈÛÜšÝ™YH™[[Ý˜[X^H[™XYH]™HÛÛ\]YˆÛX[\\È™\ÝYY™›ÜˆËÈœ›ÛH\ÈÚ[›ÜØ\™ÛÈHÞ[˜Ú›Û›Ý\Èœ›ÝÜÙ\ˆ˜Z[\™HØ[››ÝX]™BˆËÈHÝYÙYÙ\ÜÚ[Ûˆ˜[œØXÝ[Ûˆ[‹X\YY‚ˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\Ý›ÞHœ›ÝÜÙ\ˆ[œÝ[˜Ù\È›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆBˆBˆËÈ›ÜH\‹\Ù\ÜÚ[Ûˆ™[[ÝHœšYÙH
+ÈÜÝXÛY[[ˆÛˆ\Ý›ÞK‚ˆ\Ëœ™[[ÝPœ\Ë™[]JÙ\ÜÚ[Û’Y
+Bˆ\Ë˜œ›ÝÜÙ\’ÜÝžPØ[˜\Ë™[]JÙ\ÜÚ[Û’Y
+B‚ˆËÈ\ÜÜÙHYÙ[ÈÛX[ˆ\ÛÛ™šYÕØ]Ú\œË]™[\Ý[™\œËPÔÛÛ›™XÝ[ÛœÂˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆžHÂˆX[˜YÙY˜YÙ[™\ÜÜÙJ
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\ÜÜÙHYÙ[›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆBˆB‚ˆËÈÝÜÛÛÙ\™\ˆ
+PÔÙ\™\ˆ›Üˆ^\›˜[ÑÈÝXœ›ØÙ\ÜÙ\ÊBˆYˆ
+X[˜YÙYœÛÛÙ\™\ŠHÂˆžHÂˆX[˜YÙYœÛÛÙ\™\‹œÝÜ
+
+K˜Ø]Ú
+\œˆOˆÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈÝÜÛÛÙ\™\ˆ›Üˆ	ÜÙ\ÜÚ[Û’YNˆ	Ù\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆ\œŸX
+BˆJBˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈÝÜÛÛÙ\™\ˆ›Üˆ	ÜÙ\ÜÚ[Û’YNˆ	Ù\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆ\œŸX
+BˆBˆB‚ˆËÈØ[˜Ù[[žH[™[™ÈÛÝ\˜ÙKXXÝ]˜][Ûˆ]]Ë\™]žH[Y\ˆ
+Ø]KXYÙ[Ë[ÜÜÈÎ
+K‚ˆYˆ
+X[˜YÙY˜]]Ô™]žU[Y\ŠHÂˆÛX\•[Y[Ý]
+X[˜YÙY˜]]Ô™]žU[Y\ŠBˆX[˜YÙY˜]]Ô™]žU[Y\ˆH[™Yš[™YˆBˆX[˜YÙY˜]]Ô™]žT[™[™ÈH[™Yš[™Y‚ˆ\ËœÙ\ÜÚ[ÛœË™[]JÙ\ÜÚ[Û’Y
+B‚ˆËÈÛX[ˆ\Ù\ÜÚ[ÛˆY]Y]H[ˆ]]ÛX][Û”Þ\Ý[H
+™]™[ÈY[[ÜžHXZÊBˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[Kœ™[[Ý™TÙ\ÜÚ[Û“Y]Y]JÙ\ÜÚ[Û’Y
+BˆB‚ˆËÈ[]Hœ›ÛH\ÚÈÛËˆX[˜YÙY]ÛÜšÝ™YH[][ÛˆÝYÙYHÛÛ\]BˆËÈ\™XÝÜžH™Y›Ü™H™[[Ý˜[ÛÈš[˜[^˜][ÛˆØ[››ÝX]™HH\ØÛÝ™\˜X›BˆËÈ\œÚ\ÝYÙ\ÜÚ[ÛˆÚ[[™È]HÚXÚÛÝ]]\È[™XYHÛÛ™K‚ˆYˆ
+ÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙHOOH[™Yš[™Y
+HÂˆžHÂˆ\Ë™š[˜[^™TÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙJÝYÙYÙ\ÜÚ[Û”ÝÜ˜YÙJBˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ™[[Ý™HÝYÙYÙ\ÜÚ[ÛˆÝÜ˜YÙH›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆBˆH[ÙHYˆ
+Y[]TÝÜ™YÙ\ÜÚ[ÛŠÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ[]HÝÜ™YÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆB‚ˆËÈ›ÝYžH[Ú[™ÝÜÈ›Üˆ\ÈÛÜšÜÜXÙH]HÙ\ÜÚ[ÛˆØ\È[]Yˆ\ËœÙ[™]™[
+È\Nˆ	ÜÙ\ÜÚ[Û—Ù[]Y	ËÙ\ÜÚ[Û’YKX[˜YÙYÛÜšÜÜXÙKšY
+Bˆ\Ë™[Z][œ™XYÝ[[X\žPÚ[™ÙY
+
+B‚ˆËÈÛX[ˆ\]XÚY[È\™XÝÜžH
+[™YžH[]TÝÜ™YÙ\ÜÚ[Ûˆ›ÜˆÛÜšÜÜXÙK\ØÛÜYÝÜ˜YÙJBˆÙ\ÜÚ[Û“ÙËš[™›Ê[]YÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+B‚ˆ™]\›ˆÛÛ\]YÛÜšÝ™YT™[[Ý˜[ˆÈÈ[]YˆYKÛÜšÝ™YT™[[Ý˜[ˆÛÛ\]YÛÜšÝ™YT™[[Ý˜[BˆˆÈ[]YˆYHBˆB‚ˆ\Þ[˜ÈÙ[™Y\ÜØYÙJˆÙ\ÜÚ[Û’YˆÝš[™ËˆY\ÜØYÙNˆÝš[™Ëˆ]XÚY[ÏÎˆš[P]XÚY[×KˆÝÜ™Y]XÚY[ÏÎˆÝÜ™Y]XÚY[×KˆÜ[ÛœÏÎˆÙ[™Y\ÜØYÙSÜ[ÛœËˆ^\Ý[™ÓY\ÜØYÙRYÎˆÝš[™ËˆÚ\Ð]]™]žOÎˆ›ÛÛX[‹ˆÊŠ‚ˆ
+ˆ[\›˜[ÛÚÈš\™YY\ˆH\Ù\ˆY\ÜØYÙH\È™Y[ˆ\ÚYÂˆ
+ˆX[˜YÙY›Y\ÜØYÙ\Ø[™\œÚ\ÝYÈ\ÚË]™Y›Ü™HH[Ù[\Ý™X[Z[™Âˆ
+ˆÛÜšÈ™YÚ[œËˆH”È[™\ˆ\Ù\È\ÈÈÙ[™HÞ[˜Ú›Û›Ý\È˜XØÙ\Y‚ˆ
+ˆXÚÈÈHÛY[ÛÈHÜ˜\ÚZY\Ý™X[HÙ\Û‰ÝÜÙHH\Ù\ˆY\ÜØYÙBˆ
+ˆ
+ÍŒMŠKˆ™K\\œÚ\Ý\œ›ÜœÈÝ[™Z™XÝHÝ]\ˆ›ÛZ\ÙH\È™Y›Ü™K‚ˆ
+‹ÂˆÛXÚÏÎˆ
+Y\ÜØYÙRYˆÝš[™ÊHOˆ›ÚYˆÊŠ‚ˆ
+ˆÜ[Û˜[˜[œÜÜÛÛ^ˆHÙ\ÜÚ[ÛœËœÙ[™Y\ÜØYÙX”È[™\ˆ\ÜÙ\Âˆ
+ˆÈØ[\ÛY[YˆÝ˜ÛY[YXÛÈHÓHØ[ˆ[ˆH\ÚÝÜÛY[ˆ
+ˆ]ÚÝ[ÜÝ\ÈÙ\ÜÚ[Û‰ÜÈœ›ÝÜÙ\ˆÛÛËˆ\ÜÈ[™Yš[™YÚ[ˆØ[[™Âˆ
+ˆ\™XÝH
+\ÝË[˜K\Ù\™\ˆ›ÝÜÊHÈX]™HH^\Ý[™È[ˆ[ˆXÙK‚ˆ
+‹ÂˆœÐÛÛ^ÎˆÈØ[\ÛY[YÎˆÝš[™ÈKˆ
+Nˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆ›ÝÈ™]È\œ›ÜŠÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+BˆBˆ\ËœÙ]\ÝY\ÜØYÙPÛY[Y
+Ù\ÜÚ[Û’YœÐÛÛ^Ë˜Ø[\ÛY[Y
+B‚ˆËÈÛÝ\˜ÙKXXÝ]˜][Ûˆ]]Ë\™]žHY\
+Ø]KXYÙ[Ë[ÜÜÈÎ
+KˆÚ[ˆHÙ\™\‚ˆËÈ\È\ÝØÚY[YÜˆÛÛ[Z]YH–ÏÛYÏˆXÝ]˜]YHˆ™]žK›ÜHX]Ú[™ÂˆËÈ\XØ]H]\œš]™\Èœ›ÛHHYØXÞH™[™\™\ˆÝ[[›š[™ÈHÛY[\ÚYBˆËÈ]]×Ü™]žKˆHš\œÝX]Ú[™ÈØ[\ˆÚ[œÈ
+Ù\™\ˆ[Y\ˆÜˆYØXÞH”ËˆËÈÚXÚ]™\ˆ\œš]™\Èš\œÝ
+KÝXœÙ\]Y[X]Ú[™ÈØ[ÈÚ][ˆHXY[™H›Ü‚ˆYˆ
+ÛZ[P]]Ô™]žT[™[™ÊX[˜YÙYY\ÜØYÙJHOOH	Ù›Ü	ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ[™Y\ÜØYÙNˆ›ÜY\XØ]HÛÝ\˜ÙKXXÝ]˜][Ûˆ™]žH›Üˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›‚ˆB‚ˆËÈÛX\ˆ[žH[™[™È[ˆ^XÝ][ÛˆÝ]HÚ[ˆH™]È\Ù\ˆY\ÜØYÙH\ÈÙ[‚ˆËÈ\ÈXÝÈ\ÈHØY™]H˜[™HHYˆH\Ù\ˆ[Ý™\ÈÛ‹ÙHÛ‰ÝØ[ÂˆËÈ]]ËY^XÝ]H[ˆÛ[ˆ]\‹‚ˆ]ØZ]ÛX\”ÝÜ™Y[™[™Ô[‘^XÝ][ÛŠX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+B‚ˆËÈ[œÝ\™HY\ÜØYÙ\È\™HØYY™Y›Ü™HÙHžHÈY™]ÈÛ™\Âˆ]ØZ]\Ë™[œÝ\™SY\ÜØYÙ\ÓØYY
+X[˜YÙY
+B‚ˆËÈYˆÝ\œ™[H›ØÙ\ÜÚ[™Ë™Z]š[Üˆ\[™ÈÛˆHÛÛ›™XÝ[Û‰ÜÂˆËÈZYÝ™X[P™Z]š[Ü˜
+™\ÛÛ™YšXHÐ[šÈ™\ÛÛ™SZYÝ™X[P™Z]š[ÜŸKˆËÈY˜][ÈÈ›ÝšY\‹X\›ÜšX]H˜[YJN‚ˆËÂˆËÈH	ÜÝY\‰ÎˆžHÈ[]™\ˆ[ÈH[‹Y›YÚ\›‹ˆHÝY\œÈ˜]]™[NÂˆËÈÛ]YH[][]\ÈšXH™UÛÛ\ÙHÛÚËˆYˆ™Y\™XÝ
+
+X™]\›œÈ˜[ÙBˆËÈ
+Û]YHÚ]›È]™H]Y\žKÜˆ˜XÚÙ[™Ø[‰ÝÝY\ŠKH˜XÚÙ[™\ÂˆËÈ[™XYHØ[Y›Ü˜ÙPX›Ü
+™Y\™XÝ
+H[™ÙH]Y]YH›Üˆ™\^K‚ˆËÈH	Ü]Y]YIÎˆÛHY\ÜØYÙH[ÝXÚYÈHÝ\œ™[\›ˆÙY\È[›š[™ÂˆËÈÈ˜]\˜[ÛÛ\][ÛŽÈ™\^H\ÈH™]È\›ˆY\Ø\™Ëˆ“ÈØ[ÂˆËÈYÙ[œ™Y\™XÝ
+
+X“È›Ü˜ÙPX›Ü“È[\œ\[Û‹‚ˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÛÛœÝÛÛ›™XÝ[ÛˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠX[˜YÙY›PÛÛ›™XÝ[Û‹[™Yš[™Y
+BˆËÈ˜[˜XÚÈÈ	ÜÝY\‰ÈÚ[ˆ›ÈÛÛ›™XÝ[Ûˆ\È™\ÛÛ˜X›H8 %™\Ù\™\ÂˆËÈÙ^IÜÈ^XÝ™Z]š[Üˆ
+Ø[™Y\™XÝZÙHÚ]]™\ˆ]™]\›œÊK‚ˆÛÛœÝ™Z]š[ÜˆHÛÛ›™XÝ[ÛˆÈ™\ÛÛ™SZYÝ™X[P™Z]š[ÜŠÛÛ›™XÝ[ÛŠHˆ	ÜÝY\‰Â‚ˆÛÛœÝYÙ[HX[˜YÙY˜YÙ[ˆ]ÝY\™YH˜[ÙBˆYˆ
+™Z]š[ÜˆOOH	ÜÝY\‰ÊHÂˆÝY\™YHYÙ[Ëœ™Y\™XÝ
+Y\ÜØYÙJHÏÈ˜[ÙBˆBˆËÈ›Üˆ	Ü]Y]YIÎˆÚÚ\™Y\™XÝ[\™[KˆHÝ\œ™[\›ˆ\È[™\Ý\˜™Y‚‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÛZY\Ý™X[HÙ[™	ËÂˆÙ\ÜÚ[Û’Yˆ™Z]š[Ü‹ˆÝY\™Yˆ]Y]YS[™Ý™Y›Ü™NˆX[˜YÙY›Y\ÜØYÙT]Y]YK›[™Ýˆ˜XÚÙ[™ˆYÙ[ÈYÙ[˜ÛÛœÝXÝÜ‹›˜[YHˆ	Û›Û™IËˆÛÛ›™XÝ[Û”ÛYÎˆÛÛ›™XÝ[ÛËœÛYËˆJB‚ˆËÈÜ™X]H\Ù\ˆY\ÜØYÙH›ÜˆRBˆÛÛœÝ\Ù\“Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ý\Ù\‰ËˆÛÛ[ˆY\ÜØYÙKˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+Kˆ]XÚY[ÎˆÝÜ™Y]XÚY[Ëˆ˜YÙ\ÎˆÜ[ÛœÏË˜˜YÙ\ËˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\Ù\“Y\ÜØYÙJB‚ˆËÈ[Z]ÈRH8 %	ØXØÙ\Y	ÈY™ˆHÝY\ˆÝXØÙYYYÈ	Ü]Y]YY	ÈÝ\Ú\ÙBˆËÈ
+ÛÝ™\œÈ›Ý]Y]YKY\™XÝ[™]Y]YKXY\‹XX›Ü]ÊK‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\Ù\—ÛY\ÜØYÙIËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ\Ù\“Y\ÜØYÙKˆÝ]\ÎˆÝY\™YÈ	ØXØÙ\Y	Èˆ	Ü]Y]YY	ËˆÜ[Z\ÝXÓY\ÜØYÙRYˆÜ[ÛœÏË›Ü[Z\ÝXÓY\ÜØYÙRYˆKX[˜YÙYÛÜšÜÜXÙKšY
+B‚ˆYˆ
+\ÝY\™Y
+HÂˆËÈ\Ú›Üˆ’Q“È™\^HÛˆ™^Û”›ØÙ\ÜÚ[™ÔÝÜYXÚËˆØ[YHÚ\BˆËÈ›Üˆ›Ý]Y]YKY\™XÝ
+Ý\œ™[\›ˆÝ[[›š[™ÊH[™ˆËÈ]Y]YKXY\‹XX›Ü
+˜XÚÙ[™[™XYHX›ÜY
+H8 %H™\^H][‚ˆËÈ›ØÙ\ÜÓ™^]Y]YYY\ÜØYÙH\ÈY[XØ[‚ˆX[˜YÙY›Y\ÜØYÙT]Y]YKœ\Ú
+ÈY\ÜØYÙK]XÚY[ËÝÜ™Y]XÚY[ËÜ[ÛœËY\ÜØYÙRYˆ\Ù\“Y\ÜØYÙKšYÜ[Z\ÝXÓY\ÜØYÙRYˆÜ[ÛœÏË›Ü[Z\ÝXÓY\ÜØYÙRYJBˆX[˜YÙYØ\Ò[\œ\YHYBˆB‚ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆËÈ›Ü˜ÙHHÞ[˜Ú›Û›Ý\È›\ÚÛÈH\Ù\ˆY\ÜØYÙH\ÈÙ[Z[™[HÛˆ\ÚÂˆËÈ™Y›Ü™HÙH[H™[™\™\ˆ˜XØÙ\Yˆ8 %\œÚ\ÝÙ\ÜÚ[Û˜Û›BˆËÈ[œ]Y]Y\ÈÚ]HL\ÈX›Ý[˜ÙKˆ
+ÍŒMˆ™[XXš[]Hš^ŠBˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠX[˜YÙYšY
+BˆÛXÚÏËŠ\Ù\“Y\ÜØYÙKšY
+Bˆ™]\›‚ˆB‚ˆËÈY\Ù\ˆY\ÜØYÙHÚ]ÝÜ™Y]XÚY[È›Üˆ\œÚ\Ý[˜ÙBˆËÈÚÚ\Yˆ^\Ý[™ÓY\ÜØYÙRY\È›ÝšYY
+Y\ÜØYÙHØ\È[™XYHÜ™X]YÚ[ˆ]Y]YY
+Bˆ]\Ù\“Y\ÜØYÙNˆY\ÜØYÙBˆYˆ
+^\Ý[™ÓY\ÜØYÙRY
+HÂˆËÈš[™^\Ý[™ÈY\ÜØYÙH
+[™XYHYYÚ[ˆ]Y]YY
+Bˆ\Ù\“Y\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOH^\Ý[™ÓY\ÜØYÙRY
+HBˆYˆ
+]\Ù\“Y\ÜØYÙJHÂˆ›ÝÈ™]È\œ›ÜŠ^\Ý[™ÈY\ÜØYÙH	Ù^\Ý[™ÓY\ÜØYÙRYH›Ý›Ý[™
+BˆBˆH[ÙHÂˆËÈÜ™X]H™]ÈY\ÜØYÙBˆ\Ù\“Y\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ý\Ù\‰ËˆÛÛ[ˆY\ÜØYÙKˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+Kˆ]XÚY[ÎˆÝÜ™Y]XÚY[ËËÈ[˜ÛYH›Üˆ\œÚ\Ý[˜ÙH
+\È[X›˜Z[˜\ÙM
+Bˆ˜YÙ\ÎˆÜ[ÛœÏË˜˜YÙ\ËËÈ[˜ÛYHÛÛ[˜YÙ\È
+ÛÝ\˜Ù\ËÚÚ[ÈÚ][X™YYXÛÛœÊBˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\Ù\“Y\ÜØYÙJB‚ˆËÈ\]H\ÝY\ÜØYÙT›ÛH›Üˆ˜YÙH\Ü^BˆX[˜YÙY›\ÝY\ÜØYÙT›ÛHH	Ý\Ù\‰Â‚ˆËÈ\œÚ\Ý
+È›\Ú™Y›Ü™H[››Ý[˜Ú[™È8 %H\Ù\ˆY\ÜØYÙH]\Ý™BˆËÈÙ[Z[™[HÛˆ\ÚÈ™Y›Ü™HÙH[H™[™\™\ˆ˜XØÙ\Y‹[™ˆËÈ\œÚ\ÝÙ\ÜÚ[Û˜\ÈX›Ý[˜ÙY
+L\ÊKˆÍŒM‹‚ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠX[˜YÙYšY
+BˆÛXÚÏËŠ\Ù\“Y\ÜØYÙKšY
+B‚ˆËÈ[Z]\Ù\—ÛY\ÜØYÙH]™[ÛÈRHØ[ˆÛÛ™š\›HHÜ[Z\ÝXÈY\ÜØYÙBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\Ù\—ÛY\ÜØYÙIËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ\Ù\“Y\ÜØYÙKˆÝ]\Îˆ	ØXØÙ\Y	ËˆÜ[Z\ÝXÓY\ÜØYÙRYˆÜ[ÛœÏË›Ü[Z\ÝXÓY\ÜØYÙRYˆKX[˜YÙYÛÜšÜÜXÙKšY
+B‚ˆËÈYˆ\È\ÈHš\œÝ\Ù\ˆY\ÜØYÙH[™›È]H^\ÝËÙ]Û™H[[YYX][BˆËÈRHÙ[™\˜][ÛˆÚ[[š[˜ÙH]]\‹]ÙH[Ø^\È]™HH]Hœ›ÛHHÝ\ˆËÈ]]ÛX][ÛˆÙ\ÜÚ[ÛœÈ
+šYÙÙ\™YžHÙ]
+H[™XYH]™HH]H[™ÚÚ\RHÙ[™\˜][Ûˆ[\™[BˆÛÛœÝ\Ñš\œÝ\Ù\“Y\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠHOˆKœ›ÛHOOH	Ý\Ù\‰ÊK›[™ÝOOHBˆYˆ
+\Ñš\œÝ\Ù\“Y\ÜØYÙH	‰ˆ[X[˜YÙY›˜[YH	‰ˆ[X[˜YÙYšYÙÙ\™YžJHÂˆËÈ™\XÙHœ˜XÚÙ]Y[[ÛœÈÚ]Z\ˆ\Ü^HX™[È
+K™ËˆÜÚÚ[ÜÎ˜ÛÛ[Z]HOˆÛÛ[Z]ŠBˆËÈÛÈ]\ÈÚÝÈ[X[‹\™XYX›H˜[Y\È[œÝXYÙˆ˜]ÈQÂˆ]]TÛÝ\˜ÙHHY\ÜØYÙBˆYˆ
+Ü[ÛœÏË˜˜YÙ\ÊHÂˆ›Üˆ
+ÛÛœÝ˜YÙHÙˆÜ[ÛœË˜˜YÙ\ÊHÂˆYˆ
+˜YÙKœ˜]Õ^	‰ˆ˜YÙK›X™[
+HÂˆ]TÛÝ\˜ÙHH]TÛÝ\˜ÙKœ™\XÙJ˜YÙKœ˜]Õ^˜YÙK›X™[
+BˆBˆBˆBˆËÈØ[š]^™NˆÝš\[žH™[XZ[š[™Èœ˜XÚÙ]Y[[ÛœËS›ØÚÜËYÜÂˆÛÛœÝØ[š]^™YHØ[š]^™Q›Ü•]J]TÛÝ\˜ÙJBˆÛÛœÝ[š]X[]HHØ[š]^™YœÛXÙJL
+H
+È
+Ø[š]^™Y›[™ÝˆLÈ	ø )‰Èˆ	ÉÊBˆX[˜YÙY›˜[YHH[š]X[]Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆËÈ›\Ú[[YYX][HÛÈ\ÚÈ\È]]Üš]]]™H™Y›Ü™H›ÝYžZ[™È™[™\™\‚ˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠX[˜YÙYšY
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý]WÙÙ[™\˜]Y	ËˆÙ\ÜÚ[Û’Yˆ]Nˆ[š]X[]KˆKX[˜YÙYÛÜšÜÜXÙKšY
+B‚ˆËÈÙ[™\˜]HRH]H\Þ[˜Ú›Û›Ý\ÛH\Ú[™ÈYÙ[	ÜÈÑÂˆËÈ
+ØZ]ÈœšYY›H›ÜˆYÙ[Ü™X][ÛˆYˆ™YYY
+Bˆ\Ë™Ù[™\˜]U]JX[˜YÙYY\ÜØYÙJBˆBˆB‚ˆËÈ]˜[X]H]]Ë[X™[[\ÈYØZ[œÝH\Ù\ˆY\ÜØYÙH
+ÛÛ[[Ûˆ]›Üˆ›ÝˆËÈœ™\Ú[™]Y]YYY\ÜØYÙ\ÊKˆØØ[œÈ™YÙ^]\›œÈÛÛ™šYÝ\™YÛˆX™[ËˆËÈ[ˆY\™Ù\È[žH™]ÈX]Ú\È[ÈHÙ\ÜÚ[Û‰ÜÈX™[\œ˜^K‚ˆžHÂˆÛÛœÝX™[™YHH\ÝX™[ÊX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆÛÛœÝ]]ÓX]Ú\ÈH]˜[X]P]]ÓX™[ÊY\ÜØYÙKX™[™YJB‚ˆYˆ
+]]ÓX]Ú\Ë›[™Ýˆ
+HÂˆÛÛœÝ^\Ý[™ÓX™[ÈHX[˜YÙY›X™[ÈÏÈ×BˆÛÛœÝ™]Ñ[šY\ÈH]]ÓX]Ú\Âˆ›X\
+HOˆ	ÛK›X™[YNŽ‰ÛK˜[Y_X
+Bˆ™š[\Š[žHOˆY^\Ý[™ÓX™[Ëš[˜ÛY\Ê[žJJB‚ˆYˆ
+™]Ñ[šY\Ë›[™Ýˆ
+HÂˆX[˜YÙY›X™[ÈHË‹‹™^\Ý[™ÓX™[Ë‹‹›™]Ñ[šY\×Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÛX™[×ØÚ[™ÙY	ËˆÙ\ÜÚ[Û’YˆX™[ÎˆX[˜YÙY›X™[ËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆBˆBˆHØ]Ú
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›Š]]Ë[X™[]˜[X][Ûˆ˜Z[Y›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YN˜JBˆB‚ˆX[˜YÙY›\ÝY\ÜØYÙP]H]K››ÝÊ
+Bˆ\ËœÙ]›ØÙ\ÜÚ[™ÊX[˜YÙYYJBˆX[˜YÙYœÝ™X[Z[™Õ^H	ÉÂˆX[˜YÙYœ›ØÙ\ÜÚ[™ÑÙ[™\˜][ÛŠÊÂˆX[˜YÙY\›”Ý\š[˜[Y\ÜØYÙRYH\Ë™Ù]\Ýš[˜[\ÜÚ\Ý[Y\ÜØYÙRY
+X[˜YÙY›Y\ÜØYÙ\ÊB‚ˆËÈ™\Ù]]]™]žH›YÈ›Üˆ\È™]ÈY\ÜØYÙH
+[ÝÜÈÛ™H™]žH\ˆY\ÜØYÙJBˆËÈSTÔ•S•ˆÚÚ\™\Ù]Yˆ\È\È[ˆ]]™]žHØ[HH›YÈ\È[™XYHYBˆËÈ[™™\Ù][™È]ÛÝ[[ÝÈ[™š[š]H™]žHÛÜÂˆËÈ›ÝNˆ]]™]žR[”›ÙÜ™\ÜÈ\È“Õ™\Ù]\™HH]	ÜÈX[˜YÙYžHH™]žHÙÚXÂˆYˆ
+WÚ\Ð]]™]žJHÂˆX[˜YÙY˜]]™]žP][\YH˜[ÙBˆB‚ˆËÈÝÜ™HY\ÜØYÙKØ]XÚY[È›ÜˆÝ[X[™]žHY\ˆ]]™Yœ™\ÚˆËÈ
+ÑÈÝXœ›ØÙ\ÜÈØXÚ\ÈÚÙ[ˆ]Ý\\ÛÈYˆ]^\™\ÈZY\Ù\ÜÚ[Û‹ˆËÈÙH™YYÈ™XÜ™X]HHYÙ[[™™]žHHY\ÜØYÙJBˆX[˜YÙY›\ÝÙ[Y\ÜØYÙHHY\ÜØYÙBˆX[˜YÙY›\ÝÙ[]XÚY[ÈH]XÚY[ÂˆX[˜YÙY›\ÝÙ[ÝÜ™Y]XÚY[ÈHÝÜ™Y]XÚY[ÂˆX[˜YÙY›\ÝÙ[Ü[ÛœÈHÜ[ÛœÂ‚ˆËÈØ\\™HHÙ[™\˜][ÛˆÈ]XÝYˆH™]È™\]Y\ÝÝ\\œÙY\È\ÈÛ™K‚ˆËÈ\È™]™[ÈHš[˜[H›ØÚÈœ›ÛHÛØ˜™\š[™ÈÝ]HÚ[ˆH›ÛÝË]\Y\ÜØYÙH\œš]™\Ë‚ˆÛÛœÝ^QÙ[™\˜][ÛˆHX[˜YÙYœ›ØÙ\ÜÚ[™ÑÙ[™\˜][Û‚‚ˆËÈ™KY[˜X›HÛÝ\˜Ù\È™\]Z\™YžH[›ÚÙYÚÚ[È
+\ÜÝYHÌJBˆËÈ\È[[Z[˜]\ÈHÛË]\›ˆ[˜[HÚ\™HHYÙ[\ØÛÝ™\œÈZ\ÜÚ[™ÈÛÝ\˜Ù\È][[YK‚ˆËÈ\Ù\È\™Ù]YØYÚÚ[žTÛYÊ
+H[œÝXYÙˆØY[ÚÚ[Ê
+HÈ]›ÚYÊŠHš[\Þ\Ý[HØØ[œË‚ˆYˆ
+Ü[ÛœÏËœÚÚ[ÛYÜÏË›[™Ý
+HÂˆžHÂˆÛÛœÝÛÜšÜÜXÙT›ÛÝHX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]‚ˆÛÛœÝ™\]Z\™YÛÝ\˜Ù\ÈH™]ÈÙ]Ýš[™ÏŠ
+Bˆ›Üˆ
+ÛÛœÝÛYÈÙˆÜ[ÛœËœÚÚ[ÛYÜÊHÂˆÛÛœÝÚÚ[HØYÚÚ[žTÛYÊÛÜšÜÜXÙT›ÛÝÛYËX[˜YÙYÛÜšÚ[™Ñ\™XÝÜžJBˆYˆ
+ÚÚ[Ë›Y]Y]Kœ™\]Z\™YÛÝ\˜Ù\ÊHÂˆ›Üˆ
+ÛÛœÝÜ˜ÈÙˆÚÚ[›Y]Y]Kœ™\]Z\™YÛÝ\˜Ù\ÊHÂˆ™\]Z\™YÛÝ\˜Ù\Ë˜Y
+Ü˜ÊBˆBˆBˆB‚ˆYˆ
+™\]Z\™YÛÝ\˜Ù\ËœÚ^™Hˆ
+HÂˆÛÛœÝÝ\œ™[ÛYÜÈH™]ÈÙ]
+X[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×JBˆÛÛœÝÑ[˜X›NˆÝš[™Ö×HH×BˆÛÛœÝÚÚ\YˆÝš[™Ö×HH×BˆÛÛœÝØ[™Y]TÛYÜÈH\œ˜^K™œ›ÛJ™\]Z\™YÛÝ\˜Ù\ÊBˆÛÛœÝØYYÛÝ\˜Ù\ÈHÙ]ÛÝ\˜Ù\ÐžTÛYÜÊÛÜšÜÜXÙT›ÛÝØ[™Y]TÛYÜÊBˆÛÛœÝ\ØX›TÛÝ\˜Ù\ÈH™]ÈÙ]
+ˆØYYÛÝ\˜Ù\Âˆ™š[\Š\ÔÛÝ\˜ÙU\ØX›JBˆ›X\
+ÛÝ\˜ÙHOˆÛÝ\˜ÙK˜ÛÛ™šYËœÛYÊBˆ
+B‚ˆ›Üˆ
+ÛÛœÝÜ˜ÔÛYÈÙˆØ[™Y]TÛYÜÊHÂˆYˆ
+Ý\œ™[ÛYÜËš\ÊÜ˜ÔÛYÊJHÛÛ[YBˆYˆ
+\ØX›TÛÝ\˜Ù\Ëš\ÊÜ˜ÔÛYÊJHÂˆÑ[˜X›Kœ\Ú
+Ü˜ÔÛYÊBˆH[ÙHÂˆÚÚ\Yœ\Ú
+Ü˜ÔÛYÊBˆBˆB‚ˆYˆ
+ÚÚ\Y›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÚÚ[™\]Z\™\ÈÛÝ\˜Ù\È]\™H›Ý\ØX›H
+Z\ÜÚ[™ÈÜˆ[˜]][XØ]Y
+Nˆ	ÜÚÚ\Yš›Ú[Š	Ë	Ê_X
+BˆB‚ˆYˆ
+Ñ[˜X›K›[™Ýˆ
+HÂˆX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈHË‹‹ŠX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈ×JK‹‹Ñ[˜X›WBˆÙ\ÜÚ[Û“ÙËš[™›Ê™KY[˜X›YÛÝ\˜Ù\È›ÜˆÚÚ[[›ØØ][ÛŽˆ	ÝÑ[˜X›Kš›Ú[Š	Ë	Ê_X
+Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÜÛÝ\˜Ù\×ØÚ[™ÙY	ËˆÙ\ÜÚ[Û’Yˆ[˜X›YÛÝ\˜ÙTÛYÜÎˆX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆBˆBˆHØ]Ú
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ™KY[˜X›HÚÚ[ÛÝ\˜Ù\È›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YN˜JBˆBˆB‚ˆËÈÝ\\™ˆÜ[ˆ›Üˆ[\™HÙ[™Y\ÜØYÙH›ÝÂˆÛÛœÝÙ[™Ü[ˆH\™‹œÜ[Š	ÜÙ\ÜÚ[Û‹œÙ[™Y\ÜØYÙIËÈÙ\ÜÚ[Û’YJB‚ˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÛÛœÝ[˜X›YÛYÜÈHX[˜YÙY™[˜X›YÛÝ\˜ÙTÛYÜÈÏÈ×BˆÛÛœÝ\ÔÛÝ\˜Ù\ÈH[˜X›YÛYÜË›[™Ýˆ‚ˆËÈØY[˜X›YÛÝ\˜Ù\È\Yœ›ÛÛÈÙHØ[ˆ™Yœ™\ÚÚÙ[œÈ‘Q“Ô‘HÙ]ÜÜ™X]PYÙ[ˆËÈ[œÈ]È[\›˜[ÛÛ\Ù\ÜÚ[ÛˆZ[ˆÝ\Ú\ÙH]Z[ÙY\ÈÝ[HÚÙ[œÂˆËÈ[™[Z]ÈUUÔ‘TURT‘QØ]\Ú[™ÈHœšYYˆ›™YY×Ø]]ˆRH›XÚÙ\ˆ™Y›Ü™HBˆËÈÜÝXZ[™Yœ™\Ú™\ÝÜ™\ÈÝ]H
+ÍÌL
+K‚ˆÛÛœÝÛÝ\˜Ù\ÎˆØYYÛÝ\˜ÙV×HH\ÔÛÝ\˜Ù\ÂˆÈÙ]ÛÝ\˜Ù\ÐžTÛYÜÊÛÜšÜÜXÙT›ÛÝ][˜X›YÛYÜÊBˆˆ×B‚ˆYˆ
+\ÔÛÝ\˜Ù\È	‰ˆX[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\ŠHÂˆÛÛœÝ™Yœ™\Ú™\Ý[H]ØZ]™Yœ™\Ú^\™YÜ™Y[X[ÊÛÝ\˜Ù\ËX[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\ŠBˆYˆ
+™Yœ™\Ú™\Ý[™˜Z[YÛÝ\˜Ù\Ë›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÖÓÐ]]HÛÛYHÛÝ\˜Ù\È˜Z[YÚÙ[ˆ™Yœ™\Ú‰Ë™Yœ™\Ú™\Ý[™˜Z[YÛÝ\˜Ù\Ë›X\
+ˆOˆ‹œÛYÊJBˆBˆYˆ
+™Yœ™\Ú™\Ý[œ™Yœ™\ÚYÛÝ[ˆ
+HÂˆÙ[™Ü[‹›X\šÊ	ÛØ]]œ™Yœ™\ÚY	ÊBˆBˆB‚ˆËÈÙ]ÜˆÜ™X]HHYÙ[
+^žHØY[™ÊKˆ]È[\›˜[ÛÛ\Ù\ÜÚ[ÛˆZ[]ˆËÈ“ŽMMˆ›ÝÈÙY\Èœ™\ÚÚÙ[œÈ
+ÜˆÛÜœ™XÝK[™YY×Ø]]˜Z[YÛÝ\˜Ù\ËÚ[˜ÙBˆËÈ[œÝ\™Qœ™\ÚÚÙ[ˆZ\œ›ÜœÈH\ÚÈÜš]HÈÛÝ\˜ÙK˜ÛÛ™šYÈ[‹[Y[[ÜžJK‚ˆÛÛœÝYÙ[H]ØZ]\Ë™Ù]ÜÜ™X]PYÙ[
+X[˜YÙY
+BˆÙ[™Ü[‹›X\šÊ	ØYÙ[œ™XYIÊB‚ˆËÈ[Ø^\ÈÙ][ÛÝ\˜Ù\È›ÜˆÛÛ^
+]™[ˆYˆ›Û™H\™H[˜X›Y
+K[˜ÛY[™ÈZ[Z[œÂˆÛÛœÝ[ÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆYÙ[œÙ][ÛÝ\˜Ù\Ê[ÛÝ\˜Ù\ÊBˆÙ[™Ü[‹›X\šÊ	ÜÛÝ\˜Ù\Ë›ØYY	ÊB‚ˆËÈ\HÛÝ\˜ÙHÙ\™\œÈYˆ[žH\™H[˜X›YˆYˆ
+\ÔÛÝ\˜Ù\ÊHÂˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+BˆËÈÚ[™ÛHœ™\ÚZ[8 %ÚÙ[œÈ[™XYH™Yœ™\ÚYX›Ý™K‚ˆÛÛœÝÈXÜÙ\™\œË\TÙ\™\œË\œ›ÜœÈHH]ØZ]Z[Ù\™\œÑœ›ÛTÛÝ\˜Ù\ÊÛÝ\˜Ù\ËÙ\ÜÚ[Û”]X[˜YÙYÚÙ[”™Yœ™\ÚX[˜YÙ\‹YÙ[™Ù]Ý[[X\š^™PØ[˜XÚÊ
+JBˆYˆ
+\œ›ÜœË›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÛÝ\˜ÙHZ[\œ›ÜœÎ˜\œ›ÜœÊBˆB‚ˆÛÛœÝXÜÛÝ[HØš™XÝšÙ^\ÊXÜÙ\™\œÊK›[™ÝˆÛÛœÝ\PÛÝ[HØš™XÝšÙ^\Ê\TÙ\™\œÊK›[™ÝˆYˆ
+XÜÛÝ[ˆ\PÛÝ[ˆ[˜X›YÛYÜË›[™Ýˆ
+HÂˆÛÛœÝ\ØX›TÛÝ\˜Ù\ÈHÛÝ\˜Ù\Ë™š[\Š\ÔÛÝ\˜ÙU\ØX›JBˆÛÛœÝ[[™YÛYÜÈH\ØX›TÛÝ\˜Ù\Ë›X\
+ÈOˆË˜ÛÛ™šYËœÛYÊBˆ]ØZ]YÙ[œÙ]ÛÝ\˜ÙTÙ\™\œÊXÜÙ\™\œË\TÙ\™\œË[[™YÛYÜÊBˆ]ØZ]\PœšYÙU\]\ÊYÙ[Ù\ÜÚ[Û”]\ØX›TÛÝ\˜Ù\ËXÜÙ\™\œËÙ\ÜÚ[Û’YÛÜšÜÜXÙT›ÛÝ]	ÜÙ[™Y\ÜØYÙIËX[˜YÙYœÛÛÙ\™\Ë\›
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê\YY	ÛXÜÛÝ[HPÔ
+È	Ø\PÛÝ[HTHÛÝ\˜Ù\ÈÈÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH
+	Ø[ÛÝ\˜Ù\Ë›[™ÝHÝ[
+X
+BˆBˆÙ[™Ü[‹›X\šÊ	ÜÙ\™\œË˜\YY	ÊBˆB‚ˆžHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÔÝ\[™ÈÚ]›ÜˆÙ\ÜÚ[ÛŽ‰ËÙ\ÜÚ[Û’Y
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÕÛÜšÜÜXÙN‰Ë”ÓÓ‹œÝš[™ÚYžJX[˜YÙYÛÜšÜÜXÙK[ŠJBˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÓY\ÜØYÙN‰ËY\ÜØYÙJBˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐYÙ[[Ù[‰ËYÙ[™Ù][Ù[
+
+JBˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ü›ØÙ\ÜË˜ÝÙ
+
+N‰Ë›ØÙ\ÜË˜ÝÙ
+
+JB‚ˆËÈ›ØÙ\ÜÈHY\ÜØYÙH›ÝYÚHYÙ[ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐØ[[™ÈYÙ[˜Ú]
+
+K‹‹‰ÊBˆYˆ
+]XÚY[ÏË›[™Ý
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ð]XÚY[Î‰Ë]XÚY[Ë›[™Ý
+BˆB‚ˆËÈÚÚ[ÈY[[Û™YšXHY[[ÛœÈ\™H[™YžHHÑÉÜÈÚÚ[ÛÛ‚ˆËÈHRH^Y\ˆ
+^˜XÝ˜YÙ\È[ˆY[[ÛœËÊH[š™XÝÈ[K\]X[YšYY˜[Y\ÂˆËÈ[ˆH˜]Õ^[™Ø[•\ÙUÛÛ[ˆØ]KXYÙ[È›ÝšY\ÈH˜[˜XÚÂˆËÈÈ]X[YžHÚÜ˜[Y\Ëˆ›È˜[œÙ›Ü›X][Ûˆ™YYY\™K‚‚ˆËÈ[œÝ\™HXZ[ˆ›ØÙ\ÜÈ™XYÈÛÛY]Y]Hœ›ÛHHÛÜœ™XÝÙ\ÜÚ[Ûˆ\™XÝÜžK‚ˆËÈ\È]\Ý™HÙ]™Y›Ü™HXXÚÚ]
+
+HØ[Ú[˜ÙH][\HÙ\ÜÚ[ÛœÈÚ\™HH›ØÙ\ÜË‚ˆÛÛœÝÚ]Ù\ÜÚ[Û‘\ˆHÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+BˆÛÛY]Y]TÝÜ™KœÙ]Ù\ÜÚ[Û‘\ŠÚ]Ù\ÜÚ[Û‘\ŠB‚ˆËÈ[š™XÝ[\œ\[ÛˆÛÛ^ÛÈHHÛ›ÝÜÈH™]š[Ý\È\›ˆØ\ÈÝ]ÚÜ‚ˆËÈ\Ù\ÈÞ\Ý[K\™[Z[™\ˆYÜÈÛÈHH™X]È]\È˜[œÚY[Þ\Ý[HÝZY[˜ÙBˆËÈ˜]\ˆ[ˆ\ÙˆH\Ù\‰ÜÈY\ÜØYÙHÛÛ[ˆHÜšYÚ[˜[Y\ÜØYÙH\ÈÝÜ™YˆËÈ[ˆÙ\ÜÚ[Ûˆ”ÓÓ“
+[™HŒÎMLŠNÈ\ÈÛ›HY™™XÝÈHÑÉÜÈ[‹\›ØÙ\ÜÈÛÛ^‚ˆ]Y™™XÝ]™SY\ÜØYÙHHY\ÜØYÙBˆYˆ
+X[˜YÙYØ\Ò[\œ\Y
+HÂˆY™™XÝ]™SY\ÜØYÙHH	ÛY\ÜØYÙ_W—Þ\Ý[K\™[Z[™\•H™]š[Ý\È\ÜÚ\Ý[™\ÜÛœÙHØ\È[\œ\YžHH\Ù\ˆ[™X^H™H[˜ÛÛ\]KˆÈ›Ý™\X]ÜˆÛÛ[YHH[\œ\Y™\ÜÛœÙH[›\ÜÈ\ÚÙYˆ›ØÝ\ÈÛˆH™]ÈY\ÜØYÙHX›Ý™KÜÞ\Ý[K\™[Z[™\˜ˆX[˜YÙYØ\Ò[\œ\YH˜[ÙBˆB‚ˆÛÛœÝY\ÜØYÙP˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆØYÛÜšÜÜXÙPÛÛ™šYÊÛÜšÜÜXÙT›ÛÝ]
+OË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆX[˜YÙY›[Ù[ˆJBˆÛÛœÝ[Ù[[œ]]XÚY[ÈHš[\]XÚY[Ñ›Ü“[Ù[[œ]
+ˆ]XÚY[ËˆY\ÜØYÙP˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‹ˆY\ÜØYÙP˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[ˆ
+BˆYˆ
+[Ù[[œ]]XÚY[Ë›ÛZ]Y[XYÙ\Ë›[™Ýˆ
+HÂˆÛÛœÝÛZ]Y˜[Y\ÈH[Ù[[œ]]XÚY[Ë›ÛZ]Y[XYÙ\Ë›X\
+HOˆK›˜[YJKš›Ú[Š	Ë	ÊBˆÙ\ÜÚ[Û“ÙËš[™›ÊÛZ][™È	Û[Ù[[œ]]XÚY[Ë›ÛZ]Y[XYÙ\Ë›[™ÝH[XYÙH]XÚY[
+ÊHœ›ÛH[Ù[[œ]›Üˆ	ÛY\ÜØYÙP˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[Nˆ	ÛÛZ]Y˜[Y\ßX
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[™›ÉËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ[XYÙH]XÚY[	Û[Ù[[œ]]XÚY[Ë›ÛZ]Y[XYÙ\Ë›[™ÝOOHHÈ	ÉÈˆ	ÜÉßH›ÝÙ[™XØ]\ÙH[XYÙH[œ]\È\ØX›Y›Üˆ	ÛY\ÜØYÙP˜XÚÙ[™ÛÛ^œ™\ÛÛ™Y[Ù[K˜ˆ]™[ˆ	ÝØ\›š[™ÉËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆÙ[™Ü[‹›X\šÊ	ØÚ]œÝ\[™ÉÊBˆÛÛœÝÚ]]\˜]ÜˆHYÙ[˜Ú]
+Y™™XÝ]™SY\ÜØYÙK[Ù[[œ]]XÚY[Ë˜]XÚY[ÊBˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÑÛÝÚ]]\˜]Ü‹Ý\[™È]\˜][Û‹‹‹‰ÊB‚ˆ›Üˆ]ØZ]
+ÛÛœÝ]™[ÙˆÚ]]\˜]ÜŠHÂˆËÈÙÈ]™[È
+ÚÚ\›Ú\ÞH^Ù[JBˆYˆ
+]™[\HOOH	Ý^Ù[IÊHÂˆYˆ
+]™[\HOOH	ÝÛÛÜÝ\	ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÛÜÝ\ˆ	Ù]™[ÛÛ˜[Y_H
+	Ù]™[ÛÛ\ÙRYJX
+BˆH[ÙHYˆ
+]™[\HOOH	ÝÛÛÜ™\Ý[	ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÛÜ™\Ý[ˆ	Ù]™[ÛÛ\ÙRYH\Ñ\œ›ÜIÙ]™[š\Ñ\œ›ÜŸX
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÑÛÝ]™[‰Ë]™[\JBˆBˆB‚ˆËÈ›ØÙ\ÜÈH]™[š\œÝˆ]ØZ]\Ëœ›ØÙ\ÜÑ]™[
+X[˜YÙY]™[
+B‚ˆËÈ˜[˜XÚÎˆØ\\™HÑÈÙ\ÜÚ[ÛˆQYˆHÛ”ÙÔÙ\ÜÚ[Û’Y\]HØ[˜XÚÈY‰Ýš\™K‚ˆËÈš[X\žHØ\\™H\[œÈ[ˆÙ]ÜÜ™X]PYÙ[
+
+HšXHÛ”ÙÔÙ\ÜÚ[Û’Y\]HØ[˜XÚËˆËÈÚXÚ[[YYX][H›\Ú\ÈÈ\ÚËˆ\È˜[˜XÚÈ[™\ÈYÙHØ\Ù\ÈÚ\™HBˆËÈØ[˜XÚÈZYÚ›Ýš\™H
+K™Ë‹ÑÈ™\œÚ[ÛˆZ\ÛX]ÚØ[˜XÚÈ›ÝÝ\ÜY
+K‚ˆYˆ
+[X[˜YÙYœÙÔÙ\ÜÚ[Û’Y
+HÂˆÛÛœÝÙÒYHYÙ[™Ù]Ù\ÜÚ[Û’Y
+
+BˆYˆ
+ÙÒY
+HÂˆX[˜YÙYœÙÔÙ\ÜÚ[Û’YHÙÒYˆÙ\ÜÚ[Û“ÙËš[™›ÊØ\\™YÑÈÙ\ÜÚ[ÛˆQšXH˜[˜XÚÎˆ	ÜÙÒYX
+BˆËÈ[ÛÈ›\Ú\™HÚ[˜ÙHÙIÜ™H[ˆ˜[˜XÚÈ[ÙBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆÙ\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+X[˜YÙYšY
+BˆBˆB‚ˆËÈ[™HÛÛ\]H]™[HÑÈ[Ø^\ÈÙ[™È\È
+]™[ˆY\ˆ[\œ\
+BˆËÈ\È\ÈHÙ[˜[XÙHÚ\™H›ØÙ\ÜÚ[™È[™ÂˆYˆ
+]™[\HOOH	ØÛÛ\]IÊHÂˆËÈÚÚ\›Ü›X[ÛÛ\][Ûˆ[™[™ÈYˆ]]™]žH\È[ˆ›ÙÜ™\ÜÂˆËÈH™]žHÚ[[™H]ÈÝÛˆÛÛ\][Û‚ˆYˆ
+X[˜YÙY˜]]™]žR[”›ÙÜ™\ÜÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÛ\]Y]]]™]žH\È[ˆ›ÙÜ™\ÜËÚÚ\[™È›Ü›X[ÛÛ\][Ûˆ[™[™ÉÊBˆÙ[™Ü[‹›X\šÊ	ØÚ]˜ÛÛ\]K˜]]Ü™]žWÜ[™[™ÉÊBˆÙ[™Ü[‹™[™
+
+Bˆ™]\›ˆËÈ^][˜Ý[ÛˆH™]žHÚ[[™HÛÛ\][Û‚ˆB‚ˆËÈ]]Ü[ˆ[™Ù™ˆ]È[™XYHÝÜY›ØÙ\ÜÚ[™È[™[Z]YHÛÛ\]BˆËÈ]™[ÈH™[™\™\‹ˆYÛ›Ü™HH˜XÚÙ[™	ÜÈ˜Z[[™ÈÛÛ\]HÈ]›ÚYˆËÈÝX›HÛX[\[™\XØ]HRHÛÛ\][Ûˆ]™[Ë‚ˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÛ\]YY\ˆ^XÚ][™Ù™‹ÜÝÜÈÚÚ\[™È›Ü›X[ÛÛ\][Ûˆ[™[™ÉÊBˆÙ[™Ü[‹›X\šÊ	ØÚ]˜ÛÛ\]K˜[™XYWÜÝÜY	ÊBˆÙ[™Ü[‹™[™
+
+Bˆ™]\›‚ˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÛ\]YšXHÛÛ\]H]™[	ÊB‚ˆËÈÚXÚÈYˆÙHÛÝ[ˆ\ÜÚ\Ý[™\ÜÛœÙH[ˆ\È\›‚ˆËÈYˆ›ÝHÑÈX^H]™H]ÛÛ^[Z]ÈÜˆÝ\ˆ\ÜÝY\ÂˆÛÛœÝ\Ý\ÜÚ\Ý[\ÙÈHË‹‹›X[˜YÙY›Y\ÜØYÙ\×Kœ™]™\œÙJ
+K™š[™
+HO‚ˆKœ›ÛHOOH	Ø\ÜÚ\Ý[	È	‰ˆ[Kš\Ò[\›YYX]Bˆ
+BˆÛÛœÝ\Ý\Ù\“\ÙÈHË‹‹›X[˜YÙY›Y\ÜØYÙ\×Kœ™]™\œÙJ
+K™š[™
+HOˆKœ›ÛHOOH	Ý\Ù\‰ÊB‚ˆËÈYˆH\Ý\Ù\ˆY\ÜØYÙH\È™]Ù\ˆ[ˆ[žH\ÜÚ\Ý[™\ÜÛœÙKÙHÛÝ›È™\BˆËÈ\ÈØ[ˆ\[ˆYHÈÛÛ^Ý™\™›ÝÈÜˆTH\ÜÝY\ÂˆYˆ
+\Ý\Ù\“\ÙÈ	‰ˆ
+[\Ý\ÜÚ\Ý[\ÙÈ\Ý\Ù\“\ÙË[Y\Ý[\ˆ\Ý\ÜÚ\Ý[\ÙË[Y\Ý[\
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YHÛÛ\]YÚ]Ý]\ÜÚ\Ý[™\ÜÛœÙHHÜÜÚX›HÛÛ^Ý™\™›ÝÈÜˆTH\ÜÝYX
+B‚ˆËÈÚXÚÈYˆ\™IÜÈHØ\\™YTH\œ›Üˆ]^Z[œÈHÚ[[˜Z[\™K‚ˆËÈ\ÜÈ^XÚ]Ù\ÜÚ[Ûˆ]È]›ÚY™XY[™Èœ›ÛHHÜ›Û™ÈÙ\ÜÚ[Û‚ˆËÈ
+ÜÙ\ÜÚ[Û‘\ˆÚ[™Û]ÛˆØ[ˆ™HÛØ˜™\™YžHÛÛ˜Ý\œ™[Ù\ÜÚ[ÛœÊK‚ˆÛÛœÝÙ\ÜÚ[Û‘\œ›Ü”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]X[˜YÙYšY
+BˆÛÛœÝ\Q\œ›ÜˆHÙ]\Ý\Q\œ›ÜŠÙ\ÜÚ[Û‘\œ›Ü”]
+B‚ˆYˆ
+\Q\œ›Üˆ	‰ˆ\Q\œ›Ü‹œÝ]\ÈOOH
+HÂˆÛÛœÝ\Ò[XYÙQ\œ›ÜˆH\Q\œ›Ü‹›Y\ÜØYÙOËš[˜ÛY\Ê	Ú[XYÙH^ÙYYÉÊB‚ˆÛÛœÝ\œ›Ü“Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ù\œ›Ü‰ËˆÛÛ[ˆ\Ò[XYÙQ\œ›Ü‚ˆÈ[XYÙHÛÈ\™ÙNˆ	Ø\Q\œ›Ü‹›Y\ÜØYÙ_Xˆˆ™\]Y\Ý\œ›ÜŽˆ	Ø\Q\œ›Ü‹›Y\ÜØYÙ_Xˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+Kˆ\œ›ÜÛÙNˆ\Ò[XYÙQ\œ›ÜˆÈ	Ú[XYÙWÝÛ×Û\™ÙIÈˆ	Ú[˜[YÜ™\]Y\Ý	Ëˆ\œ›Ü•]Nˆ\Ò[XYÙQ\œ›ÜˆÈ	Ò[XYÙHÛÈ\™ÙIÈˆ	Ò[˜[Y™\]Y\Ý	Ëˆ\œ›Ü‘]Z[Îˆ\Ò[XYÙQ\œ›Ü‚ˆÈÉÐ[ˆ[XYÙH[ˆHÛÛ™\œØ][Ûˆ^ÙYYÈHHPˆTH[Z]‰Ëˆ	Õ\ÈÙ\ÜÚ[ÛˆØ[››Ý™XÛÝ™\ˆ8 %H[XYÙH\È[X™YY[ˆH\ÝÜžK‰Ëˆ	ÔX\ÙHÝ\H™]ÈÙ\ÜÚ[ÛˆÈÛÛ[YK‰×BˆˆØ\Q\œ›Ü‹›Y\ÜØYÙWKˆ\œ›ÜØ[”™]žNˆ˜[ÙKˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\œ›Ü“Y\ÜØYÙJBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\YÙ\œ›Ü‰ËˆÙ\ÜÚ[Û’Yˆ\œ›ÜŽˆÂˆÛÙNˆ\Ò[XYÙQ\œ›ÜˆÈ	Ú[XYÙWÝÛ×Û\™ÙIÈ\ÈÛÛœÝˆ	Ú[˜[YÜ™\]Y\Ý	È\ÈÛÛœÝˆ]Nˆ\œ›Ü“Y\ÜØYÙK™\œ›Ü•]HKˆY\ÜØYÙNˆ\Q\œ›Ü‹›Y\ÜØYÙKˆXÝ[ÛœÎˆ×KˆØ[”™]žNˆ˜[ÙKˆ]Z[Îˆ\œ›Ü“Y\ÜØYÙK™\œ›Ü‘]Z[ËˆKˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆBˆB‚ˆÙ[™Ü[‹›X\šÊ	ØÚ]˜ÛÛ\]IÊBˆÙ[™Ü[‹™[™
+
+Bˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	ØÛÛ\]IÊBˆ™]\›ˆËÈ^][˜Ý[Û‹ÚÚ\š[˜[H›ØÚÈ
+Û”›ØÙ\ÜÚ[™ÔÝÜY[™\ÈÛX[\
+BˆB‚ˆËÈ“ÕNˆÙH›ÈÛ™Ù\ˆœ™XZÈX\›HÛˆZ\Ô›ØÙ\ÜÚ[™ÈÜˆÝÜ™\]Y\ÝY‚ˆËÈY\ˆÛÙ[\œ\
+›Ü˜ÙPX›Ü
+KH˜XÚÙ[™Ù]È\›ÛÛ\]O]YHÚXÚØ]\Ù\ÂˆËÈHÙ[™\˜]ÜˆÈZY[™[XZ[š[™È]Y]YY]™[È[™[ˆÛÛ\]H˜]\˜[K‚ˆËÈ\È[œÝ\™\ÈÙHÛ‰ÝÜÙH[‹Y›YÚY\ÜØYÙ\Ë‚ˆB‚ˆËÈÛÜ^]YHZ]\ˆšXHÛÛ\]H]™[
+›Ü›X[
+HÜˆÙ[™\˜]Üˆ[™YY\ˆÛÙ[\œ\ˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÜ^]YY\ˆ^XÚ][™Ù™‹ÜÝÜ	ÊBˆÙ[™Ü[‹›X\šÊ	ØÚ]™^]˜[™XYWÜÝÜY	ÊBˆÙ[™Ü[‹™[™
+
+BˆH[ÙHYˆ
+X[˜YÙYœÝÜ™\]Y\ÝY
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÜÛÛ\]YY\ˆÝÜ™\]Y\ÝH]™[È˜Z[™YÝXØÙ\ÜÙ[IÊBˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ú[\œ\Y	ÊBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÚ]ÛÜ^]Y[™^XÝYIÊBˆBˆHØ]Ú
+\œ›ÜŠHÂˆËÈÚXÚÈYˆ\È\È[ˆX›Ü\œ›Üˆ
+^XÝYÚ[ˆ[\œ\Y
+BˆÛÛœÝ\ÐX›Ü\œ›ÜˆH\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›Üˆ	‰ˆ
+ˆ\œ›Ü‹›˜[YHOOH	ÐX›Ü\œ›Ü‰Èˆ\œ›Ü‹›Y\ÜØYÙHOOH	Ô™\]Y\ÝØ\ÈX›ÜY‰Èˆ\œ›Ü‹›Y\ÜØYÙKš[˜ÛY\Ê	ØX›ÜY	ÊBˆ
+B‚ˆYˆ
+\ÐX›Ü\œ›ÜŠHÂˆËÈ^˜XÝX›Ü™X\ÛÛˆYˆ]˜Z[X›H
+ØY™]H™]›Üˆ[™^XÝYX›Ü›ÜYØ][ÛŠBˆÛÛœÝ™X\ÛÛˆH
+\œ›Üˆ\ÈÓQ^Ù\[ÛŠK˜Ø]\ÙH\ÈX›Ü™X\ÛÛˆ[™Yš[™Y‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ]X›ÜY
+™X\ÛÛŽˆ	Ü™X\ÛÛˆ	Ý[šÛ›ÝÛ‰ßJX
+BˆÙ[™Ü[‹›X\šÊ	ØÚ]˜X›ÜY	ÊBˆÙ[™Ü[‹œÙ]Y]Y]J	ØX›ÜÜ™X\ÛÛ‰Ë™X\ÛÛˆ	Ý[šÛ›ÝÛ‰ÊBˆÙ[™Ü[‹™[™
+
+B‚ˆËÈRH[™Ù™ˆ]È
+[ˆÝX›Z\ÜÚ[Û‹]]™\]Y\Ý
+H[™HZ\ˆÝÛˆÛX[\ˆËÈžHÙ][™È\Ô›ØÙ\ÜÚ[™ÈH˜[ÙH\™XÝKˆ[Ý\ˆX›Ü™X\ÛÛœÈ›Ý]BˆËÈ›ÝYÚÛ”›ØÙ\ÜÚ[™ÔÝÜY›Üˆ]Y]YH˜Z[š[™Ë‚ˆYˆ
+™X\ÛÛˆOOHX›Ü™X\ÛÛ‹•\Ù\”ÝÜ™X\ÛÛˆOOHX›Ü™X\ÛÛ‹”™Y\™XÝ™X\ÛÛˆOOH[™Yš[™Y
+HÂˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ú[\œ\Y	ÊBˆBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ñ\œ›Üˆ[ˆÚ]‰Ë\œ›ÜŠBˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ñ\œ›ÜˆY\ÜØYÙN‰Ë\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠJBˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ñ\œ›ÜˆÝXÚÎ‰Ë\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹œÝXÚÈˆ	Ó›ÈÝXÚÉÊB‚ˆËÈ™\ÜÚ]ÔÑÈ\œ›ÜœÈšXH[[YHÛÚÜÈ
+[XÝ›ÛˆØ[ˆ›ÜØ\™ÈÙ[žJBˆÙ\ÜÚ[Û”[[YRÛÚÜË˜Ø\\™Q^Ù\[ÛŠ\œ›Ü‹È\œ›Ü”ÛÝ\˜ÙNˆ	ØÚ]	ËÙ\ÜÚ[Û’YJB‚ˆÙ[™Ü[‹›X\šÊ	ØÚ]™\œ›Ü‰ÊBˆÙ[™Ü[‹œÙ]Y]Y]J	Ù\œ›Ü‰Ë\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠJBˆÙ[™Ü[‹™[™
+
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ù\œ›Ü‰ËˆÙ\ÜÚ[Û’Yˆ\œ›ÜŽˆ\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆ	Õ[šÛ›ÝÛˆ\œ›Ü‰ÂˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆËÈ[™H\œ›ÜˆšXHÙ[˜[^™Y[™\‚ˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ù\œ›Ü‰ÊBˆBˆHš[˜[HÂˆËÈÛ›H[™HÛX[\›Üˆ[™^XÝY^]È
+ÛÜœ™XZÈÚ]Ý]ÛÛ\]H]™[
+BˆËÈ›Ü›X[ÛÛ\][Ûˆ™]\›œÈX\›HY\ˆØ[[™ÈÛ”›ØÙ\ÜÚ[™ÔÝÜYˆËÈ\œ›ÜœÈ\™H[™Y[ˆØ]Ú›ØÚÂˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™È	‰ˆX[˜YÙYœ›ØÙ\ÜÚ[™ÑÙ[™\˜][ÛˆOOH^QÙ[™\˜][ÛŠHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ñš[˜[H›ØÚÈÛX[\H[™^XÝY^]	ÊBˆÙ[™Ü[‹›X\šÊ	ØÚ][™^XÝYÙ^]	ÊBˆÙ[™Ü[‹™[™
+
+Bˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ú[\œ\Y	ÊBˆBˆBˆB‚ˆ\Þ[˜ÈØ[˜Ù[›ØÙ\ÜÚ[™ÊÙ\ÜÚ[Û’YˆÝš[™ËÚ[[H˜[ÙJNˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙYËš\Ô›ØÙ\ÜÚ[™ÊHÂˆ™]\›ˆËÈ›Ý›ØÙ\ÜÚ[™Ë›Ý[™ÈÈØ[˜Ù[ˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐØ[˜Ù[[™È›ØÙ\ÜÚ[™È›ÜˆÙ\ÜÚ[ÛŽ‰ËÙ\ÜÚ[Û’YÚ[[È	ÊÚ[[
+IÈˆ	ÉÊB‚ˆËÈÛÛXÝ]Y]YYY\ÜØYÙH^›Üˆ[œ]™\ÝÜ˜][Ûˆ™Y›Ü™HÛX\š[™ÂˆÛÛœÝ]Y]YY^ÈHX[˜YÙY›Y\ÜØYÙT]Y]YK›X\
+HOˆK›Y\ÜØYÙJB‚ˆËÈÛÛXÝ]Y]YYY\ÜØYÙHQÈÛÈÙHØ[ˆ™[[Ý™H[Hœ›ÛHHY\ÜØYÙ\È\œ˜^BˆËÈ
+^HÙ\™HYYÚ[ˆÙ[™Y\ÜØYÙHØ\ÈØ[Y\š[™È›ØÙ\ÜÚ[™ÊBˆÛÛœÝ]Y]YYY\ÜØYÙRYÈH™]ÈÙ]
+ˆX[˜YÙY›Y\ÜØYÙT]Y]YK›X\
+HOˆK›Y\ÜØYÙRY
+K™š[\Š
+Y
+NˆY\ÈÝš[™ÈOˆHZY
+Bˆ
+B‚ˆËÈÛX\ˆ]Y]YHH\Ù\ˆ^XÚ]HÝÜYÛ‰Ý›ØÙ\ÜÈ]Y]YYY\ÜØYÙ\ÂˆX[˜YÙY›Y\ÜØYÙT]Y]YHH×B‚ˆËÈ™[[Ý™H]Y]YY\Ù\ˆY\ÜØYÙ\Èœ›ÛHH\œÚ\ÝYY\ÜØYÙ\È\œ˜^BˆYˆ
+]Y]YYY\ÜØYÙRYËœÚ^™Hˆ
+HÂˆX[˜YÙY›Y\ÜØYÙ\ÈHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠHOˆ\]Y]YYY\ÜØYÙRYËš\ÊKšY
+JBˆB‚ˆËÈÚYÛ˜[[[ÈÝÜH]H]™[ÛÜ˜Z[ˆ™[XZ[š[™È]™[È™Y›Ü™HÛX\š[™È\Ô›ØÙ\ÜÚ[™ÂˆËÈ\È™]™[ÈÜÚ[™È[‹Y›YÚY\ÜØYÙ\ÈY\ˆÛÙ[\œ\ˆX[˜YÙYœÝÜ™\]Y\ÝYHYB‚ˆËÈ˜XÚÈ[\œ\[ÛˆÛÈH™^\Ù\ˆY\ÜØYÙHÙ]ÈHÛÛ^›ÝBˆËÈ[[™ÈHHH™]š[Ý\È™\ÜÛœÙHØ\ÈÝ]ÚÜˆX[˜YÙYØ\Ò[\œ\YHYB‚ˆËÈ›Ü˜ÙKXX›ÜšXH]Y\žK˜ÛÜÙJ
+HHÙ[™ÈÛÙ[\œ\ÈH˜XÚÙ[™ˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆX[˜YÙY˜YÙ[™›Ü˜ÙPX›Ü
+X›Ü™X\ÛÛ‹•\Ù\”ÝÜ
+BˆB‚ˆËÈÛ›HÚÝÈ”™\ÜÛœÙH[\œ\YˆY\ÜØYÙHÚ[ˆ\Ù\ˆ^XÚ]HÛXÚÙYÝÜˆËÈÚ[[[ÙH\È\ÙYÚ[ˆ™Y\™XÝ[™È
+Ù[™[™È™]ÈY\ÜØYÙHÚ[H›ØÙ\ÜÚ[™ÊBˆYˆ
+\Ú[[
+HÂˆÛÛœÝ[\œ\YY\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ú[™›ÉËˆÛÛ[ˆ	Ô™\ÜÛœÙH[\œ\Y	Ëˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+KˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+[\œ\YY\ÜØYÙJBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[\œ\Y	ËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ[\œ\YY\ÜØYÙKˆËÈ[˜ÛYH]Y]YY^ÈÛÈHRHØ[ˆ™\ÝÜ™H[HÈH[œ]šY[ˆ‹‹Š]Y]YY^Ë›[™ÝˆÈÈ]Y]YYY\ÜØYÙ\Îˆ]Y]YY^ÈHˆßJKˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆH[ÙHÂˆËÈÝ[Ù[™[\œ\Y]™[]Ú]Ý]HY\ÜØYÙH
+›ÜˆRHÝ]H\]JBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[\œ\Y	ËˆÙ\ÜÚ[Û’YˆËÈ[˜ÛYH]Y]YY^ÈÛÈHRHØ[ˆ™\ÝÜ™H[HÈH[œ]šY[ˆ‹‹Š]Y]YY^Ë›[™ÝˆÈÈ]Y]YYY\ÜØYÙ\Îˆ]Y]YY^ÈHˆßJKˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆËÈØY™]H[Y[Ý]ˆYˆ]™[ÛÜÙ\Û‰ÝÛÛ\]HÚ][ˆHÙXÛÛ™Ë›Ü˜ÙHÛX[\ˆËÈ\È[™\ÈØ\Ù\ÈÚ\™HHÙ[™\˜]ÜˆÙ]ÈÝXÚÂˆÙ][Y[Ý]
+
+
+HOˆÂˆYˆ
+X[˜YÙYœÝÜ™\]Y\ÝY	‰ˆX[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÑÙ[™\˜]ÜˆY›ÝÛÛ\]HY\ˆÝÜ™\]Y\Ý›Ü˜Ú[™ÈÛX[\	ÊBˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ý[Y[Ý]	ÊBˆBˆKL
+B‚ˆËÈ“ÕNˆÙHÛ‰ÝÛX\ˆ\Ô›ØÙ\ÜÚ[™ÈÜˆÙ[™ÛÛ\]H]™[\™H[ž[[Ü™K‚ˆËÈH]™[ÛÜÚ[˜Z[ˆ™[XZ[š[™È]™[È[™Ø[Û”›ØÙ\ÜÚ[™ÔÝÜYÚ[ˆÛ™K‚ˆB‚ˆÊŠ‚ˆ
+ˆ][\]]™]žNˆ™Yœ™\ÚÚÙ[‹\Ý›ÞHYÙ[™\Ù[™\ÝY\ÜØYÙK‚ˆ
+ˆÚ\™YžH›Ý\YÙ\œ›Üˆ[™Z[ˆ\œ›Üˆ]]\™]žH]Ë‚ˆ
+ˆ™]\›œÈYHYˆ™]žHØ\È[š]X]Y˜[ÙHYˆÛÛ™][ÛœÈ›ÝY]‚ˆ
+‹Âˆš]˜]H][\]]™]žJˆÙ\ÜÚ[Û’YˆÝš[™ËˆX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹ˆÛÜšÜÜXÙRYˆÝš[™Ëˆ˜Z[\™Q\œ›ÜÛÙOÎˆÝš[™Ëˆ
+Nˆ›ÛÛX[ˆÂˆYˆ
+X[˜YÙY˜]]™]žP][\Y[X[˜YÙY›\ÝÙ[Y\ÜØYÙJH™]\›ˆ˜[ÙB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê]]\œ›Üˆ]XÝY][\[™ÈÚÙ[ˆ™Yœ™\Ú[™™]žH›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆX[˜YÙY˜]]™]žP][\YHYBˆX[˜YÙY˜]]™]žR[”›ÙÜ™\ÜÈHYB‚ˆËÈ[Z]YÚÙZYÚ[™›ÈÛÈH\Ù\ˆÙY\È›ÙÜ™\ÜÈ[œÝXYÙˆHØØ\žH™Y\œ›Ü‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[™›ÉËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ	ÕÚÙ[ˆ^\™Y™Yœ™\Ú[™ÈÙ\ÜÚ[Û¸ )‰Ëˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+KˆKÛÜšÜÜXÙRY
+B‚ˆÙ][[YYX]J\Þ[˜È
+
+HOˆÂˆžHÂˆËÈKˆ™\Ù]Ý[[X\š^˜][ÛˆÛY[ÛÈ]XÚÜÈ\œ™\ÚÜ™Y[X[ÂˆÙ\ÜÚ[Û“ÙËš[™›ÊØ]]\™]žWH™\Ù][™ÈÝ[[X\š^˜][ÛˆÛY[›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™\Ù]Ý[[X\š^˜][ÛÛY[
+
+B‚ˆËÈ‹ˆ\Ý›ÞHHYÙ[8 %H™]ÈYÙ[	ÜÈÜÝ[š]
+
+HÚ[™Yœ™\Ú]]ˆÙ\ÜÚ[Û“ÙËš[™›ÊØ]]\™]žWH\Ý›ÞZ[™ÈYÙ[›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆX[˜YÙY˜YÙ[H[‚ˆËÈËˆ™]žHHY\ÜØYÙBˆÛÛœÝ™]žSY\ÜØYÙHHX[˜YÙY›\ÝÙ[Y\ÜØYÙBˆÛÛœÝ™]žP]XÚY[ÈHX[˜YÙY›\ÝÙ[]XÚY[ÂˆÛÛœÝ™]žTÝÜ™Y]XÚY[ÈHX[˜YÙY›\ÝÙ[ÝÜ™Y]XÚY[ÂˆÛÛœÝ™]žSÜ[ÛœÈHX[˜YÙY›\ÝÙ[Ü[ÛœÂ‚ˆYˆ
+™]žSY\ÜØYÙJHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊØ]]\™]žWH™]žZ[™ÈY\ÜØYÙH›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ\ËœÙ]›ØÙ\ÜÚ[™ÊX[˜YÙY˜[ÙJB‚ˆËÈ™[[Ý™HH\Ù\ˆY\ÜØYÙH]Ø\ÈYY›Üˆ\È˜Z[Y][\ˆËÈÛÈÙHÛ‰ÝÙ]\XØ]HY\ÜØYÙ\ÈÚ[ˆ™]žZ[™ÂˆÛÛœÝ\Ý\Ù\“\ÙÒ[™^HX[˜YÙY›Y\ÜØYÙ\Ë™š[™\Ý[™^
+HOˆKœ›ÛHOOH	Ý\Ù\‰ÊBˆYˆ
+\Ý\Ù\“\ÙÒ[™^OOHLJHÂˆX[˜YÙY›Y\ÜØYÙ\ËœÜXÙJ\Ý\Ù\“\ÙÒ[™^JBˆB‚ˆX[˜YÙY˜]]™]žR[”›ÙÜ™\ÜÈH˜[ÙB‚ˆ]ØZ]\ËœÙ[™Y\ÜØYÙJˆÙ\ÜÚ[Û’Yˆ™]žSY\ÜØYÙKˆ™]žP]XÚY[Ëˆ™]žTÝÜ™Y]XÚY[Ëˆ™]žSÜ[ÛœËˆ[™Yš[™YËÈ^\Ý[™ÓY\ÜØYÙRYˆYHËÈÚ\Ð]]™]žHH™]™[È[™š[š]H™]žHÛÜˆ
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊØ]]\™]žWH™]žHÛÛ\]Y›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆH[ÙHÂˆX[˜YÙY˜]]™]žR[”›ÙÜ™\ÜÈH˜[ÙBˆBˆHØ]Ú
+™]žQ\œ›ÜŠHÂˆX[˜YÙY˜]]™]žR[”›ÙÜ™\ÜÈH˜[ÙBˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠØ]]\™]žWH˜Z[YÈ™]žHY\ˆ]]™Yœ™\Ú›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YN˜™]žQ\œ›ÜŠBˆÙ\ÜÚ[Û”[[YRÛÚÜË˜Ø\\™Q^Ù\[ÛŠ™]žQ\œ›Ü‹È\œ›Ü”ÛÝ\˜ÙNˆ	Ø]]\™]žIËÙ\ÜÚ[Û’YJBˆÛÛœÝ˜Z[YY\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ù\œ›Ü‰ËˆÛÛ[ˆ	Ð]][XØ][Ûˆ˜Z[YˆX\ÙHÚXÚÈ[Ý\ˆÜ™Y[X[Ë‰Ëˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+Kˆ\œ›ÜÛÙNˆ˜Z[\™Q\œ›ÜÛÙKˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+˜Z[YY\ÜØYÙJBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ù\œ›Ü‰ËˆÙ\ÜÚ[Û’Yˆ\œ›ÜŽˆ	Ð]][XØ][Ûˆ˜Z[YˆX\ÙHÚXÚÈ[Ý\ˆÜ™Y[X[Ë‰Ëˆ[Y\Ý[\ˆ˜Z[YY\ÜØYÙK[Y\Ý[\ˆKÛÜšÜÜXÙRY
+Bˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ù\œ›Ü‰ÊBˆBˆJB‚ˆ™]\›ˆYBˆB‚ˆÊŠ‚ˆ
+ˆÙ[˜[[™\ˆ›ÜˆÚ[ˆ›ØÙ\ÜÚ[™ÈÝÜÈ
+[žH™X\ÛÛŠK‚ˆ
+ˆÚ[™ÛHÛÝ\˜ÙHÙˆ]›ÜˆÛX[\[™]Y]YH›ØÙ\ÜÚ[™Ë‚ˆ
+‚ˆ
+ˆ\˜[HÙ\ÜÚ[Û’YHHÙ\ÜÚ[Ûˆ]ÝÜY›ØÙ\ÜÚ[™Âˆ
+ˆ\˜[H™X\ÛÛˆHÚH›ØÙ\ÜÚ[™ÈÝÜY
+	ØÛÛ\]IÈ	Ú[\œ\Y	È	Ù\œ›Ü‰ÊBˆ
+‹Âˆš]˜]H\Þ[˜ÈÛ”›ØÙ\ÜÚ[™ÔÝÜY
+ˆÙ\ÜÚ[Û’YˆÝš[™Ëˆ™X\ÛÛŽˆ	ØÛÛ\]IÈ	Ú[\œ\Y	È	Ù\œ›Ü‰È	Ý[Y[Ý]	Âˆ
+Nˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+H™]\›‚‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê›ØÙ\ÜÚ[™ÈÝÜY›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YNˆ	Ü™X\ÛÛŸX
+B‚ˆËÈYÙ[\›ˆ\Ý[™Y8 %™\]Y\Ý[ˆ[[YYX]HÚ]Ý]\È™Yœ™\ÚÛÈBˆËÈÚ[™Ù\ÈÝ\™˜XÙH™Y›XÝÈ[žHš[\ÈHYÙ[ÝXÚYÚ]Ý]ØZ][™È›Ü‚ˆËÈHÛØ[\ØÙYÛXÚËˆ™\ÝYY™›Ü[™H›Ë[ÜÚ[ˆHÚXÚÛÝ]\È›ÝˆËÈÝXœØÜšX™YÈ™]™\ˆ›ØÚÜÈ\›ˆÛX[\‚ˆžHÂˆ\Ë™Ú]Ý]\Ô™Yœ™\Ú\ËŠÙ\ÜÚ[Û’Y
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÚ]Ý]\È™Yœ™\ÚY\ˆ\›ˆ˜Z[Y›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆB‚ˆËÈKˆÛX[\Ý]Bˆ\ËœÙ]›ØÙ\ÜÚ[™ÊX[˜YÙY˜[ÙJBˆX[˜YÙYœÝÜ™\]Y\ÝYH˜[ÙHËÈ™\Ù]›Üˆ™^\›‚‚ˆÛÛœÝ\›”Ý\š[˜[Y\ÜØYÙRYHX[˜YÙY\›”Ý\š[˜[Y\ÜØYÙRYˆX[˜YÙY\›”Ý\š[˜[Y\ÜØYÙRYH[™Yš[™Y‚ˆËÈÛX\ˆYÙ[ÛÛ›ÛÝ™\›^H™]ÙY[ˆ\›œËˆHÙ\ÜÚ[ÛˆÙY\Èœ›ÝÜÙ\‚ˆËÈÝÛ™\œÚ\
+›Ý[™Ù\ÜÚ[Û’Y
+H8 %Û›HHš\ÝX[Ý™\›^H\È™[[Ý™Y‚ˆËÈ[[˜š[™\[œÈ™[ÝÈÚ[ˆH]Y]YH\È[\H
+Ù\ÜÚ[Ûˆ[HÛ™JK‚ˆÛÛœÝ\›œHH\Ë™Ù]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆYˆ
+\›œJHÂˆ]ØZ]\›œK˜ÛX\•š\ÝX[Ñ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆB‚ˆËÈ‹ˆ[™H[œ™XYÝ]H˜\ÙYÛˆÚ]\ˆ\Ù\ˆ\ÈšY]Ú[™È\ÈÙ\ÜÚ[Û‚ˆËÈ\È\ÈH^XÚ]Ý]HXXÚ[™H›Üˆ‘UÈ˜YÙN‚ˆËÈHYˆ\Ù\ˆ\ÈšY]Ú[™ÎˆX\šÈ\È™XY
+^HØ]È]ÛÛ\]JBˆËÈHYˆ\Ù\ˆ\È“ÕšY]Ú[™ÎˆX\šÈ\È[œ™XY
+^H]™H™]ÈÛÛ[
+BˆËÈSTÔ•S•ˆÛ›H\H\ÈÚ[ˆH\›ˆ›ÙXÙYH‘UÈš[˜[\ÜÚ\Ý[Y\ÜØYÙK‚ˆÛÛœÝ\ÕšY]Ú[™ÈH\Ëš\ÔÙ\ÜÚ[Û™Z[™ÕšY]ÙY
+Ù\ÜÚ[Û’YX[˜YÙYÛÜšÜÜXÙKšY
+BˆÛÛœÝÝ\œ™[š[˜[Y\ÜØYÙRYH\Ë™Ù]\Ýš[˜[\ÜÚ\Ý[Y\ÜØYÙRY
+X[˜YÙY›Y\ÜØYÙ\ÊBˆÛÛœÝY™XÙZ]™S™]Ñš[˜[Y\ÜØYÙHHHXÝ\œ™[š[˜[Y\ÜØYÙRY	‰ˆÝ\œ™[š[˜[Y\ÜØYÙRYOOH\›”Ý\š[˜[Y\ÜØYÙRY‚ˆYˆ
+™X\ÛÛˆOOH	ØÛÛ\]IÈ	‰ˆY™XÙZ]™S™]Ñš[˜[Y\ÜØYÙJHÂˆYˆ
+\ÕšY]Ú[™ÊHÂˆËÈ\Ù\ˆ\ÈØ]Ú[™ÈHX\šÈ\È™XY[[YYX][Bˆ]ØZ]\Ë›X\šÔÙ\ÜÚ[Û”™XY
+Ù\ÜÚ[Û’Y
+BˆH[ÙHÂˆËÈ\Ù\ˆ\È›ÝØ]Ú[™ÈHX\šÈ\È[œ™XY›Üˆ‘UÈ˜YÙBˆYˆ
+[X[˜YÙYš\Õ[œ™XY
+HÂˆX[˜YÙYš\Õ[œ™XYHYBˆ]ØZ]\]TÙ\ÜÚ[Û“Y]Y]JX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’YÈ\Õ[œ™XYˆYHJBˆ\Ë™[Z][œ™XYÝ[[X\žPÚ[™ÙY
+
+BˆBˆBˆB‚ˆËÈËˆ]]ËXÛÛ\]HZ[šHYÙ[Ù\ÜÚ[ÛœÈÈ]›ÚYÙ\ÜÚ[Ûˆ\ÝÛ]\‚ˆËÈZ[šHYÙ[È\™HÜ]Û™Yœ›ÛHY]ÜÝ™\œÈ›Üˆ]ZXÚÈÛÛ™šYÈY]ÂˆËÈ[™ÚÝ[]]ÛX]XØ[H[Ý™HÈ	ÙÛ™IÈÚ[ˆš[š\ÚYˆYˆ
+™X\ÛÛˆOOH	ØÛÛ\]IÈ	‰ˆX[˜YÙYœÞ\Ý[T›Û\™\Ù]OOH	ÛZ[šIÈ	‰ˆX[˜YÙYœÙ\ÜÚ[Û”Ý]\ÈOOH	ÙÛ™IÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê]]ËXÛÛ\][™ÈZ[šHYÙ[Ù\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ]ØZ]\ËœÙ]Ù\ÜÚ[Û”Ý]\ÊÙ\ÜÚ[Û’Y	ÙÛ™IÊBˆB‚ˆËÈˆ\HY™\œ™Y^\›˜[Y]Y]H\]\ÈØ\\™YÚ[H›ØÙ\ÜÚ[™Ë‚ˆYˆ
+X[˜YÙYœ[™[™Ñ^\›˜[Y]Y]JHÂˆÛÛœÝ[™[™ÒXY\ˆHX[˜YÙYœ[™[™Ñ^\›˜[Y]Y]BˆX[˜YÙYœ[™[™Ñ^\›˜[Y]Y]HH[™Yš[™YˆÙ\ÜÚ[Û“ÙËš[™›Ê\Z[™ÈY™\œ™Y^\›˜[Y]Y]H›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YHY\ˆ›ØÙ\ÜÚ[™ÈÝÜ
+Bˆ\Ë˜\Q^\›˜[Ù\ÜÚ[Û“Y]Y]JX[˜YÙY[™[™ÒXY\ŠBˆB‚ˆËÈKˆÚXÚÈ]Y]YH[™›ØÙ\ÜÈÜˆÛÛ\]BˆYˆ
+X[˜YÙY›Y\ÜØYÙT]Y]YK›[™Ýˆ
+HÂˆËÈ\È]Y]YYY\ÜØYÙ\ÈH›ØÙ\ÜÈ™^ˆ\Ëœ›ØÙ\ÜÓ™^]Y]YYY\ÜØYÙJÙ\ÜÚ[Û’Y
+BˆH[ÙHÂˆËÈÙ\ÜÚ[Ûˆ\È[HÛ™H8 %™[X\ÙHœ›ÝÜÙ\ˆÝÛ™\œÚ\‚ˆËÈHÚ[™ÝÈÝ^\È[]™H
+Y[ŠH[™™XÛÛY\È™]\ØX›HžH]\™HÙ\ÜÚ[ÛœË‚ˆËÈÛˆH™^\›‹Ù]ÜÜ™X]Q›Ü”Ù\ÜÚ[ÛŠ
+HÚ[™KXš[™]‚ˆÛÛœÝÛ™PœHH\Ë™Ù]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆYˆ
+Û™PœJHÂˆ]ØZ]Û™PœK˜ÛX\•š\ÝX[Ñ›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆÛ™PœK[˜š[™[›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆB‚ˆËÈ›È]Y]YHH[Z]ÛÛ\]HÈRH
+[˜ÛYHÚÙ[•\ØYÙH[™\Õ[œ™XY›ÜˆÝ]H\]\ÊBˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ØÛÛ\]IËˆÙ\ÜÚ[Û’YˆÚÙ[•\ØYÙNˆX[˜YÙYÚÙ[•\ØYÙKˆ\Õ[œ™XYˆX[˜YÙYš\Õ[œ™XYËÈ›ÜYØ]H[œ™XYÝ]HÈ™[™\™\‚ˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆB‚ˆËÈ‹ˆ[Ø^\È\œÚ\Ýˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆB‚ˆÊŠ‚ˆ
+ˆ›ØÙ\ÜÈH™^Y\ÜØYÙH[ˆH]Y]YK‚ˆ
+ˆØ[YžHÛ”›ØÙ\ÜÚ[™ÔÝÜYÚ[ˆ]Y]YH\ÈY\ÜØYÙ\Ë‚ˆ
+‹Âˆš]˜]H›ØÙ\ÜÓ™^]Y]YYY\ÜØYÙJÙ\ÜÚ[Û’YˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙYX[˜YÙY›Y\ÜØYÙT]Y]YK›[™ÝOOH
+H™]\›‚‚ˆÛÛœÝ™^HX[˜YÙY›Y\ÜØYÙT]Y]YKœÚY
+
+HBˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ü™\^H]Y]YY	ËÂˆÙ\ÜÚ[Û’YˆY\ÜØYÙRYˆ™^›Y\ÜØYÙRYˆ]Y]YS[™ÝY\”ÚYˆX[˜YÙY›Y\ÜØYÙT]Y]YK›[™ÝˆJB‚ˆËÈ\]HRNˆ]Y]YY8¡¤ˆ›ØÙ\ÜÚ[™ÂˆYˆ
+™^›Y\ÜØYÙRY
+HÂˆÛÛœÝ^\Ý[™ÓY\ÜØYÙHHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKšYOOH™^›Y\ÜØYÙRY
+BˆYˆ
+^\Ý[™ÓY\ÜØYÙJHÂˆËÈÛX\ˆ\Ô]Y]YY›YÈ[™\œÚ\ÝH™]™[È™K\]Y]YZ[™ÈYˆÜ˜\Ú\š[™È›ØÙ\ÜÚ[™Âˆ^\Ý[™ÓY\ÜØYÙKš\Ô]Y]YYH˜[ÙBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+B‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\Ù\—ÛY\ÜØYÙIËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ^\Ý[™ÓY\ÜØYÙKˆÝ]\Îˆ	Ü›ØÙ\ÜÚ[™ÉËˆÜ[Z\ÝXÓY\ÜØYÙRYˆ™^›Ü[Z\ÝXÓY\ÜØYÙRYˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆBˆB‚ˆËÈ›ØÙ\ÜÈY\ÜØYÙH
+\ÙHÙ][[YYX]HÈ[ÝÈÝ\œ™[ÝXÚÈÈÛX\ŠBˆÙ][[YYX]J
+
+HOˆÂˆ\ËœÙ[™Y\ÜØYÙJˆÙ\ÜÚ[Û’Yˆ™^›Y\ÜØYÙKˆ™^˜]XÚY[Ëˆ™^œÝÜ™Y]XÚY[Ëˆ™^›Ü[ÛœËˆ™^›Y\ÜØYÙRYˆ
+K˜Ø]Ú
+\œˆOˆÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ	Ü™\^H˜Z[Y	ËÂˆÙ\ÜÚ[Û’YˆY\ÜØYÙRYˆ™^›Y\ÜØYÙRYˆ\œ›ÜŽˆ\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆÝš[™Ê\œŠKˆJBˆËÈ™\Ü]Y]YYY\ÜØYÙH˜Z[\™\ÈšXH[[YHÛÚÜÂˆÙ\ÜÚ[Û”[[YRÛÚÜË˜Ø\\™Q^Ù\[ÛŠ\œ‹È\œ›Ü”ÛÝ\˜ÙNˆ	ØÚ]\]Y]YIËÙ\ÜÚ[Û’YJBˆËÈÝ\™˜XÙHH\Y\œ›ÜˆÛÈHRHØ[ˆÚÝÈHÛX\‹XÝ[Û˜X›H˜[›™\‚ˆËÈ[œÝXYÙˆHÙ[™\šXÈ•[šÛ›ÝÛˆ\œ›Üˆˆ
+ÍŒMŠK‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\YÙ\œ›Ü‰ËˆÙ\ÜÚ[Û’Yˆ\œ›ÜŽˆÂˆÛÙNˆ	Ü]Y]YYÛY\ÜØYÙWÜ™\^WÙ˜Z[Y	Ëˆ]Nˆ	Ô]Y]YYY\ÜØYÙHÛÝ[›Ý™HÙ[	ËˆY\ÜØYÙNˆ	ÐHY\ÜØYÙH[ÝHÙ[Ú[HHYÙ[Ø\È[›š[™ÈÛÝ[›Ý™H™K\Ù[]]ÛX]XØ[Kˆ\™]žHÈÙ[™]›ÝË‰ËˆXÝ[ÛœÎˆÞÈÙ^Nˆ	Ü‰ËX™[ˆ	Ô™]žIËXÝ[ÛŽˆ	Ü™]žIÈWKˆØ[”™]žNˆYKˆÜšYÚ[˜[\œ›ÜŽˆ\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆÝš[™Ê\œŠKˆKˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆËÈØ[Û”›ØÙ\ÜÚ[™ÔÝÜYÈ[™HÛX[\[™ÚXÚÈ›Üˆ[Ü™H]Y]YYY\ÜØYÙ\Âˆ\Ë›Û”›ØÙ\ÜÚ[™ÔÝÜY
+Ù\ÜÚ[Û’Y	Ù\œ›Ü‰ÊBˆJBˆJBˆB‚ˆ\Þ[˜ÈÚ[Ú[
+Ù\ÜÚ[Û’YˆÝš[™ËÚ[YˆÝš[™ÊNˆ›ÛZ\ÙOÈÝXØÙ\ÜÎˆ›ÛÛX[ŽÈ\œ›ÜÎˆÝš[™ÈOˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆ™]\›ˆÈÝXØÙ\ÜÎˆ˜[ÙK\œ›ÜŽˆ	ÔÙ\ÜÚ[Ûˆ›Ý›Ý[™	ÈBˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[[™ÈÚ[	ÜÚ[YH›ÜˆÙ\ÜÚ[ÛŽˆ	ÜÙ\ÜÚ[Û’YX
+B‚ˆËÈžHÈÚ[HXÝX[›ØÙ\ÜÈ\Ú[™ÈHÝÜ™YÛÛ[X[™ˆÛÛœÝÛÛ[X[™HX[˜YÙY˜˜XÚÙÜ›Ý[™Ú[ÛÛ[X[™Ë™Ù]
+Ú[Y
+BˆYˆ
+ÛÛ[X[™
+HÂˆžHÂˆËÈ\ÙHÚ[Èš[™[™Ú[›ØÙ\ÜÙ\ÈX]Ú[™ÈHÛÛ[X[™ˆËÈHYˆ›YÈX]Ú\ÈYØZ[œÝH[ÛÛ[X[™[™BˆÛÛœÝÈ^XÈHH]ØZ][\Ü
+	ØÚ[Ü›ØÙ\ÜÉÊBˆÛÛœÝÈ›ÛZ\ÚYžHHH]ØZ][\Ü
+	Ý][	ÊBˆÛÛœÝ^XÐ\Þ[˜ÈH›ÛZ\ÚYžJ^XÊB‚ˆËÈ\ØØ\HHÛÛ[X[™›Üˆ\ÙH[ˆÚ[]\›‚ˆËÈÙHÙX\˜Ú›ÜˆH[š\]YHÛÛ[X[™Ýš[™È[ˆ›ØÙ\ÜÈ\™ÜÂˆÛÛœÝ\ØØ\YÛÛ[X[™HÛÛ[X[™œ™\XÙJÖËŠŠÏ×‰ßJ
+_×WKÙË	×		‰ÊB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê][\[™ÈÈÚ[›ØÙ\ÜÈÚ]ÛÛ[X[™ˆ	ØÛÛ[X[™œÛXÙJL
+_K‹‹˜
+B‚ˆËÈ\ÙHÜ™\š\œÝÈš[™HQ[ˆÚ[]ˆËÈ\È\ÈØY™\ˆ[ˆÚ[YˆÚXÚØ[ˆX]ÚÛÈœ›ØYBˆžHÂˆÛÛœÝÈÝÝ]HH]ØZ]^XÐ\Þ[˜ÊÜ™\Yˆ‰Ù\ØØ\YÛÛ[X[™H˜
+BˆÛÛœÝYÈHÝÝ]š[J
+KœÜ]
+	×‰ÊK™š[\Š›ÛÛX[ŠB‚ˆYˆ
+YË›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê›Ý[™	ÜYË›[™ÝH›ØÙ\ÜÊ\ÊHÈÚ[ˆ	ÜYËš›Ú[Š	Ë	Ê_X
+BˆËÈÚ[XXÚ›ØÙ\ÜÂˆ›Üˆ
+ÛÛœÝYÙˆYÊHÂˆžHÂˆ]ØZ]^XÐ\Þ[˜ÊÚ[UT“H	ÜYX
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ[ÒQÕT“HÈ›ØÙ\ÜÈ	ÜYX
+BˆHØ]Ú
+Ú[\œŠHÂˆËÈ›ØÙ\ÜÈX^H]™H[™XYH^]YˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈÚ[›ØÙ\ÜÈ	ÜYNˆ	ÚÚ[\œŸX
+BˆBˆBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê›È›ØÙ\ÜÙ\È›Ý[™X]Ú[™ÈÛÛ[X[™
+BˆBˆHØ]Ú
+Ü™\\œŠHÂˆËÈÜ™\™]\›œÈ^]ÛÙHHÚ[ˆ›È›ØÙ\ÜÙ\È›Ý[™ÚXÚ\Èš[™BˆÙ\ÜÚ[Û“ÙËš[™›Ê›ÈX]Ú[™È›ØÙ\ÜÙ\È›Ý[™
+Ü™\™]\›™Y›È™\Ý[ÊX
+BˆB‚ˆËÈÛX[ˆ\HÝÜ™YÛÛ[X[™ˆX[˜YÙY˜˜XÚÙÜ›Ý[™Ú[ÛÛ[X[™Ë™[]JÚ[Y
+BˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ\œ›ÜˆÚ[[™ÈÚ[›ØÙ\ÜÎˆ	Ù\œŸX
+BˆBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›Š›ÈÛÛ[X[™ÝÜ™Y›ÜˆÚ[	ÜÚ[YKØ[››ÝÚ[›ØÙ\ÜØ
+BˆB‚ˆËÈ[Ø^\È[Z]Ú[ÚÚ[YÈ™[[Ý™Hœ›ÛHRH™YØ\™\ÜÈÙˆ›ØÙ\ÜÈÚ[ÝXØÙ\ÜÂˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÜÚ[ÚÚ[Y	ËˆÙ\ÜÚ[Û’YˆÚ[YˆKX[˜YÙYÛÜšÜÜXÙKšY
+B‚ˆ™]\›ˆÈÝXØÙ\ÜÎˆYHBˆB‚ˆÊŠ‚ˆ
+ˆÙ]Ý]]œ›ÛHH˜XÚÙÜ›Ý[™\ÚÂˆ
+‚ˆ
+ˆÛÚÜÈ\HÝ]]š[HÝÜ™YÚ[ˆH\Ú×ØÛÛ\]Y]™[Ø\È™XÙZ]™Yˆ
+ˆ™XYÈ]ÈÛÛ[Ë[™™]\›œÈ[Kˆ˜[È˜XÚÈÈHÑË\›ÝšYYÝ[[X\žBˆ
+ˆYˆHš[HØ[››Ý™H™XY‚ˆ
+‚ˆ
+ˆ\˜[H\ÚÒYHH\ÚÈÜˆÚ[Qˆ
+ˆ™]\›œÈ\ÚÈÝ]]ÛÛ[Üˆ[Yˆ\ÚÈ›Ý›Ý[™ˆ
+‹Âˆ\Þ[˜ÈÙ]\ÚÓÝ]]
+\ÚÒYˆÝš[™ÊNˆ›ÛZ\ÙOÝš[™È[ˆÂˆËÈÊJHÛÚÝ\šXH\ÚÓÝ]][™^ˆÛÛœÝÙ\ÜÚ[Û’YH\Ë\ÚÓÝ]][™^™Ù]
+\ÚÒY
+BˆYˆ
+\Ù\ÜÚ[Û’Y
+HÂˆÙ\ÜÚ[Û“ÙËš[™›Ê›ÈÝ]]›Ý[™›Üˆ\ÚÎˆ	Ý\ÚÒYH
+\ÚÈX^HÝ[™H[›š[™ÊX
+Bˆ™]\›ˆ[ˆB‚ˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆÛÛœÝ[™›ÈHX[˜YÙYË˜˜XÚÙÜ›Ý[™\ÚÓÝ]]Ë™Ù]
+\ÚÒY
+BˆYˆ
+Z[™›ÊHÂˆËÈ[™^Ý]ÙˆÞ[˜È8 %ÛX[ˆ\Ý[H[žBˆ\Ë\ÚÓÝ]][™^™[]J\ÚÒY
+Bˆ™]\›ˆ[ˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê›Ý[™Ý]]›Üˆ\ÚÈ	Ý\ÚÒYNˆš[OIÚ[™›Ë›Ý]]š[_KÝ]\ÏIÚ[™›ËœÝ]\ßX
+BˆžHÂˆÛÛœÝÛÛ[H]ØZ]™XYš[J[™›Ë›Ý]]š[K	Ý]‹N	ÊBˆËÈ[]HY\ˆÝXØÙ\ÜÙ[™XYÈ™]™[Y[[ÜžHXZÂˆX[˜YÙYK˜˜XÚÙÜ›Ý[™\ÚÓÝ]]Ë™[]J\ÚÒY
+Bˆ\Ë\ÚÓÝ]][™^™[]J\ÚÒY
+Bˆ™]\›ˆÛÛ[ˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈ™XY\ÚÈÝ]]š[Nˆ	Ú[™›Ë›Ý]]š[_X\œŠBˆËÈ˜[˜XÚÈÈÑË\›ÝšYYÝ[[X\žBˆ™]\›ˆ[™›ËœÝ[[X\žH[ˆBˆB‚ˆÊŠ‚ˆ
+ˆ™\ÜÛ™ÈH[™[™È\›Z\ÜÚ[Ûˆ™\]Y\Ýˆ
+ˆ™]\›œÈYHYˆH™\ÜÛœÙHØ\È[]™\™Y˜[ÙHYˆYÙ[ÜÙ\ÜÚ[Ûˆ\ÈÛÛ™Bˆ
+‹Âˆ™\ÜÛ™Ô\›Z\ÜÚ[ÛŠˆÙ\ÜÚ[Û’YˆÝš[™Ëˆ™\]Y\ÝYˆÝš[™Ëˆ[ÝÙYˆ›ÛÛX[‹ˆ[Ø^\Ð[ÝÎˆ›ÛÛX[‹ˆÜ[ÛœÏÎˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊK”\›Z\ÜÚ[Û”™\ÜÛœÙSÜ[ÛœËˆ
+Nˆ›ÛÛX[ˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙYË˜YÙ[
+HÂˆÛÛœÝ™\]Y\ÝY]HH\Ëœ[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝË™Ù]
+™\]Y\ÝY
+Bˆ\Ëœ[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝË™[]J™\]Y\ÝY
+B‚ˆYˆ
+™\]Y\ÝY]OË\HOOH	ØYZ[—Ø\›Ý˜[	ÊHÂˆÛÛœÝœ›ÚÙ\”™\Ý[H\Ëœš]š[YÙY^XÝ][Ûœ›ÚÙ\‹œ™\ÛÛ™P\›Ý˜[
+™\]Y\ÝY[ÝÙYÂˆ^XÝYÛÛ[X[™\Úˆ™\]Y\ÝY]K˜ÛÛ[X[™\ÚˆJBˆYˆ
+Xœ›ÚÙ\”™\Ý[›ÚÊHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠYZ[ˆ\›Ý˜[™Z™XÝYžHœ›ÚÙ\ˆ›Üˆ	Ü™\]Y\ÝYNˆ	Øœ›ÚÙ\”™\Ý[œ™X\ÛÛŸX
+BˆËÈœ›ÚÙ\ˆ™Z™XÝ[ÛˆÚÝ[˜Z[ÛÜÙY‚ˆX[˜YÙY˜YÙ[œ™\ÜÛ™Ô\›Z\ÜÚ[ÛŠ™\]Y\ÝY˜[ÙK˜[ÙJBˆ™]\›ˆ˜[ÙBˆB‚ˆYˆ
+[ÝÙY	‰ˆ™\]Y\ÝY]K˜ÛÛ[X[™\Ú	‰ˆÜ[ÛœÏËœ™[Y[X™\‘›Ü“Z[]\ÊHÂˆ\ËœÝÜ™PYZ[”™[Y[X™\\›Ý˜[
+Ù\ÜÚ[Û’Y™\]Y\ÝY]K˜ÛÛ[X[™\Ú™\]Y\ÝYÜ[ÛœËœ™[Y[X™\‘›Ü“Z[]\ÊBˆBˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê\›Z\ÜÚ[Ûˆ™\ÜÛœÙH›Üˆ	Ü™\]Y\ÝYNˆ[ÝÙYIØ[ÝÙYK[Ø^\Ð[ÝÏIØ[Ø^\Ð[ÝßX
+BˆX[˜YÙY˜YÙ[œ™\ÜÛ™Ô\›Z\ÜÚ[ÛŠ™\]Y\ÝY[ÝÙY[Ø^\Ð[ÝÊBˆ™]\›ˆYBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý™\ÜÛ™È\›Z\ÜÚ[ÛˆH›ÈYÙ[›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›ˆ˜[ÙBˆBˆB‚ˆÊŠ‚ˆ
+ˆ™\ÜÛ™ÈH[™[™ÈÜ™Y[X[™\]Y\Ýˆ
+ˆ™]\›œÈYHYˆH™\ÜÛœÙHØ\È[]™\™Y˜[ÙHYˆ›È[™[™È™\]Y\Ý›Ý[™ˆ
+‚ˆ
+ˆÝ\ÜÈ›Ý‚ˆ
+ˆH™]È[šYšYY]]›ÝÈ
+šXH[™PÜ™Y[X[[œ]
+Bˆ
+ˆHYØXÞHØ[˜XÚÈ›ÝÈ
+šXH[™[™ÐÜ™Y[X[™\ÛÛ™\œÊBˆ
+‹Âˆ\Þ[˜È™\ÜÛ™ÐÜ™Y[X[
+Ù\ÜÚ[Û’YˆÝš[™Ë™\]Y\ÝYˆÝš[™Ë™\ÜÛœÙNˆ[\Ü
+	ÐØ]K\ÚÜÚ\™YÜ›ÝØÛÛ	ÊKÜ™Y[X[™\ÜÛœÙJNˆ›ÛZ\ÙO›ÛÛX[ˆÂˆËÈš\œÝÚXÚÈYˆ\È\ÈH™]È[šYšYY]]›ÝÈ™\]Y\ÝˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙYËœ[™[™Ð]]™\]Y\Ý	‰ˆX[˜YÙYœ[™[™Ð]]™\]Y\Ýœ™\]Y\ÝYOOH™\]Y\ÝY
+HÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÜ™Y[X[™\ÜÛœÙH
+[šYšYY›ÝÊH›Üˆ	Ü™\]Y\ÝYNˆØ[˜Ù[YIÜ™\ÜÛœÙK˜Ø[˜Ù[YX
+Bˆ]ØZ]\Ëš[™PÜ™Y[X[[œ]
+Ù\ÜÚ[Û’Y™\]Y\ÝY™\ÜÛœÙJBˆ™]\›ˆYBˆB‚ˆËÈ˜[˜XÚÈÈYØXÞHØ[˜XÚÈ›ÝÂˆÛÛœÝ™\ÛÛ™\ˆH\Ëœ[™[™ÐÜ™Y[X[™\ÛÛ™\œË™Ù]
+™\]Y\ÝY
+BˆYˆ
+™\ÛÛ™\ŠHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÜ™Y[X[™\ÜÛœÙH
+YØXÞH›ÝÊH›Üˆ	Ü™\]Y\ÝYNˆØ[˜Ù[YIÜ™\ÜÛœÙK˜Ø[˜Ù[YX
+Bˆ™\ÛÛ™\Š™\ÜÛœÙJBˆ\Ëœ[™[™ÐÜ™Y[X[™\ÛÛ™\œË™[]J™\]Y\ÝY
+Bˆ™]\›ˆYBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››Ý™\ÜÛ™ÈÜ™Y[X[H›È[™[™È™\]Y\Ý›Üˆ	Ü™\]Y\ÝYX
+Bˆ™]\›ˆ˜[ÙBˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ]H\›Z\ÜÚ[Ûˆ[ÙH›ÜˆHÙ\ÜÚ[Ûˆ
+	ÜØY™IË	Ø\ÚÉË	Ø[ÝËX[	ÊBˆ
+‹ÂˆÙ]Ù\ÜÚ[Û”\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YˆÝš[™Ë[ÙNˆ\›Z\ÜÚ[Û“[ÙJNˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙY
+HÂˆÛÛœÝ™]š[Ý\ÓX[˜YÙY[ÙHHX[˜YÙYœ\›Z\ÜÚ[Û“[ÙHÏÈ	Ø\ÚÉÂˆÛÛœÝXYÛ›ÜÝXÜÐ™Y›Ü™HHÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜÊÙ\ÜÚ[Û’Y
+BˆÛÛœÝ™]š[Ý\ÑY™™XÝ]™S[ÙHHXYÛ›ÜÝXÜÐ™Y›Ü™Kœ\›Z\ÜÚ[Û“[ÙB‚ˆËÈ›Ë[ÜÛ›HÚ[ˆ“ÕX[˜YÙYÝ]H[™[ÙK[X[˜YÙ\ˆÝ]H[™XYHX]Ú‚ˆËÈYˆX[˜YÙYÝ]HX]Ú\È]XYÛ›ÜÝXÜÈšYYX[]]Üš]]]™H[ÙHÝ]K‚ˆYˆ
+™]š[Ý\ÓX[˜YÙY[ÙHOOH[ÙH	‰ˆ™]š[Ý\ÑY™™XÝ]™S[ÙHOOH[ÙJHÂˆ™]\›‚ˆB‚ˆYˆ
+™]š[Ý\ÓX[˜YÙY[ÙHOOH[ÙH	‰ˆ™]š[Ý\ÑY™™XÝ]™S[ÙHOOH[ÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ô\›Z\ÜÚ[Ûˆ[ÙHšY]XÝYÛˆØ[YK[[ÙH\]NÈ™XÛÛ˜Ú[[™È]]Üš]]]™H[ÙHÝ]IËÂˆÙ\ÜÚ[Û’YˆX[˜YÙY[ÙNˆ™]š[Ý\ÓX[˜YÙY[ÙKˆXYÛ›ÜÝXÜÓ[ÙNˆ™]š[Ý\ÑY™™XÝ]™S[ÙKˆ\™Ù][ÙNˆ[ÙKˆ[ÙU™\œÚ[ÛŽˆXYÛ›ÜÝXÜÐ™Y›Ü™K›[ÙU™\œÚ[Û‹ˆÚ[™ÙYžNˆXYÛ›ÜÝXÜÐ™Y›Ü™K›\ÝÚ[™ÙYžKˆJBˆB‚ˆËÈ\]H[‹[Y[[ÜžHX[˜YÙY[ÙHš\œÝˆX[˜YÙYœ\›Z\ÜÚ[Û“[ÙHH[ÙB‚ˆËÈ™XÛÛ˜Ú[H[ÙK[X[˜YÙ\ˆÝ]H›Üˆ\ÈÜXÚYšXÈÙ\ÜÚ[Û‹‚ˆYˆ
+™]š[Ý\ÑY™™XÝ]™S[ÙHOOH[ÙJHÂˆÛÛœÝÚ[™ÙYžHH™]š[Ý\ÓX[˜YÙY[ÙHOOH[ÙHÈ	Ü™\ÝÜ™IÈˆ	Ý\Ù\‰ÂˆÙ]\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’Y[ÙKÈÚ[™ÙYžHJBˆB‚ˆÛÛœÝXYÛ›ÜÝXÜÈHÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜÊÙ\ÜÚ[Û’Y
+BˆX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙHHXYÛ›ÜÝXÜËœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙBˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ô\›Z\ÜÚ[Ûˆ[ÙHÚ[™ÙY	ËÂˆÙ\ÜÚ[Û’Yˆ\›Z\ÜÚ[Û“[ÙNˆ[ÙKˆ[ÙU™\œÚ[ÛŽˆXYÛ›ÜÝXÜË›[ÙU™\œÚ[Û‹ˆÚ[™ÙYžNˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙYžKˆÚ[™ÙY]ˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙY]ˆJB‚ˆËÈ›ÜØ\™ÈHYÙ[[œÝ[˜ÙHÛÈ˜XÚÙ[™ÈØ[ˆ›ÜYØ]H[ÙHÚ[™Ù\ÈÝÛœÝ™X[K‚ˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆX[˜YÙY˜YÙ[œÙ]\›Z\ÜÚ[Û“[ÙJ[ÙJBˆB‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ü\›Z\ÜÚ[Û—Û[ÙWØÚ[™ÙY	ËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆ\›Z\ÜÚ[Û“[ÙNˆ[ÙKˆ[ÙU™\œÚ[ÛŽˆXYÛ›ÜÝXÜË›[ÙU™\œÚ[Û‹ˆÚ[™ÙYžNˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙYžKˆÚ[™ÙY]ˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙY]ˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙNˆXYÛ›ÜÝXÜËœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKˆ˜[œÚ][Û‘\Ü^NˆXYÛ›ÜÝXÜË˜[œÚ][Û‘\Ü^KˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆËÈ\œÚ\ÝÈ\ÚÂˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ]]]Üš]]]™H\›Z\ÜÚ[Ûˆ[ÙHXYÛ›ÜÝXÜÈ›ÜˆHÙ\ÜÚ[Û‹‚ˆ
+ˆ\ÙYžH™[™\™\ˆÈ™XÛÛ˜Ú[HÜ[Z\ÝXËÜÝ[H[ÙHÝ]K‚ˆ
+‹ÂˆÙ]Ù\ÜÚ[Û”\›Z\ÜÚ[Û“[ÙTÝ]JÙ\ÜÚ[Û’YˆÝš[™ÊNˆÂˆ\›Z\ÜÚ[Û“[ÙNˆ\›Z\ÜÚ[Û“[ÙBˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙOÎˆ\›Z\ÜÚ[Û“[ÙBˆ˜[œÚ][Û‘\Ü^OÎˆÝš[™Âˆ[ÙU™\œÚ[ÛŽˆ[X™\‚ˆÚ[™ÙY]ˆÝš[™ÂˆÚ[™ÙYžNˆ	Ý\Ù\‰È	ÜÞ\Ý[IÈ	Ü™\ÝÜ™IÈ	Ø]]ÛX][Û‰È	Ý[šÛ›ÝÛ‰ÂˆH[ÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+H™]\›ˆ[‚ˆ]XYÛ›ÜÝXÜÈHÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜÊÙ\ÜÚ[Û’Y
+B‚ˆËÈY˜]H\œÚ\ÝY˜[œÚ][ÛˆÛÛ^Ú[ˆ[ÙK[X[˜YÙ\ˆ\È™Y[ˆ™\Ù]
+K™Ëˆ\™\Ý\
+K‚ˆYˆ
+X[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙH	‰ˆYXYÛ›ÜÝXÜËœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJHÂˆY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJBˆXYÛ›ÜÝXÜÈHÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜÊÙ\ÜÚ[Û’Y
+BˆB‚ˆËÈX[™\ÝÜ™H˜XÙ\ÈÚ\™H[ÙK[X[˜YÙ\ˆÝ[\ÈY˜][Ý]HÚ[BˆËÈÙ\ÜÚ[ÛˆY]Y]H[™XYH\ÈH\œÚ\ÝY›Û‹YY˜][[ÙK‚ˆYˆ
+X[˜YÙYœ\›Z\ÜÚ[Û“[ÙH	‰ˆXYÛ›ÜÝXÜËœ\›Z\ÜÚ[Û“[ÙHOOHX[˜YÙYœ\›Z\ÜÚ[Û“[ÙJHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	Ô\›Z\ÜÚ[Ûˆ[ÙHXYÛ›ÜÝXÜÈZ\ÛX]Ú™XÛÛ˜Ú[[™ÈÈX[˜YÙYÙ\ÜÚ[Ûˆ[ÙIËÂˆÙ\ÜÚ[Û’YˆX[˜YÙY[ÙNˆX[˜YÙYœ\›Z\ÜÚ[Û“[ÙKˆXYÛ›ÜÝXÜÓ[ÙNˆXYÛ›ÜÝXÜËœ\›Z\ÜÚ[Û“[ÙKˆ[ÙU™\œÚ[ÛŽˆXYÛ›ÜÝXÜË›[ÙU™\œÚ[Û‹ˆÚ[™ÙYžNˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙYžKˆJBˆÙ]\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YX[˜YÙYœ\›Z\ÜÚ[Û“[ÙKÈÚ[™ÙYžNˆ	Ü™\ÝÜ™IÈJBˆYˆ
+X[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJHÂˆY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJBˆBˆXYÛ›ÜÝXÜÈHÙ]\›Z\ÜÚ[Û“[ÙQXYÛ›ÜÝXÜÊÙ\ÜÚ[Û’Y
+BˆB‚ˆX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙHHXYÛ›ÜÝXÜËœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙB‚ˆ™]\›ˆÂˆ\›Z\ÜÚ[Û“[ÙNˆXYÛ›ÜÝXÜËœ\›Z\ÜÚ[Û“[ÙKˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙNˆXYÛ›ÜÝXÜËœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKˆ˜[œÚ][Û‘\Ü^NˆXYÛ›ÜÝXÜË˜[œÚ][Û‘\Ü^Kˆ[ÙU™\œÚ[ÛŽˆXYÛ›ÜÝXÜË›[ÙU™\œÚ[Û‹ˆÚ[™ÙY]ˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙY]ˆÚ[™ÙYžNˆXYÛ›ÜÝXÜË›\ÝÚ[™ÙYžKˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ]X™[È›ÜˆHÙ\ÜÚ[Ûˆ
+Y]]™HYÜËX[žK\\‹\Ù\ÜÚ[ÛŠK‚ˆ
+ˆX™[È\™HQÈ™Y™\™[˜Ú[™ÈÛÜšÜÜXÙHX™[ËØÛÛ™šYËšœÛÛ‹‚ˆ
+‹Âˆ\Þ[˜ÈÙ]Ù\ÜÚ[Û“X™[ÊÙ\ÜÚ[Û’YˆÝš[™ËX™[ÎˆÝš[™Ö×JNˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙY
+HÂˆX[˜YÙY›X™[ÈHX™[Âˆ\ËœÙ]Y]Y]UÜš]QÝX\™
+X[˜YÙY
+B‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÛX™[×ØÚ[™ÙY	ËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆX™[ÎˆX[˜YÙY›X™[ËˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆËÈ\œÚ\Ý[‹[Y[[ÜžHÝ]H\™XÝHÈ]›ÚY˜XÙHÚ][™[™È]Y]YHÜš]\Âˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠX[˜YÙYšY
+BˆËÈÛÜšØ\›Ý[™ˆ[‰ÜÈœËØ]Ú
+È™XÝ\œÚ]™NˆYHJHÛˆ[^Ù\Û‰Ý˜XÚÂˆËÈ\™XÝÜšY\ÈÜ™X]YY\ˆHØ]Ú\ˆÝ\Y‚ˆËÈÎ‹ËÙÚ]X‹˜ÛÛKÛÝ™[‹\ÚØ[‹Ú\ÜÝY\ËÌMNLÎBˆÛÛœÝØ]Ú\ˆH\Ë˜ÛÛ™šYÕØ]Ú\œË™Ù]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]
+BˆØ]Ú\Ë››ÝYžQš[PÚ[™ÙJÙ\ÜÚ[ÛœËÉÜÙ\ÜÚ[Û’YKÜÙ\ÜÚ[Û‹šœÛÛ›
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ]H[šÚ[™È]™[›ÜˆHÙ\ÜÚ[Û‹ˆÙYHÐ[šÈ[šÚ[™Ó]™[H›Üˆ˜[Y˜[Y\Ë‚ˆ
+ˆ\È\ÈÝXÚÞH[™\œÚ\ÝYXÜ›ÜÜÈY\ÜØYÙ\Ë‚ˆ
+‹ÂˆÙ]Ù\ÜÚ[Û•[šÚ[™Ó]™[
+Ù\ÜÚ[Û’YˆÝš[™Ë]™[ˆ[šÚ[™Ó]™[
+Nˆ›ÚYÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+X[˜YÙY
+HÂˆËÈ\]H[šÚ[™È]™[[ˆX[˜YÙYÙ\ÜÚ[Û‚ˆX[˜YÙY[šÚ[™Ó]™[H]™[‚ˆËÈ\]HHYÙ[	ÜÈ[šÚ[™È]™[Yˆ]^\ÝÂˆYˆ
+X[˜YÙY˜YÙ[
+HÂˆX[˜YÙY˜YÙ[œÙ][šÚ[™Ó]™[
+]™[
+BˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YNˆ[šÚ[™È]™[Ù]È	Û]™[X
+BˆËÈ\œÚ\ÝÈ\ÚÂˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆÙ[™\˜]H[ˆRH]H›ÜˆHÙ\ÜÚ[Ûˆœ›ÛHH\Ù\‰ÜÈš\œÝY\ÜØYÙK‚ˆ
+ˆ\Ù\ÈHYÙ[	ÜÈÙ[™\˜]U]J
+HY]ÙÚXÚ[™\È›ÝšY\‹\ÜXÚYšXÈÑÈØ[Ë‚ˆ
+ˆYˆ›ÈYÙ[^\ÝËÜ™X]\ÈH[\Ü˜\žHÛ™H\Ú[™ÈHÙ\ÜÚ[Û‰ÜÈÛÛ›™XÝ[Û‹‚ˆ
+‹Âˆš]˜]H\Þ[˜ÈÙ[™\˜]U]JX[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹\Ù\“Y\ÜØYÙNˆÝš[™ÊNˆ›ÛZ\ÙO›ÚYˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÙÙ[™\˜]U]WHÝ\[™È›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+B‚ˆËÈ\ÙH^\Ý[™ÈYÙ[ÜˆÜ™X]H[\Ü˜\žHÛ™Bˆ]YÙ[ˆYÙ[[œÝ[˜ÙH[HX[˜YÙY˜YÙ[ˆ]\Õ[\Ü˜\žHH˜[ÙB‚ˆËÈØZ]œšYY›H›ÜˆYÙ[È™HÜ™X]Y
+]	ÜÈÜ™X]YÛÛ˜Ý\œ™[JBˆYˆ
+XYÙ[
+HÂˆ]][\ÈHˆÚ[H
+[X[˜YÙY˜YÙ[	‰ˆ][\ÈL
+HÂˆ]ØZ]™]È›ÛZ\ÙJ™\ÛÛ™HOˆÙ][Y[Ý]
+™\ÛÛ™KL
+JBˆ][\ÊÊÂˆBˆYÙ[HX[˜YÙY˜YÙ[ˆB‚ˆËÈYˆÝ[›ÈYÙ[Ü™X]HH[\Ü˜\žHÛ™H\Ú[™ÈHÙ\ÜÚ[Û‰ÜÈÛÛ›™XÝ[Û‚ˆYˆ
+XYÙ[	‰ˆX[˜YÙY›PÛÛ›™XÝ[ÛŠHÂˆžHÂˆÛÛœÝÛÛ›™XÝ[ÛˆHÙ]PÛÛ›™XÝ[ÛŠX[˜YÙY›PÛÛ›™XÝ[ÛŠB‚ˆYÙ[HÜ™X]P˜XÚÙ[™œ›ÛPÛÛ›™XÝ[ÛŠX[˜YÙY›PÛÛ›™XÝ[Û‹ÂˆÛÜšÜÜXÙNˆX[˜YÙYÛÜšÜÜXÙKˆZ[šS[Ù[ˆÛÛ›™XÝ[ÛˆÈ
+Ù]Z[šS[Ù[
+ÛÛ›™XÝ[ÛŠHÏÈÛÛ›™XÝ[Û‹™Y˜][[Ù[
+Hˆ[™Yš[™YˆÙ\ÜÚ[ÛŽˆÂˆYˆ]KIÛX[˜YÙYšYXˆÛÜšÜÜXÙT›ÛÝ]ˆX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆPÛÛ›™XÝ[ÛŽˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆÜ™X]Y]ˆ]K››ÝÊ
+Kˆ\Ý\ÙY]ˆ]K››ÝÊ
+KˆKˆ\ÒXY\ÜÎˆYKˆKZ[˜XÚÙ[™ÜÝ[[YPÛÛ^
+
+JH\ÈYÙ[[œÝ[˜ÙBˆ]ØZ]YÙ[œÜÝ[š]
+
+Bˆ\Õ[\Ü˜\žHHYBˆÙ\ÜÚ[Û“ÙËš[™›ÊÙÙ[™\˜]U]WHÜ™X]Y[\Ü˜\žHYÙ[›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠÙÙ[™\˜]U]WH˜Z[YÈÜ™X]H[\Ü˜\žHYÙ[˜\œ›ÜŠBˆ™]\›‚ˆBˆB‚ˆYˆ
+XYÙ[
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙÙ[™\˜]U]WH›ÈYÙ[[™›ÈÛÛ›™XÝ[Ûˆ›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+Bˆ™]\›‚ˆB‚ˆžHÂˆÛÛœÝÙ[“[™ÐÛÙHH
+LN‹œ™\ÛÛ™Y[™ÝXYÙHÏÈ	Ù[‰ÊH\È[™ÝXYÙPÛÙBˆÛÛœÝÙ[“[™Ñ[žHHÐÐSWÔ‘QÒTÕ–VÙÙ[“[™ÐÛÙWBˆÙ\ÜÚ[Û“ÙËš[™›ÊÙÙ[™\˜]U]WH[™ÝXYÙH]Ø[[YXÂˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆ™\ÛÛ™Y[™ÝXYÙNˆLN‹œ™\ÛÛ™Y[™ÝXYÙHÏÈ[ˆÙ[“[™ÐÛÙKˆ˜]]™S˜[YNˆÙ[“[™Ñ[žOË›˜]]™S˜[YHÏÈ[ˆJBˆÛÛœÝ]HH]ØZ]YÙ[™Ù[™\˜]U]J\Ù\“Y\ÜØYÙKÈ[™ÝXYÙNˆÙ[“[™Ñ[žOË›˜]]™S˜[YHJBˆYˆ
+]JHÂˆX[˜YÙY›˜[YHH]Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆËÈ›\Ú[[YYX][HÈ[œÝ\™H\ÚÈ\È\]ËY]H™Y›Ü™H›ÝYžZ[™È™[™\™\‹‚ˆËÈ\È™]™[È˜XÙHÛÛ™][ÛˆÚ\™H^žHØY[™È™XYÈÝ[H\ÚÈ]BˆËÈ
+H\œÚ\Ý[˜ÙH]Y]YH\ÈHL\ÈX›Ý[˜ÙJK‚ˆ]ØZ]\Ë™›\ÚÙ\ÜÚ[ÛŠX[˜YÙYšY
+BˆËÈ›ÝÈØY™HÈ›ÝYžH™[™\™\ˆH\ÚÈ\È]]Üš]]]™Bˆ\ËœÙ[™]™[
+È\Nˆ	Ý]WÙÙ[™\˜]Y	ËÙ\ÜÚ[Û’YˆX[˜YÙYšY]HKX[˜YÙYÛÜšÜÜXÙKšY
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ[™\˜]Y]H›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYNˆ‰Ý]_H˜
+BˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›Š]HÙ[™\˜][Ûˆ™]\›™Y[›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYX
+BˆBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈÙ[™\˜]H]H›ÜˆÙ\ÜÚ[Ûˆ	ÛX[˜YÙYšYN˜\œ›ÜŠB‚ˆËÈÝ\™˜XÙH][ÝKØ]]\œ›ÜœÈÈH\Ù\ˆ8 %\ÙH[™XØ]HHXZ[ˆÚ]Ø[Ú[[ÛÈ˜Z[ˆÛÛœÝ\œ›Ü“\ÙÈH\œ›Üˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ›Ü‹›Y\ÜØYÙHˆÝš[™Ê\œ›ÜŠBˆYˆ
+\œ›Ü“\ÙËš[˜ÛY\Ê	Ü][ÝIÊH\œ›Ü“\ÙËš[˜ÛY\Ê	ÍŽIÊH\œ›Ü“\ÙËš[˜ÛY\Ê	ÍIÊH\œ›Ü“\ÙËš[˜ÛY\Ê	Ú[œÝY™šXÚY[	ÊJHÂˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\YÙ\œ›Ü‰ËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆ\œ›ÜŽˆÂˆÛÙNˆ	Ü›ÝšY\—Ù\œ›Ü‰Ëˆ]Nˆ	ÐTH\œ›Ü‰ËˆY\ÜØYÙNˆTH\œ›ÜŽˆ	Ù\œ›Ü“\ÙËœÛXÙJŒ
+_XˆXÝ[ÛœÎˆÞÈÙ^Nˆ	Ü‰ËX™[ˆ	Ô™]žIËXÝ[ÛŽˆ	Ü™]žIÈWKˆØ[”™]žNˆYKˆBˆKX[˜YÙYÛÜšÜÜXÙKšY
+BˆBˆHš[˜[HÂˆËÈÛX[ˆ\[\Ü˜\žHYÙ[ˆYˆ
+\Õ[\Ü˜\žH	‰ˆYÙ[
+HÂˆYÙ[™\Ý›ÞJ
+BˆBˆBˆB‚ˆš]˜]H\Þ[˜È›ØÙ\ÜÑ]™[
+X[˜YÙYˆX[˜YÙYÙ\ÜÚ[Û‹]™[ˆYÙ[]™[
+Nˆ›ÛZ\ÙO›ÚYˆÂˆÛÛœÝÙ\ÜÚ[Û’YHX[˜YÙYšYˆÛÛœÝÛÜšÜÜXÙRYHX[˜YÙYÛÜšÜÜXÙKšY‚ˆÝÚ]Ú
+]™[\JHÂˆØ\ÙH	Ý^Ù[IÎ‚ˆX[˜YÙYœÝ™X[Z[™Õ^
+ÏH]™[^ˆËÈ]Y]YH[H›Üˆ˜]ÚYÙ[™[™È
+\™›Ü›X[˜ÙNˆ™YXÙ\ÈTÈœ›ÛHL
+ËÜÙXÈÈŒŒÜÙXÊBˆ\Ëœ]Y]YQ[JÙ\ÜÚ[Û’YÛÜšÜÜXÙRY]™[^]™[\›’Y
+Bˆœ™XZÂ‚ˆØ\ÙH	Ý^ØÛÛ\]IÎˆÂˆËÈ›\Ú[žH[™[™È[\È™Y›Ü™HÙ[™[™ÈÛÛ\]H
+[œÝ\™\È™[™\™\ˆ\È[ÛÛ[
+Bˆ\Ë™›\Ú[JÙ\ÜÚ[Û’YÛÜšÜÜXÙRY
+B‚ˆÛÛœÝ\ÜÚ\Ý[Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ø\ÜÚ\Ý[	ËˆÛÛ[ˆ]™[^ˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+Kˆ\Ò[\›YYX]Nˆ]™[š\Ò[\›YYX]Kˆ\›’Yˆ]™[\›’Yˆ\™[ÛÛ\ÙRYˆ]™[œ\™[ÛÛ\ÙRYˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\ÜÚ\Ý[Y\ÜØYÙJBˆX[˜YÙYœÝ™X[Z[™Õ^H	ÉÂ‚ˆËÈ\]H\ÝY\ÜØYÙT›ÛH[™\Ýš[˜[Y\ÜØYÙRY›Üˆ˜YÙKÝ[œ™XY\Ü^H
+Û›H›Üˆš[˜[Y\ÜØYÙ\ÊBˆYˆ
+Y]™[š\Ò[\›YYX]JHÂˆX[˜YÙY›\ÝY\ÜØYÙT›ÛHH	Ø\ÜÚ\Ý[	ÂˆX[˜YÙY›\Ýš[˜[Y\ÜØYÙRYH\ÜÚ\Ý[Y\ÜØYÙKšY‚ˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+B‚ˆËÈÛ]YHœ˜[˜ÚXÝ]Ù™ˆÝ\Üˆ\œÚ\ÝY\ÜØYÙHURQ
+ÈÑÈÙ\ÜÚ[Ûˆ[™XYÙH[ˆÚYXØ\‹‚ˆËÈ\ÙYÈÝX\™™\Ý[YTÙ\ÜÚ[Û]ÛÈÙHÛ›HÙ[™[˜ÚÜœÈ˜[Y›ÜˆH\™[ÑÈÙ\ÜÚ[Û‹‚ˆYˆ
+]™[\›’Y	‰ˆX[˜YÙYœÙÔÙ\ÜÚ[Û’Y	‰ˆ\ÐÛ]YSY\ÜØYÙU]ZY
+]™[\›’Y
+JHÂˆžHÂˆ]ØZ]Ø]™PÛ]YU\›[˜ÚÜŠÙ\ÜÚ[Û”]\ÜÚ\Ý[Y\ÜØYÙKšYX[˜YÙYœÙÔÙ\ÜÚ[Û’Y]™[\›’Y
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\œÚ\ÝÛ]YH\›ˆ[˜ÚÜˆ›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YN˜\œ›ÜŠBˆBˆB‚ˆËÈHœ˜[˜ÚXÝ]Ù™ˆÝ\Üˆ™[Y[X™\ˆHÑÈY\ÜØYÙHY8¡¤ˆÜ˜YˆËÈ\ÜÚ\Ý[Y\ÜØYÙHYX\[™ËˆHXÝX[[˜ÚÜˆ\œš]™\È\ÈBˆËÈÙ\\˜]HWÝ\›—Ø[˜ÚÜ˜]™[Û™HZXÜ›Ý\ÚÈ]\ˆ8 %HÑÂˆËÈ\]\È]ÈXYˆÛ›HQ•Tˆš\š[™ÈY\ÜØYÙWÙ[™
+ÙYHÍÎŠK‚ˆYˆ
+]™[œÙÓY\ÜØYÙRY
+HÂˆ]ØXÚHHX[˜YÙYœTÙÓY\ÜØYÙUÐÜ˜YY\ÜØYÙBˆYˆ
+XØXÚJHÂˆØXÚHH™]ÈX\
+
+BˆX[˜YÙYœTÙÓY\ÜØYÙUÐÜ˜YY\ÜØYÙHHØXÚBˆBˆØXÚKœÙ]
+]™[œÙÓY\ÜØYÙRY\ÜÚ\Ý[Y\ÜØYÙKšY
+BˆËÈ[™HÛ\Ý[šY\ÈÚ[ˆÝ™\ˆHØ\ˆX\™\Ù\™\È[œÙ\[Û‚ˆËÈÜ™\‹ÛÈHš\œÝÙ^H\ÈHÛ\Ý‚ˆYˆ
+ØXÚKœÚ^™HˆWÔÑ×ÓQTÔÐQÑWÒQÐÐPÒWÓSRU
+HÂˆÛÛœÝÛ\ÝHØXÚKšÙ^\Ê
+K›™^
+
+K˜[YBˆYˆ
+Û\ÝOOH[™Yš[™Y
+HØXÚK™[]JÛ\Ý
+BˆBˆBˆB‚ˆ\ËœÙ[™]™[
+È\Nˆ	Ý^ØÛÛ\]IËÙ\ÜÚ[Û’Y^ˆ]™[^\Ò[\›YYX]Nˆ]™[š\Ò[\›YYX]K\›’Yˆ]™[\›’Y\™[ÛÛ\ÙRYˆ]™[œ\™[ÛÛ\ÙRY[Y\Ý[\ˆ\ÜÚ\Ý[Y\ÜØYÙK[Y\Ý[\Y\ÜØYÙRYˆ\ÜÚ\Ý[Y\ÜØYÙKšYKÛÜšÜÜXÙRY
+B‚ˆËÈ\œÚ\ÝÙ\ÜÚ[ÛˆY\ˆÛÛ\]HY\ÜØYÙHÈ™]™[]HÜÜÈÛˆ]Z]ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆœ™XZÂˆB‚ˆØ\ÙH	ÜWÝ\›—Ø[˜ÚÜ‰ÎˆÂˆËÈ›ÛÝË]\ÈH^ØÛÛ\]Xœ›ÛHHH˜XÚÙ[™Ø\œžZ[™ÈBˆËÈÛÜœ™XÝXYˆYØ\\™YQ•TˆHÑÈ\[™Y]È\ÜÚ\Ý[[žBˆËÈ
+HÞ[˜Ú›Û›Ý\ÈY\ÜØYÙWÙ[™\Ý[™\ˆÛÝ[›ÝÙYH]8 %ÍÎŠK‚ˆËÈÛÚÈ\HÜ˜Y\ÜÚ\Ý[Y\ÜØYÙHYžHÑÈY\ÜØYÙHY[™ˆËÈ\œÚ\ÝH[˜ÚÜˆÈHÚYXØ\‹‚ˆÛÛœÝØXÚHHX[˜YÙYœTÙÓY\ÜØYÙUÐÜ˜YY\ÜØYÙBˆÛÛœÝÜ˜YY\ÜØYÙRYHØXÚOË™Ù]
+]™[œÙÓY\ÜØYÙRY
+BˆYˆ
+XÜ˜YY\ÜØYÙRY
+HÂˆÙ\ÜÚ[Û“ÙË™XYÊWÝ\›—Ø[˜ÚÜˆ›Üˆ[šÛ›ÝÛˆÙÓY\ÜØYÙRYIÙ]™[œÙÓY\ÜØYÙRYNÈYÛ›Üš[™Ø
+Bˆœ™XZÂˆBˆÛÛœÝÙ\ÜÚ[Û”]HÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+X[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+BˆžHÂˆ]ØZ]Ø]™TU\›[˜ÚÜŠÙ\ÜÚ[Û”]Ü˜YY\ÜØYÙRY]™[œÙÕ\›[˜ÚÜŠBˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š˜Z[YÈ\œÚ\ÝH\›ˆ[˜ÚÜˆ›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YN˜\œ›ÜŠBˆBˆœ™XZÂˆB‚ˆØ\ÙH	ÝÛÛÜÝ\	ÎˆÂˆËÈ›Ü›X]ÛÛ[œ]]ÈÈ™[]]™H›Üˆ™]\ˆ™XYXš[]BˆÛÛœÝ›Ü›X]YÛÛ[œ]H›Ü›X]ÛÛ[œ]]Ê]™[š[œ]
+B‚ˆËÈ™\ÛÛ™HØ[ÛH[Ù[›Üˆ\›Ø\™˜YÙH\Ü^K‚ˆËÈ™\ÛÛ™HØ[ÛH[Ù[ÚÜ˜[Y\ÈÈ[QÈ›Üˆ\Ü^K‚ˆËÈ›ÝNˆHÙ\ÜÚ[ÛœÈÝ™\œšYHH[Ù[[ˆQ]™[Y\\ˆ
+Ø[ÛH[Ø^\È\Ù\ÈZ[šS[Ù[
+K‚ˆYˆ
+]™[ÛÛ˜[YHOOH	ÛXÜ×ÜÙ\ÜÚ[Û—×ØØ[ÛIÈ	‰ˆ›Ü›X]YÛÛ[œ]Ë›[Ù[
+HÂˆÛÛœÝÚÜ˜[YHHÝš[™Ê›Ü›X]YÛÛ[œ]›[Ù[
+BˆÛÛœÝ[Ù[YˆHSÑSÔ‘QÒTÕ–K™š[™
+HOˆKšYOOHÚÜ˜[YJBˆSÑSÔ‘QÒTÕ–K™š[™
+HOˆKœÚÜ˜[YKÓÝÙ\Ø\ÙJ
+HOOHÚÜ˜[YKÓÝÙ\Ø\ÙJ
+JBˆSÑSÔ‘QÒTÕ–K™š[™
+HOˆK›˜[YKÓÝÙ\Ø\ÙJ
+HOOHÚÜ˜[YKÓÝÙ\Ø\ÙJ
+JBˆYˆ
+[Ù[YŠHÂˆ›Ü›X]YÛÛ[œ]›[Ù[H[Ù[Y‹šYˆBˆB‚ˆËÈ™\ÛÛ™HÛÛ\Ü^HY]Y]H
+XÛÛ‹\Ü^S˜[YJH›ÜˆÚÚ[ËÜÛÝ\˜Ù\ÂˆËÈÛ›H™\ÛÛ™HÚ[ˆÙH]™H[œ]
+ÙXÛÛ™]™[›ÜˆÑÈX[Y]™[]\›ŠBˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆ]ÛÛ\Ü^SY]NˆÛÛ\Ü^SY]H[™Yš[™YˆYˆ
+›Ü›X]YÛÛ[œ]	‰ˆØš™XÝšÙ^\Ê›Ü›X]YÛÛ[œ]
+K›[™Ýˆ
+HÂˆÛÛœÝ[ÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛ\Ü^SY]HH]ØZ]™\ÛÛ™UÛÛ\Ü^SY]J]™[ÛÛ˜[YK›Ü›X]YÛÛ[œ]ÛÜšÜÜXÙT›ÛÝ][ÛÝ\˜Ù\ÊBˆB‚ˆËÈÚXÚÈYˆHY\ÜØYÙHÚ]\ÈÛÛ\ÙRY[™XYH^\ÝÈ’T”ÕˆËÈÑÈÙ[™ÈÛÈ]™[È\ˆÛÛˆš\œÝœ›ÛHÝ™X[WÙ]™[
+[\H[œ]
+KˆËÈÙXÛÛ™œ›ÛH\ÜÚ\Ý[Y\ÜØYÙH
+ÛÛ\]H[œ]
+BˆÛÛœÝ^\Ý[™ÔÝ\\ÙÈHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKÛÛ\ÙRYOOH]™[ÛÛ\ÙRY
+BˆÛÛœÝ\Ñ\XØ]Q]™[HHY^\Ý[™ÔÝ\\ÙÂ‚ˆËÈ\ÙH\™[ÛÛ\ÙRY\™XÝHœ›ÛHH]™[8 %Ø]PYÙ[™\ÛÛ™\È\ÂˆËÈœ›ÛHÑÉÜÈ\™[ÝÛÛÝ\ÙWÚY
+]]Üš]]]™K[™\È\˜[[\ÚÜÈÛÜœ™XÝJK‚ˆËÈ›ÈÝXÚÈÜˆX\™YYYÈH]™[Ø\œšY\ÈHÛÜœ™XÝ\™[œ›ÛHHÝ\‚ˆÛÛœÝ\™[ÛÛ\ÙRYH]™[œ\™[ÛÛ\ÙRY‚ˆËÈ˜XÚÈYˆÙH™YYÈÙ[™[ˆ]™[ÈH™[™\™\‚ˆËÈÙ[™ÛŽˆš\œÝØØÝ\œ™[˜ÙHÔˆÚ[ˆÙH]™H™]È[œ]]HÈ\]Bˆ]ÚÝ[Ù[™]™[HZ\Ñ\XØ]Q]™[‚ˆYˆ
+^\Ý[™ÔÝ\\ÙÊHÂˆËÈ\]H^\Ý[™ÈY\ÜØYÙHÚ]ÛÛ\]H[œ]
+ÙXÛÛ™]™[\È[[œ]
+BˆYˆ
+›Ü›X]YÛÛ[œ]	‰ˆØš™XÝšÙ^\Ê›Ü›X]YÛÛ[œ]
+K›[™Ýˆ
+HÂˆÛÛœÝY[œ]™Y›Ü™HH^\Ý[™ÔÝ\\ÙËÛÛ[œ]	‰ˆØš™XÝšÙ^\Ê^\Ý[™ÔÝ\\ÙËÛÛ[œ]
+K›[™Ýˆˆ^\Ý[™ÔÝ\\ÙËÛÛ[œ]H›Ü›X]YÛÛ[œ]ˆËÈÙ[™\]H]™[YˆÙIÜ™HY[™È[œ]]Ø\Û‰Ý\™H™Y›Ü™BˆYˆ
+ZY[œ]™Y›Ü™JHÂˆÚÝ[Ù[™]™[HYBˆBˆBˆËÈ[ÛÈÙ]\™[Yˆ›Ý[™XYHÙ]ˆYˆ
+\™[ÛÛ\ÙRY	‰ˆY^\Ý[™ÔÝ\\ÙËœ\™[ÛÛ\ÙRY
+HÂˆ^\Ý[™ÔÝ\\ÙËœ\™[ÛÛ\ÙRYH\™[ÛÛ\ÙRYˆBˆËÈÙ]ÛÛ\Ü^SY]HYˆ›Ý[™XYHÙ]
+\È˜\ÙMXÛÛˆ›ÜˆšY]Ù\ŠBˆYˆ
+ÛÛ\Ü^SY]H	‰ˆY^\Ý[™ÔÝ\\ÙËÛÛ\Ü^SY]JHÂˆ^\Ý[™ÔÝ\\ÙËÛÛ\Ü^SY]HHÛÛ\Ü^SY]BˆBˆËÈ\]HÛÛ[[Yˆ›Ý[™XYHÙ]
+ÙXÛÛ™]™[\È[[œ›ÛHÛÛ\]H[œ]
+BˆYˆ
+]™[š[[	‰ˆY^\Ý[™ÔÝ\\ÙËÛÛ[[
+HÂˆ^\Ý[™ÔÝ\\ÙËÛÛ[[H]™[š[[ˆBˆËÈ\]HÛÛ\Ü^S˜[YHYˆ›Ý[™XYHÙ]ˆYˆ
+]™[™\Ü^S˜[YH	‰ˆY^\Ý[™ÔÝ\\ÙËÛÛ\Ü^S˜[YJHÂˆ^\Ý[™ÔÝ\\ÙËÛÛ\Ü^S˜[YHH]™[™\Ü^S˜[YBˆBˆH[ÙHÂˆËÈYÛÛY\ÜØYÙH[[YYX][H
+Ú[™H\]YÛˆÛÛÜ™\Ý[
+BˆËÈ\È[œÝ\™\ÈÛÛØ[È\™H\œÚ\ÝY]™[ˆYˆ^HÛ‰ÝÛÛ\]BˆÛÛœÝÛÛÝ\Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	ÝÛÛ	ËˆÛÛ[ˆ[›š[™È	Ù]™[ÛÛ˜[Y_K‹‹˜ˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+KˆÛÛ˜[YNˆ]™[ÛÛ˜[YKˆÛÛ\ÙRYˆ]™[ÛÛ\ÙRYˆÛÛ[œ]ˆ›Ü›X]YÛÛ[œ]ˆÛÛÝ]\Îˆ	Ù^XÝ][™ÉËˆÛÛ[[ˆ]™[š[[ˆÛÛ\Ü^S˜[YNˆ]™[™\Ü^S˜[YKˆÛÛ\Ü^SY]KËÈ[˜ÛY\È˜\ÙMXÛÛˆ›ÜˆšY]Ù\ˆÛÛ\]Xš[]Bˆ\›’Yˆ]™[\›’Yˆ\™[ÛÛ\ÙRYˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+ÛÛÝ\Y\ÜØYÙJBˆB‚ˆËÈXÝ]˜]Hœ›ÝÜÙ\ˆYÙ[ÛÛ›ÛÝ™\›^HÛˆXÝ[Û˜X›Hœ›ÝÜÙ\ˆÛÛÝ\Ë‚ˆËÈÚÚ\œ›ÝÜÙ\—ÝÛÛ[Ü™[X\ÙHÛÛ[X[™ÈÈ]›ÚYÚ[\ÜÈÝ™\›^H›\Ú\Ë‚ˆÛÛœÝÚÝ[XÝ]˜]SÝ™\›^HHÚÝ[XÝ]˜]Pœ›ÝÜÙ\“Ý™\›^Jˆ]™[ÛÛ˜[YKˆ›Ü›X]YÛÛ[œ]ˆ
+B‚ˆÛÛœÝÝ™\›^PœHH\Ë™Ù]œ›ÝÜÙ\”[™SX[˜YÙ\‘›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’Y
+BˆYˆ
+Ý™\›^PœH	‰ˆÚÝ[XÝ]˜]SÝ™\›^JHÂˆËÈ[œÝ\™Hš\œÝœ›ÝÜÙ\ˆXÝ[Ûˆ[ˆH\›ˆÙ]È[ˆ[œÝ[˜ÙH™Y›Ü™HÝ™\›^HXÝ]˜][Û‹‚ˆÝ™\›^PœK™Ù]ÜÜ™X]Q›Ü”Ù\ÜÚ[ÛŠÙ\ÜÚ[Û’YÈÛÜšÜÜXÙRYJB‚ˆÛÛœÝ™\ÛÛ™Y\Ü^S˜[YHHÛÛ\Ü^SY]OË™\Ü^S˜[YBˆÏÈ]™[™\Ü^S˜[YBˆÏÈ]™[ÛÛ˜[YBˆÝ™\›^PœKœÙ]YÙ[ÛÛ›Û
+ˆÙ\ÜÚ[Û’YˆÈ\Ü^S˜[YNˆ™\ÛÛ™Y\Ü^S˜[YK[[ˆ]™[š[[KˆÈÛÜšÜÜXÙRYKˆ
+BˆB‚ˆËÈÙ[™]™[È™[™\™\ˆÛˆš\œÝØØÝ\œ™[˜ÙHÔˆÚ[ˆ[œ]]H\È\]YˆYˆ
+ÚÝ[Ù[™]™[
+HÂˆÛÛœÝ[Y\Ý[\H^\Ý[™ÔÝ\\ÙÏË[Y\Ý[\ÏÈ\Ë›[Û›ÝÛšXÊ
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÝÛÛÜÝ\	ËˆÙ\ÜÚ[Û’YˆÛÛ˜[YNˆ]™[ÛÛ˜[YKˆÛÛ\ÙRYˆ]™[ÛÛ\ÙRYˆÛÛ[œ]ˆ›Ü›X]YÛÛ[œ]ÏÈßKˆÛÛ[[ˆ]™[š[[ˆÛÛ\Ü^S˜[YNˆ]™[™\Ü^S˜[YKˆÛÛ\Ü^SY]KËÈ[˜ÛY\È˜\ÙMXÛÛˆ›ÜˆšY]Ù\ˆÛÛ\]Xš[]Bˆ\›’Yˆ]™[\›’Yˆ\™[ÛÛ\ÙRYˆ[Y\Ý[\ˆKÛÜšÜÜXÙRY
+BˆBˆœ™XZÂˆB‚ˆØ\ÙH	ÝÛÛÜ™\Ý[	ÎˆÂˆËÈÛÛ˜[YHÛÛY\È\™XÝHœ›ÛHØ]PYÙ[
+™\ÛÛ™YšXHÛÛ[™^
+BˆÛÛœÝÛÛ˜[YHH]™[ÛÛ˜[YH	Ý[šÛ›ÝÛ‰Â‚ˆËÈ›Ü›X]XœÛÛ]H]ÈÈ™[]]™H]È›Üˆ™]\ˆ™XYXš[]BˆÛÛœÝ˜]Ñ›Ü›X]Y™\Ý[H]™[œ™\Ý[È›Ü›X]]ÕÔ™[]]™J]™[œ™\Ý[
+Hˆ	ÉÂ‚ˆËÈØY™]H™]ˆ™]™[X\ÜÚ]™HÛÛ™\Ý[Èœ›ÛH›Ø][™ÈÙ\ÜÚ[Ûˆ”ÓÓ“
+›ÝXÝÈ[˜XÚÙ[™ÊBˆÛÛœÝPVÔT”ÒTÕQÔ‘TÕSÐÒT”ÈHŒÌËÈLÈÚÙ[œÂˆÛÛœÝ›Ü›X]Y™\Ý[H˜]Ñ›Ü›X]Y™\Ý[›[™ÝˆPVÔT”ÒTÕQÔ‘TÕSÐÒT”ÂˆÈ˜]Ñ›Ü›X]Y™\Ý[œÛXÙJPVÔT”ÒTÕQÔ‘TÕSÐÒT”ÊH
+Âˆ—–Õ[˜Ø]Y›ÜˆÝÜ˜YÙNˆ	Ü˜]Ñ›Ü›X]Y™\Ý[›[™ÝÓØØ[TÝš[™Ê
+_HÚ\œÈÝ[Xˆˆ˜]Ñ›Ü›X]Y™\Ý[‚ˆËÈÛÛYH˜XÚÙ[™ÈÛZ]^XÚ]\Ñ\œ›Üˆ]Ý[™Yš^Ú]ÑT”“Ô—K‚ˆÛÛœÝ[™™\œ™Y\œ›ÜˆH]™[š\Ñ\œ›ÜˆOOHYH×—ÊŠÑT”“Ô—_\œ›ÜŽŸ\œ›ÜŽŠKË\Ý
+›Ü›X]Y™\Ý[
+B‚ˆËÈ\]H^\Ý[™ÈÛÛY\ÜØYÙH
+Ü™X]YÛˆÛÛÜÝ\
+H[œÝXYÙˆÜ™X][™È™]ÈÛ™BˆÛÛœÝ^\Ý[™ÕÛÛ\ÙÈHX[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKÛÛ\ÙRYOOH]™[ÛÛ\ÙRY
+BˆËÈ˜XÚÈYˆ[™XYHÛÛ\]YÈ]›ÚYÙ[™[™È\XØ]H]™[ÂˆÛÛœÝØ\Ð[™XYPÛÛ\]HH^\Ý[™ÕÛÛ\ÙÏËÛÛÝ]\ÈOOH	ØÛÛ\]Y	Â‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê‘TÕSPUÒˆÛÛ\ÙRYIÙ]™[ÛÛ\ÙRYK›Ý[™IÈHY^\Ý[™ÕÛÛ\ÙßKÛÛ˜[YOIÙ^\Ý[™ÕÛÛ\ÙÏËÛÛ˜[YHÛÛ˜[Y_KØ\ÐÛÛ\]OIÝØ\Ð[™XYPÛÛ\]_X
+B‚ˆËÈ\™[ÛÛ\ÙRYÛÛY\Èœ›ÛHØ]PYÙ[
+ÑËX]]Üš]]]™JHÜˆ^\Ý[™ÈY\ÜØYÙBˆÛÛœÝ\™[ÛÛ\ÙRYH^\Ý[™ÕÛÛ\ÙÏËœ\™[ÛÛ\ÙRY]™[œ\™[ÛÛ\ÙRY‚ˆYˆ
+^\Ý[™ÕÛÛ\ÙÊHÂˆËÈÙY\YÚÙZYÚÝ]\È^[ˆÛÛ[[™ÝÜ™H[^[ØY[ˆÛÛ™\Ý[Û›K‚ˆ^\Ý[™ÕÛÛ\ÙËÛÛ™\Ý[H›Ü›X]Y™\Ý[ˆ^\Ý[™ÕÛÛ\ÙËÛÛÝ]\ÈH[™™\œ™Y\œ›ÜˆÈ	Ù\œ›Ü‰Èˆ	ØÛÛ\]Y	Âˆ^\Ý[™ÕÛÛ\ÙËš\Ñ\œ›ÜˆH[™™\œ™Y\œ›Ü‚ˆËÈYˆY\ÜØYÙHÙ\Û‰Ý]™H\™[Ù]\ÙH]™[	ÜÈ\™[ÛÛ\ÙRYˆYˆ
+Y^\Ý[™ÕÛÛ\ÙËœ\™[ÛÛ\ÙRY	‰ˆ]™[œ\™[ÛÛ\ÙRY
+HÂˆ^\Ý[™ÕÛÛ\ÙËœ\™[ÛÛ\ÙRYH]™[œ\™[ÛÛ\ÙRYˆBˆH[ÙHÂˆËÈ›ÈX]Ú[™ÈÛÛÜÝ\›Ý[™8 %Ü™X]HY\ÜØYÙHœ›ÛH™\Ý[‚ˆËÈ\È\È›Ü›X[›Üˆ˜XÚÙÜ›Ý[™ÝX˜YÙ[Ú[ÛÛÈÚ\™HÛÛÜ™\Ý[\œš]™\ÂˆËÈÚ]Ý]Hš[ÜˆÛÛÜÝ\ˆYˆÛÛÜÝ\\œš]™\È]\‹š[™ÛÛY\ÜØYÙHÚ[ˆËÈØØ]H\ÈY\ÜØYÙHžHÛÛ\ÙRY[™\]H]Ú][œ]Ú[[Ù\Ü^SY]K‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê‘TÕSÒUÕUÕT•ˆÛÛ\ÙRYIÙ]™[ÛÛ\ÙRYKÛÛ˜[YOIÝÛÛ˜[Y_H
+Ü™X][™ÈY\ÜØYÙHœ›ÛH™\Ý[
+X
+BˆÛÛœÝ˜[˜XÚÕÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÛÛœÝ˜[˜XÚÔÛÝ\˜Ù\ÈHØY[ÛÝ\˜Ù\Ê˜[˜XÚÕÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝ˜[˜XÚÕÛÛ\Ü^SY]HH]ØZ]™\ÛÛ™UÛÛ\Ü^SY]JÛÛ˜[YK[™Yš[™Y˜[˜XÚÕÛÜšÜÜXÙT›ÛÝ]˜[˜XÚÔÛÝ\˜Ù\ÊB‚ˆÛÛœÝÛÛY\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	ÝÛÛ	ËˆÛÛ[ˆ	ÉËˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+KˆÛÛ˜[YNˆÛÛ˜[YKˆÛÛ\ÙRYˆ]™[ÛÛ\ÙRYˆÛÛ™\Ý[ˆ›Ü›X]Y™\Ý[ˆÛÛÝ]\Îˆ[™™\œ™Y\œ›ÜˆÈ	Ù\œ›Ü‰Èˆ	ØÛÛ\]Y	ËˆÛÛ\Ü^SY]Nˆ˜[˜XÚÕÛÛ\Ü^SY]Kˆ\™[ÛÛ\ÙRYˆ\Ñ\œ›ÜŽˆ[™™\œ™Y\œ›Ü‹ˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+ÛÛY\ÜØYÙJBˆB‚ˆËÈÙ[™]™[È™[™\™\ˆYŽˆ
+JHš\œÝÛÛ\][Û‹Üˆ
+ŠH™\Ý[ÛÛ[Ú[™ÙYˆËÈ
+K™Ë‹ØY™]H™]]]ËXÛÛ\]YÚ][\H™\Ý[[ˆ™X[™\Ý[\œš]™Y]\ŠBˆÛÛœÝ™\Ý[Ú[™ÙYHØ\Ð[™XYPÛÛ\]H	‰ˆ›Ü›X]Y™\Ý[	‰ˆ^\Ý[™ÕÛÛ\ÙÏËÛÛ™\Ý[OOH›Ü›X]Y™\Ý[ˆYˆ
+]Ø\Ð[™XYPÛÛ\]H™\Ý[Ú[™ÙY
+HÂˆËÈ\ÙH^\Ý[™ÈÛÛY\ÜØYÙH[Y\Ý[\Üˆ˜[˜XÚÈY\ÜØYÙH[Y\Ý[\›ÜˆÜ™\š[™ÂˆÛÛœÝÛÛ™\Ý[[Y\Ý[\H^\Ý[™ÕÛÛ\ÙÏË[Y\Ý[\ÏÈ
+X[˜YÙY›Y\ÜØYÙ\Ë™š[™
+HOˆKÛÛ\ÙRYOOH]™[ÛÛ\ÙRY
+OË[Y\Ý[\
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÝÛÛÜ™\Ý[	ËˆÙ\ÜÚ[Û’YˆÛÛ\ÙRYˆ]™[ÛÛ\ÙRYˆÛÛ˜[YNˆÛÛ˜[YKˆ™\Ý[ˆ›Ü›X]Y™\Ý[ˆ\›’Yˆ]™[\›’Yˆ\™[ÛÛ\ÙRYˆ\Ñ\œ›ÜŽˆ[™™\œ™Y\œ›Ü‹ˆ[Y\Ý[\ˆÛÛ™\Ý[[Y\Ý[\ˆKÛÜšÜÜXÙRY
+BˆB‚ˆËÈØY™]H™]ˆÚ[ˆH\™[\ÚÈÛÛ\]\ËX\šÈ[]ÈÝ[\[™[™ÈÚ[ÛÛÈ\ÈÛÛ\]Y‚ˆËÈ\È[™\ÈHØ\ÙHÚ\™HÚ[ÛÛÜ™\Ý[]™[È™]™\ˆ\œš]™H
+K™Ë‹ÝX˜YÙ[[\›˜[ÛÛÂˆËÈÚÜÙH™\Ý[È\™[‰ÝÝ\™˜XÙY›ÝYÚH\™[Ý™X[JK‚ˆYˆ
+\Ô\™[\ÚÕÛÛ
+ÛÛ˜[YJHÛÛ˜[YHOOH	Õ\ÚÓÝ]]	ÊHÂˆÛÛœÝ[™[™ÐÚ[™[ˆHX[˜YÙY›Y\ÜØYÙ\Ë™š[\ŠˆHOˆKœ\™[ÛÛ\ÙRYOOH]™[ÛÛ\ÙRYˆ	‰ˆKÛÛÝ]\ÈOOH	ØÛÛ\]Y	Âˆ	‰ˆKÛÛÝ]\ÈOOH	Ù\œ›Ü‰Âˆ
+Bˆ›Üˆ
+ÛÛœÝÚ[Ùˆ[™[™ÐÚ[™[ŠHÂˆÚ[ÛÛÝ]\ÈH	ØÛÛ\]Y	ÂˆÚ[ÛÛ™\Ý[HÚ[ÛÛ™\Ý[	ÉÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÒSUUËPÓÓTUQˆÛÛ\ÙRYIØÚ[ÛÛ\ÙRYKÛÛ˜[YOIØÚ[ÛÛ˜[Y_H
+\™[	ÝÛÛ˜[Y_HÛÛ\]Y
+X
+Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÝÛÛÜ™\Ý[	ËˆÙ\ÜÚ[Û’YˆÛÛ\ÙRYˆÚ[ÛÛ\ÙRYKˆÛÛ˜[YNˆÚ[ÛÛ˜[YH	Ý[šÛ›ÝÛ‰Ëˆ™\Ý[ˆÚ[ÛÛ™\Ý[	ÉËˆ\›’YˆÚ[\›’Yˆ\™[ÛÛ\ÙRYˆ]™[ÛÛ\ÙRYˆKÛÜšÜÜXÙRY
+BˆBˆB‚ˆËÈ\œÚ\ÝÙ\ÜÚ[ÛˆY\ˆÛÛÛÛ\]\ÈÈ™]™[]HÜÜÈÛˆ]Z]ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆœ™XZÂˆB‚ˆØ\ÙH	ÜÝ]\ÉÎ‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÜÝ]\ÉËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ]™[›Y\ÜØYÙKˆÝ]\Õ\Nˆ]™[›Y\ÜØYÙKš[˜ÛY\Ê	ÐÛÛ\XÝ[™ÉÊHÈ	ØÛÛ\XÝ[™ÉÈˆ[™Yš[™YˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂ‚ˆØ\ÙH	Ú[™›ÉÎˆÂˆÛÛœÝ\ÐÛÛ\XÝ[ÛÛÛ\]HH]™[›Y\ÜØYÙKœÝ\ÕÚ]
+	ÐÛÛ\XÝY	ÊBˆÛÛœÝ[™›Õ[Y\Ý[\H\Ë›[Û›ÝÛšXÊ
+B‚ˆËÈ\œÚ\ÝÛÛ\XÝ[ÛˆY\ÜØYÙ\ÈÛÈ^HÝ\š]™H™[ØYˆËÈÝ\ˆ[™›ÈY\ÜØYÙ\È\™H˜[œÚY[
+\ÝÙ[È™[™\™\ŠBˆYˆ
+\ÐÛÛ\XÝ[ÛÛÛ\]JHÂˆÛÛœÝÛÛ\XÝ[Û“Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ú[™›ÉËˆÛÛ[ˆ]™[›Y\ÜØYÙKˆ[Y\Ý[\ˆ[™›Õ[Y\Ý[\ˆÝ]\Õ\Nˆ	ØÛÛ\XÝ[Û—ØÛÛ\]IËˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+ÛÛ\XÝ[Û“Y\ÜØYÙJB‚ˆËÈX\šÈÛÛ\XÝ[ÛˆÛÛ\]H[ˆHÙ\ÜÚ[ÛˆÝ]K‚ˆËÈ\È\ÈÛ™H\™H
+˜XÚÙ[™
+H˜]\ˆ[ˆ[ˆH™[™\™\ˆÛÈ]	ÜÂˆËÈ›ÝY™™XÝYžHÓQ
+Ôˆ\š[™ÈÛÛ\XÝ[Û‹ˆHœ›Û[™™[ØYˆËÈ™XÛÝ™\žHÚ[ÙYH]ØZ][™ÐÛÛ\XÝ[ÛY˜[ÙH[™šYÙÙ\ˆ^XÝ][Û‹‚ˆ›ÚYX\šÔÝÜ™YÛÛ\XÝ[ÛÛÛ\]JX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YNˆÛÛ\XÝ[ÛˆÛÛ\]KX\šÙY[™[™È[ˆ™XYX
+B‚ˆËÈ[Z]\ØYÙWÝ\]HÛÈHÛÛ^ÛÝ[˜YÙH™Yœ™\Ú\È[[YYX][BˆËÈY\ˆÛÛ\XÝ[Û‹Ú]Ý]ØZ][™È›ÜˆH™^Y\ÜØYÙBˆYˆ
+X[˜YÙYÚÙ[•\ØYÙJHÂˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\ØYÙWÝ\]IËˆÙ\ÜÚ[Û’YˆÚÙ[•\ØYÙNˆÂˆ[œ]ÚÙ[œÎˆX[˜YÙYÚÙ[•\ØYÙKš[œ]ÚÙ[œËˆÛÛ^Ú[™ÝÎˆX[˜YÙYÚÙ[•\ØYÙK˜ÛÛ^Ú[™ÝËˆKˆKÛÜšÜÜXÙRY
+BˆBˆB‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ú[™›ÉËˆÙ\ÜÚ[Û’YˆY\ÜØYÙNˆ]™[›Y\ÜØYÙKˆÝ]\Õ\Nˆ\ÐÛÛ\XÝ[ÛÛÛ\]HÈ	ØÛÛ\XÝ[Û—ØÛÛ\]IÈˆ[™Yš[™Yˆ[Y\Ý[\ˆ[™›Õ[Y\Ý[\ˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂˆB‚ˆØ\ÙH	Ù\œ›Ü‰ÎˆÂˆËÈÚÚ\\œ›ÜœÈY\ˆ[™Ù™ˆ
+[ˆÝX›Z\ÜÚ[Û‹]]™\]Y\Ý
+H8 %HÑÈX^H[Z]ˆËÈ[ˆ\œ›Üˆœ›ÛHH[\œ\Y]Y\žHY\ˆÙIÝ™H[™XYHÝÜY›ØÙ\ÜÚ[™Ë‚ˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÔÚÚ\[™È\œ›Üˆ]™[Y\ˆ[™Ù™‹ÜÝÜ‰Ë]™[›Y\ÜØYÙJBˆœ™XZÂˆB‚ˆËÈÚÚ\X›Ü\œ›ÜœÈH\ÙH\™H^XÝYÚ[ˆ›Ü˜ÙKXX›Ü[™ÈšXH]Y\žK˜ÛÜÙJ
+BˆYˆ
+]™[›Y\ÜØYÙKš[˜ÛY\Ê	ØX›ÜY	ÊH]™[›Y\ÜØYÙKš[˜ÛY\Ê	ÐX›Ü\œ›Ü‰ÊJHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÔÚÚ\[™ÈX›Ü\œ›Üˆ]™[
+^XÝY\š[™È[\œ\
+IÊBˆœ™XZÂˆB‚ˆËÈY™[œÚ]™Nˆ]XÝ]]Y^\žH^[ˆZ[ˆ\œ›ÜœÈ]Ù\™[‰ÝÛ\ÜÚYšYYˆËÈ\È\YÙ\œ›Üˆ
+K™ËˆHÑÈ\œ›Üˆ]Üˆ]\™H›ÝšY\ˆÚ[™Ù\ÊK‚ˆÛÛœÝÝÙ\‘\œˆH]™[›Y\ÜØYÙKÓÝÙ\Ø\ÙJ
+BˆÛÛœÝ\ÔZ[]]\œ›ÜˆBˆÝÙ\‘\œ‹š[˜ÛY\Ê	ÝÚÙ[ˆ\È^\™Y	ÊHˆÝÙ\‘\œ‹š[˜ÛY\Ê	Ø]][XØ][ÛˆÚÙ[ˆ\È^\™Y	ÊHˆÝÙ\‘\œ‹š[˜ÛY\Ê	ÜX\ÙHžHÚYÛš[™È[ˆYØZ[‰ÊHˆ
+ÝÙ\‘\œ‹š[˜ÛY\Ê	ÍIÊH	‰ˆ
+ÝÙ\‘\œ‹š[˜ÛY\Ê	Ý[˜]]Üš^™Y	ÊHÝÙ\‘\œ‹š[˜ÛY\Ê	Ø]]	ÊJJB‚ˆYˆ
+\ÔZ[]]\œ›Üˆ	‰ˆ\Ë˜][\]]™]žJÙ\ÜÚ[Û’YX[˜YÙYÛÜšÜÜXÙRY
+JHÂˆœ™XZÂˆB‚ˆËÈYÙ[]™[\Ù\ÈY\ÜØYÙX›Ý\œ›Ü˜ˆÛÛœÝ\œ›Ü“Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ù\œ›Ü‰ËˆÛÛ[ˆ]™[›Y\ÜØYÙKˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+BˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\œ›Ü“Y\ÜØYÙJBˆ\ËœÙ[™]™[
+È\Nˆ	Ù\œ›Ü‰ËÙ\ÜÚ[Û’Y\œ›ÜŽˆ]™[›Y\ÜØYÙK[Y\Ý[\ˆ\œ›Ü“Y\ÜØYÙK[Y\Ý[\KÛÜšÜÜXÙRY
+Bˆœ™XZÂˆB‚ˆØ\ÙH	Ý\YÙ\œ›Ü‰Î‚ˆËÈÚÚ\\œ›ÜœÈY\ˆ[™Ù™ˆ
+[ˆÝX›Z\ÜÚ[Û‹]]™\]Y\Ý
+BˆYˆ
+[X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÔÚÚ\[™È\YÙ\œ›Üˆ]™[Y\ˆ[™Ù™‹ÜÝÜ‰Ë]™[™\œ›Ü‹›Y\ÜØYÙH]™[™\œ›Ü‹]JBˆœ™XZÂˆB‚ˆËÈÚÚ\X›Ü\œ›ÜœÈH\ÙH\™H^XÝYÚ[ˆ›Ü˜ÙKXX›Ü[™ÈšXH]Y\žK˜ÛÜÙJ
+BˆÛÛœÝ\Y\œ›Ü“\ÙÈH]™[™\œ›Ü‹›Y\ÜØYÙH]™[™\œ›Ü‹]H	ÉÂˆYˆ
+\Y\œ›Ü“\ÙËš[˜ÛY\Ê	ØX›ÜY	ÊH\Y\œ›Ü“\ÙËš[˜ÛY\Ê	ÐX›Ü\œ›Ü‰ÊJHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÔÚÚ\[™È\YX›Ü\œ›Üˆ]™[
+^XÝY\š[™È[\œ\
+IÊBˆœ™XZÂˆBˆËÈ\Y\œ›ÜœÈ]™HÝXÝ\™Y[™›Ü›X][ÛˆHÙ[™›Ý›Ü›X]È›ÜˆÛÛ\]Xš[]BˆÙ\ÜÚ[Û“ÙËš[™›Ê	Ý\YÙ\œ›ÜŽ‰Ë”ÓÓ‹œÝš[™ÚYžJ]™[™\œ›Ü‹[ŠJB‚ˆËÈÚXÚÈ›Üˆ]]\œ›ÜœÈ]Ø[ˆ™H™]šYYžH™Yœ™\Ú[™ÈHÚÙ[‚ˆËÈHÑÈÝXœ›ØÙ\ÜÈØXÚ\ÈHÚÙ[ˆ]Ý\\ÛÈYˆ]^\™\ÈZY\Ù\ÜÚ[Û‹ˆËÈÙHÙ][˜[YØ\WÚÙ^H\œ›ÜœËˆÙHØ[ˆš^\ÈžN‚ˆËÈKˆ™\Ù][™ÈHÝ[[X\š^˜][ÛˆÛY[ØXÚBˆËÈ‹ˆ\Ý›ÞZ[™ÈHYÙ[
+™]ÈYÙ[	ÜÈÜÝ[š]
+
+H™Yœ™\Ú\ÈHÚÙ[ŠBˆËÈËˆ™]žZ[™ÈHY\ÜØYÙBˆÛÛœÝ\Ð]]\œ›ÜˆH]™[™\œ›Ü‹˜ÛÙHOOH	Ú[˜[YØ\WÚÙ^IÈˆ]™[™\œ›Ü‹˜ÛÙHOOH	Ù^\™YÛØ]]ÝÚÙ[‰Â‚ˆYˆ
+\Ð]]\œ›Üˆ	‰ˆ\Ë˜][\]]™]žJÙ\ÜÚ[Û’YX[˜YÙYÛÜšÜÜXÙRY]™[™\œ›Ü‹˜ÛÙJJHÂˆËÈÛ‰ÝY\œ›ÜˆY\ÜØYÙHÜˆÙ[™È™[™\™\ˆHÙIÜ™H[™[™È]šXH™]žBˆœ™XZÂˆB‚ˆËÈZ[šXÚ\œ›ÜˆY\ÜØYÙHÚ][XYÛ›ÜÝXÈšY[È›Üˆ\œÚ\Ý[˜ÙH[™RH\Ü^BˆÛÛœÝ\Y\œ›Ü“Y\ÜØYÙNˆY\ÜØYÙHHÂˆYˆÙ[™\˜]SY\ÜØYÙRY
+
+Kˆ›ÛNˆ	Ù\œ›Ü‰ËˆËÈÛÛXš[™H]H[™Y\ÜØYÙH›ÜˆÛÛ[\Ü^H
+[™\È[™Yš[™YÜ˜XÙY[JBˆÛÛ[ˆÙ]™[™\œ›Ü‹]K]™[™\œ›Ü‹›Y\ÜØYÙWK™š[\Š›ÛÛX[ŠKš›Ú[Š	Îˆ	ÊH	Ð[ˆ\œ›ÜˆØØÝ\œ™Y	Ëˆ[Y\Ý[\ˆ\Ë›[Û›ÝÛšXÊ
+KˆËÈšXÚ\œ›ÜˆšY[È›ÜˆXYÛ›ÜÝXÜÈ[™™]žH[˜Ý[Û˜[]Bˆ\œ›ÜÛÙNˆ]™[™\œ›Ü‹˜ÛÙKˆ\œ›Ü•]Nˆ]™[™\œ›Ü‹]Kˆ\œ›Ü‘]Z[Îˆ]™[™\œ›Ü‹™]Z[Ëˆ\œ›Ü“ÜšYÚ[˜[ˆ]™[™\œ›Ü‹›ÜšYÚ[˜[\œ›Ü‹ˆ\œ›ÜØ[”™]žNˆ]™[™\œ›Ü‹˜Ø[”™]žKˆBˆX[˜YÙY›Y\ÜØYÙ\Ëœ\Ú
+\Y\œ›Ü“Y\ÜØYÙJBˆËÈÙ[™\YÙ\œ›Üˆ]™[Ú][ÝXÝ\™H›Üˆ™[™\™\ˆÈ[™Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\YÙ\œ›Ü‰ËˆÙ\ÜÚ[Û’Yˆ\œ›ÜŽˆÂˆÛÙNˆ]™[™\œ›Ü‹˜ÛÙKˆ]Nˆ]™[™\œ›Ü‹]KˆY\ÜØYÙNˆ]™[™\œ›Ü‹›Y\ÜØYÙKˆXÝ[ÛœÎˆ]™[™\œ›Ü‹˜XÝ[ÛœËˆØ[”™]žNˆ]™[™\œ›Ü‹˜Ø[”™]žKˆ]Z[Îˆ]™[™\œ›Ü‹™]Z[ËˆÜšYÚ[˜[\œ›ÜŽˆ]™[™\œ›Ü‹›ÜšYÚ[˜[\œ›Ü‹ˆKˆ[Y\Ý[\ˆ\Y\œ›Ü“Y\ÜØYÙK[Y\Ý[\ˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂ‚ˆØ\ÙH	Ý\Ú×Ø˜XÚÙÜ›Ý[™Y	Î‚ˆØ\ÙH	Ý\Ú×Ü›ÙÜ™\ÜÉÎ‚ˆËÈ›ÜØ\™˜XÚÙÜ›Ý[™\ÚÈ]™[È\™XÝHÈ™[™\™\‚ˆ\ËœÙ[™]™[
+Âˆ‹‹™]™[ˆÙ\ÜÚ[Û’YˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂ‚ˆØ\ÙH	Ý\Ú×ØÛÛ\]Y	Î‚ˆËÈÝÜ™HÝ]]›Üˆ]\ˆ™]šY]˜[šXHÙ]\ÚÓÝ]]
+
+BˆYˆ
+X[˜YÙY
+HÂˆX[˜YÙY˜˜XÚÙÜ›Ý[™\ÚÓÝ]]ËœÙ]
+]™[\ÚÒYÂˆÝ]]š[Nˆ]™[›Ý]]š[H	ÉËˆÝ[[X\žNˆ]™[œÝ[[X\žH	ÉËˆÝ]\Îˆ]™[œÝ]\ËˆÛÛ\]Y]ˆ]K››ÝÊ
+KˆJBˆËÈÊJH[™^›ÜˆÙ]\ÚÓÝ]]
+
+H8 %]›ÚYÈØØ[›š[™È[Ù\ÜÚ[ÛœÂˆ\Ë\ÚÓÝ]][™^œÙ]
+]™[\ÚÒYÙ\ÜÚ[Û’Y
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê˜XÚÙÜ›Ý[™\ÚÈ	Ù]™[\ÚÒYHÛÛ\]Y
+Ý]\ÏIÙ]™[œÝ]\ßJX
+B‚ˆËÈ]šXÝÝ[H[šY\ÈÛ\ˆ[ˆHÝ\ˆÈ›Ý[™Y[[ÜžHÜ›ÝÝˆÛÛœÝÓ‘WÒÕTˆH×ÍŒÌˆÛÛœÝ›ÝÈH]K››ÝÊ
+Bˆ›Üˆ
+ÛÛœÝÝY[™›×HÙˆX[˜YÙY˜˜XÚÙÜ›Ý[™\ÚÓÝ]]ÊHÂˆYˆ
+›ÝÈH[™›Ë˜ÛÛ\]Y]ˆÓ‘WÒÕTŠHÂˆX[˜YÙY˜˜XÚÙÜ›Ý[™\ÚÓÝ]]Ë™[]JY
+Bˆ\Ë\ÚÓÝ]][™^™[]JY
+BˆBˆBˆBˆËÈ›ÜØ\™È™[™\™\ˆ›ÜˆRH\]Bˆ\ËœÙ[™]™[
+Âˆ‹‹™]™[ˆÙ\ÜÚ[Û’YˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂ‚ˆØ\ÙH	ÜÚ[Ø˜XÚÙÜ›Ý[™Y	Î‚ˆËÈÝÜ™HHÛÛ[X[™›Üˆ]\ˆ›ØÙ\ÜÈÚ[[™ÂˆYˆ
+]™[˜ÛÛ[X[™	‰ˆX[˜YÙY
+HÂˆX[˜YÙY˜˜XÚÙÜ›Ý[™Ú[ÛÛ[X[™ËœÙ]
+]™[œÚ[Y]™[˜ÛÛ[X[™
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÝÜ™YÛÛ[X[™›ÜˆÚ[	Ù]™[œÚ[YNˆ	Ù]™[˜ÛÛ[X[™œÛXÙJL
+_K‹‹˜
+BˆBˆËÈ›ÜØ\™È™[™\™\‚ˆ\ËœÙ[™]™[
+Âˆ‹‹™]™[ˆÙ\ÜÚ[Û’YˆKÛÜšÜÜXÙRY
+Bˆœ™XZÂ‚ˆØ\ÙH	ÜÛÝ\˜ÙWØXÝ]˜]Y	ÎˆÂˆËÈHÛÝ\˜ÙHØ\È]]ËXXÝ]˜]YZY]\›‹ˆHÙ\™\ˆØÚY[\ÈH™K\Ù[™ÙˆBˆËÈÜšYÚ[˜[Y\ÜØYÙHÚ]H–ÏÛYÏˆXÝ]˜]YHˆÝY™š^ÛÈXY\ÜÈ\Þ[Y[ÂˆËÈ
+ÙX•RKØÚÙ\ˆÙ\™\ŠHÚZ[ˆXÝ]˜][ÛœÈHØ[YHØ^HH™[™\™\ˆ\ÙYË‚ˆËÈH™[™\™\ˆÝ[™XÙZ]™\ÈH]™[È™[™\ˆXÝ]˜][Ûˆ™YY˜XÚË]›ÂˆËÈÛ™Ù\ˆš\™\È]ÈÝÛˆ]]×Ü™]žH
+ÙYH›ØÙ\ÜÛÜ‹ÊK‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÛÝ\˜ÙH‰Ù]™[œÛÝ\˜ÙTÛYßHˆXÝ]˜]Y›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YKØÚY[[™È]]Ë\™]žX
+B‚ˆ\ËœÙ[™]™[
+Âˆ\Nˆ	ÜÛÝ\˜ÙWØXÝ]˜]Y	ËˆÙ\ÜÚ[Û’YˆÛÝ\˜ÙTÛYÎˆ]™[œÛÝ\˜ÙTÛYËˆÜšYÚ[˜[Y\ÜØYÙNˆ]™[›ÜšYÚ[˜[Y\ÜØYÙKˆKÛÜšÜÜXÙRY
+B‚ˆYˆ
+[X[˜YÙY
+Hœ™XZÂ‚ˆÛÛœÝÜšYÚ[˜[Y\ÜØYÙHH]™[›ÜšYÚ[˜[Y\ÜØYÙHÏÈ	ÉÂˆYˆ
+[ÜšYÚ[˜[Y\ÜØYÙKš[J
+JHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÛÝ\˜ÙH‰Ù]™[œÛÝ\˜ÙTÛYßHˆXÝ]˜]Y›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YK]ÜšYÚ[˜[Y\ÜØYÙHØ\È[\NÈÚÚ\[™È]]Ë\™]žX
+Bˆœ™XZÂˆB‚ˆÛÛœÝY\ÜØYÙUÚ]ÝY™š^H	ÛÜšYÚ[˜[Y\ÜØYÙ_W—–ÉÙ]™[œÛÝ\˜ÙTÛYßHXÝ]˜]YXˆÛÛœÝY\ÜØYÙPÛÝ[]ØÚY[HHX[˜YÙY›Y\ÜØYÙ\Ë›[™Ý‚ˆËÈÝ\ÚH™]žH^[ØYÛÈH\XØ]HÙ[™Y\ÜØYÙHœ›ÛHHYØXÞH™[™\™\‚ˆËÈ
+Z^Y]™\œÚ[Ûˆ›ÛÝ]ˆ™]ÈÙ\™\ˆ
+ÈŒŽKH[XÝ›ÛˆÛY[
+HÙ]ÈY\Y‚ˆËÈœÈÚ[™ÝÈÛÝ™\œÈÔÈ][˜ÞHZ[Ûˆ›ZÞH[Øš[HÈ›ÞH[šÜË‚ˆX[˜YÙY˜]]Ô™]žT[™[™ÈHÂˆÛÛ[ˆY\ÜØYÙUÚ]ÝY™š^ˆXY[™S\Îˆ]K››ÝÊ
+H
+ÈŒˆÛÛ[Z]Yˆ˜[ÙKˆB‚ˆYˆ
+X[˜YÙY˜]]Ô™]žU[Y\ŠHÛX\•[Y[Ý]
+X[˜YÙY˜]]Ô™]žU[Y\ŠBˆX[˜YÙY˜]]Ô™]žU[Y\ˆHÙ][Y[Ý]
+
+
+HOˆÂˆÛÛœÝÝ\œ™[H\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+XÝ\œ™[
+H™]\›‚ˆÝ\œ™[˜]]Ô™]žU[Y\ˆH[™Yš[™Y‚ˆËÈYˆH\Ù\ˆ›ÛÝË]\\œš]™Y[ˆHL\ÈÚ[™ÝËÚÚ\8 %^H™Y[\Y\Ë‚ˆYˆ
+Ý\œ™[›Y\ÜØYÙ\Ë›[™ÝˆY\ÜØYÙPÛÝ[]ØÚY[JHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê]]Ë\™]žHÚÚ\Y›Üˆ	ÜÙ\ÜÚ[Û’YNˆ›ÛÝË]\Y\ÜØYÙH\œš]™Yš\œÝ
+BˆÝ\œ™[˜]]Ô™]žT[™[™ÈH[™Yš[™Yˆ™]\›‚ˆB‚ˆËÈ›ÝNˆÈ“ÕÛX\ˆ]]Ô™]žT[™[™È\™H8 %Ù[™Y\ÜØYÙJ
+H™YYÈÈÙYH]ˆËÈÛÈHYØXÞH™[™\™\‰ÜÈ\XØ]H”È\œš]š[™ÈL\È]\ˆÙ]È›ÜY‚ˆËÈH[™[™ÈÛÝ\ÈÛX\™YžHHXY[™HÚXÚÈ[ˆÙ[™Y\ÜØYÙKžHBˆËÈ™^X]Ú[™ÈÙ[™Y\ÜØYÙH]›ÜÈ\ÈH\XØ]KÜˆžHÙ\ÜÚ[Ûˆ[][Û‹‚ˆ\ËœÙ[™Y\ÜØYÙJÙ\ÜÚ[Û’YY\ÜØYÙUÚ]ÝY™š^
+K˜Ø]Ú
+\œˆOˆÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ]]Ë\™]žHÙ[™Y\ÜØYÙH˜Z[Y›Üˆ	ÜÙ\ÜÚ[Û’YN˜\œŠBˆJBˆKL
+Bˆœ™XZÂˆB‚ˆØ\ÙH	ØÛÛ\]IÎ‚ˆËÈÛÛ\]H]™[œ›ÛHØ]PYÙ[HXØÝ[][]H\ØYÙHœ›ÛH\È\›‚ˆËÈXÝX[	ØÛÛ\]IÈÙ[È™[™\™\ˆÛÛY\Èœ›ÛHHš[˜[H›ØÚÈ[ˆÙ[™Y\ÜØYÙBˆYˆ
+]™[\ØYÙJHÂˆËÈ[š]X[^™HÚÙ[•\ØYÙHYˆ›ÝÙ]ˆYˆ
+[X[˜YÙYÚÙ[•\ØYÙJHÂˆX[˜YÙYÚÙ[•\ØYÙHHÂˆ[œ]ÚÙ[œÎˆˆÝ]]ÚÙ[œÎˆˆÝ[ÚÙ[œÎˆˆÛÛ^ÚÙ[œÎˆˆÛÜÝ\ÙˆˆBˆBˆËÈ[œ]ÚÙ[œÈHÝ\œ™[ÛÛ^Ú^™H
+[ÛÛ™\œØ][ÛˆÙ[\È\›ŠK“ÕXØÝ[][]YˆËÈXXÚTHØ[Ù[™ÈH[ÛÛ™\œØ][Ûˆ\ÝÜžKÛÈÙH\ÙHH]\Ý˜[YBˆX[˜YÙYÚÙ[•\ØYÙKš[œ]ÚÙ[œÈH]™[\ØYÙKš[œ]ÚÙ[œÂˆËÈÝ]]ÚÙ[œÈ[™ÛÜÝ\Ù\™HXØÝ[][]YXÜ›ÜÜÈ[\›œÈ
+Ý[Ù\ÜÚ[Ûˆ\ØYÙJBˆX[˜YÙYÚÙ[•\ØYÙK›Ý]]ÚÙ[œÈ
+ÏH]™[\ØYÙK›Ý]]ÚÙ[œÂˆX[˜YÙYÚÙ[•\ØYÙKÝ[ÚÙ[œÈHX[˜YÙYÚÙ[•\ØYÙKš[œ]ÚÙ[œÈ
+ÈX[˜YÙYÚÙ[•\ØYÙK›Ý]]ÚÙ[œÂˆX[˜YÙYÚÙ[•\ØYÙK˜ÛÜÝ\Ù
+ÏH]™[\ØYÙK˜ÛÜÝ\ÙÏÈˆËÈØXÚHÚÙ[œÈ™Y›XÝÝ\œ™[Ý]K›ÝXØÝ[][]YˆX[˜YÙYÚÙ[•\ØYÙK˜ØXÚT™XYÚÙ[œÈH]™[\ØYÙK˜ØXÚT™XYÚÙ[œÈÏÈˆX[˜YÙYÚÙ[•\ØYÙK˜ØXÚPÜ™X][Û•ÚÙ[œÈH]™[\ØYÙK˜ØXÚPÜ™X][Û•ÚÙ[œÈÏÈˆËÈ\]HÛÛ^Ú[™ÝÈ
+\ÙH]\Ý˜[YHHX^HÚ[™ÙHYˆ[Ù[ÝÚ]Ú\ÊBˆYˆ
+]™[\ØYÙK˜ÛÛ^Ú[™ÝÊHÂˆX[˜YÙYÚÙ[•\ØYÙK˜ÛÛ^Ú[™ÝÈH]™[\ØYÙK˜ÛÛ^Ú[™ÝÂˆBˆBˆœ™XZÂ‚ˆØ\ÙH	Ý\ØYÙWÝ\]IÎ‚ˆËÈ™X[][YH\ØYÙH\]H›ÜˆÛÛ^\Ü^H\š[™È›ØÙ\ÜÚ[™ÂˆËÈ\]HX[˜YÙYÙ\ÜÚ[Û‰ÜÈÚÙ[•\ØYÙHÚ]]\ÝÛÛ^Ú^™BˆYˆ
+]™[\ØYÙJHÂˆYˆ
+[X[˜YÙYÚÙ[•\ØYÙJHÂˆX[˜YÙYÚÙ[•\ØYÙHHÂˆ[œ]ÚÙ[œÎˆˆÝ]]ÚÙ[œÎˆˆÝ[ÚÙ[œÎˆˆÛÛ^ÚÙ[œÎˆˆÛÜÝ\ÙˆˆBˆBˆËÈ\]HÛ›H[œ]ÚÙ[œÈ
+Ý\œ™[ÛÛ^Ú^™JHHÝ\ˆšY[ÈXØÝ[][]HÛˆÛÛ\]BˆX[˜YÙYÚÙ[•\ØYÙKš[œ]ÚÙ[œÈH]™[\ØYÙKš[œ]ÚÙ[œÂˆYˆ
+]™[\ØYÙK˜ÛÛ^Ú[™ÝÊHÂˆX[˜YÙYÚÙ[•\ØYÙK˜ÛÛ^Ú[™ÝÈH]™[\ØYÙK˜ÛÛ^Ú[™ÝÂˆB‚ˆËÈÙ[™È™[™\™\ˆ›Üˆ[[YYX]HRH\]Bˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý\ØYÙWÝ\]IËˆÙ\ÜÚ[Û’YˆX[˜YÙYšYˆÚÙ[•\ØYÙNˆÂˆ[œ]ÚÙ[œÎˆ]™[\ØYÙKš[œ]ÚÙ[œËˆÛÛ^Ú[™ÝÎˆ]™[\ØYÙK˜ÛÛ^Ú[™ÝËˆKˆKÛÜšÜÜXÙRY
+BˆBˆœ™XZÂ‚ˆØ\ÙH	ÜÝY\—Ý[™[]™\™Y	Î‚ˆËÈÝY\ˆY\ÜØYÙHØ\È›Ý[]™\™Y
+›È™UÛÛ\ÙHš\™Y™Y›Ü™H\›ˆ[™Y
+K‚ˆËÈ™K\]Y]YH]ÛÈ]	ÜÈÙ[\ÈH›Ü›X[Y\ÜØYÙHÛˆH™^\›‹‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÝY\ˆY\ÜØYÙH[™[]™\™Y™K\]Y]Z[™È›ÜˆÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+BˆX[˜YÙY›Y\ÜØYÙT]Y]YKœ\Ú
+ÈY\ÜØYÙNˆ]™[›Y\ÜØYÙHJBˆX[˜YÙYØ\Ò[\œ\YHYBˆœ™XZÂ‚ˆËÈ›ÝNˆÛÜšÚ[™×Ù\™XÝÜžWØÚ[™ÙY\È\Ù\‹Z[š]X]YÛ›H
+šXH\]UÛÜšÚ[™Ñ\™XÝÜžJKˆËÈHYÙ[›ÈÛ™Ù\ˆ\ÈHÚ[™ÙWÝÛÜšÚ[™×Ù\™XÝÜžHÛÛˆBˆB‚ˆš]˜]HÙ[™]™[
+]™[ˆÙ\ÜÚ[Û‘]™[ÛÜšÜÜXÙRYÎˆÝš[™ÊNˆ›ÚYÂˆYˆ
+]\Ë™]™[Ú[šÊHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÐØ[››ÝÙ[™]™[H›È]™[Ú[šÉÊBˆ™]\›‚ˆB‚ˆYˆ
+]ÛÜšÜÜXÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠØ[››ÝÙ[™	Ù]™[\_H]™[H›ÈÛÜšÜÜXÙRY
+Bˆ™]\›‚ˆB‚ˆ\Ë™]™[Ú[šÊ”×ÐÒS“‘SËœÙ\ÜÚ[ÛœË‘U‘S•ÈÎˆ	ÝÛÜšÜÜXÙIËÛÜšÜÜXÙRYK]™[
+BˆB‚ˆÊŠ‚ˆ
+ˆ]Y]YHH^[H›Üˆ˜]ÚYÙ[™[™È
+\™›Ü›X[˜ÙHÜ[Z^˜][ÛŠBˆ
+ˆ[œÝXYÙˆÙ[™[™ÈL
+ÈTÈ]™[È\ˆÙXÛÛ™˜]Ú\È[\È[™›\Ú\È]™\žHL\Âˆ
+‹Âˆš]˜]H]Y]YQ[JÙ\ÜÚ[Û’YˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™Ë[NˆÝš[™Ë\›’YÎˆÝš[™ÊNˆ›ÚYÂˆÛÛœÝ^\Ý[™ÈH\Ëœ[™[™Ñ[\Ë™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+^\Ý[™ÊHÂˆËÈ\[™È^\Ý[™È˜]Úˆ^\Ý[™Ë™[H
+ÏH[BˆËÈÙY\H]\Ý\›’Y
+ÚÝ[™HHØ[YK]\Ý[ˆØ\ÙJBˆYˆ
+\›’Y
+H^\Ý[™Ë\›’YH\›’YˆH[ÙHÂˆËÈÝ\™]È˜]Úˆ\Ëœ[™[™Ñ[\ËœÙ]
+Ù\ÜÚ[Û’YÈ[K\›’YJBˆB‚ˆËÈØÚY[H›\ÚYˆ›Ý[™XYHØÚY[YˆYˆ
+]\Ë™[Q›\Ú[Y\œËš\ÊÙ\ÜÚ[Û’Y
+JHÂˆÛÛœÝ[Y\ˆHÙ][Y[Ý]
+
+
+HOˆÂˆ\Ë™›\Ú[JÙ\ÜÚ[Û’YÛÜšÜÜXÙRY
+BˆKSWÐUÒÒS•T•SÓTÊBˆ\Ë™[Q›\Ú[Y\œËœÙ]
+Ù\ÜÚ[Û’Y[Y\ŠBˆBˆB‚ˆÊŠ‚ˆ
+ˆ›\Ú[žH[™[™È[\È›ÜˆHÙ\ÜÚ[Ûˆ
+Ù[™È˜]ÚYTÈ]™[
+Bˆ
+ˆØ[YÛˆ[Y\ˆÜˆÚ[ˆÝ™X[Z[™È[™È
+^ØÛÛ\]JBˆ
+‹Âˆš]˜]H›\Ú[JÙ\ÜÚ[Û’YˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÚYÂˆËÈÛX\ˆH[Y\‚ˆÛÛœÝ[Y\ˆH\Ë™[Q›\Ú[Y\œË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[Y\ŠHÂˆÛX\•[Y[Ý]
+[Y\ŠBˆ\Ë™[Q›\Ú[Y\œË™[]JÙ\ÜÚ[Û’Y
+BˆB‚ˆËÈÙ[™˜]ÚY[HYˆ[žBˆÛÛœÝ[™[™ÈH\Ëœ[™[™Ñ[\Ë™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[™[™È	‰ˆ[™[™Ë™[JHÂˆ\ËœÙ[™]™[
+Âˆ\Nˆ	Ý^Ù[IËˆÙ\ÜÚ[Û’Yˆ[Nˆ[™[™Ë™[Kˆ\›’Yˆ[™[™Ë\›’YˆKÛÜšÜÜXÙRY
+Bˆ\Ëœ[™[™Ñ[\Ë™[]JÙ\ÜÚ[Û’Y
+BˆBˆB‚ˆÊŠ‚ˆ
+ˆ^XÝ]HH›Û\]]ÛX][ÛˆžHÜ™X][™ÈH™]ÈÙ\ÜÚ[Ûˆ[™Ù[™[™ÈH›Û\‚ˆ
+‚ˆ
+ˆHÜ[ÛœË[Øš™XÝ›Ü›H™\XÙYH™]š[Ý\ÈÜÚ][Û˜[X\™ÜÈÚYÛ˜]\™Bˆ
+ˆÛ˜ÙHH\˜[H\ÝÝ]Ü™]È™XYXš[]H8 %[šÚ[™Ó]™[Ø\ÈHšYÙÙ\‹‚ˆ
+ˆÚ[ˆ[šÚ[™Ó]™[\ÈÛZ]YÜ™X]TÙ\ÜÚ[Û˜˜[È˜XÚÈÈBˆ
+ˆÛÜšÜÜXÙHY˜][
+[ˆQUSÕS’ÒS‘×ÓU‘S
+K‚ˆ
+‹Âˆ\Þ[˜È^XÝ]T›Û\]]ÛX][ÛŠˆ[œ]ˆ^XÝ]T›Û\]]ÛX][Û’[œ]ˆ
+Nˆ›ÛZ\ÙOÈÙ\ÜÚ[Û’YˆÝš[™ÈOˆÂˆÛÛœÝÂˆÛÜšÜÜXÙRYˆÛÜšÜÜXÙT›ÛÝ]ˆ›Û\ˆX™[Ëˆ\›Z\ÜÚ[Û“[ÙKˆY[[ÛœËˆPÛÛ›™XÝ[Û‹ˆ[Ù[ˆ[šÚ[™Ó]™[ˆ]]ÛX][Û“˜[YKˆ[YÜ˜[UÜXËˆHH[œ]‚ˆËÈØ\›ˆYˆPÛÛ›™XÝ[ÛˆØ\ÈÜXÚYšYY]Ù\Û‰Ý™\ÛÛ™BˆYˆ
+PÛÛ›™XÝ[ÛŠHÂˆÛÛœÝÛÛ›™XÝ[ÛˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠPÛÛ›™XÝ[ÛŠBˆYˆ
+XÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÐ]]ÛX][Ûœ×HPÛÛ›™XÝ[Ûˆ‰ÛPÛÛ›™XÝ[ÛŸHˆ›Ý›Ý[™\Ú[™ÈY˜][
+BˆBˆB‚ˆËÈ™\ÛÛ™HY[[ÛœÈÈÛÝ\˜ÙKÜÚÚ[ÛYÜÂˆÛÛœÝ™\ÛÛ™YHY[[ÛœÈÈ\Ëœ™\ÛÛ™P]]ÛX][Û“Y[[ÛœÊÛÜšÜÜXÙT›ÛÝ]Y[[ÛœÊHˆ[™Yš[™Y‚ˆËÈ[œÝ\™HX™[È^\Ý[ˆÛÜšÜÜXÙHÛÛ™šYÈ™Y›Ü™H\ÜÚYÛš[™ÈÈÙ\ÜÚ[Û‚ˆÛÛœÝ™\ÛÛ™YX™[ÈHX™[ÏË›[™ÝˆÈ[œÝ\™SX™[Ñ^\Ý
+ÛÜšÜÜXÙT›ÛÝ]X™[ÊBˆˆX™[Â‚ˆËÈ\ÙH]]ÛX][Ûˆ˜[YHYˆ›ÝšYYÝ\Ú\ÙH˜[˜XÚÈÈ›Û\Ûš\]ˆÛÛœÝ˜[˜XÚÈH]]ÛX][ÛŽˆ	Ü›Û\œÛXÙJL
+_IÜ›Û\›[™ÝˆLÈ	Ë‹‹‰Èˆ	ÉßXˆÛÛœÝÙ\ÜÚ[Û“˜[YHH]]ÛX][Û“˜[YH˜[˜XÚÂ‚ˆËÈÜ™X]HH™]ÈÙ\ÜÚ[Ûˆ›Üˆ\È]]ÛX][Û‚ˆÛÛœÝÙ\ÜÚ[ÛˆH]ØZ]\Ë˜Ü™X]TÙ\ÜÚ[ÛŠÛÜšÜÜXÙRYÂˆ˜[YNˆÙ\ÜÚ[Û“˜[YKˆX™[Îˆ™\ÛÛ™YX™[Ëˆ\›Z\ÜÚ[Û“[ÙNˆ\›Z\ÜÚ[Û“[ÙH	ÜØY™IËˆ[˜X›YÛÝ\˜ÙTÛYÜÎˆ™\ÛÛ™YËœÛÝ\˜ÙTÛYÜËˆPÛÛ›™XÝ[Û‹ˆ[Ù[ˆ[šÚ[™Ó]™[ˆJB‚ˆËÈÜ[]HšYÙÙ\™YžHY]Y]HÛÈ]HÙ[™\˜][Ûˆ\È^XÚ]HÚÚ\YˆËÈ[™HÙ\ÜÚ[Ûˆ\ÈY[YšXX›H\È]]ÛX][Û‹Z[š]X]YY\ˆ™[ØYˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û‹šY
+BˆYˆ
+X[˜YÙY
+HÂˆX[˜YÙYšYÙÙ\™YžHHÈ]]ÛX][Û“˜[YK[Y\Ý[\ˆ]K››ÝÊ
+HBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+BˆB‚ˆËÈ›ÝYžH™[™\™\ˆÈY˜]H[Ù\ÜÚ[ÛˆY]Y]H
+[˜ÛY[™È]JBˆËÈ™Y›Ü™HÝ™X[Z[™È]™[È\œš]™KˆÚ]Ý]\ËH™[™\™\ˆX^HÜ™X]BˆËÈHÞ[]XÈ[\HÙ\ÜÚ[Ûˆ[™[\Ü˜\š[HÚÝÈ“™]ÈÚ]‹‚ˆ\ËœÙ[™]™[
+È\Nˆ	ÜÙ\ÜÚ[Û—ØÜ™X]Y	ËÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û‹šYKÛÜšÜÜXÙRY
+B‚ˆËÈš[™H™]ÈÙ\ÜÚ[ÛˆÈ]È[YÜ˜[H›Ü[HÜXÈYˆHX]Ú\‚ˆËÈXÛ\™Y[YÜ˜[UÜXØˆÛ™H™Y›Ü™HÙ[™Y\ÜØYÙXÛÈHš\œÝˆËÈ\ÜÚ\Ý[ÚÙ[œÈ[™XYH›Ý]H›ÝYÚH›Ý[™ÜXËˆ˜Z[\™BˆËÈ\ÈÙÙÙY[œÚYHHš[™\ŽÈHÙ\ÜÚ[ÛˆÛÛ[Y\È[˜›Ý[™‚ˆYˆ
+\Ë˜]]ÛX][Ûš[™\ˆ	‰ˆ[YÜ˜[UÜXÈ	‰ˆ[YÜ˜[UÜXËš[J
+K›[™Ýˆ
+HÂˆžHÂˆ]ØZ]\Ë˜]]ÛX][Ûš[™\ŠÂˆÛÜšÜÜXÙRYˆÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û‹šYˆÜXÓ˜[YNˆ[YÜ˜[UÜXËš[J
+KˆJBˆHØ]Ú
+\œŠHÂˆÙ\ÜÚ[Û“ÙËØ\›Š	ÖÐ]]ÛX][Ûœ×H]]ÛX][Ûˆš[™\ˆ™]ÉËÂˆÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û‹šYˆ[YÜ˜[UÜXËˆ\œ›ÜŽˆ\œˆ[œÝ[˜Ù[Ùˆ\œ›ÜˆÈ\œ‹›Y\ÜØYÙHˆÝš[™Ê\œŠKˆJBˆBˆB‚ˆËÈÙ[™H›Û\ˆ]ØZ]\ËœÙ[™Y\ÜØYÙJÙ\ÜÚ[Û‹šY›Û\[™Yš[™Y[™Yš[™YÂˆÚÚ[ÛYÜÎˆ™\ÛÛ™YËœÚÚ[ÛYÜËˆJB‚ˆ™]\›ˆÈÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û‹šYBˆB‚ˆÊŠ‚ˆ
+ˆ™\ÛÛ™HY[[ÛœÈ[ˆ]]ÛX][Ûˆ›Û\ÈÈÛÝ\˜ÙH[™ÚÚ[ÛYÜÂˆ
+‹Âˆš]˜]H™\ÛÛ™P]]ÛX][Û“Y[[ÛœÊÛÜšÜÜXÙT›ÛÝ]ˆÝš[™ËY[[ÛœÎˆÝš[™Ö×JNˆÈÛÝ\˜ÙTÛYÜÎˆÝš[™Ö×NÈÚÚ[ÛYÜÎˆÝš[™Ö×HH[™Yš[™YÂˆÛÛœÝÛÝ\˜Ù\ÈHØYÛÜšÜÜXÙTÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÚÚ[ÈHØY[ÚÚ[ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝÛÝ\˜ÙTÛYÜÎˆÝš[™Ö×HH×BˆÛÛœÝÚÚ[ÛYÜÎˆÝš[™Ö×HH×B‚ˆ›Üˆ
+ÛÛœÝY[[ÛˆÙˆY[[ÛœÊHÂˆYˆ
+ÛÝ\˜Ù\ËœÛÛYJÈOˆË˜ÛÛ™šYËœÛYÈOOHY[[ÛŠJHÂˆÛÝ\˜ÙTÛYÜËœ\Ú
+Y[[ÛŠBˆH[ÙHYˆ
+ÚÚ[ËœÛÛYJÈOˆËœÛYÈOOHY[[ÛŠJHÂˆÚÚ[ÛYÜËœ\Ú
+Y[[ÛŠBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÐ]]ÛX][Ûœ×H[šÛ›ÝÛˆY[[ÛŽˆ	ÛY[[ÛŸX
+BˆBˆB‚ˆ™]\›ˆ
+ÛÝ\˜ÙTÛYÜË›[™ÝˆÚÚ[ÛYÜË›[™Ýˆ
+HÈÈÛÝ\˜ÙTÛYÜËÚÚ[ÛYÜÈHˆ[™Yš[™YˆB‚ˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOBˆËÈ^ÜÈ[\ÜÈ\Ü]ÚˆËÈOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOB‚ˆš]˜]H\Þ[˜ÈÙ[™\˜]T™[[ÝU˜[œÙ™\”Ý[[X\žJX[˜YÙYˆX[˜YÙYÙ\ÜÚ[ÛŠNˆ›ÛZ\ÙOÝš[™È[ˆÂˆ]ØZ]\Ë™[œÝ\™SY\ÜØYÙ\ÓØYY
+X[˜YÙY
+B‚ˆÛÛœÝY\ÜØYÙ\ÈHX[˜YÙY›Y\ÜØYÙ\Âˆ™š[\ŠHOˆKœ›ÛHOOH	Ý\Ù\‰ÈKœ›ÛHOOH	Ø\ÜÚ\Ý[	ÊBˆ™š[\ŠHOˆ[Kš\Ò[\›YYX]JBˆ›X\
+HOˆ
+Âˆ\NˆKœ›ÛH\È	Ý\Ù\‰È	Ø\ÜÚ\Ý[	ËˆÛÛ[ˆK˜ÛÛ[ˆJJB‚ˆYˆ
+Y\ÜØYÙ\Ë›[™ÝOOH
+H™]\›ˆ[‚ˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]ˆÛÛœÝÜÐÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝY˜][[Ù[HÜÐÛÛ™šYÏË™Y˜][ÏË›[Ù[ˆÛÛœÝ˜XÚÙ[™ÛÛ^H™\ÛÛ™P˜XÚÙ[™ÛÛ^
+ÂˆÙ\ÜÚ[ÛÛÛ›™XÝ[Û”ÛYÎˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆÛÜšÜÜXÙQY˜][ÛÛ›™XÝ[Û”ÛYÎˆÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‹ˆX[˜YÙY[Ù[ˆX[˜YÙY›[Ù[Y˜][[Ù[ˆJB‚ˆÛÛœÝZ[šS[Ù[H˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‚ˆÈ
+Ù]Z[šS[Ù[
+˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛŠHÏÈ˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[Û‹™Y˜][[Ù[ÏÈÙ]Y˜][Ý[[X\š^˜][Û“[Ù[
+
+JBˆˆÙ]Y˜][Ý[[X\š^˜][Û“[Ù[
+
+B‚ˆÛÛœÝ[“Ý™\œšY\Îˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆÐUWÕÓÔ’ÔÔPÑWÔUˆÛÜšÜÜXÙT›ÛÝ]ˆ‹‹ŠZ[šS[Ù[ÈÈS•“ÔP×ÑQUSÒRRÕWÓSÑSˆZ[šS[Ù[HˆßJKˆB‚ˆÛÛœÝYÙ[HÜ™X]P˜XÚÙ[™œ›ÛT™\ÛÛ™YÛÛ^
+ÂˆÛÛ^ˆ˜XÚÙ[™ÛÛ^ˆÜÝ[[YNˆZ[˜XÚÙ[™ÜÝ[[YPÛÛ^
+
+KˆÛÜ™PÛÛ™šYÎˆÂˆÛÜšÜÜXÙNˆX[˜YÙYÛÜšÜÜXÙKˆÙ\ÜÚ[ÛŽˆÂˆYˆ	ÛX[˜YÙYšYK\™[[ÝK]˜[œÙ™\‹\Ý[[X\žXˆÛÜšÜÜXÙT›ÛÝ]ˆÜ™X]Y]ˆ]K››ÝÊ
+Kˆ\Ý\ÙY]ˆ]K››ÝÊ
+KˆÛÜšÚ[™Ñ\™XÝÜžNˆX[˜YÙYÛÜšÚ[™Ñ\™XÝÜžKˆÙÐÝÙˆX[˜YÙYœÙÐÝÙˆ[Ù[ˆX[˜YÙY›[Ù[ˆPÛÛ›™XÝ[ÛŽˆX[˜YÙY›PÛÛ›™XÝ[Û‹ˆ\›Z\ÜÚ[Û“[ÙNˆX[˜YÙYœ\›Z\ÜÚ[Û“[ÙKˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙNˆX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKˆKˆZ[šS[Ù[ˆ[“Ý™\œšY\Ëˆ\ÒXY\ÜÎˆYKˆKˆ›ÝšY\“Ü[ÛœÎˆÈP]]›ÝšY\Žˆ˜XÚÙ[™ÛÛ^˜ÛÛ›™XÝ[ÛËœP]]›ÝšY\ˆKˆJB‚ˆžHÂˆ™]\›ˆ]ØZ]Ù[™\˜]PÛÛ™\œØ][Û”Ý[[X\žJY\ÜØYÙ\ËYÙ[œ[“Z[šPÛÛ\][Û‹˜š[™
+YÙ[
+JBˆHš[˜[HÂˆYÙ[™\Ý›ÞJ
+BˆBˆB‚ˆ\Þ[˜È^Ü™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\ŠÙ\ÜÚ[Û’YˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÛZ\ÙO™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\”^[ØY[ˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHØ[››Ý^Ü™[[ÝH˜[œÙ™\Žˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›ˆ[ˆB‚ˆYˆ
+X[˜YÙYÛÜšÜÜXÙKšYOOHÛÜšÜÜXÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YHÙ\È›Ý™[Û™ÈÈÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYX
+Bˆ™]\›ˆ[ˆB‚ˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHØ[››Ý^Ü™[[ÝH˜[œÙ™\ˆ	ÜÙ\ÜÚ[Û’YNˆÝ[›ØÙ\ÜÚ[™Ø
+Bˆ™]\›ˆ[ˆB‚ˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+Ù\ÜÚ[Û’Y
+B‚ˆÛÛœÝÝ[[X\žHH]ØZ]\Ë™Ù[™\˜]T™[[ÝU˜[œÙ™\”Ý[[X\žJX[˜YÙY
+BˆYˆ
+\Ý[[X\žJHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚH˜Z[YÈÙ[™\˜]H™[[ÝH˜[œÙ™\ˆÝ[[X\žH›Üˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›ˆ[ˆB‚ˆ™]\›ˆÂˆÛÝ\˜ÙTÙ\ÜÚ[Û’YˆX[˜YÙYšYˆ˜[YNˆX[˜YÙY›˜[YKˆÙ\ÜÚ[Û”Ý]\ÎˆX[˜YÙYœÙ\ÜÚ[Û”Ý]\ËˆX™[ÎˆX[˜YÙY›X™[Ëˆ\›Z\ÜÚ[Û“[ÙNˆX[˜YÙYœ\›Z\ÜÚ[Û“[ÙKˆÝ[[X\žKˆBˆB‚ˆ\Þ[˜È[\Ü™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\ŠˆÛÜšÜÜXÙRYˆÝš[™Ëˆ^[ØYˆ™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\”^[ØYˆ
+Nˆ›ÛZ\ÙO[\Ü™[[ÝTÙ\ÜÚ[Û•˜[œÙ™\”™\Ý[ˆÂˆYˆ
+\^[ØY\[Ùˆ^[ØYOOH	ÛØš™XÝ	È\[Ùˆ^[ØYœÝ[[X\žHOOH	ÜÝš[™ÉÈ\^[ØYœÝ[[X\žKš[J
+JHÂˆ›ÝÈ™]È\œ›ÜŠ	Ò[˜[Y™[[ÝHÙ\ÜÚ[Ûˆ˜[œÙ™\ˆ^[ØY	ÊBˆB‚ˆÛÛœÝÙ\ÜÚ[ÛˆH]ØZ]\Ë˜Ü™X]TÙ\ÜÚ[ÛŠÛÜšÜÜXÙRYÂˆ˜[YNˆ^[ØY›˜[YKˆ\›Z\ÜÚ[Û“[ÙNˆ^[ØYœ\›Z\ÜÚ[Û“[ÙKˆÙ\ÜÚ[Û”Ý]\Îˆ^[ØYœÙ\ÜÚ[Û”Ý]\ËˆX™[Îˆ^[ØY›X™[ËˆJB‚ˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û‹šY
+BˆYˆ
+[X[˜YÙY
+HÂˆ›ÝÈ™]È\œ›ÜŠ˜[œÙ™\œ™YÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û‹šYHØ\È›ÝÜ™X]Y
+BˆB‚ˆX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHH^[ØYœÝ[[X\žKš[J
+BˆX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYH˜[ÙBˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+Ù\ÜÚ[Û‹šY
+B‚ˆ™]\›ˆÈÙ\ÜÚ[Û’YˆÙ\ÜÚ[Û‹šYBˆB‚ˆÊŠ‚ˆ
+ˆ^ÜHÙ\ÜÚ[Ûˆ\ÈHÜX›HÙ\ÜÚ[Û[™K‚ˆ
+‚ˆ
+ˆÝ\Î‚ˆ
+ˆKˆ˜[Y]HÙ\ÜÚ[Ûˆ^\ÝÈ[™™\ÛÛ™H]ÈÛÜšÜÜXÙBˆ
+ˆ‹ˆYˆÙ\ÜÚ[Ûˆ\È›ØÙ\ÜÚ[™Ë™Y\ÙH
+Ø[\ˆ]\ÝÝÜ]š\œÝ
+Bˆ
+ˆËˆ›\Ú[™[™È\œÚ\Ý[˜ÙHÜš]\Âˆ
+ˆˆÙ\šX[^™HÙ\ÜÚ[Ûˆ\™XÝÜžH[ÈH[™Bˆ
+‹Âˆ\Þ[˜È^ÜÙ\ÜÚ[ÛŠÙ\ÜÚ[Û’YˆÝš[™ËÛÜšÜÜXÙRYˆÝš[™ÊNˆ›ÛZ\ÙOÙ\ÜÚ[Û[™H[ˆÂˆÛÛœÝX[˜YÙYH\ËœÙ\ÜÚ[ÛœË™Ù]
+Ù\ÜÚ[Û’Y
+BˆYˆ
+[X[˜YÙY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHØ[››Ý^ÜÙ\ÜÚ[ÛŽˆ	ÜÙ\ÜÚ[Û’YH›Ý›Ý[™
+Bˆ™]\›ˆ[ˆB‚ˆYˆ
+X[˜YÙYÛÜšÜÜXÙKšYOOHÛÜšÜÜXÙRY
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YHÙ\È›Ý™[Û™ÈÈÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYX
+Bˆ™]\›ˆ[ˆB‚ˆYˆ
+X[˜YÙYš\Ô›ØÙ\ÜÚ[™ÊHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÙ\Ü]ÚHØ[››Ý^ÜÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YNˆÝ[›ØÙ\ÜÚ[™Ø
+Bˆ™]\›ˆ[ˆB‚ˆËÈ›\Ú[™[™ÈÜš]\ÈÈ[œÝ\™H”ÓÓ“\È\È]Bˆ\Ëœ\œÚ\ÝÙ\ÜÚ[ÛŠX[˜YÙY
+Bˆ]ØZ]Ù\ÜÚ[Û”\œÚ\Ý[˜ÙT]Y]YK™›\Ú
+Ù\ÜÚ[Û’Y
+B‚ˆÛÛœÝ[™HHÙ\šX[^™TÙ\ÜÚ[ÛŠX[˜YÙYÛÜšÜÜXÙKœ›ÛÝ]Ù\ÜÚ[Û’Y
+BˆYˆ
+X[™JHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠÙ\Ü]ÚH˜Z[YÈÙ\šX[^™HÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YX
+Bˆ™]\›ˆ[ˆB‚ˆ™]\›ˆ[™BˆB‚ˆÊŠ‚ˆ
+ˆ[\ÜHÙ\ÜÚ[Ûˆ[™H[ÈH\™Ù]ÛÜšÜÜXÙK‚ˆ
+‚ˆ
+ˆÝ\Î‚ˆ
+ˆKˆ˜[Y]H[™HÝXÝ\™H[™\™Ù]ÛÜšÜÜXÙBˆ
+ˆ‹ˆÙ[™\˜]H™]ÈÙ\ÜÚ[ÛˆQ
+›ÜšÊHÜˆ\ÙHÜšYÚ[˜[
+[Ý™JBˆ
+ˆËˆÜ™X]HÙ\ÜÚ[Ûˆ\™XÝÜžH[™Üš]H”ÓÓ“
+Èš[\Âˆ
+ˆˆ™YÚ\Ý\ˆÙ\ÜÚ[Ûˆ[‹[Y[[ÜžBˆ
+ˆKˆ[Z]Ù\ÜÚ[Û—ØÜ™X]Y]™[ˆ
+ˆ‹ˆ™]\›ˆ™]ÈÙ\ÜÚ[ÛˆQ[™ÛÛ\]Xš[]HØ\›š[™ÜÂˆ
+‹Âˆ\Þ[˜È[\ÜÙ\ÜÚ[ÛŠˆÛÜšÜÜXÙRYˆÝš[™Ëˆ[™NˆÙ\ÜÚ[Û[™Kˆ[ÙNˆ\Ü]Ú[ÙKˆ
+Nˆ›ÛZ\ÙOÈÙ\ÜÚ[Û’YˆÝš[™ÎÈØ\›š[™ÜÏÎˆÝš[™Ö×HOˆÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜHÝ\[™È[\ÜˆÛÜšÜÜXÙRYIÝÛÜšÜÜXÙRYK[ÙOIÛ[Ù_K[™TÙ\ÜÚ[Û’YIØ[™OËœÙ\ÜÚ[ÛËšXY\ËšYÏÈ	Ý[šÛ›ÝÛ‰ßKš[\ÏIØ[™OË™š[\ÏË›[™ÝÏÈX
+B‚ˆYˆ
+]˜[Y]P[™J[™JJHÂˆ›ÝÈ™]È\œ›ÜŠ	Ò[˜[YÙ\ÜÚ[Ûˆ[™IÊBˆB‚ˆÛÛœÝÛÜšÜÜXÙHHÙ]ÛÜšÜÜXÙPžS˜[YSÜ’Y
+ÛÜšÜÜXÙRY
+BˆYˆ
+]ÛÜšÜÜXÙJHÂˆ›ÝÈ™]È\œ›ÜŠÛÜšÜÜXÙH	ÝÛÜšÜÜXÙRYH›Ý›Ý[™
+BˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜH\™Ù]ÛÜšÜÜXÙNˆ‰ÝÛÜšÜÜXÙK›˜[Y_Hˆ]	ÝÛÜšÜÜXÙKœ›ÛÝ]X
+B‚ˆÛÛœÝØ\›š[™ÜÎˆÝš[™Ö×HH×BˆÛÛœÝÛÜšÜÜXÙT›ÛÝ]HÛÜšÜÜXÙKœ›ÛÝ]‚ˆËÈ]\›Z[™HÙ\ÜÚ[ÛˆQˆÛÛœÝÙ\ÜÚ[Û’YH[ÙHOOH	Û[Ý™IÂˆÈ[™KœÙ\ÜÚ[Û‹šXY\‹šYˆˆÙ[™\˜]TÙ\ÜÚ[Û’Y
+ÛÜšÜÜXÙT›ÛÝ]
+B‚ˆËÈÚXÚÈ›ÜˆQÛÛ\Ú[ÛˆÛˆ[Ý™BˆYˆ
+[ÙHOOH	Û[Ý™IÈ	‰ˆ\ËœÙ\ÜÚ[ÛœËš\ÊÙ\ÜÚ[Û’Y
+JHÂˆ›ÝÈ™]È\œ›ÜŠÙ\ÜÚ[Ûˆ	ÜÙ\ÜÚ[Û’YH[™XYH^\ÝÈ[ˆ\™Ù]ÛÜšÜÜXÙX
+BˆB‚ˆËÈÜ™X]HÙ\ÜÚ[Ûˆ\™XÝÜžHÚ][ÝX™\™XÝÜšY\ÂˆÛÛœÝÙ\ÜÚ[Û‘\ˆH[œÝ\™TÙ\ÜÚ[Û‘\ŠÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+B‚ˆËÈZ[HÝÜ™YÙ\ÜÚ[Ûˆœ›ÛH[™H]BˆÛÛœÝXY\ˆH[™KœÙ\ÜÚ[Û‹šXY\‚ˆÛÛœÝÝÜ™YÙ\ÜÚ[ÛŽˆÝÜ™YÙ\ÜÚ[ÛˆHÂˆYˆÙ\ÜÚ[Û’YˆÛÜšÜÜXÙT›ÛÝ]ˆÙÔÙ\ÜÚ[Û’YˆXY\‹œÙÔÙ\ÜÚ[Û’YËÈ™\Ù\™Y[š]X[NÈ›ÜšÈÙÚXÈ™[ÝÈX^HÛX\ˆ]ˆËÈ[Ø^\È™YÙ[™\˜]HÙÐÝÙ›ÜˆH\™Ù]ÛÜšÜÜXÙK‚ˆËÈHÛÝ\˜ÙHÙÐÝÙÚ[ÈÈH]ÛˆHÜšYÚ[˜][™ÈÙ\™\‚ˆËÈÚXÚÙ\Û‰Ý^\Ý\™H
+Ü›ÜÜË\Ù\™\ˆ˜[œÙ™\ŠK‚ˆÙÐÝÙˆÙ]Ù\ÜÚ[Û”ÝÜ˜YÙT]
+ÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+Kˆ˜[YNˆXY\‹›˜[YKˆÜ™X]Y]ˆXY\‹˜Ü™X]Y]ˆ\Ý\ÙY]ˆ]K››ÝÊ
+Kˆ\ÝY\ÜØYÙP]ˆXY\‹›\ÝY\ÜØYÙP]ˆ\Ñ›YÙÙYˆXY\‹š\Ñ›YÙÙYˆ\›Z\ÜÚ[Û“[ÙNˆXY\‹œ\›Z\ÜÚ[Û“[ÙKˆ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙNˆXY\‹œ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙKˆÙ\ÜÚ[Û”Ý]\ÎˆXY\‹œÙ\ÜÚ[Û”Ý]\ËˆX™[ÎˆXY\‹›X™[Ëˆ[˜X›YÛÝ\˜ÙTÛYÜÎˆXY\‹™[˜X›YÛÝ\˜ÙTÛYÜËˆÛÜšÚ[™Ñ\™XÝÜžNˆXY\‹ÛÜšÚ[™Ñ\™XÝÜžKˆ[Ù[ˆXY\‹›[Ù[ˆPÛÛ›™XÝ[ÛŽˆXY\‹›PÛÛ›™XÝ[Û‹ˆÛÛ›™XÝ[Û“ØÚÙYˆXY\‹˜ÛÛ›™XÝ[Û“ØÚÙYˆ[šÚ[™Ó]™[ˆXY\‹[šÚ[™Ó]™[ˆY[ŽˆXY\‹šY[‹ˆ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žNˆXY\‹˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žKˆ˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYˆXY\‹˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYˆY\ÜØYÙ\Îˆ[™KœÙ\ÜÚ[Û‹›Y\ÜØYÙ\ËˆÚÙ[•\ØYÙNˆXY\‹ÚÙ[•\ØYÙHÏÈQUSÕÒÑS—ÕTÐQÑKˆËÈ“ÕNˆÚXÚÛÝ]\È[[[Û˜[H“ÕÛÜYYœ›ÛHHÛÝ\˜ÙHXY\‹‚ˆËÈÜÝ\ÜXÚYšXÈX[˜YÙY]ÛÜšÝ™YHQÈ[™]È\™H›ÝÜX›NÈ[\ÜˆËÈ[™™[[ÝH˜[œÙ™\ˆ]\Ý™]™\ˆ™XÜ™X]HÜˆÛZ[HÝÛ™\œÚ\ÙˆBˆËÈÛÝ\˜ÙKZÜÝÛÜšÝ™YKˆH\Ý[˜][ÛˆÝ\ÈÚ]›ÈÚXÚÛÝ]™XÛÜ™‚ˆB‚ˆËÈ›ÜšË\ÜXÚYšXÎˆÙ]\ÑÈœ˜[˜Ú[™ÈYˆœ˜[˜Ú[™›È›ÝšYYˆYˆ
+[ÙHOOH	Ù›ÜšÉÈ	‰ˆ[™K˜œ˜[˜Ú[™›ÊHÂˆÝÜ™YÙ\ÜÚ[Û‹˜œ˜[˜Úœ›ÛTÙÔÙ\ÜÚ[Û’YH[™K˜œ˜[˜Ú[™›ËœÙÔÙ\ÜÚ[Û’YˆÝÜ™YÙ\ÜÚ[Û‹˜œ˜[˜Úœ›ÛTÙÕ\›’YH[™K˜œ˜[˜Ú[™›ËœÙÕ\›’YˆÝÜ™YÙ\ÜÚ[Û‹˜œ˜[˜Úœ›ÛTÙÐÝÙH[™K˜œ˜[˜Ú[™›ËœÙÐÝÙˆB‚ˆËÈ›ÜšË\ÜXÚYšXÎˆÛX\ˆÚ\š[™ÈÝ]H[™][\™\Ý[YKYš\œÝÝ˜]YÞBˆYˆ
+[ÙHOOH	Ù›ÜšÉÊHÂˆÝÜ™YÙ\ÜÚ[Û‹œÚ\™Y\›H[™Yš[™YˆÝÜ™YÙ\ÜÚ[Û‹œÚ\™YYH[™Yš[™Y‚ˆËÈ™\Ý[YKYš\œÝˆžHÈš[™HÛÛ\]X›HHÛÛ›™XÝ[ÛˆÛˆH\™Ù]ÛÜšÜÜXÙK‚ˆËÈYˆ›Ý[™[™HÙ\ÜÚ[Ûˆ\È[ˆÙÔÙ\ÜÚ[Û’Y™\Ù\™H]›ÜˆTK[]™[™\Ý[YK‚ˆËÈYˆ›ÝÛX\ˆÑÈÝ]H[™˜[˜XÚÈÈ˜[œÙ™\œ™YÙ\ÜÚ[ÛˆÝ[[X\žK‚ˆÛÛœÝÛÝ\˜ÙT›ÝšY\•\HHXY\‹›PÛÛ›™XÝ[Û‚ˆÈÙ]PÛÛ›™XÝ[ÛŠXY\‹›PÛÛ›™XÝ[ÛŠOËœ›ÝšY\•\Bˆˆ[™Yš[™YˆÛÛœÝÛÛ\]X›PÛÛ›™XÝ[ÛˆHÛÝ\˜ÙT›ÝšY\•\BˆÈ\Ë™š[™ÛÛ\]X›SPÛÛ›™XÝ[ÛŠÛÜšÜÜXÙT›ÛÝ]ÛÝ\˜ÙT›ÝšY\•\JBˆˆ[‚ˆYˆ
+ÛÛ\]X›PÛÛ›™XÝ[Ûˆ	‰ˆÝÜ™YÙ\ÜÚ[Û‹œÙÔÙ\ÜÚ[Û’Y
+HÂˆËÈ™\Ý[YH]ˆÛÛ\]X›HÜ™Y[X[È^\Ý8 %™\Ù\™HÑÈÙ\ÜÚ[ÛˆQˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜH›ÜšÎˆÛÛ\]X›H	ÜÛÝ\˜ÙT›ÝšY\•\_HÛÛ›™XÝ[Ûˆ‰ØÛÛ\]X›PÛÛ›™XÝ[ÛŸHˆ›Ý[™8 %™\Ù\š[™ÈÙÔÙ\ÜÚ[Û’Y›Üˆ™\Ý[YX
+BˆÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛˆHÛÛ\]X›PÛÛ›™XÝ[Û‚ˆÝÜ™YÙ\ÜÚ[Û‹˜ÛÛ›™XÝ[Û“ØÚÙYH˜[ÙBˆH[ÙHÂˆËÈÝ[[X\žH]ˆ›ÈÛÛ\]X›HÛÛ›™XÝ[ÛˆÜˆ›ÈÑÈÙ\ÜÚ[Ûˆ8 %ÛX\ˆ›Üˆœ™\ÚÝ\ˆYˆ
+ÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜH›ÜšÎˆ›ÈÛÛ\]X›H	ÜÛÝ\˜ÙT›ÝšY\•\HÏÈ	Ý[šÛ›ÝÛ‰ßHÛÛ›™XÝ[Ûˆ8 %ÛX\š[™ËÚ[\ÙHÝ[[X\žHÛÛ^
+BˆBˆÝÜ™YÙ\ÜÚ[Û‹œÙÔÙ\ÜÚ[Û’YH[™Yš[™YˆÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛˆH[™Yš[™YˆÝÜ™YÙ\ÜÚ[Û‹˜ÛÛ›™XÝ[Û“ØÚÙYH˜[ÙBˆBˆËÈÛX\ˆ[šÚ[™È]™[ÛÈHÙ\ÜÚ[Ûˆ[š\š]ÈHÛÜšÜÜXÙHY˜][ˆÝÜ™YÙ\ÜÚ[Û‹[šÚ[™Ó]™[H[™Yš[™YˆËÈÛX\ˆÛÜšÚ[™È\™XÝÜžH8 %HÛÝ\˜ÙH]ÛÛ‰Ý^\ÝÛˆHY™™\™[Ù\™\‹‚ˆËÈH\Ù\ˆØ[ˆÙ]H™]ÈÝÙY\ˆHÙ\ÜÚ[Ûˆ\È˜[œÙ™\œ™Y‚ˆÝÜ™YÙ\ÜÚ[Û‹ÛÜšÚ[™Ñ\™XÝÜžHH[™Yš[™YˆB‚ˆËÈÚXÚÈÛÝ\˜ÙHÛÛ\]Xš[]H
+™Y›Ü™HÜš][™È”ÓÓ“ÛÈš^\È\™H\œÚ\ÝY
+BˆYˆ
+ÝÜ™YÙ\ÜÚ[Û‹™[˜X›YÛÝ\˜ÙTÛYÜÏË›[™Ý
+HÂˆÛÛœÝ]˜Z[X›TÛÝ\˜Ù\ÈHØYÛÜšÜÜXÙTÛÝ\˜Ù\ÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝ]˜Z[X›TÛYÜÈH™]ÈÙ]
+]˜Z[X›TÛÝ\˜Ù\Ë›X\
+ÈOˆË˜ÛÛ™šYËœÛYÊJBˆÛÛœÝZ\ÜÚ[™ÔÛÝ\˜Ù\ÈHÝÜ™YÙ\ÜÚ[Û‹™[˜X›YÛÝ\˜ÙTÛYÜË™š[\ŠÈOˆX]˜Z[X›TÛYÜËš\ÊÊJBˆYˆ
+Z\ÜÚ[™ÔÛÝ\˜Ù\Ë›[™Ýˆ
+HÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÚ[\ÜHÛÝ\˜Ù\È›Ý]˜Z[X›Nˆ	ÛZ\ÜÚ[™ÔÛÝ\˜Ù\Ëš›Ú[Š	Ë	Ê_X
+BˆØ\›š[™ÜËœ\Ú
+ÛÝ\˜Ù\È›Ý]˜Z[X›H[ˆ\™Ù]ÛÜšÜÜXÙNˆ	ÛZ\ÜÚ[™ÔÛÝ\˜Ù\Ëš›Ú[Š	Ë	Ê_X
+BˆBˆB‚ˆËÈÚXÚÈHÛÛ›™XÝ[ÛˆÛÛ\]Xš[]H›Üˆ[Ý™H[ÙH
+›ÜšÈ[™XYHÛX\™YX›Ý™JBˆYˆ
+[ÙHOOH	Û[Ý™IÈ	‰ˆÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜHÚXÚÚ[™ÈHÛÛ›™XÝ[ÛŽˆ‰ÜÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŸH˜
+BˆÛÛœÝÛÛ›ˆH™\ÛÛ™TÙ\ÜÚ[ÛÛÛ›™XÝ[ÛŠÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[Û‹[™Yš[™Y
+BˆYˆ
+XÛÛ›ŠHÂˆÙ\ÜÚ[Û“ÙËØ\›ŠÚ[\ÜHHÛÛ›™XÝ[Ûˆ‰ÜÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŸHˆ›Ý›Ý[™8 %ÛX\š[™ÈÈ\ÙHY˜][
+BˆØ\›š[™ÜËœ\Ú
+HÛÛ›™XÝ[Ûˆ‰ÜÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŸHˆ›Ý›Ý[™[ˆ\™Ù]8 %Ù\ÜÚ[ÛˆÚ[\ÙHY˜][
+BˆÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛˆH[™Yš[™YˆÝÜ™YÙ\ÜÚ[Û‹˜ÛÛ›™XÝ[Û“ØÚÙYH˜[ÙBˆH[ÙHÂˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜHHÛÛ›™XÝ[Ûˆ‰ÜÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŸHˆ™\ÛÛ™YÒØ
+BˆBˆH[ÙHYˆ
+[ÙHOOH	Û[Ý™IÈ	‰ˆ\ÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛŠHÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÖÚ[\ÜH›ÈHÛÛ›™XÝ[Ûˆ[ˆ[™H8 %Ú[\ÙHY˜][	ÊBˆB‚ˆËÈÜš]H”ÓÓ“š[H
+Y\ˆÛÛ\]Xš[]HÚXÚÜÈÛÈ™[X\Y˜[Y\È\™H\œÚ\ÝY
+BˆÛÛœÝÙ\ÜÚ[Û‘š[HHÙ]Ù\ÜÚ[Û‘š[T]
+ÛÜšÜÜXÙT›ÛÝ]Ù\ÜÚ[Û’Y
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜHÜš][™È”ÓÓ“ˆ	ÜÙ\ÜÚ[Û‘š[_H
+PÛÛ›™XÝ[ÛIÜÝÜ™YÙ\ÜÚ[Û‹›PÛÛ›™XÝ[ÛˆÏÈ	ÙY˜][	ßKY\ÜØYÙ\ÏIÜÝÜ™YÙ\ÜÚ[Û‹›Y\ÜØYÙ\Ë›[™ÝJX
+BˆÜš]TÙ\ÜÚ[Û’œÛÛ›
+Ù\ÜÚ[Û‘š[KÝÜ™YÙ\ÜÚ[ÛŠB‚ˆËÈÜš]H[[™Hš[\È
+]XÚY[Ë[œË]KÝÛ›ØYË]ËŠBˆËÈ\Ù\È™\ÝÜ™Qš[\Ê
+H›Üˆ]˜]™\œØ[Ú^™K[™˜\ÙM˜[Y][Û‹‚ˆ™\ÝÜ™Qš[\ÊÙ\ÜÚ[Û‘\‹[™K™š[\ÊB‚ˆËÈ™YÚ\Ý\ˆ[‹[Y[[ÜžH8 %\ÜÈÙ\ÜÚ[ÛˆY]Y]HÚ]Ý]Y\ÜØYÙ\ÈÈ]›ÚYˆËÈÝÜ™YY\ÜØYÙV×HœÈY\ÜØYÙV×H\HZ\ÛX]Ú[ˆÛÛ™\Y\ÜØYÙ\ÈÙ\\˜][BˆÛÛœÝÈY\ÜØYÙ\Îˆ[™SY\ÜØYÙ\Ë‹‹œÙ\ÜÚ[Û“Y]HHHÝÜ™YÙ\ÜÚ[Û‚ˆÛÛœÝX[˜YÙYHÜ™X]SX[˜YÙYÙ\ÜÚ[ÛŠÙ\ÜÚ[Û“Y]KÛÜšÜÜXÙKÂˆY\ÜØYÙ\ÓØYYˆYKˆÛÜšÚ[™Ñ\™XÝÜžNˆÝÜ™YÙ\ÜÚ[Û‹ÛÜšÚ[™Ñ\™XÝÜžKˆJBˆX[˜YÙY›Y\ÜØYÙ\ÈH[™SY\ÜØYÙ\Ë›X\
+ÝÜ™YÓY\ÜØYÙJB‚ˆÙ]\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YX[˜YÙYœ\›Z\ÜÚ[Û“[ÙHÏÈ	Ø\ÚÉËÈÚ[™ÙYžNˆ	Ü™\ÝÜ™IÈJBˆYˆ
+X[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJHÂˆY˜]T™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJÙ\ÜÚ[Û’YX[˜YÙYœ™]š[Ý\Ô\›Z\ÜÚ[Û“[ÙJBˆB‚ˆ\ËœÙ\ÜÚ[ÛœËœÙ]
+Ù\ÜÚ[Û’YX[˜YÙY
+B‚ˆËÈ[š]X[^™H]]ÛX][ÛˆY]Y]BˆÛÛœÝ]]ÛX][Û”Þ\Ý[HH\Ë˜]]ÛX][Û”Þ\Ý[\Ë™Ù]
+ÛÜšÜÜXÙT›ÛÝ]
+BˆYˆ
+]]ÛX][Û”Þ\Ý[JHÂˆ]]ÛX][Û”Þ\Ý[KœÙ][š]X[Ù\ÜÚ[Û“Y]Y]JÙ\ÜÚ[Û’YÂˆ\›Z\ÜÚ[Û“[ÙNˆÝÜ™YÙ\ÜÚ[Û‹œ\›Z\ÜÚ[Û“[ÙKˆX™[ÎˆÝÜ™YÙ\ÜÚ[Û‹›X™[Ëˆ\Ñ›YÙÙYˆÝÜ™YÙ\ÜÚ[Û‹š\Ñ›YÙÙYˆÙ\ÜÚ[Û”Ý]\ÎˆÝÜ™YÙ\ÜÚ[Û‹œÙ\ÜÚ[Û”Ý]\ËˆÙ\ÜÚ[Û“˜[YNˆX[˜YÙY›˜[YKˆJBˆB‚ˆËÈ[Z]Ù\ÜÚ[Û—ØÜ™X]YÛÈ™[™\™\ˆXÚÜÈ]\ˆ\ËœÙ[™]™[
+È\Nˆ	ÜÙ\ÜÚ[Û—ØÜ™X]Y	ËÙ\ÜÚ[Û’YKÛÜšÜÜXÙRY
+B‚ˆÙ\ÜÚ[Û“ÙËš[™›ÊÚ[\ÜHÛÛ\]NˆÙ\ÜÚ[Û’YIÜÙ\ÜÚ[Û’YK˜[œÙ™\œ™YÝ[[X\žOIÛX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žHÈ	ÛX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žK›[™ÝHÚ\œØˆ	Û›Û™IßK\YYIÛX[˜YÙY˜[œÙ™\œ™YÙ\ÜÚ[Û”Ý[[X\žP\YYKØ\›š[™ÜÏIÝØ\›š[™ÜË›[™ÝˆÈØ\›š[™ÜËš›Ú[Š	ÎÈ	ÊHˆ	Û›Û™IßX
+Bˆ™]\›ˆÈÙ\ÜÚ[Û’YØ\›š[™ÜÎˆØ\›š[™ÜË›[™ÝˆÈØ\›š[™ÜÈˆ[™Yš[™YBˆB‚ˆÊŠ‚ˆ
+ˆš[™[ˆHÛÛ›™XÝ[ÛˆÛˆ\ÈÙ\™\ˆ]X]Ú\ÈHÚ]™[ˆ›ÝšY\ˆ\K‚ˆ
+ˆÚXÚÜÈÛÜšÜÜXÙHY˜][š\œÝ[ˆ˜[È˜XÚÈÈ[žHX]Ú[™ÈÛÛ›™XÝ[Û‹‚ˆ
+‹Âˆš]˜]Hš[™ÛÛ\]X›SPÛÛ›™XÝ[ÛŠÛÜšÜÜXÙT›ÛÝ]ˆÝš[™Ë›ÝšY\•\NˆÝš[™ÊNˆÝš[™È[ÂˆÛÛœÝÜÐÛÛ™šYÈHØYÛÜšÜÜXÙPÛÛ™šYÊÛÜšÜÜXÙT›ÛÝ]
+BˆÛÛœÝY˜][ÛYÈHÜÐÛÛ™šYÏË™Y˜][ÏË™Y˜][PÛÛ›™XÝ[Û‚ˆYˆ
+Y˜][ÛYÊHÂˆÛÛœÝÛÛ›ˆHÙ]PÛÛ›™XÝ[ÛŠY˜][ÛYÊBˆYˆ
+ÛÛ›Ëœ›ÝšY\•\HOOH›ÝšY\•\JH™]\›ˆY˜][ÛYÂˆBˆËÈ˜[˜XÚÎˆ[žHÛÛ›™XÝ[ÛˆÚ]X]Ú[™È›ÝšY\ˆ\BˆÛÛœÝÛÛ›™XÝ[ÛœÈHÙ]PÛÛ›™XÝ[ÛœÊ
+BˆÛÛœÝX]ÚHÛÛ›™XÝ[ÛœË™š[™
+ÈOˆËœ›ÝšY\•\HOOH›ÝšY\•\JBˆ™]\›ˆX]ÚËœÛYÈÏÈ[ˆB‚ˆÊŠ‚ˆ
+ˆÛX[ˆ\[™\ÛÝ\˜Ù\È[žHHÙ\ÜÚ[Û“X[˜YÙ\‹‚ˆ
+ˆÚÝ[™HØ[YÛˆ\Ú]ÝÛˆÈ™]™[™\ÛÝ\˜ÙHXZÜË‚ˆ
+‹ÂˆÛX[\
+
+Nˆ›ÚYÂˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÛX[š[™È\™\ÛÝ\˜Ù\Ë‹‹‰ÊB‚ˆËÈÝÜ[ÛÛ™šYÕØ]Ú\œÈ
+š[HÞ\Ý[HØ]Ú\œÊBˆ›Üˆ
+ÛÛœÝÜ]Ø]Ú\—HÙˆ\Ë˜ÛÛ™šYÕØ]Ú\œÊHÂˆØ]Ú\‹œÝÜ
+
+BˆÙ\ÜÚ[Û“ÙËš[™›ÊÝÜYÛÛ™šYÈØ]Ú\ˆ›Üˆ	Ü]X
+BˆBˆ\Ë˜ÛÛ™šYÕØ]Ú\œË˜ÛX\Š
+B‚ˆËÈ\ÜÜÙH[]]ÛX][Û”Þ\Ý[\È
+[˜ÛY\ÈØÚY[\‹[™\œË[™]™[ÙÙÙ\œÊBˆ›Üˆ
+ÛÛœÝÝÛÜšÜÜXÙT]]]ÛX][Û”Þ\Ý[WHÙˆ\Ë˜]]ÛX][Û”Þ\Ý[\ÊHÂˆžHÂˆ]]ÛX][Û”Þ\Ý[K™\ÜÜÙJ
+BˆÙ\ÜÚ[Û“ÙËš[™›Ê\ÜÜÙY]]ÛX][Û”Þ\Ý[H›Üˆ	ÝÛÜšÜÜXÙT]X
+BˆHØ]Ú
+\œ›ÜŠHÂˆÙ\ÜÚ[Û“ÙË™\œ›ÜŠ˜Z[YÈ\ÜÜÙH]]ÛX][Û”Þ\Ý[H›Üˆ	ÝÛÜšÜÜXÙT]N˜\œ›ÜŠBˆBˆBˆ\Ë˜]]ÛX][Û”Þ\Ý[\Ë˜ÛX\Š
+B‚ˆËÈÛX\ˆ[[™[™È[H›\Ú[Y\œÂˆ›Üˆ
+ÛÛœÝÜÙ\ÜÚ[Û’Y[Y\—HÙˆ\Ë™[Q›\Ú[Y\œÊHÂˆÛX\•[Y[Ý]
+[Y\ŠBˆBˆ\Ë™[Q›\Ú[Y\œË˜ÛX\Š
+Bˆ\Ëœ[™[™Ñ[\Ë˜ÛX\Š
+B‚ˆËÈÛX\ˆ[™[™ÈÜ™Y[X[™\ÛÛ™\œÈ
+^HÛÛ‰Ý™H™\ÛÛ™Y]™]™[ÈY[[ÜžHXZÊBˆ\Ëœ[™[™ÐÜ™Y[X[™\ÛÛ™\œË˜ÛX\Š
+Bˆ\Ëœ[™[™Ô\›Z\ÜÚ[Û”™\]Y\ÝË˜ÛX\Š
+Bˆ\Ë˜YZ[”™[Y[X™\\›Ý˜[Ë˜ÛX\Š
+B‚ˆËÈÛX[ˆ\Ù\ÜÚ[Û‹\ØÛÜYÛÛØ[˜XÚÜÈ›Üˆ[Ù\ÜÚ[ÛœÂˆ›Üˆ
+ÛÛœÝÙ\ÜÚ[Û’YÙˆ\ËœÙ\ÜÚ[ÛœËšÙ^\Ê
+JHÂˆ[œ™YÚ\Ý\”Ù\ÜÚ[Û”ØÛÜYÛÛØ[˜XÚÜÊÙ\ÜÚ[Û’Y
+BˆB‚ˆÙ\ÜÚ[Û“ÙËš[™›Ê	ÐÛX[\ÛÛ\]IÊBˆBŸB

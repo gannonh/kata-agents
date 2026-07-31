@@ -8,7 +8,7 @@
  *    reference, even for the final owner (removal is a separate explicit choice);
  *  - a shared worktree survives deletion of one owner while another remains.
  */
-import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
+import { describe, test, expect, afterEach, beforeEach, jest } from 'bun:test'
 import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
@@ -156,6 +156,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
       },
     })
     managed.agent = {
+      quiesceForTeardown: async () => {},
       dispose: () => {
         throw new Error('injected agent cleanup failure')
       },
@@ -643,14 +644,12 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     const order: string[] = []
     managed.isProcessing = true
     managed.agent = {
-      forceAbort: () => {
+      quiesceForTeardown: async () => {
         order.push(
           existsSync(prep.checkout.checkoutPath)
-            ? 'forceAbort:checkout-present'
-            : 'forceAbort:checkout-removed',
+            ? 'quiesce:checkout-present'
+            : 'quiesce:checkout-removed',
         )
-        // Real backends clear their own flag here; the turn loop clears the
-        // session-level one as it unwinds.
         managed.isProcessing = false
       },
       dispose: () => {
@@ -662,7 +661,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
       removeManagedWorktree: true,
     })
 
-    expect(order[0]).toBe('forceAbort:checkout-present')
+    expect(order[0]).toBe('quiesce:checkout-present')
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
@@ -831,11 +830,8 @@ describe('SessionManager.deleteSession — removeManagedWorktree is safe for any
   })
 })
 
-describe('SessionManager.deleteSession — removal waits for real agent quiescence', () => {
-  // `forceAbort` only requests teardown. A fixed sleep was a guess: a subprocess
-  // still mid-write can land files afterwards, and a forced removal would then
-  // discard work no destructive confirmation ever counted.
-  test('waits for the backend to report idle before removing the checkout', async () => {
+describe('SessionManager.deleteSession — backend quiescence contract', () => {
+  test('waits for backend teardown before inspecting or removing the checkout', async () => {
     const repo = tmp()
     await initRepo(repo)
     const { sm } = makeManager()
@@ -848,51 +844,61 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
       baseRef: 'main',
     })
 
-    // The backend keeps reporting "processing" for several polls after the
-    // abort, then goes idle. Removal must not happen until it does.
-    let processing = true
-    let pollsWhileProcessing = 0
-    const observed: string[] = []
-    managed.isProcessing = true
+    let release!: () => void
+    const teardown = new Promise<void>((resolve) => { release = resolve })
+    let quiesceCalled = false
     managed.agent = {
-      forceAbort: () => {},
-      dispose: () => {},
-      isProcessing: () => {
-        if (processing) {
-          pollsWhileProcessing += 1
-          if (pollsWhileProcessing >= 3) {
-            processing = false
-            // The turn loop unwinding is what clears the session-level flag.
-            managed.isProcessing = false
-            observed.push(
-              existsSync(prep.checkout.checkoutPath) ? 'idle:present' : 'idle:already-removed',
-            )
-          }
-        }
-        return processing
+      quiesceForTeardown: async () => {
+        quiesceCalled = true
+        await teardown
       },
+      dispose: () => {},
     } as any
 
-    const result = await sm.deleteSession('slowStop', {
-      removeManagedWorktree: true,
-    })
+    const deletion = sm.deleteSession('slowStop', { removeManagedWorktree: true })
+    await Promise.resolve()
+    await Promise.resolve()
 
-    // It polled rather than assuming, and the checkout was still intact for the
-    // whole time the backend claimed to be busy.
-    expect(pollsWhileProcessing).toBeGreaterThanOrEqual(3)
-    expect(observed).toEqual(['idle:present'])
+    expect(quiesceCalled).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+
+    release()
+    const result = await deletion
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
   })
 
-  test('refuses removal — and the deletion — when the agent never stops', async () => {
+  test('calls teardown for an idle agent that still owns a persistent checkout runtime', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 'idlePi', wsRoot)
+    const prep = await sm.prepareCheckout('idlePi', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    let quiesceCalls = 0
+    managed.agent = {
+      quiesceForTeardown: async () => { quiesceCalls += 1 },
+      dispose: () => {},
+    } as any
+
+    const result = await sm.deleteSession('idlePi', { removeManagedWorktree: true })
+    expect(quiesceCalls).toBe(1)
+    expect(result.deleted).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+  })
+
+  test('blocks managed removal on teardown rejection but still permits plain deletion', async () => {
     const repo = tmp()
     await initRepo(repo)
     const { sm } = makeManager()
     const wsRoot = tmp()
     const managed = injectSession(sm, 'wedged', wsRoot)
-
     const prep = await sm.prepareCheckout('wedged', {
       mode: 'managed-worktree',
       workingDirectory: repo,
@@ -901,73 +907,76 @@ describe('SessionManager.deleteSession — removal waits for real agent quiescen
 
     managed.isProcessing = true
     managed.agent = {
-      forceAbort: () => {},
+      quiesceForTeardown: async () => { throw new Error('exit unconfirmed') },
       dispose: () => {},
-      isProcessing: () => true,
     } as any
 
-    const result = await (sm as any).deleteSession(
-      'wedged',
-      { removeManagedWorktree: true },
-    )
-
-    // A wedged backend must never let a force removal race it. Nothing is
-    // deleted, so the session stays and can be deleted again — without the
-    // removal option it never touches the checkout at all.
-    expect(result.deleted).toBe(false)
-    expect(result.worktreeRemoval?.blocked).toBe(true)
-    expect(result.worktreeRemoval?.blockedReason).toContain('has not finished stopping')
+    const blocked = await sm.deleteSession('wedged', { removeManagedWorktree: true })
+    expect(blocked.deleted).toBe(false)
+    expect(blocked.worktreeRemoval?.blocked).toBe(true)
+    expect(blocked.worktreeRemoval?.blockedReason).toContain('has not finished stopping')
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
     expect((sm as any).sessions.has('wedged')).toBe(true)
 
     const plain = await sm.deleteSession('wedged')
     expect(plain.deleted).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-  }, 20000)
-})
+  })
 
-describe('SessionManager.deleteSession — the backend flag alone cannot wave removal through', () => {
-  // `forceAbort` synchronously clears the state `isProcessing()` reads on both
-  // backends (ClaudeAgent nulls `currentQuery`, PiAgent sets `_isProcessing =
-  // false`), so it reports idle the instant the abort is requested. If that were
-  // the barrier, removal would proceed while the turn was still unwinding.
-  test('keeps waiting while the turn is unwinding even though the backend claims idle', async () => {
+  test('uses a bounded timeout when backend teardown never settles', async () => {
+    jest.useFakeTimers()
+    try {
+      const { sm } = makeManager()
+      const wsRoot = tmp()
+      const managed = injectSession(sm, 'timeout', wsRoot)
+      managed.agent = {
+        quiesceForTeardown: () => new Promise<void>(() => {}),
+      } as any
+
+      const waiting = (sm as any).waitForAgentQuiescence('timeout', managed, 50)
+      jest.advanceTimersByTime(50)
+      await expect(waiting).resolves.toBe(false)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test('holds the destructive inspection until the final write is inside the quiesced boundary', async () => {
     const repo = tmp()
     await initRepo(repo)
     const { sm } = makeManager()
     const wsRoot = tmp()
-    const managed = injectSession(sm, 'abortLies', wsRoot)
-
-    const prep = await sm.prepareCheckout('abortLies', {
+    const managed = injectSession(sm, 'lastWrite', wsRoot)
+    const prep = await sm.prepareCheckout('lastWrite', {
       mode: 'managed-worktree',
       workingDirectory: repo,
       baseRef: 'main',
     })
+    const displayedRisk = await sm.inspectManagedWorktreeRemoval('lastWrite')
 
-    const observed: string[] = []
-    managed.isProcessing = true
+    let release!: () => void
+    const teardown = new Promise<void>((resolve) => { release = resolve })
     managed.agent = {
-      // Mirrors real backend behaviour: idle immediately on abort.
-      forceAbort: () => {},
+      quiesceForTeardown: async () => { await teardown },
       dispose: () => {},
-      isProcessing: () => false,
     } as any
 
-    // The turn loop finishes a little later, as `onProcessingStopped` would.
-    setTimeout(() => {
-      observed.push(existsSync(prep.checkout.checkoutPath) ? 'unwound:present' : 'unwound:removed')
-      managed.isProcessing = false
-    }, 400)
-
-    const result = await sm.deleteSession('abortLies', {
+    const deletion = sm.deleteSession('lastWrite', {
       removeManagedWorktree: true,
+      forceWorktreeRemoval: true,
+      worktreeRemovalConfirmation: confirmationFor(displayedRisk),
     })
+    await Promise.resolve()
+    await Promise.resolve()
+    writeFileSync(join(prep.checkout.checkoutPath, 'last-write.txt'), 'completed before teardown\n')
+    release()
 
-    // The checkout must still have been intact when the turn finally unwound —
-    // proof the wait outlasted the backend's immediate "idle".
-    expect(observed).toEqual(['unwound:present'])
-    expect(result.deleted).toBe(true)
-    expect(result.worktreeRemoval?.removed).toBe(true)
+    const result = await deletion
+    expect(result.deleted).toBe(false)
+    expect(result.worktreeRemoval?.blocked).toBe(true)
+    expect(result.worktreeRemoval?.blockedReason).toContain('changed after')
+    expect(existsSync(join(prep.checkout.checkoutPath, 'last-write.txt'))).toBe(true)
+    expect((sm as any).sessions.has('lastWrite')).toBe(true)
   })
 })
 
