@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-07-31
+
+* **Agent quiescence plan approved**: issue #21's awaitable teardown contract was approved for Build on the existing feature branch and draft PR. Implementation will proceed through the shared barrier, provider teardown, SessionManager boundary, and verification phases.
+
 ## 2026-07-30
 
 * **Agent quiescence plan drafted**: added the approval-gated [awaitable agent teardown quiescence spec](specs/2026-07-30-agent-quiescence-contract-design.md), linked it from the specs roadmap and documentation index, and mapped issue #21 to a required backend teardown contract, provider process-exit guarantees, SessionManager integration, deterministic safety tests, and a lesser-model Build handoff.

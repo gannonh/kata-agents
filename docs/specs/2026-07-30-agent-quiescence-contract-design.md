@@ -2,7 +2,8 @@
 type: Spec
 title: Awaitable agent teardown quiescence contract
 description: Replace inferred agent-idle polling with a backend-owned teardown contract before destructive managed-worktree operations.
-status: Draft
+status: Approved
+approved_at: 2026-07-31T01:35:49Z
 tags: [agents, backends, git, worktrees, sessions, safety]
 timestamp: 2026-07-30T00:00:00Z
 ---
@@ -11,10 +12,8 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## Status
 
-Draft — awaiting approval. This document is the first commit on the long-lived
-feature branch for [issue #21](https://github.com/gannonh/kata-agents/issues/21).
-Build must not begin until the status is changed to **Approved** in both this
-section and the frontmatter.
+Approved — Build authorized by the user on 2026-07-31. This document is the
+first commit on the long-lived feature branch for [issue #21](https://github.com/gannonh/kata-agents/issues/21).
 
 ## Goal
 
@@ -431,8 +430,7 @@ Use the repository's actual documentation validation command if
    or PR.
 2. Read `AGENTS.md`, `packages/shared/CLAUDE.md`, this spec, issue #21, and the
    managed-worktree ADR before editing.
-3. Confirm this spec says `Approved` in both status locations. If it still says
-   `Draft`, stop and ask for approval.
+3. Confirm this spec says `Approved` in both status locations before editing.
 4. Execute Phases 1–4 in order. Do not combine the three implementation commits
    into one work-in-progress commit.
 5. Run each phase gate before its commit. Fix failures attributable to the
@@ -450,5 +448,5 @@ Use the repository's actual documentation validation command if
 
 Approve this spec to authorize Build with the selected
 `quiesceForTeardown(reason)` contract and the four implementation phases above.
-Requested changes return the spec to Draft and must be incorporated before any
-production code is written.
+Requested changes after approval return the spec to Draft and must be
+incorporated before continuing implementation.

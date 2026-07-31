@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-07-31
+
+* **Approved awaitable agent teardown contract**: the user approved [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) for Build on the long-lived feature branch and draft PR #23.
+
 ## 2026-07-30
 
 * **Drafted awaitable agent teardown quiescence contract**: added [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) for [#21](https://github.com/gannonh/kata-agents/issues/21). The approval-gated plan keeps synchronous `forceAbort` semantics, adds required `quiesceForTeardown(reason)`, tracks nested `BaseAgent.chat()` completion, requires confirmed Pi child-process exit, replaces SessionManager polling and its 100 ms floor, and provides phased tasks, pass/fail acceptance criteria, deterministic race tests, and a lesser-model Build handoff.
