@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-01
+
+* **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, with runtime resolution and preferred-default coverage. Added focused catalog and registry tests.
+
 ## 2026-07-31
 
 * **Implemented awaitable agent teardown contract**: [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) is now Implemented after the user-approved Build on draft PR #23. Evidence covers the shared barrier, Claude query unwind, Pi child exit, SessionManager removal boundary, and deterministic race tests.

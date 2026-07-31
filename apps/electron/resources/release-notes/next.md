@@ -10,6 +10,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **GPT-5.6 OpenAI models** — Added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, including runtime resolution and updated defaults.
 - **Default theme brand color** — The distributed Default theme now uses the Kata brand highlight color instead of the previous purple accent across bundled theme files and renderer defaults.
 - **CLI rename** — The terminal client package is now `@kata-sh/agents-cli` with binary `kata-agents-cli`. Bundled docs and reference guides were updated to match.
 

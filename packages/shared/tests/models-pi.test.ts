@@ -36,4 +36,13 @@ describe('models-pi filtering', () => {
     expect(ids).toContain('pi/deepseek-v4-flash');
     expect(ids).toContain('pi/deepseek-v4-pro');
   });
+
+  it('includes GPT-5.6 models for OpenAI API and Codex catalogs', () => {
+    const expected = ['pi/gpt-5.6-sol', 'pi/gpt-5.6-terra', 'pi/gpt-5.6-luna'];
+
+    for (const provider of ['openai', 'openai-codex']) {
+      const ids = getPiModelsForAuthProvider(provider).map(m => m.id);
+      expect(ids).toEqual(expect.arrayContaining(expected));
+    }
+  });
 });

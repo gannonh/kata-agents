@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-01
+
+* **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex catalogs, including Pi runtime registration and updated defaults. Added the preview Git workspace flag to `.env.example`.
+
 ## 2026-07-31
 
 * **Agent quiescence implemented**: issue #21's awaitable teardown contract shipped on the existing feature branch and draft PR, with the shared barrier, provider teardown, SessionManager boundary, deterministic lifecycle regression coverage, and full affected verification matrix.

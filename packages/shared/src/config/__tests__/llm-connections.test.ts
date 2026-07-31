@@ -67,11 +67,14 @@ describe('getDefaultModelForConnection', () => {
     expect(modelIds).toContain(defaultModel)
   })
 
-  it('Pi openai default is in its own model list', () => {
-    const defaultModel = getDefaultModelForConnection('pi', 'openai')
-    const models = getDefaultModelsForConnection('pi', 'openai')
-    const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
-    expect(modelIds).toContain(defaultModel)
+  it('Pi OpenAI defaults use GPT-5.6 Sol and remain selectable', () => {
+    for (const provider of ['openai', 'openai-codex']) {
+      const defaultModel = getDefaultModelForConnection('pi', provider)
+      const models = getDefaultModelsForConnection('pi', provider)
+      const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
+      expect(defaultModel).toBe('pi/gpt-5.6-sol')
+      expect(modelIds).toContain(defaultModel)
+    }
   })
 
   it('Pi deepseek default is in its own model list', () => {

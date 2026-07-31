@@ -40,6 +40,94 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
 }
 
 /**
+ * Supplemental OpenAI model metadata that may land after the Pi SDK catalog.
+ * Keep this provider-specific so the runtime can resolve the same models for
+ * both OpenAI API-key and ChatGPT/Codex authentication.
+ */
+export interface SupplementalPiModel {
+  id: string;
+  name: string;
+  description: string;
+  provider: 'openai' | 'openai-codex';
+  api: 'openai-responses' | 'openai-codex-responses';
+  baseUrl: string;
+  reasoning: boolean;
+  thinkingLevelMap: Record<string, string | null | undefined>;
+  input: Array<'text' | 'image'>;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
+  contextWindow: number;
+  maxTokens: number;
+}
+
+const GPT_56_MODEL_SPECS = [
+  {
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6 Sol',
+    description: 'Frontier GPT-5.6 model for complex work',
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+  },
+  {
+    id: 'gpt-5.6-terra',
+    name: 'GPT-5.6 Terra',
+    description: 'Balanced GPT-5.6 model for everyday work',
+    cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
+  },
+  {
+    id: 'gpt-5.6-luna',
+    name: 'GPT-5.6 Luna',
+    description: 'Fast, cost-efficient GPT-5.6 model',
+    cost: { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0 },
+  },
+] as const;
+
+/**
+ * OpenAI's GPT-5.6 family is available in the official API and Codex
+ * catalogs, but the currently pinned Pi SDK does not include it yet.
+ */
+export const SUPPLEMENTAL_OPENAI_MODELS: readonly SupplementalPiModel[] =
+  (['openai', 'openai-codex'] as const).flatMap((provider) =>
+    GPT_56_MODEL_SPECS.map((model) => ({
+      ...model,
+      provider,
+      api: provider === 'openai' ? 'openai-responses' : 'openai-codex-responses',
+      baseUrl: provider === 'openai' ? 'https://api.openai.com/v1' : 'https://chatgpt.com/backend-api',
+      reasoning: true,
+      thinkingLevelMap: provider === 'openai'
+        ? { off: null, xhigh: 'xhigh' }
+        : { minimal: 'low', xhigh: 'xhigh' },
+      input: ['text', 'image'],
+      contextWindow: 1_050_000,
+      maxTokens: 128_000,
+    } satisfies SupplementalPiModel)),
+  );
+
+function supplementalPiModelToDefinition(model: SupplementalPiModel): ModelDefinition {
+  return {
+    id: `pi/${model.id}`,
+    name: model.name,
+    shortName: model.name,
+    description: `${model.description} via Kata Agents Backend`,
+    provider: 'pi',
+    contextWindow: model.contextWindow,
+    supportsThinking: model.reasoning,
+  };
+}
+
+function dedupeModelDefinitions(models: ModelDefinition[]): ModelDefinition[] {
+  const seen = new Set<string>();
+  return models.filter((model) => {
+    if (seen.has(model.id)) return false;
+    seen.add(model.id);
+    return true;
+  });
+}
+
+/**
  * Models to EXCLUDE from the Pi model list.
  * Temporary workaround for models that are broken in the current Pi SDK version.
  * e.g., gemini-1.5-flash fails with "not found for API version v1beta"
@@ -98,25 +186,28 @@ function isBareBedrockClaudeModel(modelId: string): boolean {
  * Get Pi models for a specific auth provider directly from the Pi SDK.
  */
 export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
+  let models: ModelDefinition[] = [];
   try {
-    const models = getModels(piAuthProvider as KnownProvider);
-    if (models.length > 0) {
-      return models
-        .filter(m => !isExcludedPiModel(m.id))
-        // Bedrock: exclude bare Claude models without region prefix — they're
-        // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
-        // Regional variants from the same catalog are kept.
-        .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
-        .map(piModelToDefinition);
-    }
+    models = getModels(piAuthProvider as KnownProvider)
+      .filter(m => !isExcludedPiModel(m.id))
+      // Bedrock: exclude bare Claude models without region prefix — they're
+      // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
+      // Regional variants from the same catalog are kept.
+      .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
+      .map(piModelToDefinition);
   } catch {
-    // Provider not recognized by SDK — fall through
+    // Provider not recognized by SDK — use supplemental entries when available.
   }
-  return [];
+
+  const supplemental = SUPPLEMENTAL_OPENAI_MODELS
+    .filter(model => model.provider === piAuthProvider)
+    .map(supplementalPiModelToDefinition);
+
+  return dedupeModelDefinitions([...models, ...supplemental]);
 }
 
 /**
- * Get all Pi models across all providers from the SDK.
+ * Get all Pi models across all providers from the SDK and supplemental catalog.
  */
 export function getAllPiModels(): ModelDefinition[] {
   const allModels: ModelDefinition[] = [];
@@ -131,6 +222,11 @@ export function getAllPiModels(): ModelDefinition[] {
       // Skip providers that fail
     }
   }
+
+  const existingIds = new Set(allModels.map(model => model.id));
+  allModels.push(...SUPPLEMENTAL_OPENAI_MODELS
+    .filter(model => !existingIds.has(`pi/${model.id}`))
+    .map(supplementalPiModelToDefinition));
   return allModels;
 }
 
