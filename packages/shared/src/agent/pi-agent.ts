@@ -491,7 +491,7 @@ export class PiAgent extends BaseAgent {
 
     // Handle subprocess exit
     child.on('exit', (code, signal) => {
-      this.handleSubprocessExit(code, signal);
+      this.handleSubprocessExit(child, code, signal);
     });
 
     child.on('error', (error) => {
@@ -1691,7 +1691,12 @@ export class PiAgent extends BaseAgent {
   /**
    * Handle subprocess exit.
    */
-  private handleSubprocessExit(code: number | null, signal: string | null): void {
+  private handleSubprocessExit(child: ChildProcess, code: number | null, signal: string | null): void {
+    if (this.subprocess !== child) {
+      this.debug('Ignoring exit from stale Pi subprocess');
+      return;
+    }
+
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
@@ -2365,6 +2370,15 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Await the shared turn barrier, then stop the persistent Pi child and
+   * require confirmed operating-system exit before destructive teardown.
+   */
+  override async quiesceForTeardown(reason: AbortReason): Promise<void> {
+    await super.quiesceForTeardown(reason);
+    await this.killSubprocessGracefully(2_000, true);
+  }
+
+  /**
    * Reconnect by killing subprocess -- next chat() will spawn fresh.
    */
   async reconnect(): Promise<void> {
@@ -2376,7 +2390,7 @@ export class PiAgent extends BaseAgent {
    * Gracefully stop the subprocess and wait briefly for the child to exit.
    * Used before an idle runtime restart so we don't leave transient children behind.
    */
-  private async killSubprocessGracefully(timeoutMs = 2_000): Promise<void> {
+  private async killSubprocessGracefully(timeoutMs = 2_000, requireExit = false): Promise<void> {
     const child = this.subprocess;
     if (!child) {
       this.killSubprocess();
@@ -2409,7 +2423,7 @@ export class PiAgent extends BaseAgent {
       child.kill('SIGKILL');
       result = await Promise.race([
         waitForExit,
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 1_000)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), Math.min(timeoutMs, 1_000))),
       ]);
     }
 
@@ -2429,7 +2443,11 @@ export class PiAgent extends BaseAgent {
     if (result) {
       this.debug(`Pi subprocess ${pid ?? '(unknown pid)'} stopped for restart: code=${result.code}, signal=${result.signal}`);
     } else {
-      this.debug(`Pi subprocess ${pid ?? '(unknown pid)'} stop timed out after SIGKILL`);
+      const message = `Pi subprocess ${pid ?? '(unknown pid)'} stop timed out after SIGKILL`;
+      this.debug(message);
+      if (requireExit) {
+        throw new Error(message);
+      }
     }
   }
 
