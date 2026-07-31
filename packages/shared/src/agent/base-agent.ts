@@ -199,6 +199,13 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected temporaryClarifications: string | null = null;
 
+  // Chat lifecycle barrier used by destructive teardown. The promise is
+  // replaced only on a zero-to-one transition, so nested chat() calls share
+  // the same generation and cannot make quiescence resolve early.
+  private activeChatCount = 0;
+  private idleChatPromise: Promise<void> = Promise.resolve();
+  private resolveIdleChat: (() => void) | null = null;
+
   // ============================================================
   // Source activation auto-retry (routed through the existing source_activated
   // + forceAbort + auto_retry pipeline used for tool-call errors).
@@ -1010,45 +1017,70 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
-    if (missingSkills.length > 0) {
-      yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
-      yield { type: 'complete' };
-      return;
-    }
-
-    // Register skill prerequisites — blocks all tools until SKILL.md files are read.
-    if (skillPaths.size > 0) {
-      this.prerequisiteManager.registerSkillPrerequisites([...skillPaths.values()]);
-    }
-
-    // Prepend branch seed context (for seeded branch sessions) and transferred-session summary.
-    const branchSeedContext = this.buildBranchSeedContext(this.config.getBranchSeedMessages?.());
-    if (branchSeedContext) {
-      this.config.markBranchSeedApplied?.();
-    }
-
-    const transferredSessionSummary = this.config.getTransferredSessionSummary?.();
-    const transferredSessionContext = transferredSessionSummary
-      ? buildTransferredSessionContext(transferredSessionSummary)
-      : null;
-    if (transferredSessionContext) {
-      this.config.markTransferredSessionSummaryApplied?.();
-    }
-
-    // Prepend read directive to the message so the model reads SKILL.md first.
-    const directive = this.formatSkillDirective(skillPaths);
-    const messageParts = [branchSeedContext, transferredSessionContext, directive, cleanMessage].filter(Boolean);
-    const effectiveMessage = messageParts.join('\n\n');
-
-    // Capture the raw user message for source-activation auto-retry. `cleanMessage`
-    // has skill paths stripped but otherwise matches what the user typed — exactly
-    // what we want to resend when an activation forces a turn restart.
-    this.setCurrentTurnUserMessage(cleanMessage);
+    this.beginChatGeneration();
     try {
-      yield* this.chatImpl(effectiveMessage, attachments, options);
+      const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+      if (missingSkills.length > 0) {
+        yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
+        yield { type: 'complete' };
+        return;
+      }
+
+      // Register skill prerequisites — blocks all tools until SKILL.md files are read.
+      if (skillPaths.size > 0) {
+        this.prerequisiteManager.registerSkillPrerequisites([...skillPaths.values()]);
+      }
+
+      // Prepend branch seed context (for seeded branch sessions) and transferred-session summary.
+      const branchSeedContext = this.buildBranchSeedContext(this.config.getBranchSeedMessages?.());
+      if (branchSeedContext) {
+        this.config.markBranchSeedApplied?.();
+      }
+
+      const transferredSessionSummary = this.config.getTransferredSessionSummary?.();
+      const transferredSessionContext = transferredSessionSummary
+        ? buildTransferredSessionContext(transferredSessionSummary)
+        : null;
+      if (transferredSessionContext) {
+        this.config.markTransferredSessionSummaryApplied?.();
+      }
+
+      // Prepend read directive to the message so the model reads SKILL.md first.
+      const directive = this.formatSkillDirective(skillPaths);
+      const messageParts = [branchSeedContext, transferredSessionContext, directive, cleanMessage].filter(Boolean);
+      const effectiveMessage = messageParts.join('\n\n');
+
+      // Capture the raw user message for source-activation auto-retry. `cleanMessage`
+      // has skill paths stripped but otherwise matches what the user typed — exactly
+      // what we want to resend when an activation forces a turn restart.
+      this.setCurrentTurnUserMessage(cleanMessage);
+      try {
+        yield* this.chatImpl(effectiveMessage, attachments, options);
+      } finally {
+        this.setCurrentTurnUserMessage(null);
+      }
     } finally {
-      this.setCurrentTurnUserMessage(null);
+      this.endChatGeneration();
+    }
+  }
+
+  private beginChatGeneration(): void {
+    if (this.activeChatCount === 0) {
+      this.idleChatPromise = new Promise<void>((resolve) => {
+        this.resolveIdleChat = resolve;
+      });
+    }
+    this.activeChatCount += 1;
+  }
+
+  private endChatGeneration(): void {
+    if (this.activeChatCount === 0) return;
+
+    this.activeChatCount -= 1;
+    if (this.activeChatCount === 0) {
+      const resolveIdleChat = this.resolveIdleChat;
+      this.resolveIdleChat = null;
+      resolveIdleChat?.();
     }
   }
 
@@ -1082,6 +1114,16 @@ ${formattedMessages}
    * Used for true hard-stop semantics (user stop, redirect fallback, teardown).
    */
   abstract forceAbort(reason: AbortReason): void;
+
+  /**
+   * Request a hard abort and await the current chat generation's complete
+   * unwind. Provider subclasses extend this for persistent child processes.
+   */
+  async quiesceForTeardown(reason: AbortReason): Promise<void> {
+    const idleChatPromise = this.idleChatPromise;
+    this.forceAbort(reason);
+    await idleChatPromise;
+  }
 
   /**
    * Interrupt the current turn because control is being handed to the UI.

@@ -7,12 +7,22 @@
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { AbortReason } from '../backend/types.ts';
+import type { AgentEvent } from '@kata-sh/core/types';
 import {
   TestAgent,
   createMockBackendConfig,
   createMockSource,
   collectEvents,
 } from './test-utils.ts';
+
+class NestedChatAgent extends TestAgent {
+  protected override async *chatImpl(message: string): AsyncGenerator<AgentEvent> {
+    if (message === 'outer') {
+      yield* this.chat('nested');
+    }
+    yield { type: 'complete' };
+  }
+}
 
 describe('BaseAgent', () => {
   let agent: TestAgent;
@@ -190,6 +200,52 @@ describe('BaseAgent', () => {
       await agent.abort('test reason');
       expect(agent.abortCalls).toHaveLength(1);
       expect(agent.abortCalls[0]?.reason).toBe('test reason');
+    });
+
+    it('should await an active chat generator after forceAbort clears processing state', async () => {
+      const stream = agent.chat('held turn');
+      await stream.next();
+
+      let settled = false;
+      const teardown = agent.quiesceForTeardown(AbortReason.UserStop).then(() => {
+        settled = true;
+      });
+
+      await Promise.resolve();
+      expect(agent.isProcessing()).toBe(false);
+      expect(settled).toBe(false);
+
+      await stream.return(undefined);
+      await teardown;
+      expect(settled).toBe(true);
+    });
+
+    it('should make idle and repeated teardown calls safe', async () => {
+      await expect(agent.quiesceForTeardown(AbortReason.UserStop)).resolves.toBeUndefined();
+      await expect(Promise.all([
+        agent.quiesceForTeardown(AbortReason.UserStop),
+        agent.quiesceForTeardown(AbortReason.UserStop),
+      ])).resolves.toEqual([undefined, undefined]);
+      expect(agent.forceAbortCalls).toHaveLength(3);
+    });
+
+    it('should keep nested chat calls in the same teardown generation', async () => {
+      const nestedAgent = new NestedChatAgent(createMockBackendConfig());
+      const stream = nestedAgent.chat('outer');
+      await stream.next();
+
+      let settled = false;
+      const teardown = nestedAgent.quiesceForTeardown(AbortReason.UserStop).then(() => {
+        settled = true;
+      });
+
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await stream.return(undefined);
+      await teardown;
+      expect(settled).toBe(true);
+      nestedAgent.destroy();
     });
 
     it('should delegate handoff interrupts to forceAbort by default', () => {
