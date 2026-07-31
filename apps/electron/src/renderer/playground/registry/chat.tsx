@@ -187,7 +187,7 @@ const playgroundAppShellContext = {
     isProcessing: false,
     lastMessageAt: Date.now(),
   }),
-  onSendMessage: () => {},
+  onSendMessage: async () => true,
   onRenameSession: () => {},
   onFlagSession: () => {},
   onUnflagSession: () => {},

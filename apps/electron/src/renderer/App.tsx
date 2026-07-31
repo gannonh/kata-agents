@@ -15,6 +15,9 @@ import type { AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
+import { DeleteSessionDialog } from '@/components/app-shell/DeleteSessionDialog'
+import { resolveDeleteConfirmation } from '@/components/app-shell/worktree-removal'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@kata-sh/ui'
 import { FocusProvider } from '@/context/FocusContext'
@@ -316,6 +319,16 @@ export default function App() {
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
+  // Delete-session dialog with the separate managed-worktree removal choice
+  // (spec: AC18–AC19). Only used for managed-worktree sessions; other sessions
+  // keep the lightweight native confirmation path. The captured `resolve`
+  // bridges the dialog outcome back to the awaited handleDeleteSession promise.
+  const [deleteDialog, setDeleteDialog] = useState<{
+    sessionId: string
+    sessionName: string
+    branch: string | null
+    resolve: (deleted: boolean) => void
+  } | null>(null)
 
   // Splash screen state - tracks when app is fully ready (all data loaded)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
@@ -1109,7 +1122,30 @@ export default function App() {
       // Session is empty if it has no lastFinalMessageId (no assistant responses) and no name (set on first user message)
       const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
-      if (!isEmpty) {
+      const managedCheckout = FEATURE_FLAGS.gitWorkspaceV1
+        ? store.get(sessionAtomFamily(sessionId))?.checkout
+        : undefined
+      const confirmation = resolveDeleteConfirmation({
+        isEmpty,
+        checkoutMode: managedCheckout?.mode ?? null,
+      })
+
+      if (confirmation === 'managed-worktree-dialog' && managedCheckout) {
+        // Managed-worktree sessions get a richer confirmation that offers the
+        // separate managed-worktree removal choice (spec: AC18–AC19). The
+        // dialog performs the deletion itself; we bridge its outcome back to
+        // this promise so existing callers keep their boolean contract.
+        return await new Promise<boolean>((resolve) => {
+          setDeleteDialog({
+            sessionId,
+            sessionName: meta?.name || 'Untitled',
+            branch: managedCheckout.expectedBranch ?? managedCheckout.branchAtPreparation ?? null,
+            resolve,
+          })
+        })
+      }
+
+      if (confirmation === 'native-confirm') {
         const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
         if (!confirmed) return false
       }
@@ -1121,10 +1157,31 @@ export default function App() {
     return true
   }, [store, removeSession])
 
-  // Auto-delete handler for empty sessions (fire-and-forget, no confirmation)
+  // Resolve the pending delete-session promise and dismiss the dialog. Called
+  // with `true` after the dialog completes deletion, `false` on cancel.
+  const handleDeleteDialogClose = useCallback((deleted: boolean) => {
+    setDeleteDialog((cur) => {
+      cur?.resolve(deleted)
+      return null
+    })
+  }, [])
+
+  // Auto-delete handler for empty sessions (fire-and-forget, no confirmation).
+  //
+  // Unattended cleanup must also clean up a managed worktree the session
+  // prepared but never used — nothing removes an unowned checkout later, so
+  // dropping only the owner reference would leave it and its temporary branch on
+  // disk with no session through which to remove them. `force` is deliberately
+  // NOT passed: if the worktree holds uncommitted or unique work, removal is
+  // blocked, which also cancels the deletion, so the session stays and remains
+  // the way to reach that work. Only a clean provisional checkout is discarded.
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
-    window.electronAPI.deleteSession(sessionId)
-    removeSession(sessionId)
+    void (async () => {
+      const result = await window.electronAPI.deleteSession(sessionId, {
+        removeManagedWorktree: true,
+      })
+      if (result?.deleted) removeSession(sessionId)
+    })()
   }, [removeSession])
 
   const handleFlagSession = useCallback((sessionId: string) => {
@@ -1190,7 +1247,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]): Promise<boolean> => {
     try {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
@@ -1339,6 +1396,10 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
       })
+      // Resolved once the message is persisted/accepted (pre-persist failures
+      // reject and land in the catch below). Signals successful submission so
+      // callers like the Changes feedback flow can safely clear local state.
+      return true
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
@@ -1353,6 +1414,7 @@ export default function App() {
           }
         ]
       }))
+      return false
     }
   }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
 
@@ -2027,6 +2089,21 @@ export default function App() {
               open={showResetDialog}
               onConfirm={executeReset}
               onCancel={() => setShowResetDialog(false)}
+            />
+            <DeleteSessionDialog
+              open={!!deleteDialog}
+              sessionId={deleteDialog?.sessionId ?? null}
+              sessionName={deleteDialog?.sessionName ?? ''}
+              branch={deleteDialog?.branch ?? null}
+              onOpenChange={(open) => {
+                if (!open) handleDeleteDialogClose(false)
+              }}
+              onDeleteSession={async (id, options) => {
+                const result = await window.electronAPI.deleteSession(id, options)
+                if (result?.deleted) removeSession(id)
+                return result
+              }}
+              onDeleted={() => handleDeleteDialogClose(true)}
             />
           </div>
 

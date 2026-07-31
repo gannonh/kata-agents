@@ -101,6 +101,10 @@ export interface Session {
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
+  /** Git checkout metadata (managed worktree / current checkout), when bound. */
+  checkout?: import('./git').SessionCheckoutV1
+  /** Number of sessions sharing this session's managed worktree (derived, >=1). */
+  sharedOwnerCount?: number
 }
 
 export interface CreateSessionOptions {

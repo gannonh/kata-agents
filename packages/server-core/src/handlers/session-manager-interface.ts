@@ -44,7 +44,10 @@ export interface ISessionManager {
   getSessions(workspaceId?: string): Session[]
   getSession(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
-  deleteSession(sessionId: string): Promise<void>
+  deleteSession(
+    sessionId: string,
+    options?: import('@kata-sh/shared/protocol').SessionDeleteOptions,
+  ): Promise<import('@kata-sh/shared/protocol').SessionDeleteResult>
 
   // ---------------------------------------------------------------------------
   // Session state
@@ -69,6 +72,49 @@ export interface ISessionManager {
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
+
+  /**
+   * Prepare a session's Git checkout (empty-session gate).
+   *
+   * Rejects unless the session has no messages, no SDK session ID, and no live
+   * agent. For managed-worktree intent, creates a managed worktree + temporary
+   * `kata-agent/<token>` branch on the workspace-owning server and binds
+   * checkout metadata, `workingDirectory`, and initial `sdkCwd` atomically.
+   * Idempotent only when the intent matches the persisted ready record.
+   */
+  prepareCheckout(
+    sessionId: string,
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult>
+  /**
+   * Inject the server-owned Git domain so the checkout gate shares one
+   * managed-worktree registry with the git RPC handlers. Optional: falls back
+   * to the lazily-constructed default services when never called.
+   */
+  setGitServices?(services: import('../git').GitServices): void
+  /**
+   * Install a callback that requests an immediate Git status refresh for a
+   * session. The git RPC handlers wire this so agent turn completion refreshes
+   * the Changes surface without waiting for the coalesced poll tick.
+   */
+  setGitStatusRefresher?(refresh: (sessionId: string) => void): void
+  /**
+   * Inspect managed-worktree removal risk for the requesting session. Identity
+   * is resolved server-side from the session's persisted checkout — the client
+   * never supplies a worktree path or ID.
+   */
+  inspectManagedWorktreeRemoval(
+    sessionId: string,
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk>
+  /**
+   * Remove the managed worktree owned by the requesting session. Identity is
+   * resolved server-side from persisted checkout ownership; blocked while
+   * another session owns it. `force` governs uncommitted/unique work only.
+   */
+  removeManagedWorktree(
+    sessionId: string,
+    options?: { force?: boolean },
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>

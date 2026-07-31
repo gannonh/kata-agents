@@ -83,6 +83,22 @@ export function isEmbeddedServerEnabled(): boolean {
   return false;
 }
 
+/**
+ * Runtime-evaluated check for the Git/GitHub V1 managed-worktree workspace feature.
+ *
+ * Gates the complete user-facing Git workspace feature (composer Workspace/ref
+ * controls, managed worktrees, checkout preparation, and Git mutation handlers).
+ * Defaults to disabled in stable and nightly. Override with
+ * KATA_FEATURE_GIT_WORKSPACE_V1=1|0. Server mutation handlers reject
+ * feature-only operations while this flag is disabled so renderer/server state
+ * cannot drift.
+ */
+export function isGitWorkspaceV1Enabled(): boolean {
+  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_GIT_WORKSPACE_V1'));
+  if (override !== undefined) return override;
+  return false;
+}
+
 export const FEATURE_FLAGS = {
   /** Enable Opus 4.7 fast mode (speed:"fast" + beta header). 6x pricing. */
   fastMode: false,
@@ -102,5 +118,13 @@ export const FEATURE_FLAGS = {
    */
   get embeddedServer(): boolean {
     return isEmbeddedServerEnabled();
+  },
+  /**
+   * Enable the Git/GitHub V1 managed-worktree workspace feature.
+   *
+   * Defaults to disabled. Override with KATA_FEATURE_GIT_WORKSPACE_V1=1|0.
+   */
+  get gitWorkspaceV1(): boolean {
+    return isGitWorkspaceV1Enabled();
   },
 } as const;

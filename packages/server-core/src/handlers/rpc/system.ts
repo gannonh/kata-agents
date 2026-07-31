@@ -8,6 +8,7 @@ import { classifyExternalUrl, formatBlockedUrlError } from '@kata-sh/shared/util
 import { isUsableGitBashPath, validateGitBashPath } from '@kata-sh/server-core/services'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import type { RpcServer } from '@kata-sh/server-core/transport'
+import { getDefaultGitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 import {
   requestClientOpenExternal,
@@ -179,19 +180,12 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
     return getLatestReleaseVersion()
   })
 
-  // Get git branch for a directory (returns null if not a git repo or git unavailable)
+  // Get git branch for a directory (returns null if not a git repo, detached,
+  // or git unavailable). Delegates to the server-owned RepositoryService so all
+  // git invocation goes through a single execFile-based command runner.
   server.handle(RPC_CHANNELS.git.GET_BRANCH, async (_ctx, dirPath: string) => {
-    try {
-      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-        cwd: dirPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5000,
-      }).trim()
-      return branch || null
-    } catch {
-      return null
-    }
+    const git = deps.gitServices ?? getDefaultGitServices()
+    return git.repository.getBranch(dirPath)
   })
 
   // Git Bash detection and configuration (Windows only)

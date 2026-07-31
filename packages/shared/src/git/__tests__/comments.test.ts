@@ -1,0 +1,227 @@
+import { describe, expect, it } from 'bun:test'
+import {
+  createPendingComment,
+  reconcileStaleForPath,
+  reconcileCommentsForDiff,
+  hasStaleComments,
+  clearStaleComments,
+  commentsForSession,
+  serializeFeedback,
+  sortCommentsForSerialization,
+  summarizePendingComments,
+} from '../comments'
+import type { GitPendingComment } from '../../protocol/git'
+
+function make(overrides: Partial<GitPendingComment> = {}): GitPendingComment {
+  return {
+    id: overrides.id ?? 'c1',
+    sessionId: overrides.sessionId ?? 's1',
+    path: overrides.path ?? 'src/a.ts',
+    previousPath: overrides.previousPath,
+    side: overrides.side ?? 'new',
+    line: overrides.line ?? 10,
+    text: overrides.text ?? 'fix this',
+    diffFingerprint: overrides.diffFingerprint ?? 'fp1',
+    context: overrides.context ?? 'const a = 1',
+    createdAt: overrides.createdAt ?? 1,
+    stale: overrides.stale,
+  }
+}
+
+describe('createPendingComment', () => {
+  it('trims text and starts non-stale', () => {
+    const c = createPendingComment({
+      id: 'c1',
+      sessionId: 's1',
+      path: 'a.ts',
+      side: 'new',
+      line: 3,
+      text: '  needs work  ',
+      diffFingerprint: 'fp',
+      context: 'x',
+      createdAt: 5,
+    })
+    expect(c.text).toBe('needs work')
+    expect(c.stale).toBe(false)
+  })
+})
+
+describe('reconcileStaleForPath', () => {
+  it('marks comments stale when the fingerprint changes for that path', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', diffFingerprint: 'old' })]
+    const next = reconcileStaleForPath(comments, 'a.ts', 'new')
+    expect(next[0]!.stale).toBe(true)
+  })
+
+  it('clears staleness when the fingerprint matches again', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', diffFingerprint: 'fp', stale: true })]
+    const next = reconcileStaleForPath(comments, 'a.ts', 'fp')
+    expect(next[0]!.stale).toBe(false)
+  })
+
+  it('does not touch comments on other paths', () => {
+    const comments = [
+      make({ id: 'c1', path: 'a.ts', diffFingerprint: 'old' }),
+      make({ id: 'c2', path: 'b.ts', diffFingerprint: 'keep' }),
+    ]
+    const next = reconcileStaleForPath(comments, 'a.ts', 'new')
+    expect(next[0]!.stale).toBe(true)
+    expect(next[1]!.stale).toBeUndefined()
+  })
+
+  it('returns the same array reference when nothing changed', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', diffFingerprint: 'fp' })]
+    const next = reconcileStaleForPath(comments, 'a.ts', 'fp')
+    expect(next).toBe(comments)
+  })
+})
+
+describe('reconcileCommentsForDiff', () => {
+  const newContent = 'l1\nl2\nl3\n'
+
+  it('marks a still-present line stale when the fingerprint changed', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 2, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent,
+    })
+    expect(next).toHaveLength(1)
+    expect(next[0]!.stale).toBe(true)
+  })
+
+  it('keeps a still-present line non-stale when the fingerprint matches', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 2, diffFingerprint: 'fp', stale: true })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'fp',
+      newContent,
+    })
+    expect(next[0]!.stale).toBe(false)
+  })
+
+  it('auto-drops a comment whose anchored line no longer exists', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 9, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent, // only 3 lines
+    })
+    expect(next).toHaveLength(0)
+  })
+
+  it('auto-drops all comments on a path that is now clean or reverted', () => {
+    const comments = [
+      make({ id: 'c1', path: 'a.ts', side: 'new', line: 1 }),
+      make({ id: 'c2', path: 'b.ts', side: 'new', line: 1 }),
+    ]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'clean',
+      fingerprint: 'clean',
+    })
+    expect(next.map((c) => c.id)).toEqual(['c2'])
+  })
+
+  it('marks comments stale (not dropped) when the diff is now oversized/binary', () => {
+    const comments = [make({ id: 'c1', path: 'a.ts', side: 'new', line: 1, diffFingerprint: 'old' })]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'oversized',
+      fingerprint: 'size-fp',
+    })
+    expect(next).toHaveLength(1)
+    expect(next[0]!.stale).toBe(true)
+  })
+
+  it('does not touch comments on other paths', () => {
+    const comments = [
+      make({ id: 'c1', path: 'a.ts', side: 'new', line: 1, diffFingerprint: 'old' }),
+      make({ id: 'c2', path: 'b.ts', side: 'new', line: 1, diffFingerprint: 'keep' }),
+    ]
+    const next = reconcileCommentsForDiff(comments, 'a.ts', {
+      state: 'text',
+      fingerprint: 'new',
+      newContent,
+    })
+    expect(next.find((c) => c.id === 'c2')!.stale).toBeUndefined()
+  })
+})
+
+describe('clearStaleComments', () => {
+  it('removes only stale comments', () => {
+    const comments = [make({ id: 'c1', stale: true }), make({ id: 'c2', stale: false })]
+    expect(clearStaleComments(comments).map((c) => c.id)).toEqual(['c2'])
+  })
+})
+
+describe('hasStaleComments', () => {
+  it('detects at least one stale comment', () => {
+    expect(hasStaleComments([make({ stale: false }), make({ id: 'c2', stale: true })])).toBe(true)
+    expect(hasStaleComments([make({ stale: false })])).toBe(false)
+  })
+})
+
+describe('summarizePendingComments', () => {
+  it('allows sending when there are pending comments and none are stale', () => {
+    const s = summarizePendingComments([make({ id: 'c1' }), make({ id: 'c2' })])
+    expect(s.pendingCount).toBe(2)
+    expect(s.staleCount).toBe(0)
+    expect(s.canSend).toBe(true)
+    expect(s.requiresReview).toBe(false)
+  })
+
+  it('blocks sending and requires review when a comment is stale', () => {
+    const s = summarizePendingComments([make({ id: 'c1' }), make({ id: 'c2', stale: true })])
+    expect(s.staleCount).toBe(1)
+    expect(s.canSend).toBe(false)
+    expect(s.requiresReview).toBe(true)
+  })
+
+  it('cannot send with no pending comments', () => {
+    const s = summarizePendingComments([])
+    expect(s.canSend).toBe(false)
+    expect(s.requiresReview).toBe(false)
+  })
+})
+
+describe('commentsForSession', () => {
+  it('filters to a single session', () => {
+    const all = [make({ id: 'c1', sessionId: 's1' }), make({ id: 'c2', sessionId: 's2' })]
+    expect(commentsForSession(all, 's1').map((c) => c.id)).toEqual(['c1'])
+  })
+})
+
+describe('sortCommentsForSerialization', () => {
+  it('orders by path, side (old before new), line, then createdAt', () => {
+    const comments = [
+      make({ id: 'a', path: 'z.ts', side: 'new', line: 1 }),
+      make({ id: 'b', path: 'a.ts', side: 'new', line: 5 }),
+      make({ id: 'c', path: 'a.ts', side: 'old', line: 9 }),
+      make({ id: 'd', path: 'a.ts', side: 'new', line: 2 }),
+    ]
+    expect(sortCommentsForSerialization(comments).map((c) => c.id)).toEqual(['c', 'd', 'b', 'a'])
+  })
+})
+
+describe('serializeFeedback', () => {
+  it('produces a deterministic structured message with path, side, line, and context', () => {
+    const comments = [
+      make({ id: 'c1', path: 'src/a.ts', side: 'new', line: 12, text: 'rename this', context: 'const foo = 1' }),
+      make({ id: 'c2', path: 'src/a.ts', side: 'old', line: 4, text: 'why removed?', context: 'const bar = 2' }),
+    ]
+    const msg = serializeFeedback(comments)
+    expect(msg).toContain('### src/a.ts')
+    expect(msg).toContain('- [old line 4] why removed?')
+    expect(msg).toContain('- [new line 12] rename this')
+    expect(msg).toContain('  > const foo = 1')
+    // Deterministic across insertion order.
+    const reversed = serializeFeedback([...comments].reverse())
+    expect(reversed).toBe(msg)
+  })
+
+  it('notes renames in the path heading', () => {
+    const msg = serializeFeedback([
+      make({ path: 'new.ts', previousPath: 'old.ts', text: 'ok' }),
+    ])
+    expect(msg).toContain('### new.ts (renamed from old.ts)')
+  })
+})

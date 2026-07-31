@@ -4,8 +4,16 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
-import { basename, dirname, join } from 'path'
-import { existsSync } from 'fs'
+import { basename, dirname, join, resolve } from 'path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@kata-sh/shared/agent'
@@ -23,6 +31,8 @@ import {
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@kata-sh/shared/config'
 import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
+import { getDefaultGitServices, type GitServices } from '../git'
+import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import { InitGate } from '@kata-sh/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
 import {
@@ -81,7 +91,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -175,6 +185,14 @@ const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
 // are ignored, so the watcher does not roll back the in-memory mutation we
 // just persisted. See onSessionMetadataChange.
 const METADATA_WRITE_GUARD_MS = 5000
+/**
+ * How long deletion waits for an aborted agent to report that it stopped before
+ * treating its checkout as still live. Bounded so a wedged subprocess cannot
+ * make a session undeletable.
+ */
+const AGENT_QUIESCE_TIMEOUT_MS = 5000
+/** Poll interval, and the floor delay that lets an in-flight write land. */
+const AGENT_QUIESCE_POLL_MS = 100
 
 /**
  * Text sent to the session when a plan is approved from outside the desktop
@@ -824,6 +842,8 @@ interface ManagedSession {
   // SDK cwd for session storage - set once at creation, never changes.
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
+  // Git checkout metadata (managed worktree / current checkout), when bound.
+  checkout?: import('@kata-sh/shared/protocol').SessionCheckoutV1
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -1072,8 +1092,18 @@ const DEFAULT_TOKEN_USAGE = {
  * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
  */
 function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Session {
+  let sharedOwnerCount: number | undefined
+  if (m.checkout?.mode === 'managed-worktree' && m.checkout.managedWorktreeId) {
+    try {
+      const count = getDefaultGitServices().worktrees.getOwnerCount(m.checkout.managedWorktreeId)
+      if (count > 0) sharedOwnerCount = count
+    } catch {
+      /* registry unavailable — omit */
+    }
+  }
   return {
     ...pickSessionFields(m),
+    sharedOwnerCount,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
@@ -1840,6 +1870,7 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
+        this.recoverStagedSessionDeletions(workspaceRootPath)
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
@@ -2766,6 +2797,18 @@ export class SessionManager implements ISessionManager {
         delete branchedStored.branchFromSdkCwd
         delete branchedStored.branchFromSdkTurnId
       }
+
+      // Conversation-branch shared ownership: a child from a managed-worktree
+      // session shares the same managed worktree (V1 does not claim filesystem
+      // isolation between provider-native conversation branches). Inherit the
+      // parent's checkout metadata and worktree working directory / sdk cwd.
+      if (validatedBranch.sourceSession.checkout) {
+        const parentCheckout = validatedBranch.sourceSession.checkout
+        branchedStored.checkout = parentCheckout
+        branchedStored.workingDirectory = parentCheckout.checkoutPath
+        branchedStored.sdkCwd = parentCheckout.checkoutPath
+      }
+
       await saveStoredSession(branchedStored)
 
       // Propagate the Pi turn-anchor sidecar into the branch so a downstream
@@ -2864,6 +2907,27 @@ export class SessionManager implements ISessionManager {
           throw new Error(
             `Could not create branch: ${error instanceof Error ? error.message : String(error)}`
           )
+        }
+      }
+    }
+
+    // Conversation-branch shared ownership: mirror the parent's checkout onto
+    // the in-memory child and register it as an additional owner of the shared
+    // managed worktree so removal is blocked while this owner remains.
+    if (validatedBranch?.sourceSession.checkout) {
+      const parentCheckout = validatedBranch.sourceSession.checkout
+      managed.checkout = parentCheckout
+      managed.workingDirectory = parentCheckout.checkoutPath
+      managed.sdkCwd = parentCheckout.checkoutPath
+      if (parentCheckout.mode === 'managed-worktree' && parentCheckout.managedWorktreeId) {
+        try {
+          this.getGitServices().worktrees.addOwner(parentCheckout.managedWorktreeId, storedSession.id)
+        } catch (err) {
+          sessionLog.warn('Failed to register conversation-branch worktree owner', {
+            sessionId: storedSession.id,
+            managedWorktreeId: parentCheckout.managedWorktreeId,
+            err,
+          })
         }
       }
     }
@@ -5046,6 +5110,20 @@ export class SessionManager implements ISessionManager {
   updateWorkingDirectory(sessionId: string, path: string): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      // A bound checkout owns the working directory. Git actions, the Changes
+      // surface, and the persisted checkout identity all resolve from
+      // `managed.checkout`, so repointing `workingDirectory`/`sdkCwd` elsewhere
+      // would have the agent edit one tree while Kata inspects and commits
+      // another. Reject instead: checkout selection is the only way to change
+      // where a prepared session works.
+      if (managed.checkout && resolve(path) !== resolve(managed.checkout.checkoutPath)) {
+        const reason =
+          'This session is bound to a checkout. Its working directory cannot be changed.'
+        sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" — ${reason}`)
+        this.sendEvent({ type: 'working_directory_error', sessionId, error: reason }, managed.workspace.id)
+        return
+      }
+
       const validation = isValidWorkingDirectory(path)
       if (!validation.valid) {
         sessionLog.warn(`Session ${sessionId}: rejected working directory "${path}" — ${validation.reason}`)
@@ -5089,6 +5167,477 @@ export class SessionManager implements ISessionManager {
       // Notify renderer of the working directory change
       this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: path }, managed.workspace.id)
     }
+  }
+
+  /** Lazily-resolved Git domain services (managed worktrees, repository ops). */
+  private gitServicesInstance: GitServices | null = null
+  private getGitServices(): GitServices {
+    if (!this.gitServicesInstance) {
+      this.gitServicesInstance = getDefaultGitServices()
+    }
+    return this.gitServicesInstance
+  }
+
+  /**
+   * Override the Git domain services. Bootstrap wires the same instance used by
+   * the RPC handlers so checkout preparation and read-only Git RPCs share one
+   * registry/mutation-lock. Tests inject temp-rooted services.
+   */
+  setGitServices(services: GitServices): void {
+    this.gitServicesInstance = services
+  }
+
+  /**
+   * Callback that requests an immediate Git status refresh for a session.
+   * Installed by the git RPC handlers so agent turn completion (and, later,
+   * app-issued Git actions) can refresh the Changes surface without waiting for
+   * the coalesced poll tick (spec: refresh immediately after agent turn
+   * completion). No-op when the session's checkout is not subscribed.
+   */
+  private gitStatusRefresher: ((sessionId: string) => void) | null = null
+
+  /** Install the agent-turn / app-action Git status refresher. */
+  setGitStatusRefresher(refresh: (sessionId: string) => void): void {
+    this.gitStatusRefresher = refresh
+  }
+
+  /**
+   * Empty-session checkout preparation gate. See ISessionManager.prepareCheckout.
+   *
+   * Ordering (managed worktree):
+   * 1. Verify the session is empty (no messages, no SDK session ID, no agent).
+   * 2. Resolve repository + base-ref identity from the intent directory.
+   * 3. Create a provisional worktree + `kata-agent/<token>` branch.
+   * 4. Apply `.worktreeinclude`.
+   * 5. Re-verify the empty gate, then bind checkout metadata + workingDirectory
+   *    + sdkCwd atomically and persist.
+   * If binding fails, the still-clean provisional worktree/branch is removed.
+   */
+  async prepareCheckout(
+    sessionId: string,
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult> {
+    if (!isGitWorkspaceV1Enabled()) {
+      throw new Error('Git workspace feature is not enabled.')
+    }
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found`)
+    }
+
+    this.assertEmptySessionGate(managed)
+
+    const git = this.getGitServices()
+    const workingDirectory = intent.workingDirectory
+    const ctx = await git.repository.getContext(workingDirectory)
+    if (!ctx.isGitRepository || !ctx.repositoryRoot || !ctx.gitCommonDir) {
+      throw new Error('Selected directory is not inside a Git repository.')
+    }
+
+    // Idempotence: a repeated request only succeeds when its full intent
+    // (mode + repository + base ref) matches the persisted ready record; any
+    // different intent is rejected. `ctx.repositoryRoot` is compared against
+    // both the recorded repository root and checkout path so a re-request made
+    // from inside a prepared worktree still resolves as the same intent.
+    const existing = managed.checkout
+    if (existing) {
+      const sameMode = existing.mode === intent.mode
+      const sameRepo =
+        existing.repositoryRoot === ctx.repositoryRoot ||
+        existing.checkoutPath === ctx.repositoryRoot
+      let sameIntent = false
+      if (intent.mode === 'current') {
+        sameIntent = sameMode && sameRepo
+      } else {
+        const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
+        sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
+      }
+      if (sameIntent) {
+        return {
+          checkout: existing,
+          workingDirectory: existing.checkoutPath,
+          sdkCwd: managed.sdkCwd ?? existing.checkoutPath,
+        }
+      }
+      throw new Error('Session checkout is already prepared with a different intent.')
+    }
+
+    if (intent.mode === 'current') {
+      const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
+        schemaVersion: 1,
+        mode: 'current',
+        repositoryRoot: ctx.repositoryRoot,
+        checkoutPath: ctx.repositoryRoot,
+        branchAtPreparation: ctx.currentBranch,
+        baseRef: null,
+        managedWorktreeId: null,
+        expectedBranch: null,
+      }
+      this.bindCheckout(managed, checkout, workingDirectory)
+      // Prefer a durable persist before returning success: `bindCheckout`
+      // enqueues a debounced write, so flush it so a restart/resume immediately
+      // after preparation restores the same checkout (AC5).
+      await this.flushSession(sessionId)
+      return { checkout, workingDirectory, sdkCwd: managed.sdkCwd ?? workingDirectory }
+    }
+
+    // managed-worktree
+    const baseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
+    if (!baseRef) {
+      throw new Error('A base ref is required to create a new worktree.')
+    }
+
+    const { record, include } = await git.worktrees.createWorktree({
+      workspaceId: managed.workspace.id,
+      sessionId,
+      repositoryRoot: ctx.repositoryRoot,
+      gitCommonDir: ctx.gitCommonDir,
+      baseRef,
+    })
+
+    // Re-verify the gate after the async worktree creation; a concurrent send
+    // could have advanced the session. If so, tear down the clean provisional.
+    try {
+      this.assertEmptySessionGate(managed)
+    } catch (gateErr) {
+      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId)
+      throw gateErr
+    }
+
+    const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
+      schemaVersion: 1,
+      mode: 'managed-worktree',
+      repositoryRoot: ctx.repositoryRoot,
+      checkoutPath: record.checkoutPath,
+      branchAtPreparation: record.expectedBranch,
+      baseRef,
+      managedWorktreeId: record.managedWorktreeId,
+      expectedBranch: record.expectedBranch,
+    }
+
+    try {
+      this.bindCheckout(managed, checkout, record.checkoutPath)
+      git.registry.setState(record.managedWorktreeId, 'ready')
+      // Durable persist so restart/resume immediately after preparation returns
+      // to the same managed worktree (AC5).
+      await this.flushSession(sessionId)
+    } catch (bindErr) {
+      // Session update failed — attempt clean provisional cleanup.
+      await git.worktrees.removeWorktree(record.managedWorktreeId, sessionId).catch(() => {})
+      throw bindErr
+    }
+
+    return {
+      checkout,
+      workingDirectory: record.checkoutPath,
+      sdkCwd: managed.sdkCwd ?? record.checkoutPath,
+      warnings: include.skippedSymlinks > 0
+        ? [`Skipped ${include.skippedSymlinks} symlink(s) while applying .worktreeinclude.`]
+        : undefined,
+    }
+  }
+
+  /**
+   * Resolve the managed-worktree identity for a session from its persisted
+   * checkout metadata and the registry — never a client-supplied path/id. The
+   * requesting session must be a recorded owner of the worktree.
+   */
+  private resolveOwnedWorktreeId(sessionId: string): string {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    const managedWorktreeId = managed.checkout?.managedWorktreeId
+    if (managed.checkout?.mode !== 'managed-worktree' || !managedWorktreeId) {
+      throw new Error('Session has no managed worktree to remove.')
+    }
+    const git = this.getGitServices()
+    const record = git.registry.get(managedWorktreeId)
+    if (!record) {
+      throw new Error('Managed worktree record not found for this session.')
+    }
+    if (!record.ownerSessionIds.includes(sessionId)) {
+      throw new Error('Session does not own this managed worktree.')
+    }
+    return managedWorktreeId
+  }
+
+  /**
+   * Inspect managed-worktree removal risk for the requesting session. Identity
+   * is resolved server-side from the session's persisted checkout.
+   */
+  async inspectManagedWorktreeRemoval(
+    sessionId: string,
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk> {
+    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    return this.getGitServices().worktrees.inspectRemoval(managedWorktreeId, sessionId)
+  }
+
+  /**
+   * Remove the managed worktree owned by the requesting session. Identity is
+   * resolved server-side from the session's persisted checkout; the client
+   * never supplies a worktree path or ID. Blocked while another session owns
+   * it. `force` governs uncommitted/unique work only, not identity safety.
+   */
+  async removeManagedWorktree(
+    sessionId: string,
+    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
+  ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalResult> {
+    if (!isGitWorkspaceV1Enabled()) {
+      throw new Error('Git workspace feature is not enabled.')
+    }
+    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    return this.getGitServices().worktrees.removeWorktree(managedWorktreeId, sessionId, options)
+  }
+
+  /**
+   * Remove this session's managed worktree before deleting the session. The
+   * authoritative fingerprint comparison and removal happen together under the
+   * repository mutation lock, so a mismatch cannot be discovered only after
+   * the session has already been lost.
+   *
+   * Three outcomes, deliberately distinct so `removeManagedWorktree` is safe for
+   * any caller to pass — including unattended cleanup that cannot inspect the
+   * session first:
+   *
+   *  - `nothing-to-remove`: there is no Kata-owned checkout to remove (feature
+   *    disabled, no managed checkout, no registry record, or this session is not
+   *    a recorded owner). Deletion proceeds normally; a client hint about
+   *    removal must never block deleting a session that has nothing to clean up.
+   *  - `blocked`: a real removal guard rejected it — another session still owns
+   *    the worktree, it holds uncommitted or unique work and `force` was not
+   *    given, or identity revalidation failed. The caller aborts entirely.
+   *  - `removed`: removal completed and session deletion may proceed.
+   */
+  private async removeManagedWorktreeBeforeSessionDeletion(
+    sessionId: string,
+    options?: { force?: boolean; expectedConfirmation?: WorktreeRemovalConfirmation },
+  ): Promise<
+    | { outcome: 'nothing-to-remove' }
+    | { outcome: 'removed'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
+    | { outcome: 'blocked'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
+  > {
+    if (!isGitWorkspaceV1Enabled()) return { outcome: 'nothing-to-remove' }
+    let managedWorktreeId: string
+    try {
+      managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    } catch {
+      // No managed checkout, no registry record, or not an owner — all mean
+      // there is nothing this session may remove.
+      return { outcome: 'nothing-to-remove' }
+    }
+
+    try {
+      const result = await this.getGitServices().worktrees.removeWorktree(
+        managedWorktreeId,
+        sessionId,
+        {
+          force: options?.force,
+          expectedConfirmation: options?.expectedConfirmation,
+        },
+      )
+      if (result.blocked) return { outcome: 'blocked', result }
+      return { outcome: 'removed', result }
+    } catch (err) {
+      return {
+        outcome: 'blocked',
+        result: {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  }
+
+  /**
+   * Atomically hide the persisted session without destroying it. A blocked
+   * checkout removal renames this directory back, while a successful combined
+   * deletion removes the tombstone only after runtime cleanup completes.
+   */
+  private async stageSessionStorageForDeletion(
+    workspaceRootPath: string,
+    sessionId: string,
+    managedWorktreeId: string,
+  ): Promise<{ originalPath: string; stagedPath: string; transactionPath: string } | null> {
+    await sessionPersistenceQueue.flush(sessionId)
+    sessionPersistenceQueue.cancel(sessionId)
+    const originalPath = getSessionStoragePath(workspaceRootPath, sessionId)
+    if (!existsSync(originalPath)) return null
+    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
+    const transactionPath = join(transactionRoot, randomUUID())
+    const stagedPath = join(transactionPath, 'session')
+    mkdirSync(transactionPath, { recursive: true })
+    writeFileSync(
+      join(transactionPath, 'transaction.json'),
+      JSON.stringify({ sessionId, managedWorktreeId }),
+      'utf8',
+    )
+    renameSync(originalPath, stagedPath)
+    return { originalPath, stagedPath, transactionPath }
+  }
+
+  private restoreStagedSessionStorage(
+    staged:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null,
+  ): void {
+    if (!staged || !existsSync(staged.stagedPath)) return
+    renameSync(staged.stagedPath, staged.originalPath)
+    rmSync(staged.transactionPath, { recursive: true, force: true })
+  }
+
+  private finalizeStagedSessionStorage(
+    staged:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null,
+  ): void {
+    if (!staged) return
+    rmSync(staged.transactionPath, { recursive: true, force: true })
+  }
+
+  /**
+   * Recover a crash-interrupted combined delete before normal session
+   * discovery. A still-tracked, still-present checkout means removal never
+   * completed and the session is restored. Otherwise the hidden transaction is
+   * finalized so no stale header can resurrect a dangling session.
+   */
+  private recoverStagedSessionDeletions(workspaceRootPath: string): void {
+    const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
+    if (!existsSync(transactionRoot)) return
+    for (const entry of readdirSync(transactionRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const transactionPath = join(transactionRoot, entry.name)
+      const markerPath = join(transactionPath, 'transaction.json')
+      const stagedPath = join(transactionPath, 'session')
+      try {
+        if (!existsSync(markerPath) || !existsSync(stagedPath)) {
+          rmSync(transactionPath, { recursive: true, force: true })
+          continue
+        }
+        const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
+          sessionId?: string
+          managedWorktreeId?: string
+        }
+        if (!marker.sessionId || !marker.managedWorktreeId) {
+          rmSync(transactionPath, { recursive: true, force: true })
+          continue
+        }
+        const originalPath = getSessionStoragePath(workspaceRootPath, marker.sessionId)
+        const rec = this.getGitServices().registry.get(marker.managedWorktreeId)
+        if (rec && existsSync(rec.checkoutPath) && !existsSync(originalPath)) {
+          renameSync(stagedPath, originalPath)
+        }
+        rmSync(transactionPath, { recursive: true, force: true })
+      } catch (err) {
+        sessionLog.error(
+          `Failed to recover staged session deletion at ${transactionPath}:`,
+          err,
+        )
+      }
+    }
+  }
+
+  /**
+   * Wait for an aborted turn to actually finish before its checkout is inspected
+   * or removed.
+   *
+   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: work
+   * still in flight can land files afterwards, and a forced worktree removal
+   * would then discard work the destructive confirmation never counted.
+   *
+   * The backend's own `isProcessing()` cannot be the barrier here — `forceAbort`
+   * clears the exact state it reads (`ClaudeAgent` nulls `currentQuery`,
+   * `PiAgent` sets `_isProcessing = false`), so it reports idle the instant the
+   * abort is requested and would wave us through immediately. The meaningful
+   * signal is the session-level `isProcessing` flag, which is cleared by
+   * `onProcessingStopped` only after the abort has propagated out of the send
+   * loop and the turn has unwound. Both are checked, so neither can report idle
+   * on its own.
+   *
+   * Returns whether the turn confirmed it stopped. `false` means "unknown, and
+   * we stopped waiting" — callers must treat the checkout as still live rather
+   * than assume it is safe to remove.
+   *
+   * This is a turn-loop barrier, not a filesystem one: it does not prove the
+   * spawned subprocess has exited or that its last write landed. Closing that
+   * needs a real quiescence contract on the backend interface (see #21); the
+   * floor delay below only gives an already-issued write time to land.
+   */
+  private async waitForAgentQuiescence(
+    sessionId: string,
+    managed: ManagedSession,
+    timeoutMs = AGENT_QUIESCE_TIMEOUT_MS,
+  ): Promise<boolean> {
+    const agent = managed.agent
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    // Floor delay, kept from the original fixed wait: it protects session-file
+    // writes during rapid deletes and lets an in-flight write land. It is now a
+    // minimum rather than the whole guarantee.
+    await sleep(AGENT_QUIESCE_POLL_MS)
+    if (!agent) return true
+
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      // Both are evaluated every iteration, never short-circuited: the session
+      // flag is the one `forceAbort` does not clear, and the backend flag can
+      // still report work the session layer has not observed yet.
+      const sessionBusy = managed.isProcessing === true
+      let backendBusy = false
+      try {
+        backendBusy = agent.isProcessing()
+      } catch {
+        // A backend that cannot report its state leaves the session flag as the
+        // whole signal.
+        backendBusy = false
+      }
+      if (!sessionBusy && !backendBusy) return true
+      if (Date.now() >= deadline) {
+        sessionLog.warn(
+          `Turn for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
+        )
+        return false
+      }
+      await sleep(AGENT_QUIESCE_POLL_MS)
+    }
+  }
+
+  /** Throw unless the session is empty (no messages, no SDK session, no agent). */
+  private assertEmptySessionGate(managed: ManagedSession): void {
+    if (
+      managed.messages.length > 0 ||
+      managed.sdkSessionId ||
+      managed.agent ||
+      managed.isProcessing
+    ) {
+      throw new Error(
+        'Checkout preparation is only allowed on an empty session (no messages, no SDK session, no live agent).',
+      )
+    }
+  }
+
+  /**
+   * Bind checkout metadata, workingDirectory, and initial sdkCwd atomically.
+   * The empty-session gate guarantees sdkCwd is still safe to change.
+   */
+  private bindCheckout(
+    managed: ManagedSession,
+    checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1,
+    resolvedWorkingDir: string,
+  ): void {
+    managed.checkout = checkout
+    managed.workingDirectory = resolvedWorkingDir
+    managed.sdkCwd = resolvedWorkingDir
+    if (managed.agent) {
+      managed.agent.updateWorkingDirectory(resolvedWorkingDir)
+      managed.agent.updateSdkCwd(resolvedWorkingDir)
+    }
+    invalidateContextFileCache(resolvedWorkingDir)
+    invalidateSkillsCache()
+    this.persistSession(managed)
+    this.sendEvent(
+      { type: 'working_directory_changed', sessionId: managed.id, workingDirectory: resolvedWorkingDir },
+      managed.workspace.id,
+    )
   }
 
   /**
@@ -5319,22 +5868,119 @@ export class SessionManager implements ISessionManager {
     this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
+  async deleteSession(
+    sessionId: string,
+    options?: import('@kata-sh/shared/protocol').SessionDeleteOptions,
+  ): Promise<import('@kata-sh/shared/protocol').SessionDeleteResult> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
-      return
+      return { deleted: false }
     }
 
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
-    // If processing is in progress, force-abort via Query.close() and wait for cleanup
+    // Quiesce the agent BEFORE anything reads or removes the checkout. A live
+    // turn writes into the worktree, so inspecting removal risk or removing the
+    // checkout while it runs could discard files the destructive confirmation
+    // never counted (spec: AC19). Also prevents overlapping writes from
+    // corrupting session files during rapid deletes.
+    let agentQuiesced = true
     if (managed.isProcessing && managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
-      // Brief wait for the query to finish tearing down before we delete session files.
-      // Prevents file corruption from overlapping writes during rapid delete operations.
-      await new Promise(resolve => setTimeout(resolve, 100))
+      agentQuiesced = await this.waitForAgentQuiescence(sessionId, managed)
+    }
+
+    // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Its
+    // authoritative confirmation check and removal complete while the session
+    // still exists. If anything changed after the dialog inspection, the
+    // operation stops before ownership or session state is touched.
+    let completedWorktreeRemoval:
+      | import('@kata-sh/shared/protocol').WorktreeRemovalResult
+      | undefined
+    let stagedSessionStorage:
+      | { originalPath: string; stagedPath: string; transactionPath: string }
+      | null
+      | undefined
+    if (options?.removeManagedWorktree) {
+      // Removal requires a backend that has *confirmed* it stopped. Inspecting
+      // and force-removing a checkout that a subprocess may still be writing to
+      // would discard work no confirmation ever counted, so a wedged agent
+      // blocks removal — and therefore this deletion — rather than racing it.
+      // Deleting the session without the removal option never touches the
+      // checkout and stays available.
+      if (!agentQuiesced) {
+        sessionLog.warn(
+          `Refusing managed-worktree removal for ${sessionId}: agent did not confirm it stopped`,
+        )
+        return {
+          deleted: false,
+          worktreeRemoval: {
+            removed: false,
+            branchPruned: false,
+            blocked: true,
+            blockedReason:
+              'The agent has not finished stopping, so its worktree cannot be removed safely yet. Try again in a moment.',
+          },
+        }
+      }
+      let ownedWorktreeId: string | null = null
+      if (isGitWorkspaceV1Enabled()) {
+        try {
+          ownedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+        } catch {
+          // The removal hint is harmless when this session owns no checkout.
+        }
+      }
+      if (ownedWorktreeId) {
+        try {
+          stagedSessionStorage = await this.stageSessionStorageForDeletion(
+            workspaceRootPath,
+            sessionId,
+            ownedWorktreeId,
+          )
+        } catch (err) {
+          return {
+            deleted: false,
+            worktreeRemoval: {
+              removed: false,
+              branchPruned: false,
+              blocked: true,
+              blockedReason: `The session could not be staged for safe deletion: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          }
+        }
+      }
+
+      const removal = await this.removeManagedWorktreeBeforeSessionDeletion(sessionId, {
+        force: options.forceWorktreeRemoval,
+        expectedConfirmation: options.worktreeRemovalConfirmation,
+      })
+      if (removal.outcome === 'blocked') {
+        try {
+          this.restoreStagedSessionStorage(stagedSessionStorage ?? null)
+        } catch (err) {
+          sessionLog.error(
+            `Failed to restore session storage after blocked worktree removal for ${sessionId}:`,
+            err,
+          )
+        }
+        return { deleted: false, worktreeRemoval: removal.result }
+      }
+      if (removal.outcome === 'removed') completedWorktreeRemoval = removal.result
+    }
+
+    // Drop managed-worktree ownership for this session. Deleting a session never
+    // removes the checkout on its own; it only releases the owner reference so
+    // shared-owner counts stay correct. When explicit removal was requested,
+    // the registry record is already gone and this is a harmless no-op.
+    if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
+      try {
+        this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
+      } catch (err) {
+        sessionLog.warn(`Failed to release worktree ownership for ${sessionId}:`, err)
+      }
     }
 
     // Revoke share if session was shared (prevent orphaned viewer copies)
@@ -5374,7 +6020,14 @@ export class SessionManager implements ISessionManager {
     // Destroy browser instances bound to this session
     const sessionBpm = this.getBrowserPaneManagerForSession(sessionId)
     if (sessionBpm) {
-      sessionBpm.destroyForSession(sessionId)
+      try {
+        sessionBpm.destroyForSession(sessionId)
+      } catch (err) {
+        // Worktree removal may already have completed. Cleanup is best-effort
+        // from this point forward so a synchronous browser failure cannot leave
+        // the staged session transaction half-applied.
+        sessionLog.warn(`Failed to destroy browser instances for ${sessionId}:`, err)
+      }
     }
     // Drop the per-session remote bridge + host-client pin on destroy.
     this.remoteBpms.delete(sessionId)
@@ -5382,14 +6035,22 @@ export class SessionManager implements ISessionManager {
 
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
     if (managed.agent) {
-      managed.agent.dispose()
+      try {
+        managed.agent.dispose()
+      } catch (err) {
+        sessionLog.warn(`Failed to dispose agent for ${sessionId}:`, err)
+      }
     }
 
     // Stop pool server (HTTP MCP server for external SDK subprocesses)
     if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
+      try {
+        managed.poolServer.stop().catch(err => {
+          sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
+        })
+      } catch (err) {
         sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
+      }
     }
 
     // Cancel any pending source-activation auto-retry timer (kata-agents-oss#804).
@@ -5407,8 +6068,18 @@ export class SessionManager implements ISessionManager {
       automationSystem.removeSessionMetadata(sessionId)
     }
 
-    // Delete from disk too
-    deleteStoredSession(workspaceRootPath, sessionId)
+    // Delete from disk too. Managed-worktree deletion staged the complete
+    // directory before removal, so finalization cannot leave a discoverable
+    // persisted session pointing at a checkout that is already gone.
+    if (stagedSessionStorage !== undefined) {
+      try {
+        this.finalizeStagedSessionStorage(stagedSessionStorage)
+      } catch (err) {
+        sessionLog.warn(`Failed to remove staged session storage for ${sessionId}:`, err)
+      }
+    } else if (!deleteStoredSession(workspaceRootPath, sessionId)) {
+      sessionLog.warn(`Failed to delete stored session ${sessionId}`)
+    }
 
     // Notify all windows for this workspace that the session was deleted
     this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
@@ -5416,6 +6087,10 @@ export class SessionManager implements ISessionManager {
 
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
     sessionLog.info(`Deleted session ${sessionId}`)
+
+    return completedWorktreeRemoval
+      ? { deleted: true, worktreeRemoval: completedWorktreeRemoval }
+      : { deleted: true }
   }
 
   async sendMessage(
@@ -6208,6 +6883,16 @@ export class SessionManager implements ISessionManager {
     if (!managed) return
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+
+    // Agent turn just ended — request an immediate Git status refresh so the
+    // Changes surface reflects any files the agent touched without waiting for
+    // the coalesced poll tick. Best-effort and a no-op when the checkout is not
+    // subscribed; never blocks turn cleanup.
+    try {
+      this.gitStatusRefresher?.(sessionId)
+    } catch (err) {
+      sessionLog.warn(`Git status refresh after turn failed for ${sessionId}:`, err)
+    }
 
     // 1. Cleanup state
     this.setProcessing(managed, false)
@@ -7910,6 +8595,10 @@ export class SessionManager implements ISessionManager {
       transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
       messages: bundle.session.messages,
       tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
+      // NOTE: `checkout` is intentionally NOT copied from the source header.
+      // Host-specific managed-worktree IDs and paths are not portable; import
+      // and remote transfer must never recreate or claim ownership of a
+      // source-host worktree. The destination starts with no checkout record.
     }
 
     // Fork-specific: set up SDK branching if branchInfo provided

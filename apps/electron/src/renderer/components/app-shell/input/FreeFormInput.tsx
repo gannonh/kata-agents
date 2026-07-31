@@ -6,6 +6,7 @@ import {
   Paperclip,
   ArrowUp,
   Square,
+  Loader2,
   Check,
   DatabaseZap,
   ChevronDown,
@@ -73,6 +74,7 @@ import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingDirectorySelector'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
+import { WorkspaceCheckoutBadge, useCheckoutBound, type WorkspaceCheckoutHandle } from './WorkspaceCheckoutBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/modes'
@@ -615,6 +617,15 @@ export function FreeFormInput({
   const containerRef = React.useRef<HTMLDivElement>(null)
   const sourceButtonRef = React.useRef<HTMLButtonElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  // Workspace checkout control (Git/GitHub V1). Used to prepare a pending New
+  // worktree/ref intent on the server BEFORE the first message is accepted (AC4).
+  const checkoutBadgeRef = React.useRef<WorkspaceCheckoutHandle>(null)
+  const [isPreparingCheckout, setIsPreparingCheckout] = React.useState(false)
+  // A bound checkout owns the working directory (the server rejects changes to
+  // it), so the directory selectors are hidden and the checkout badge shows the
+  // bound identity instead.
+  const checkoutBound = useCheckoutBound(sessionId)
+  const showWorkingDirectoryPicker = !!onWorkingDirectoryChange && !checkoutBound
 
   // Merge refs for RichTextInput
   const internalInputRef = React.useRef<RichTextInputHandle>(null)
@@ -1251,12 +1262,29 @@ export function FreeFormInput({
   }
 
   // Submit message - backend handles queueing and interruption
-  const submitMessage = React.useCallback(() => {
+  const submitMessage = React.useCallback(async () => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
     if (!hasContent || disabled) return false
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
+
+    // AC4: a pending New worktree/ref intent must be prepared on the
+    // workspace-owning server BEFORE the message is accepted, so a send can
+    // never bypass preparation and silently land in the Current checkout. If
+    // preparation is required but fails, do NOT send the message.
+    const checkoutHandle = checkoutBadgeRef.current
+    if (checkoutHandle) {
+      setIsPreparingCheckout(true)
+      try {
+        const outcome = await checkoutHandle.prepareIfNeeded()
+        if (outcome.status === 'error') return false
+      } catch {
+        return false
+      } finally {
+        setIsPreparingCheckout(false)
+      }
+    }
 
     // Parse all @mentions (skills, sources, folders)
     const skillSlugs = skills.map(s => s.slug)
@@ -1300,7 +1328,7 @@ export function FreeFormInput({
     const handleSubmitInput = (e: CustomEvent<{ sessionId?: string }>) => {
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
-      submitMessage()
+      void submitMessage()
     }
 
     window.addEventListener('craft:submit-input', handleSubmitInput as EventListener)
@@ -1309,7 +1337,7 @@ export function FreeFormInput({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    submitMessage()
+    await submitMessage()
   }
 
   const handleStop = (silent = false) => {
@@ -1370,18 +1398,18 @@ export function FreeFormInput({
       // Enter sends, Shift+Enter adds newline
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Also allow Cmd/Ctrl+Enter to send (power user shortcut)
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
     } else {
       // cmd-enter mode: ⌘/Ctrl+Enter sends, plain Enter adds newline
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Plain Enter is allowed to pass through (adds newline)
     }
@@ -1888,13 +1916,22 @@ export function FreeFormInput({
               />
             </div>
           )}
-          {onWorkingDirectoryChange && (
+          {showWorkingDirectoryPicker && (
             <CompactWorkingDirectorySelector
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
               isEmptySession={false}
               workspaceId={workspaceId}
+            />
+          )}
+          {onWorkingDirectoryChange && (
+            <WorkspaceCheckoutBadge
+              ref={checkoutBadgeRef}
+              sessionId={sessionId}
+              workingDirectory={workingDirectory}
+              isEmptySession={isEmptySession}
+              onWorkingDirectoryChange={onWorkingDirectoryChange}
             />
           )}
           </div>
@@ -1996,13 +2033,24 @@ export function FreeFormInput({
           )}
 
           {/* 3. Working Directory Selector Badge */}
-          {onWorkingDirectoryChange && (
+          {showWorkingDirectoryPicker && (
             <WorkingDirectoryBadge
               workingDirectory={workingDirectory}
               onWorkingDirectoryChange={onWorkingDirectoryChange}
               sessionFolderPath={sessionFolderPath}
               isEmptySession={isEmptySession}
               workspaceId={workspaceId}
+            />
+          )}
+
+          {/* 4. Workspace checkout controls (Git/GitHub V1, feature-flagged) */}
+          {onWorkingDirectoryChange && (
+            <WorkspaceCheckoutBadge
+              ref={checkoutBadgeRef}
+              sessionId={sessionId}
+              workingDirectory={workingDirectory}
+              isEmptySession={isEmptySession}
+              onWorkingDirectoryChange={onWorkingDirectoryChange}
             />
           )}
           </div>
@@ -2451,12 +2499,17 @@ export function FreeFormInput({
             <Button
               type="submit"
               size="icon"
-              aria-label={t('shortcuts.sendMessage')}
+              aria-label={isPreparingCheckout ? t('git.workspace.preparing') : t('shortcuts.sendMessage')}
+              title={isPreparingCheckout ? t('git.workspace.preparing') : undefined}
               className="send-btn h-7 w-7 rounded-full shrink-0 ml-2"
-              disabled={!hasContent || disabled || disableSend}
+              disabled={!hasContent || disabled || disableSend || isPreparingCheckout}
               data-tutorial="send-button"
             >
-              <ArrowUp className="h-4 w-4" />
+              {isPreparingCheckout ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
             </Button>
           )}
           </div>

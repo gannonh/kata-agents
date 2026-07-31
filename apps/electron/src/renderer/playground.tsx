@@ -15,6 +15,7 @@ import { Toaster } from './components/ui/sonner'
 import { PlaygroundApp } from './playground/PlaygroundApp'
 import { EscapeInterruptProvider } from './context/EscapeInterruptContext'
 import { PlaygroundAppShellProvider } from './playground/PlaygroundAppShellProvider'
+import { appStore } from './atoms/store'
 import './index.css'
 
 // Initialize i18n before any React rendering. `useTranslation()` reads from
@@ -23,7 +24,7 @@ setupI18n([initReactI18next])
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <JotaiProvider>
+    <JotaiProvider store={appStore}>
       <ThemeProvider>
         <EscapeInterruptProvider>
           <PlaygroundAppShellProvider>

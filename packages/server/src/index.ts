@@ -48,6 +48,7 @@ import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@kata
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@kata-sh/server-core/sessions'
 import { initModelRefreshService, setFetcherPlatform } from '@kata-sh/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@kata-sh/server-core/services'
+import { getDefaultGitServices } from '@kata-sh/server-core/git'
 import type { HandlerDeps } from '@kata-sh/server-core/handlers'
 
 process.env.KATA_IS_PACKAGED ??= 'false'
@@ -229,6 +230,7 @@ const instance = await (async () => {
           platform,
           oauthFlowStore,
           messagingRegistry: messagingHandle.registry,
+          gitServices: getDefaultGitServices(),
         }
       },
       registerAllRpcHandlers: registerCoreRpcHandlers,

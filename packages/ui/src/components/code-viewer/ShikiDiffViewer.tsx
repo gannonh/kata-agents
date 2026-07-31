@@ -10,11 +10,31 @@
 
 import * as React from 'react'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { FileDiff, type FileDiffMetadata, type FileDiffProps } from '@pierre/diffs/react'
-import { parseDiffFromFile, DIFFS_TAG_NAME, type FileContents } from '@pierre/diffs'
+import {
+  FileDiff,
+  type FileDiffMetadata,
+  type FileDiffProps,
+  type DiffLineAnnotation,
+} from '@pierre/diffs/react'
+import {
+  parseDiffFromFile,
+  DIFFS_TAG_NAME,
+  type FileContents,
+  type SelectedLineRange,
+  type GetHoveredLineResult,
+} from '@pierre/diffs'
 import { cn } from '../../lib/utils'
 import { LANGUAGE_MAP } from './language-map'
 import { registerCraftShikiThemes } from './registerShikiThemes'
+
+/** Which diff side a line event/annotation targets, in Pierre's vocabulary. */
+export type DiffAnnotationSide = 'deletions' | 'additions'
+
+/** Diff-line pointer emitted by Pierre's mouse handlers (stable old/new identity). */
+export interface DiffLinePointer {
+  lineNumber: number
+  side: DiffAnnotationSide
+}
 
 // Register the diffs-container custom element if not already registered
 // This is necessary because the React component renders a custom element
@@ -32,7 +52,7 @@ if (typeof HTMLElement !== 'undefined' && !customElements.get(DIFFS_TAG_NAME)) {
 // Register custom themes once per runtime.
 registerCraftShikiThemes()
 
-export interface ShikiDiffViewerProps {
+export interface ShikiDiffViewerProps<TAnnotation = undefined> {
   /** Original (before) content */
   original: string
   /** Modified (after) content */
@@ -59,6 +79,29 @@ export interface ShikiDiffViewerProps {
   onReady?: () => void
   /** Additional class names */
   className?: string
+
+  // --- Line annotations & interaction (diff-line feedback) ---
+  /**
+   * Annotations anchored to specific old (`deletions`) / new (`additions`) diff
+   * lines. Rendered inline via {@link renderAnnotation}. Line identity is stable
+   * across renders as long as the underlying diff is unchanged.
+   */
+  lineAnnotations?: DiffLineAnnotation<TAnnotation>[]
+  /** Render an inline annotation body for a given anchored line. */
+  renderAnnotation?: (annotation: DiffLineAnnotation<TAnnotation>) => React.ReactNode
+  /**
+   * Render a hover utility (e.g. an "add comment" affordance) for the currently
+   * hovered diff line. Receives an accessor returning the hovered line + side.
+   */
+  renderHoverUtility?: (
+    getHoveredLine: () => GetHoveredLineResult<'diff'> | undefined,
+  ) => React.ReactNode
+  /** Selected diff line range (for highlighting an in-progress selection). */
+  selectedLines?: SelectedLineRange | null
+  /** Fired when a diff line's gutter number is clicked (stable old/new pointer). */
+  onLineNumberClick?: (pointer: DiffLinePointer) => void
+  /** Fired when a diff line body is clicked (stable old/new pointer). */
+  onLineClick?: (pointer: DiffLinePointer) => void
 }
 
 /**
@@ -84,7 +127,7 @@ function getLanguageFromPath(filePath: string, explicit?: string): string {
 /**
  * ShikiDiffViewer - Shiki-based diff viewer component
  */
-export function ShikiDiffViewer({
+export function ShikiDiffViewer<TAnnotation = undefined>({
   original,
   modified,
   filePath = 'file',
@@ -97,7 +140,13 @@ export function ShikiDiffViewer({
   onFileHeaderClick,
   onReady,
   className,
-}: ShikiDiffViewerProps) {
+  lineAnnotations,
+  renderAnnotation,
+  renderHoverUtility,
+  selectedLines,
+  onLineNumberClick,
+  onLineClick,
+}: ShikiDiffViewerProps<TAnnotation>) {
   const hasCalledReady = useRef(false)
   const [isReady, setIsReady] = useState(false)
 
@@ -132,7 +181,17 @@ export function ShikiDiffViewer({
     ? '[data-diffs-header] { cursor: pointer; } [data-diffs-header]:hover [data-title] { text-decoration: underline; }'
     : undefined
 
-  const options: FileDiffProps<undefined>['options'] = useMemo(() => ({
+  // Keep the latest click callbacks in refs so the options object (and thus the
+  // underlying pierre instance) does not churn on every parent render.
+  const onLineNumberClickRef = useRef(onLineNumberClick)
+  onLineNumberClickRef.current = onLineNumberClick
+  const onLineClickRef = useRef(onLineClick)
+  onLineClickRef.current = onLineClick
+
+  const enableLineEvents = !!onLineNumberClick || !!onLineClick
+  const enableHoverUtility = !!renderHoverUtility
+
+  const options: FileDiffProps<TAnnotation>['options'] = useMemo(() => ({
     theme: resolvedThemeName,
     diffStyle,
     diffIndicators: 'bars',
@@ -142,7 +201,31 @@ export function ShikiDiffViewer({
     disableFileHeader,
     themeType: theme === 'dark' ? 'dark' : 'light',
     unsafeCSS,
-  }), [resolvedThemeName, theme, diffStyle, disableBackground, disableFileHeader, unsafeCSS])
+    enableHoverUtility,
+    ...(enableLineEvents
+      ? {
+          onLineNumberClick: (props) =>
+            onLineNumberClickRef.current?.({
+              lineNumber: props.lineNumber,
+              side: props.annotationSide,
+            }),
+          onLineClick: (props) =>
+            onLineClickRef.current?.({
+              lineNumber: props.lineNumber,
+              side: props.annotationSide,
+            }),
+        }
+      : {}),
+  }), [
+    resolvedThemeName,
+    theme,
+    diffStyle,
+    disableBackground,
+    disableFileHeader,
+    unsafeCSS,
+    enableHoverUtility,
+    enableLineEvents,
+  ])
 
   // Call onReady after first render
   useEffect(() => {
@@ -211,9 +294,13 @@ export function ShikiDiffViewer({
         lineHeight: 1.6,
       }}
     >
-      <FileDiff
+      <FileDiff<TAnnotation>
         fileDiff={fileDiff}
         options={options}
+        lineAnnotations={lineAnnotations}
+        renderAnnotation={renderAnnotation}
+        renderHoverUtility={renderHoverUtility}
+        selectedLines={selectedLines}
         className="min-h-full h-full"
       />
     </div>

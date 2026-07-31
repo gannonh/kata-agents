@@ -16,6 +16,7 @@
     "./model-fetchers": "./src/model-fetchers/index.ts",
     "./domain": "./src/domain/index.ts",
     "./services": "./src/services/index.ts",
+    "./git": "./src/git/index.ts",
     "./handlers/rpc": "./src/handlers/rpc/index.ts",
     "./handlers/rpc/*": "./src/handlers/rpc/*.ts",
     "./handlers/push-sources-changed": "./src/handlers/push-sources-changed.ts",

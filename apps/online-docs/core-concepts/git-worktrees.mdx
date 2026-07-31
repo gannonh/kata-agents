@@ -1,0 +1,91 @@
+---
+title: "Git & GitHub worktrees"
+description: "Run a session in an isolated Git worktree, review changes, and commit, push, or open a GitHub pull request — all on the machine that owns your workspace."
+keywords: ["git", "github", "worktree", "commit", "pull request", "gh"]
+---
+
+<Note>
+  Git & GitHub worktrees are a preview feature, gated behind the
+  `KATA_FEATURE_GIT_WORKSPACE_V1` flag and **off by default**. Set the environment
+  variable to `1` (or `true`) on the machine that runs Kata Agents to try it.
+</Note>
+
+When a session's working directory is inside a Git repository, Kata Agents can
+give that session its own **managed worktree** — an isolated checkout on a
+temporary branch — so the agent's work stays separate from your current checkout.
+You can then review the changes and commit, pull, push, or open a GitHub pull
+request without leaving the app.
+
+## Where Git runs
+
+Git, worktree, and `gh` commands always run on the **server that owns the
+workspace filesystem**. For a local workspace that is your own machine; for a
+remote/headless workspace it is the remote server. The desktop app and CLI are
+thin clients — they never run Git against your repository directly, and the same
+controls appear whether the workspace is local or remote.
+
+**Requirements on the workspace-owning machine:**
+
+- a working `git` client for repository, worktree, commit, pull, and push actions;
+- for pull-request actions, the [GitHub CLI (`gh`)](https://cli.github.com/)
+  installed **and** authenticated (`gh auth login`).
+
+If Git, a remote, or `gh` is missing, the app shows actionable setup guidance
+instead of the action — it never changes your repository state to work around a
+missing tool.
+
+## Choosing a workspace for a session
+
+Before the first message in a Git repository, the composer offers a **Workspace**
+control:
+
+<Steps>
+  <Step title="Current checkout">
+    The session works directly in your existing checkout and branch.
+  </Step>
+  <Step title="New worktree">
+    Pick a base ref (defaults to the current branch). Kata creates a managed
+    worktree on a temporary `kata-agent/<id>` branch starting from that ref. The
+    worktree starts from committed state — uncommitted changes in your current
+    checkout are not copied.
+  </Step>
+</Steps>
+
+Once a worktree is prepared, the session is locked to it. Restarting or resuming
+the session keeps the same worktree — it never silently falls back to your
+current checkout.
+
+## Reviewing and sharing work
+
+The Changes panel and the header Git control show the worktree's status and let
+you:
+
+- **Commit** selected files with a message;
+- **Pull** (fast-forward only);
+- **Push**, creating upstream tracking when needed;
+- **Create / View pull request** for GitHub remotes when `gh` is ready. New PRs
+  target the worktree's base ref and open with an editable title and body.
+
+<Warning>
+  V1 is intentionally conservative. It never force-pushes, resets history or your
+  working tree, rebases, merges, or auto-resolves conflicts. If a repository is
+  mid-merge or has unresolved conflicts, committing is blocked — resolve or abort
+  the operation outside Kata first.
+</Warning>
+
+## Recovery states
+
+Kata never silently switches your directory. If a managed worktree is moved or
+removed outside the app, or its branch is switched externally, the composer badge
+shows a visible **recovery** or **blocked** state and Git actions are refused
+until you restore the expected branch or delete the session.
+
+## Archiving and deleting sessions
+
+- **Archiving** a session never removes its worktree.
+- **Deleting** a session drops that session's claim on the worktree but does not
+  remove the checkout on its own. Removing the managed worktree is a separate,
+  explicit choice in the delete dialog. It is blocked while another session still
+  shares the worktree, and removing a worktree with uncommitted or unpushed work
+  requires an extra destructive confirmation that names what would be lost. The
+  temporary branch is pruned only when it has no unique work.

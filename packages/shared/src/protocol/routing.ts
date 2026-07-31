@@ -404,8 +404,24 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.automations.REPLAY,
   RPC_CHANNELS.automations.CHANGED,
 
-  // git — workspace filesystem
+  // git — workspace filesystem (server owns all Git behavior; all channels remote-eligible)
   RPC_CHANNELS.git.GET_BRANCH,
+  RPC_CHANNELS.git.GET_CONTEXT,
+  RPC_CHANNELS.git.LIST_REFS,
+  RPC_CHANNELS.git.PREPARE_CHECKOUT,
+  RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL,
+  RPC_CHANNELS.git.REMOVE_WORKTREE,
+  RPC_CHANNELS.git.GET_STATUS,
+  RPC_CHANNELS.git.GET_DIFF,
+  RPC_CHANNELS.git.SUBSCRIBE_STATUS,
+  RPC_CHANNELS.git.UNSUBSCRIBE_STATUS,
+  RPC_CHANNELS.git.STATUS_CHANGED,
+  RPC_CHANNELS.git.COMMIT,
+  RPC_CHANNELS.git.PULL,
+  RPC_CHANNELS.git.PUSH,
+  RPC_CHANNELS.git.GITHUB_STATUS,
+  RPC_CHANNELS.git.FIND_PULL_REQUEST,
+  RPC_CHANNELS.git.CREATE_PULL_REQUEST,
 
   // resources — workspace resource export/import
   RPC_CHANNELS.resources.EXPORT,

@@ -335,6 +335,29 @@ export const RPC_CHANNELS = {
   },
   git: {
     GET_BRANCH: 'git:getBranch',
+    // Repository context and ref listing (Phase 1)
+    GET_CONTEXT: 'git:getContext',
+    LIST_REFS: 'git:listRefs',
+    // Empty-session checkout preparation (Phase 1)
+    PREPARE_CHECKOUT: 'git:prepareCheckout',
+    // Managed-worktree risk inspection and removal (Phase 1 inspection; Phase 4 removal UI)
+    INSPECT_WORKTREE_REMOVAL: 'git:inspectWorktreeRemoval',
+    REMOVE_WORKTREE: 'git:removeWorktree',
+    // Checkout status and bounded diff retrieval (Phase 2)
+    GET_STATUS: 'git:getStatus',
+    GET_DIFF: 'git:getDiff',
+    // Status subscribe/unsubscribe and push events (Phase 2)
+    SUBSCRIBE_STATUS: 'git:subscribeStatus',
+    UNSUBSCRIBE_STATUS: 'git:unsubscribeStatus',
+    STATUS_CHANGED: 'git:statusChanged',
+    // Commit, pull, and push with structured progress (Phase 3)
+    COMMIT: 'git:commit',
+    PULL: 'git:pull',
+    PUSH: 'git:push',
+    // GitHub capability/auth status + pull-request lookup and creation (Phase 3)
+    GITHUB_STATUS: 'git:githubStatus',
+    FIND_PULL_REQUEST: 'git:findPullRequest',
+    CREATE_PULL_REQUEST: 'git:createPullRequest',
   },
   gitbash: {
     CHECK: 'gitbash:check',

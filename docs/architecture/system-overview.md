@@ -60,6 +60,29 @@ The server (`packages/server/`) exposes a WebSocket RPC API (default port 9100).
 
 See [CLI reference](/reference/cli.md) for the full command surface and connection flags.
 
+## Git & GitHub worktrees (preview)
+
+Gated behind `KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). Git, worktree, and
+`gh` behavior is owned entirely by the server that owns the workspace filesystem;
+the desktop renderer and CLI are thin clients that address operations by session
+ID and never pass repository paths. This keeps local embedded and remote headless
+workspaces at parity.
+
+- **Server-core (`packages/server-core/src/git/`)** — the single source of truth:
+  - `RepositoryService` (read-only context/status/diff/ref discovery, operation-in-progress detection),
+  - `GitActionService` (safe commit / fast-forward pull / push+upstream — never force-push, reset, rebase, merge, or auto-resolve conflicts),
+  - `GitHubCliService` (`gh` capability + pull-request create/find),
+  - `ManagedWorktreeService` + `WorktreeRegistry` (create/inspect/remove worktrees, ownership, reconciliation),
+  - `MutationLock` (serializes mutations by Git common directory) and `GitStatusSubscription` (coalesced polling → workspace-routed change events).
+- **RPC surface (`packages/server-core/src/handlers/rpc/git.ts`)** — all channels are remote-eligible. Mutations resolve identity server-side and revalidate a managed worktree's checkout path, Git common directory, and expected branch before acting; drift produces a visible recoverable error rather than a silent directory switch. PR base ref authority is the managed worktree's persisted base ref when present, otherwise the detected default ref.
+- **Managed worktrees** live beneath the owning server's Kata config root (not inside the repository) on temporary `kata-agent/<8-hex>` branches. Host-specific worktree IDs/paths are not portable; session import and remote transfer clear managed-worktree ownership.
+- **Lifecycle** — archiving preserves worktrees; deleting a session drops the owner reference but never removes the checkout on its own. Managed-worktree removal is a separate, explicitly-confirmed choice, blocked while another owner remains, and destructive removal requires force and names uncommitted/unpushed/unique work.
+
+Remote-server requirement: the workspace-owning machine needs a working `git`
+client, and pull-request actions additionally need `gh` installed and
+authenticated there. When missing, the app shows actionable setup guidance
+without changing repository state.
+
 ## Configuration
 
 Runtime config lives at `~/.kata-agents/` (unchanged from Kata Agents upstream):

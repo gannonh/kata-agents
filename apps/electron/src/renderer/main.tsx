@@ -7,6 +7,7 @@ import { Provider as JotaiProvider, useAtomValue } from 'jotai'
 import App from './App'
 import { ThemeProvider } from './context/ThemeContext'
 import { windowWorkspaceIdAtom } from './atoms/sessions'
+import { appStore } from './atoms/store'
 import { Toaster } from '@/components/ui/sonner'
 import { setupI18n, i18n } from '@kata-sh/shared/i18n'
 import { initReactI18next } from 'react-i18next'
@@ -129,7 +130,7 @@ function Root() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Sentry.ErrorBoundary fallback={<CrashFallback />}>
-      <JotaiProvider>
+      <JotaiProvider store={appStore}>
         <Root />
       </JotaiProvider>
     </Sentry.ErrorBoundary>

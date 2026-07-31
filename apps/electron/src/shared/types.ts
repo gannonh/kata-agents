@@ -214,6 +214,22 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  RepositoryContext,
+  ListRefsResult,
+  CheckoutPrepareIntent,
+  CheckoutPrepareResult,
+  GitStatusSnapshot,
+  GitFileDiff,
+  GitStatusChangedEvent,
+  WorktreeRemovalRisk,
+  WorktreeRemovalResult,
+  SessionDeleteOptions,
+  SessionDeleteResult,
+  GitCommitInput,
+  GitActionResult,
+  GitHubCapabilityStatus,
+  PullRequestSummary,
+  CreatePullRequestInput,
 } from '@kata-sh/shared/protocol'
 
 export interface ElectronAPI {
@@ -223,7 +239,16 @@ export interface ElectronAPI {
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
-  deleteSession(sessionId: string): Promise<void>
+  /**
+   * Delete a session. Pass `removeManagedWorktree` to have the server remove
+   * the session's managed worktree in the same operation — the server quiesces
+   * the agent, verifies removal is allowed, deletes the session, and only then
+   * removes the checkout.
+   */
+  deleteSession(
+    sessionId: string,
+    options?: SessionDeleteOptions,
+  ): Promise<SessionDeleteResult>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
@@ -586,6 +611,40 @@ export interface ElectronAPI {
   // Git operations
   getGitBranch(dirPath: string): Promise<string | null>
 
+  // Git / GitHub V1 — workspace checkout controls (feature-flagged)
+  getGitContext(dirPath: string): Promise<RepositoryContext>
+  listGitRefs(dirPath: string): Promise<ListRefsResult>
+  prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
+  getGitStatus(dirPath: string): Promise<GitStatusSnapshot>
+  /** Bounded diff for a repository-relative path; identity resolved server-side by session ID. */
+  getGitDiff(sessionId: string, path: string): Promise<GitFileDiff>
+  /** Subscribe the calling client's Changes surface to a session checkout; returns the current snapshot. */
+  subscribeGitStatus(sessionId: string): Promise<GitStatusSnapshot>
+  /** Release a status subscription for a session (or all sessions when omitted). */
+  unsubscribeGitStatus(sessionId?: string): Promise<void>
+  /** Workspace-routed status change events carrying the session ID + snapshot. */
+  onGitStatusChanged(callback: (event: GitStatusChangedEvent) => void): () => void
+  // Identity is resolved server-side from the session's persisted checkout;
+  // callers pass only the session ID (never a worktree path or ID).
+  inspectGitWorktreeRemoval(sessionId: string): Promise<WorktreeRemovalRisk>
+  removeGitWorktree(sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
+
+  // Git / GitHub V1 — commit / pull / push + GitHub pull requests (Phase 3).
+  // Identity is resolved server-side from the session's persisted checkout;
+  // callers pass only the session ID and typed operation input.
+  /** Commit selected files; returns structured per-stage progress. */
+  commitGit(input: GitCommitInput): Promise<GitActionResult>
+  /** Fast-forward-only pull. */
+  pullGit(sessionId: string): Promise<GitActionResult>
+  /** Push the current branch, configuring upstream when absent. */
+  pushGit(sessionId: string): Promise<GitActionResult>
+  /** GitHub `gh` capability/auth status for the session's checkout. */
+  getGitHubCapability(sessionId: string): Promise<GitHubCapabilityStatus>
+  /** Look up an open pull request for the current branch, or null. */
+  getPullRequest(sessionId: string): Promise<PullRequestSummary | null>
+  /** Create a pull request; returns structured per-stage progress + URL. */
+  createPullRequest(input: CreatePullRequestInput): Promise<GitActionResult>
+
   // Git Bash (Windows)
   checkGitBash(): Promise<GitBashStatus>
   browseForGitBash(): Promise<string | null>
@@ -767,6 +826,7 @@ export type WhatsAppUiEvent =
 export type RightSidebarPanel =
   | { type: 'files'; path?: string }
   | { type: 'history' }
+  | { type: 'changes'; path?: string }
   | { type: 'none' }
 
 /**

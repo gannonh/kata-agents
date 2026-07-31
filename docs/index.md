@@ -16,7 +16,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 
 ## Active work
 
-* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — Draft design for checkout-aware sessions, Changes review with agent feedback, safe Git/GitHub actions, and managed-worktree lifecycle.
+* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — **Implemented** behind `KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). All four slices built: checkout-aware sessions + server-owned managed worktrees, a Changes review panel with line feedback, safe commit/push/GitHub-PR actions (never force-push/reset/rebase/merge), and lifecycle management (archive preserves worktrees; delete offers separate force-confirmed worktree removal; recovery/blocked states; local/remote parity). Build report: [specs/2026-07-26-git-github-worktrees-v1-build-report.md](specs/2026-07-26-git-github-worktrees-v1-build-report.md). Real-GitHub UAT and macOS `@git` E2E deferred to Verify.
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — completed. Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
 * **ADRs** — [adrs/](adrs/) — one accepted (kata-identity hard-cutover); seed is in place for future decisions
 

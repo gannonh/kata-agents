@@ -13,6 +13,7 @@ const FEATURE_FLAG_ENV_KEYS = [
   'KATA_DEBUG',
   'KATA_FEATURE_DEVELOPER_FEEDBACK',
   'KATA_FEATURE_EMBEDDED_SERVER',
+  'KATA_FEATURE_GIT_WORKSPACE_V1',
 ] as const
 
 function getRendererFeatureFlags(mode: string): Record<string, string | undefined> {

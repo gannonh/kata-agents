@@ -777,7 +777,13 @@ export function NavigationProvider({
 
         case 'delete-session':
           if (parsed.id) {
-            await window.electronAPI.deleteSession(parsed.id)
+            // This deep link deletes without a confirmation dialog, so it takes
+            // the same cleanup rule as unattended cleanup: remove a managed
+            // worktree the session owns, but without `force`, so a checkout
+            // holding uncommitted or unique work blocks the removal *and* the
+            // deletion instead of being orphaned or discarded. The session then
+            // stays, and removing it is an explicit choice in the delete dialog.
+            await window.electronAPI.deleteSession(parsed.id, { removeManagedWorktree: true })
           }
           break
 

@@ -766,6 +766,10 @@ export function parseRightSidebarParam(sidebarStr?: string): RightSidebarPanel |
   if (sidebarStr === 'history') {
     return { type: 'history' }
   }
+  if (sidebarStr.startsWith('changes')) {
+    const path = sidebarStr.substring(8) // Remove 'changes/' prefix
+    return { type: 'changes', path: path || undefined }
+  }
   if (sidebarStr.startsWith('files')) {
     const path = sidebarStr.substring(6) // Remove 'files/' prefix
     return { type: 'files', path: path || undefined }
@@ -788,6 +792,8 @@ export function buildRightSidebarParam(panel?: RightSidebarPanel): string | unde
   switch (panel.type) {
     case 'history':
       return 'history'
+    case 'changes':
+      return panel.path ? `changes/${panel.path}` : 'changes'
     case 'files':
       return panel.path ? `files/${panel.path}` : 'files'
     default:
