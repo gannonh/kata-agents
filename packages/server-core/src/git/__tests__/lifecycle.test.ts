@@ -9,7 +9,7 @@
  *  - a shared worktree survives deletion of one owner while another remains.
  */
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { createGitServices } from '../index'
@@ -138,6 +138,44 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
 })
 
 describe('SessionManager.deleteSession — server-owned removal ordering (AC18–AC19)', () => {
+  test('cleanup failures cannot interrupt a completed deletion transaction', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 'cleanup-throws', wsRoot)
+
+    const prep = await sm.prepareCheckout('cleanup-throws', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    ;(sm as any).getBrowserPaneManagerForSession = () => ({
+      destroyForSession: () => {
+        throw new Error('injected browser cleanup failure')
+      },
+    })
+    managed.agent = {
+      dispose: () => {
+        throw new Error('injected agent cleanup failure')
+      },
+    } as any
+
+    const result = await sm.deleteSession('cleanup-throws', {
+      removeManagedWorktree: true,
+    })
+
+    expect(result.deleted).toBe(true)
+    expect(result.worktreeRemoval?.removed).toBe(true)
+    expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
+    expect((sm as any).sessions.has('cleanup-throws')).toBe(false)
+    expect(existsSync(join(wsRoot, 'sessions', 'cleanup-throws'))).toBe(false)
+    const transactionRoot = join(wsRoot, '.kata-session-deletions')
+    expect(
+      !existsSync(transactionRoot) || readdirSync(transactionRoot).length === 0,
+    ).toBe(true)
+  })
+
   test('authoritatively removes the checkout while the session still exists', async () => {
     const repo = tmp()
     await initRepo(repo)

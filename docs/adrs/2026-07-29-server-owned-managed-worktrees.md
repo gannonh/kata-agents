@@ -87,15 +87,24 @@ resurrect a session that points at a removed checkout.
 For a destructive removal, `forceWorktreeRemoval` is bound to an opaque
 server-issued fingerprint of the checkout identity (including the HEAD OID),
 dirty paths, exact index entries, file modes and working-tree contents, and
-unique commit identities inspected for the confirmation dialog. The file and
-commit counts remain user-facing copy, but they are not the authorization:
-different work can have identical counts. The server re-inspects under the
-repository mutation lock as part of removal, fails closed if status cannot be
-read, and rechecks ownership after inspection. Any changed fingerprint blocks
-the whole deletion, restores the staged session directory, keeps the session
-and checkout reachable, and makes the client refresh before a person can
-confirm the current state. A stale Boolean `force` flag or count-only summary
-is never sufficient.
+unique commit identities inspected for the confirmation dialog. Ignored files
+are inventoried separately because `git status` omits them even though forced
+worktree removal would destroy them; their paths, modes, and contents contribute
+to the fingerprint and displayed file count. The file and commit counts remain
+user-facing copy, but they are not the authorization: different work can have
+identical counts. The server validates static checkout identity first, then
+takes its authoritative snapshot as the final awaited guard under the
+repository mutation lock and rechecks ownership synchronously before removal
+starts. Status failures close the operation. Any changed fingerprint blocks the
+whole deletion, restores the staged session directory, keeps the session and
+checkout reachable, and makes the client refresh before a person can confirm
+the current state. A stale Boolean `force` flag or count-only summary is never
+sufficient.
+
+After checkout removal succeeds, browser, agent, and pool-server teardown is
+best-effort. A synchronous cleanup exception is logged and contained so runtime
+session removal and staged-storage finalization still complete; cleanup cannot
+interrupt the deletion transaction after its irreversible step.
 
 A blocked removal is **atomic in the caller's favour**: nothing is deleted and nothing is removed, so
 the client can report why and the user retries or drops the removal choice. There is no

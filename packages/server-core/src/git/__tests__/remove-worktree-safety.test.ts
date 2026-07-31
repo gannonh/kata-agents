@@ -56,6 +56,87 @@ function injectSession(sm: SessionManager, id: string, workspaceRootPath: string
 }
 
 describe('ManagedWorktreeService.removeWorktree — identity revalidation', () => {
+  test('counts and fingerprints ignored files before destructive removal', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    writeFile(repo, '.gitignore', 'private-notes.txt\n')
+    await git(repo, ['add', '.gitignore'])
+    await git(repo, ['commit', '-m', 'ignore private notes'])
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'only',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    writeFile(record.checkoutPath, 'private-notes.txt', 'first secret\n')
+
+    const displayedRisk = await svc.worktrees.inspectRemoval(
+      record.managedWorktreeId,
+      'only',
+    )
+    expect(displayedRisk.uncommittedFileCount).toBe(1)
+
+    const unconfirmed = await svc.worktrees.removeWorktree(
+      record.managedWorktreeId,
+      'only',
+    )
+    expect(unconfirmed.removed).toBe(false)
+    expect(unconfirmed.blocked).toBe(true)
+    expect(existsSync(record.checkoutPath)).toBe(true)
+
+    // A same-path ignored-file edit must invalidate the displayed snapshot.
+    writeFile(record.checkoutPath, 'private-notes.txt', 'replacement secret\n')
+    const staleConfirmation = await svc.worktrees.removeWorktree(
+      record.managedWorktreeId,
+      'only',
+      {
+        force: true,
+        expectedConfirmation: {
+          uncommittedFileCount: displayedRisk.uncommittedFileCount,
+          unpushedCommitCount: displayedRisk.unpushedCommitCount,
+          branchHasUniqueWork: displayedRisk.branchHasUniqueWork,
+          confirmationFingerprint: displayedRisk.confirmationFingerprint,
+        },
+      },
+    )
+    expect(staleConfirmation.removed).toBe(false)
+    expect(staleConfirmation.blocked).toBe(true)
+    expect(staleConfirmation.blockedReason).toContain('changed after')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+  })
+
+  test('re-inspects after identity validation before removal starts', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'only',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    const worktrees = svc.worktrees as any
+    const originalValidate = worktrees.validateRemovalIdentity.bind(worktrees)
+    worktrees.validateRemovalIdentity = async (...args: unknown[]) => {
+      const result = await originalValidate(...args)
+      writeFile(record.checkoutPath, 'late-write.txt', 'written during identity validation\n')
+      return result
+    }
+
+    const res = await svc.worktrees.removeWorktree(record.managedWorktreeId, 'only')
+
+    expect(res.removed).toBe(false)
+    expect(res.blocked).toBe(true)
+    expect(res.blockedReason).toContain('uncommitted')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+    expect(existsSync(join(record.checkoutPath, 'late-write.txt'))).toBe(true)
+  })
+
   test('blocks removal when the checkout is on an unexpected branch', async () => {
     const repo = tmp()
     await initRepo(repo)

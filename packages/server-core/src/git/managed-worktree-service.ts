@@ -264,6 +264,7 @@ export class ManagedWorktreeService {
   private async createRemovalConfirmationFingerprint(
     rec: ManagedWorktreeRecord,
     entries: GitWorkingTreeEntry[],
+    ignoredPaths: string[],
   ): Promise<string> {
     const hash = createHash('sha256')
     hash.update('kata-worktree-removal-v1\0')
@@ -324,6 +325,33 @@ export class ManagedWorktreeService {
       hash.update('\0')
     }
 
+    // `git status` deliberately omits ignored files, but managed checkouts can
+    // contain them through `.worktreeinclude`, tools, or direct user writes.
+    // They are still work that a forced directory removal would destroy, so
+    // inventory their paths, modes, and content separately from status entries.
+    for (const ignoredPath of [...ignoredPaths].sort()) {
+      hash.update(`ignored\0${ignoredPath}\0`)
+      const absolutePath = join(rec.checkoutPath, ignoredPath)
+      try {
+        hash.update(lstatSync(absolutePath).mode.toString(8))
+        hash.update('\0')
+        const object = await runGit(
+          ['hash-object', '--no-filters', '--', ignoredPath],
+          { cwd: rec.checkoutPath },
+        )
+        hash.update(object.stdout.trim())
+      } catch (err) {
+        if (
+          !(err instanceof Error) ||
+          !('code' in err) ||
+          (err as NodeJS.ErrnoException).code !== 'ENOENT'
+        ) {
+          throw err
+        }
+      }
+      hash.update('\0')
+    }
+
     if (rec.baseRef) {
       const uniqueCommits = await runGit(
         ['rev-list', '--reverse', `${rec.baseRef}..HEAD`],
@@ -368,7 +396,12 @@ export class ManagedWorktreeService {
       .digest('hex')
     if (exists) {
       const status = await this.repositoryService.getStatus(rec.checkoutPath, { strict: true })
-      uncommittedFileCount = status.entries.length
+      const ignoredFiles = await runGit(
+        ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'],
+        { cwd: rec.checkoutPath },
+      )
+      const ignoredPaths = ignoredFiles.stdout.split('\0').filter(Boolean)
+      uncommittedFileCount = status.entries.length + ignoredPaths.length
       if (rec.baseRef) {
         unpushedCommitCount = await this.repositoryService.countCommitsAhead(
           rec.checkoutPath,
@@ -379,6 +412,7 @@ export class ManagedWorktreeService {
       confirmationFingerprint = await this.createRemovalConfirmationFingerprint(
         rec,
         status.entries,
+        ignoredPaths,
       )
     }
 
@@ -424,8 +458,22 @@ export class ManagedWorktreeService {
     }
 
     return this.mutationLock.withLock(rec.gitCommonDir, async () => {
-      // This is the authoritative inspection. A session-delete dry run may
-      // have happened earlier, while the confirmation dialog was open.
+      // Validate static containment/common-directory/branch expectations before
+      // taking the authoritative content snapshot. No awaited identity check
+      // may run after that snapshot: an external write during such a gap would
+      // otherwise be absent from the confirmation and still get deleted.
+      const identity = await this.validateRemovalIdentity(rec)
+      if (!identity.ok) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: `The worktree could not be inspected safely: ${identity.reason}`,
+        }
+      }
+
+      // This is the final awaited guard before removal starts. A session-delete
+      // dry run or dialog inspection may have happened earlier.
       let risk: WorktreeRemovalRisk
       try {
         risk = await this.inspectRemoval(managedWorktreeId, requestingSessionId)
@@ -477,23 +525,9 @@ export class ManagedWorktreeService {
         }
       }
 
-      // Identity revalidation: never delete a checkout unless it is a genuine
-      // managed worktree under the Kata worktree root, on the expected branch,
-      // and sharing the recorded Git common directory. A `force` flag governs
-      // uncommitted/unique work — it does NOT bypass identity safety.
-      const identity = await this.validateRemovalIdentity(rec)
-      if (!identity.ok) {
-        return {
-          removed: false,
-          branchPruned: false,
-          blocked: true,
-          blockedReason: identity.reason,
-        }
-      }
-
-      // Ownership is mutable registry state and inspection performs async Git
-      // work. Re-read it after the last guard await so an owner added during
-      // inspection cannot lose its checkout.
+      // Ownership is mutable registry state and the authoritative inspection
+      // performs async Git work. Re-read it synchronously after the last guard
+      // await so an owner added during inspection cannot lose its checkout.
       const currentRecord = this.registry.get(managedWorktreeId)
       const currentOwners = currentRecord?.ownerSessionIds ?? []
       const currentOtherOwners = currentOwners.filter(

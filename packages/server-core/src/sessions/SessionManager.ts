@@ -6020,7 +6020,14 @@ export class SessionManager implements ISessionManager {
     // Destroy browser instances bound to this session
     const sessionBpm = this.getBrowserPaneManagerForSession(sessionId)
     if (sessionBpm) {
-      sessionBpm.destroyForSession(sessionId)
+      try {
+        sessionBpm.destroyForSession(sessionId)
+      } catch (err) {
+        // Worktree removal may already have completed. Cleanup is best-effort
+        // from this point forward so a synchronous browser failure cannot leave
+        // the staged session transaction half-applied.
+        sessionLog.warn(`Failed to destroy browser instances for ${sessionId}:`, err)
+      }
     }
     // Drop the per-session remote bridge + host-client pin on destroy.
     this.remoteBpms.delete(sessionId)
@@ -6028,14 +6035,22 @@ export class SessionManager implements ISessionManager {
 
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
     if (managed.agent) {
-      managed.agent.dispose()
+      try {
+        managed.agent.dispose()
+      } catch (err) {
+        sessionLog.warn(`Failed to dispose agent for ${sessionId}:`, err)
+      }
     }
 
     // Stop pool server (HTTP MCP server for external SDK subprocesses)
     if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
+      try {
+        managed.poolServer.stop().catch(err => {
+          sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
+        })
+      } catch (err) {
         sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
+      }
     }
 
     // Cancel any pending source-activation auto-retry timer (kata-agents-oss#804).
