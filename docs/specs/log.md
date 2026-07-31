@@ -2,7 +2,7 @@
 
 ## 2026-07-31
 
-* **Approved awaitable agent teardown contract**: the user approved [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) for Build on the long-lived feature branch and draft PR #23.
+* **Implemented awaitable agent teardown contract**: [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) is now Implemented after the user-approved Build on draft PR #23. Evidence covers the shared barrier, Claude query unwind, Pi child exit, SessionManager removal boundary, and deterministic race tests.
 
 ## 2026-07-30
 

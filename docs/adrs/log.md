@@ -1,5 +1,9 @@
 # ADR Update Log
 
+## 2026-07-31
+
+* **ADR implemented quiescence guarantee**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) now records the required `quiesceForTeardown(reason)` contract, Claude query completion boundary, strict Pi child exit, SessionManager's bounded await, and the plain-deletion fallback when teardown cannot be confirmed.
+
 ## 2026-07-29
 
 * **ADR hardened (complete destructive inventory and transaction finalization)**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) — ignored files now contribute to the removal count and exact fingerprint, static identity validation precedes the final awaited checkout snapshot, and synchronous browser/agent/pool cleanup failures cannot interrupt session-storage finalization after checkout removal.

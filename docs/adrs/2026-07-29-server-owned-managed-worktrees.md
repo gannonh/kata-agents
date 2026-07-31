@@ -60,17 +60,19 @@ Session deletion and managed-worktree removal are **two irreversible steps that 
 sequence itself**. `SessionManager.deleteSession(sessionId, { removeManagedWorktree,
 forceWorktreeRemoval })` performs them in a fixed order:
 
-1. quiesce the turn — a live turn writes into the checkout, so nothing may inspect or remove it
-   while one is running. `forceAbort` only *requests* teardown, and notably the backend's own
-   `isProcessing()` cannot serve as the barrier: `forceAbort` synchronously clears the state it reads
-   (`ClaudeAgent` nulls `currentQuery`, `PiAgent` sets `_isProcessing = false`), so it reports idle
-   the instant the abort is requested. Deletion therefore waits on the **session-level** `isProcessing`
-   flag, cleared by `onProcessingStopped` only after the abort has propagated out of the send loop,
-   checking both flags each iteration and bounded by a timeout so a wedged turn cannot make a session
-   undeletable. If quiescence is never confirmed, removal is refused (and with it the deletion) rather
-   than raced: deleting the session *without* the removal option never touches the checkout and stays
-   available. This is a turn-loop barrier, not a filesystem one — proving the spawned subprocess has
-   exited needs a real quiescence contract on the backend interface (deferred, see issue #21);
+1. await `agent.quiesceForTeardown(AbortReason.UserStop)` before inspecting or removing the
+   checkout whenever an agent exists and managed-worktree removal was requested. Plain session
+   deletion uses the same contract when the session is processing. The required backend contract
+   requests the existing hard abort, waits for every active and nested `BaseAgent.chat()` generator
+   to leave its `finally` block, and then waits for provider-owned processes that could still write
+   into the checkout. Claude reaches this boundary when its SDK `Query` iteration completes; Pi
+   additionally shuts down the captured persistent child and requires its operating-system `exit`
+   event, escalating from `SIGTERM` to `SIGKILL` and rejecting if exit remains unconfirmed. The
+   synchronous `forceAbort` method remains unchanged for ordinary stop, redirect, and handoff paths.
+   SessionManager bounds the await at five seconds and attaches rejection handling before racing the
+   timeout. A rejection or timeout refuses managed-worktree removal and restores any staged session;
+   plain deletion remains available because it never removes the checkout. Idle agents are still
+   quiesced for explicit worktree removal so a persistent Pi child cannot outlive its session;
 2. flush persistence and atomically rename the complete session directory to a reversible
    tombstone;
 3. perform strict status inspection, the authoritative fingerprint/ownership comparison, and

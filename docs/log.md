@@ -2,7 +2,7 @@
 
 ## 2026-07-31
 
-* **Agent quiescence plan approved**: issue #21's awaitable teardown contract was approved for Build on the existing feature branch and draft PR. Implementation will proceed through the shared barrier, provider teardown, SessionManager boundary, and verification phases.
+* **Agent quiescence implemented**: issue #21's awaitable teardown contract shipped on the existing feature branch and draft PR, with the shared barrier, provider teardown, SessionManager boundary, deterministic lifecycle regression coverage, and full affected verification matrix.
 
 ## 2026-07-30
 

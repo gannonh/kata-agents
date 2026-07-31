@@ -2,8 +2,9 @@
 type: Spec
 title: Awaitable agent teardown quiescence contract
 description: Replace inferred agent-idle polling with a backend-owned teardown contract before destructive managed-worktree operations.
-status: Approved
+status: Implemented
 approved_at: 2026-07-31T01:35:49Z
+implemented_at: 2026-07-31T01:48:17Z
 tags: [agents, backends, git, worktrees, sessions, safety]
 timestamp: 2026-07-30T00:00:00Z
 ---
@@ -12,8 +13,9 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## Status
 
-Approved — Build authorized by the user on 2026-07-31. This document is the
-first commit on the long-lived feature branch for [issue #21](https://github.com/gannonh/kata-agents/issues/21).
+Implemented — Build was authorized by the user on 2026-07-31 and all listed
+acceptance criteria passed the affected verification matrix. This document is
+the design record for the long-lived feature branch and [PR #23](https://github.com/gannonh/kata-agents/pull/23).
 
 ## Goal
 
@@ -41,32 +43,25 @@ change the feature flag, the removal fingerprint, or the deletion transaction.
 - `packages/server-core/src/sessions/SessionManager.ts`
 - `packages/server-core/src/git/__tests__/lifecycle.test.ts`
 
-## Verified current state
+## Implemented behavior
 
-- `AgentBackend.forceAbort(reason)` is synchronous. It requests cancellation
-  but cannot tell a caller when teardown has finished.
-- `ClaudeAgent.forceAbort()` aborts its SDK `AbortController` and immediately
-  clears `currentQuery`. The surrounding `for await` loop can still be
-  unwinding while `isProcessing()` already returns `false`.
-- The Claude SDK `Query` is an async generator. Its transport performs a
-  graceful-close sequence before its forwarded process signal fires, so the
-  reliable application-visible boundary is completion of the consumed query
-  generator, not clearing the query reference.
-- `PiAgent.forceAbort()` immediately clears `_isProcessing`, completes the
-  main-process event queue, and sends an `abort` message to a persistent Pi
-  subprocess. The main-process generator can therefore finish before the child
-  handles the abort.
-- Pi already has `killSubprocessGracefully()` for idle runtime restart. It sends
-  shutdown, sends `SIGTERM`, waits for the child `exit` event, escalates to
-  `SIGKILL`, and currently logs rather than fails when exit is still
-  unconfirmed.
-- `SessionManager.waitForAgentQuiescence()` polls the session and backend
-  processing flags for up to five seconds. It begins with a 100 ms floor delay
-  intended to let a final subprocess write land.
-- Managed-worktree removal refuses to proceed when this inferred barrier times
-  out. Plain session deletion still proceeds without touching the checkout.
-- Startup reconciliation from issue #22 reclaims clean unowned worktrees, so a
-  refused or interrupted removal remains recoverable.
+- `AgentBackend` requires `quiesceForTeardown(reason)`. `forceAbort(reason)`
+  remains synchronous for ordinary stop, redirect, and handoff paths.
+- `BaseAgent` tracks active and nested `chat()` generators with a generation-safe
+  idle promise. Its default teardown requests abort and awaits the complete
+  generator unwind.
+- Claude inherits the shared barrier, so teardown cannot resolve when only
+  `currentQuery` has been cleared; it resolves after consumed SDK query
+  iteration and the surrounding `chat()` cleanup finish.
+- Pi waits for the shared barrier, then stops the exact persistent child and
+  requires `exit`, escalating from `SIGTERM` to `SIGKILL` and rejecting when
+  exit cannot be confirmed. Stale exits cannot clear a replacement child.
+- SessionManager awaits the backend contract before managed-worktree inspection,
+  staging, fingerprint comparison, or removal. The five-second ceiling blocks
+  removal on rejection or timeout while plain session deletion remains
+  available. Polling, `AGENT_QUIESCE_POLL_MS`, and the 100 ms floor are gone.
+- Startup reconciliation from issue #22 continues to reclaim clean unowned
+  worktrees, so refused or interrupted removal remains recoverable.
 
 ## Settled design
 
@@ -241,6 +236,31 @@ backends; both must implement the real contract.
 12. The ADR describes the implemented guarantee rather than the former
     turn-loop inference, and documentation validation plus `git diff --check`
     pass.
+
+## Implementation evidence
+
+The acceptance criteria are covered by the following implementation and
+verification evidence:
+
+| Criteria | Evidence |
+| --- | --- |
+| 1–2 | Required interface method and generation-safe nested-chat barrier in `AgentBackend`/`BaseAgent`; `base-agent.test.ts` covers active, idle, repeated, and nested teardown. |
+| 3 | Claude inherits the BaseAgent barrier; `claude-agent-quiescence.test.ts` proves clearing `currentQuery` does not settle teardown before the captured chat generation completes. |
+| 4–5 | Pi override, captured-child exit handling, escalation, strict rejection, idle safety, and stale-child identity protection in `pi-agent.ts`; `pi-agent-quiescence.test.ts` covers each path. |
+| 6–9 | `SessionManager.deleteSession()` awaits teardown before staging/removal; lifecycle tests cover idle Pi teardown, deferred final writes, rejection, timeout, plain deletion, and preserved checkout/registry state. |
+| 10 | The former `waitForAgentQuiescence` polling helper, `AGENT_QUIESCE_POLL_MS`, and the 100 ms floor were removed; no destructive path polls `isProcessing()`. |
+| 11 | Full shared-agent, server Git lifecycle, removal-safety, and Git RPC/headless suites pass; shared and server-core type checks pass. |
+| 12 | This ADR records the backend-owned guarantee and failure behavior; i18n parity/sorted checks, documentation smoke tests, and `git diff --check` pass. |
+
+Verification commands run in this Build:
+
+```text
+661 shared-agent tests passed across 47 files.
+147 server-core Git tests passed.
+23 Git RPC/headless tests passed.
+Shared and server-core TypeScript compilation passed.
+i18n parity (6 locales / 1,590 keys) and sorted checks passed.
+```
 
 ## Implementation plan
 
