@@ -4,6 +4,8 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
+* [2026-08-01-pi-sdk-0.83-migration-design.md](2026-08-01-pi-sdk-0.83-migration-design.md): Migrate from retired `@mariozechner` Pi packages to Pi CLI-aligned `@earendil-works` 0.83 packages and use native model reasoning metadata. **Status: Approved.**
+
 * [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md): Provider-aware reasoning controls for OpenAI API, ChatGPT/Codex, and other Pi-managed models, including model capability metadata and the `minimal` level. **Status: Implemented.** See the [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md).
 
 * [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md): Required backend teardown contract for destructive checkout operations. Tracks [#21](https://github.com/gannonh/kata-agents/issues/21) and replaces processing-flag polling plus the 100 ms grace delay with nested-turn completion and provider child-process exit. **Status: Implemented.**

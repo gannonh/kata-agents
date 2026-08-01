@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Pi SDK 0.83 migration approved**: added the [Pi SDK migration spec](specs/2026-08-01-pi-sdk-0.83-migration-design.md) for the current Pi CLI-aligned `@earendil-works` package family, native model catalogs, and native reasoning levels.
+
 * **Provider-aware reasoning levels implemented**: model-specific OpenAI, ChatGPT/Codex, Copilot, and Pi-managed reasoning controls now expose supported levels, restore persisted app defaults for new sessions, preserve existing session values, retain Pi's app-level `max` alias, and resolve prefixed model IDs. See the [build report](specs/2026-08-01-provider-aware-reasoning-levels-build-report.md).
 
 * **Provider-aware reasoning levels planned**: added the draft [provider-aware reasoning levels spec](specs/2026-08-01-provider-aware-reasoning-levels-design.md) for model-specific OpenAI, ChatGPT/Codex, and Pi-managed reasoning controls, including the `minimal` level and renderer capability metadata.

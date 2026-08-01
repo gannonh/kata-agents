@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Approved Pi SDK 0.83 migration**: added [2026-08-01-pi-sdk-0.83-migration-design.md](2026-08-01-pi-sdk-0.83-migration-design.md) to move from retired `@mariozechner` Pi dependencies to the Pi CLI-aligned `@earendil-works` 0.83 package family and expose native reasoning metadata.
+
 * **Implemented provider-aware reasoning levels**: [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md) moved to Implemented after shared, server-core, Pi, Electron, i18n, generated-bundle, and independent review checks passed. A follow-up correction retains Pi's app-level `max` alias when native `xhigh` is available and normalizes prefixed model IDs. The [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md) records the evidence.
 
 * **Drafted provider-aware reasoning levels**: added [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md), covering model capability metadata, OpenAI/ChatGPT/Codex/Pi-managed controls, the `minimal` level, and focused verification criteria.
