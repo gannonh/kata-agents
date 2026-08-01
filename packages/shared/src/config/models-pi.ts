@@ -45,8 +45,12 @@ export function deriveSupportedThinkingLevelsFromPiModel(
 export function mapReportedReasoningEfforts(
   efforts?: readonly string[],
 ): ThinkingLevel[] | undefined {
-  if (efforts === undefined) return undefined;
-  const reported = new Set(efforts.map((effort) => effort.toLowerCase()));
+  if (efforts === undefined || !Array.isArray(efforts)) return undefined;
+  const reported = new Set(
+    efforts
+      .filter((effort): effort is string => typeof effort === 'string')
+      .map((effort) => effort.toLowerCase()),
+  );
   return PI_THINKING_LEVEL_IDS.filter((level) => reported.has(level));
 }
 

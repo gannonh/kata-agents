@@ -65,6 +65,8 @@ describe('models-pi filtering', () => {
     ]);
     expect(mapReportedReasoningEfforts([])).toEqual([]);
     expect(mapReportedReasoningEfforts(undefined)).toBeUndefined();
+    expect(mapReportedReasoningEfforts([1, null] as any)).toEqual([]);
+    expect(mapReportedReasoningEfforts('malformed' as any)).toBeUndefined();
   });
 
   it('includes GPT-5.6 models for OpenAI API and Codex catalogs', () => {

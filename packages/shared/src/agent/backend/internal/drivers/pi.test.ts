@@ -16,6 +16,20 @@ describe('Copilot reasoning capabilities', () => {
     });
   });
 
+  it('ignores malformed reported effort values without dropping the model', () => {
+    const [model] = toModelDefinitions([{
+      id: 'malformed',
+      name: 'Malformed',
+      supportedReasoningEfforts: [1 as any, null as any, 'high'],
+    }]);
+
+    expect(model).toMatchObject({
+      id: 'malformed',
+      supportsThinking: true,
+      supportedThinkingLevels: ['high'],
+    });
+  });
+
   it('distinguishes missing and explicitly empty effort metadata', () => {
     const models = toModelDefinitions([
       { id: 'unknown', name: 'Unknown' },

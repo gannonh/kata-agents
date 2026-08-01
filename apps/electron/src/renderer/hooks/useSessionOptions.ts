@@ -35,6 +35,26 @@ export const defaultSessionOptions: SessionOptions = {
 /** Type for partial updates to session options */
 export type SessionOptionUpdates = Partial<SessionOptions>
 
+/**
+ * Preserve effective levels for sessions that predate an app-default change.
+ * New sessions use the new app default through the context fallback.
+ */
+export function preserveSessionOptionsOnDefaultChange(
+  current: Map<string, SessionOptions>,
+  sessions: Array<{ id: string; thinkingLevel?: ThinkingLevel | null }>,
+  previousDefault: ThinkingLevel,
+): Map<string, SessionOptions> {
+  const next = new Map(current)
+  for (const session of sessions) {
+    if (next.has(session.id)) continue
+    next.set(session.id, {
+      ...defaultSessionOptions,
+      thinkingLevel: session.thinkingLevel ?? previousDefault,
+    })
+  }
+  return next
+}
+
 /** Helper to merge session options with updates */
 export function mergeSessionOptions(
   current: SessionOptions | undefined,

@@ -21,6 +21,12 @@ describe('thinking level capabilities', () => {
     expect(normalizeThinkingLevelForModel('medium', { supportedThinkingLevels: [] })).toBeUndefined()
   })
 
+  it('falls back safely when renderer capability data is malformed', () => {
+    const model = { provider: 'pi' as const, supportedThinkingLevels: 'invalid' as any }
+    expect(getThinkingLevelDefinitionsForModel(model).map(level => level.id)).toContain('minimal')
+    expect(normalizeThinkingLevelForModel('max', model)).toBe('max')
+  })
+
   it('normalizes using Pi ordering and prefers higher levels on ties', () => {
     const model = {
       provider: 'pi' as const,

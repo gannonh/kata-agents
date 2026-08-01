@@ -87,13 +87,18 @@ async function listModelsViaHttp(
 
     console.warn(`[listModelsViaHttp] GET /models returned ${models.length} models`);
 
-    return models.map(m => ({
-      id: m.id as string,
-      name: (m.name || m.id) as string,
-      supportedReasoningEfforts: (m.supportedReasoningEfforts || m.supported_reasoning_efforts) as string[] | undefined,
-      policy: m.policy as { state: string } | undefined,
-      contextWindow: ((m.capabilities as Record<string, unknown>)?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
-    }));
+    return models.map(m => {
+      const reportedEfforts = m.supportedReasoningEfforts || m.supported_reasoning_efforts;
+      return {
+        id: m.id as string,
+        name: (m.name || m.id) as string,
+        supportedReasoningEfforts: Array.isArray(reportedEfforts)
+          ? reportedEfforts.filter((effort): effort is string => typeof effort === 'string')
+          : undefined,
+        policy: m.policy as { state: string } | undefined,
+        contextWindow: ((m.capabilities as Record<string, unknown>)?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
+      };
+    });
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new Error('Copilot models API timed out');

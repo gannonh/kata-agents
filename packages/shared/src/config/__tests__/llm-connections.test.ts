@@ -45,6 +45,19 @@ describe('hydratePiConnectionModels', () => {
     expect(openai.models?.[1]).toBe('custom-model')
   })
 
+  it('does not guess capabilities when provider identity is missing', () => {
+    const connection = {
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      createdAt: Date.now(),
+      models: ['pi/gpt-5.6-sol'],
+    }
+
+    expect(hydratePiConnectionModels(connection)).toBe(connection)
+  })
+
   it('fills missing capabilities without replacing explicit model overrides', () => {
     const connection = hydratePiConnectionModels({
       slug: 'pi-test',

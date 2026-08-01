@@ -79,7 +79,7 @@ export function getThinkingLevelDefinitionsForModel(
   model?: ThinkingCapabilityModel,
 ): readonly ThinkingLevelDefinition[] {
   if (model?.supportsThinking === false) return [];
-  if (model?.supportedThinkingLevels !== undefined) {
+  if (Array.isArray(model?.supportedThinkingLevels)) {
     return THINKING_LEVELS.filter(({ id }) => model.supportedThinkingLevels!.includes(id));
   }
   return THINKING_LEVELS;
@@ -96,7 +96,8 @@ export function normalizeThinkingLevelForModel(
   const definitions = getThinkingLevelDefinitionsForModel(model);
   if (definitions.length === 0) return undefined;
 
-  const isKnownPiCapabilityList = model?.provider === 'pi' && model.supportedThinkingLevels !== undefined;
+  const isKnownPiCapabilityList = model?.provider === 'pi'
+    && Array.isArray(model.supportedThinkingLevels);
   const available = definitions
     .map(({ id }) => id)
     .filter((id) => !(isKnownPiCapabilityList && id === 'max'));

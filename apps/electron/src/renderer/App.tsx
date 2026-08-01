@@ -6,7 +6,11 @@ import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, ThinkingLevel } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@kata-sh/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
-import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
+import {
+  defaultSessionOptions,
+  mergeSessionOptions,
+  preserveSessionOptionsOnDefaultChange,
+} from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
@@ -303,11 +307,6 @@ export default function App() {
     defaultThinkingLevelRef.current = defaultThinkingLevel
   }, [defaultThinkingLevel])
 
-  const updateDefaultThinkingLevel = useCallback((level: ThinkingLevel) => {
-    defaultThinkingLevelRef.current = level
-    setDefaultThinkingLevel(level)
-  }, [])
-
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
     return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
@@ -325,6 +324,17 @@ export default function App() {
   const sessionDraftsRef = useRef<Map<string, SessionDraft>>(new Map())
   // Unified session options for all session-scoped settings
   const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
+
+  const updateDefaultThinkingLevel = useCallback((level: ThinkingLevel) => {
+    const previousDefault = defaultThinkingLevelRef.current
+    const sessions = store.get(sessionIdsAtom)
+      .map(sessionId => store.get(sessionAtomFamily(sessionId)))
+      .filter((session): session is Session => session !== null)
+
+    defaultThinkingLevelRef.current = level
+    setDefaultThinkingLevel(level)
+    setSessionOptions(current => preserveSessionOptionsOnDefaultChange(current, sessions, previousDefault))
+  }, [store])
 
   // Theme state (app-level only)
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)

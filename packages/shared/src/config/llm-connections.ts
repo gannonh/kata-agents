@@ -539,7 +539,9 @@ export function setModelSupportsImages(
  * stored ID, ordering, duplicates, unknown strings, and explicit overrides.
  */
 export function hydratePiConnectionModels<T extends LlmConnection>(connection: T): T {
-  if (connection.providerType !== 'pi' || !connection.models?.length) return connection;
+  if (connection.providerType !== 'pi' || !connection.models?.length || !connection.piAuthProvider) {
+    return connection;
+  }
 
   const catalog = getModelsForProviderType('pi', connection.piAuthProvider);
   if (catalog.length === 0) return connection;
