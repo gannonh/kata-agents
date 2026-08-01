@@ -1,6 +1,6 @@
-import { getModels } from '@mariozechner/pi-ai';
-import type { Api, KnownProvider, Model } from '@mariozechner/pi-ai';
-import { ModelRegistry } from '@mariozechner/pi-coding-agent';
+import { getModels } from '@earendil-works/pi-ai/compat';
+import type { Api, Model } from '@earendil-works/pi-ai';
+import { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import {
   SUPPLEMENTAL_OPENAI_MODELS,
   type SupplementalPiModel,
@@ -50,7 +50,7 @@ function supplementalToRegisteredModel(model: SupplementalPiModel): RegisteredMo
  */
 export function registerSupplementalOpenAIModels(registry: ModelRegistry): void {
   for (const provider of ['openai', 'openai-codex'] as const) {
-    const existing = getModels(provider as KnownProvider).map(toRegisteredModel);
+    const existing = getModels(provider as Parameters<typeof getModels>[0]).map(toRegisteredModel);
     const supplemental = SUPPLEMENTAL_OPENAI_MODELS
       .filter(model => model.provider === provider)
       .map(supplementalToRegisteredModel);

@@ -1,7 +1,7 @@
 /**
  * Stdout guard for JSONL subprocess mode.
  *
- * Mirrors @mariozechner/pi-coding-agent's output-guard (used by runRpcMode) so
+ * Mirrors @earendil-works/pi-coding-agent's output-guard (used by runRpcMode) so
  * Pi SDK subprocess output (e.g. npm install) is redirected to stderr instead
  * of corrupting the JSONL protocol on stdout.
  */

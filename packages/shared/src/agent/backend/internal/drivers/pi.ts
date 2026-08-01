@@ -48,10 +48,17 @@ async function listModelsViaHttp(
   githubToken: string,
   timeoutMs: number,
 ): Promise<RawCopilotModel[]> {
-  const { refreshGitHubCopilotToken } = await import('@mariozechner/pi-ai/oauth');
+  const { githubCopilotProvider } = await import('@earendil-works/pi-ai/providers/github-copilot');
+  const oauth = githubCopilotProvider().auth.oauth;
+  if (!oauth) throw new Error('Pi SDK did not configure GitHub Copilot OAuth');
 
   // Step 1: Exchange GitHub OAuth token → Copilot API token
-  const creds = await refreshGitHubCopilotToken(githubToken);
+  const creds = await oauth.refresh({
+    type: 'oauth',
+    access: '',
+    refresh: githubToken,
+    expires: 0,
+  });
   const copilotToken = creds.access;
 
   // Step 2: Extract base URL from token
@@ -303,7 +310,7 @@ export const piDriver: ProviderDriver = {
     let modelApi: string | undefined;
     let modelBaseUrl: string | undefined;
     try {
-      const { getModels } = await import('@mariozechner/pi-ai');
+      const { getModels } = await import('@earendil-works/pi-ai/compat');
       const models = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
       const requestedId = args.model.startsWith('pi/') ? args.model.slice(3) : args.model;
       const match = models.find(m => m.id === requestedId) || models[0];
