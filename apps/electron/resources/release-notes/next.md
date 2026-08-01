@@ -16,7 +16,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Managed worktree deletion confirmation** — Preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon stays aligned with the first line of wrapped labels.
+- **Managed worktree deletion confirmation** — Preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon and supporting text stay aligned with the wrapped label.
 - **Documentation help links** — The app Help dropdown now opens the hosted Mintlify docs site at `https://agents.kata.sh/docs`, and the linked Sources, Skills, Statuses, Permissions, Automations, Messaging, and All Documentation pages exist in the docs site.
 
 ## Breaking Changes

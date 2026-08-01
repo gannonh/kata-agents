@@ -213,12 +213,12 @@ export function DeleteSessionDialog({
                 </span>
 
                 {summary.blocked ? (
-                  <span className="text-[12px] text-muted-foreground">
+                  <span className="pl-5 text-[12px] text-muted-foreground">
                     {t('git.delete.sharedBlocked', { count: summary.otherOwnerCount })}
                   </span>
                 ) : (
                   <>
-                    <span className="text-[12px] text-muted-foreground">
+                    <span className="pl-5 text-[12px] text-muted-foreground">
                       {t('git.delete.worktreeKeptNote')}
                     </span>
                     {removalChosen && summary.destructive && (
@@ -247,7 +247,7 @@ export function DeleteSessionDialog({
                       </span>
                     )}
                     {removalChosen && summary.branchHasUniqueWork && (
-                      <span className="text-[12px] text-muted-foreground">
+                      <span className="pl-5 text-[12px] text-muted-foreground">
                         {t('git.delete.branchKeptNote')}
                       </span>
                     )}

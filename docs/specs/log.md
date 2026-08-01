@@ -2,7 +2,7 @@
 
 ## 2026-08-01
 
-* **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon remains aligned when the label wraps.
+* **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon and supporting text remain aligned when the label wraps.
 
 * **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, with runtime resolution and preferred-default coverage. Added focused catalog and registry tests.
 
