@@ -37,10 +37,10 @@ describe('hydratePiConnectionModels', () => {
     ])
     expect(typeof openai.models?.[0]).toBe('object')
     expect((openai.models?.[0] as any).supportedThinkingLevels).toEqual([
-      'minimal', 'low', 'medium', 'high', 'xhigh',
+      'off', 'low', 'medium', 'high', 'xhigh', 'max',
     ])
     expect((codex.models?.[0] as any).supportedThinkingLevels).toEqual([
-      'off', 'minimal', 'low', 'medium', 'high', 'xhigh',
+      'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
     ])
     expect(openai.models?.[1]).toBe('custom-model')
   })
@@ -73,7 +73,7 @@ describe('hydratePiConnectionModels', () => {
       id: 'pi/gpt-5.6-sol',
       name: 'Custom name',
       supportsImages: false,
-      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     })
   })
 })
