@@ -1133,6 +1133,8 @@ export class SessionManager implements ISessionManager {
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
   private sessionTeardownFences: Map<string, number> = new Map()
+  /** Keeps a blocked destructive deletion fenced until a later retry succeeds. */
+  private sessionTeardownFenceHolds: Set<string> = new Set()
   /** Reused by retries while a timed-out backend teardown is still running. */
   private agentTeardownPromises: Map<string, Promise<boolean>> = new Map()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
@@ -1218,10 +1220,19 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private async awaitPendingPreChat(sessionId: string): Promise<void> {
+  private async awaitPendingPreChat(sessionId: string, timeoutMs: number): Promise<boolean> {
     const barriers = this.pendingPreChatBarriers.get(sessionId)
-    if (!barriers || barriers.size === 0) return
-    await Promise.all([...barriers])
+    if (!barriers || barriers.size === 0) return true
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const settled = await Promise.race([
+      Promise.all([...barriers]).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(false), timeoutMs)
+      }),
+    ])
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    return settled
   }
 
   private async withPreChatBarrier<T>(
@@ -1238,23 +1249,76 @@ export class SessionManager implements ISessionManager {
 
   private async withSessionTeardownFence<T>(
     sessionId: string,
-    operation: () => Promise<T>,
+    operation: (
+      retainFence: () => void,
+      preChatSettled: boolean,
+      teardownDeadline: number,
+    ) => Promise<T>,
   ): Promise<T> {
+    const hadRetainedFence = this.sessionTeardownFenceHolds.has(sessionId)
     this.sessionTeardownFences.set(sessionId, (this.sessionTeardownFences.get(sessionId) ?? 0) + 1)
+    const teardownDeadline = Date.now() + AGENT_QUIESCE_TIMEOUT_MS
+    const preChatSettled = await this.awaitPendingPreChat(sessionId, AGENT_QUIESCE_TIMEOUT_MS)
+    let retainFence = false
+    let operationCompleted = false
     try {
-      await this.awaitPendingPreChat(sessionId)
-      return await operation()
+      const result = await operation(
+        () => {
+          retainFence = true
+        },
+        preChatSettled,
+        teardownDeadline,
+      )
+      operationCompleted = true
+      return result
     } finally {
+      if (retainFence) {
+        this.sessionTeardownFenceHolds.add(sessionId)
+      } else if (operationCompleted && hadRetainedFence) {
+        // A successful retry releases the hold left by the prior blocked delete.
+        this.sessionTeardownFenceHolds.delete(sessionId)
+      }
+
       const count = this.sessionTeardownFences.get(sessionId) ?? 1
-      if (count <= 1) {
+      const releases = retainFence || !hadRetainedFence || !operationCompleted ? 1 : 2
+      const remaining = Math.max(0, count - releases)
+      if (remaining > 0) {
+        this.sessionTeardownFences.set(sessionId, remaining)
+      } else if (this.sessionTeardownFenceHolds.has(sessionId)) {
+        // Keep one fence reference for a blocked destructive deletion. This
+        // prevents queued/new sends from racing a late teardown completion.
+        this.sessionTeardownFences.set(sessionId, 1)
+      } else {
         this.sessionTeardownFences.delete(sessionId)
         const managed = this.sessions.get(sessionId)
         if (managed && !managed.isProcessing && managed.messageQueue.length > 0) {
           setImmediate(() => this.processNextQueuedMessage(sessionId))
         }
-      } else {
-        this.sessionTeardownFences.set(sessionId, count - 1)
       }
+    }
+  }
+
+  /**
+   * Start an async chat generator before releasing the SessionManager pre-chat
+   * barrier. Calling `next()` runs BaseAgent.beginChatGeneration() immediately,
+   * even though the generator may not yield its first event until later.
+   */
+  private async *releasePreChatBarrierOnStart(
+    iterator: AsyncGenerator<AgentEvent>,
+    release: () => void,
+  ): AsyncGenerator<AgentEvent> {
+    const firstNext = iterator.next()
+    release()
+    let completed = false
+    try {
+      let result = await firstNext
+      while (!result.done) {
+        yield result.value
+        result = await iterator.next()
+      }
+      completed = true
+    } finally {
+      if (!completed) await iterator.return?.(undefined)
     }
   }
 
@@ -5627,15 +5691,31 @@ export class SessionManager implements ISessionManager {
     sessionId: string,
     managed: ManagedSession,
     timeoutMs = AGENT_QUIESCE_TIMEOUT_MS,
+    preChatSettled?: boolean,
   ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    const settled = preChatSettled ?? await this.awaitPendingPreChat(sessionId, timeoutMs)
+    if (!settled) {
+      sessionLog.warn(
+        `Pre-chat processing for ${sessionId} did not settle within ${timeoutMs}ms; not treating its checkout as safe to remove`,
+      )
+      return false
+    }
+
+    const remainingMs = Math.max(0, deadline - Date.now())
     const agent = managed.agent
+    if (remainingMs === 0 && agent) {
+      sessionLog.warn(
+        `No teardown budget remained for ${sessionId} after pre-chat processing; not treating its checkout as safe to remove`,
+      )
+      return false
+    }
     if (!agent) return true
 
-    await this.awaitPendingPreChat(sessionId)
     let teardown = this.agentTeardownPromises.get(sessionId)
     if (!teardown) {
       const created = Promise.resolve()
-        .then(() => agent.quiesceForTeardown(AbortReason.UserStop))
+        .then(() => agent.quiesceForTeardown(AbortReason.UserStop, remainingMs))
         .then(
           () => true,
           (error) => {
@@ -5654,7 +5734,7 @@ export class SessionManager implements ISessionManager {
 
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<boolean>((resolve) => {
-      timeoutHandle = setTimeout(() => resolve(false), timeoutMs)
+      timeoutHandle = setTimeout(() => resolve(false), remainingMs)
     })
     const quiesced = await Promise.race([teardown, timeout])
     if (timeoutHandle) clearTimeout(timeoutHandle)
@@ -5943,7 +6023,7 @@ export class SessionManager implements ISessionManager {
       return { deleted: false }
     }
 
-    return this.withSessionTeardownFence(sessionId, async () => {
+    return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
@@ -5954,8 +6034,13 @@ export class SessionManager implements ISessionManager {
     // the session/backend flags report idle, because Pi owns a persistent child
     // outside those inferred turn flags.
     let agentQuiesced = true
-    if (managed.agent && (managed.isProcessing || options?.removeManagedWorktree)) {
-      agentQuiesced = await this.awaitAgentTeardown(sessionId, managed)
+    if (managed.isProcessing || options?.removeManagedWorktree) {
+      agentQuiesced = await this.awaitAgentTeardown(
+        sessionId,
+        managed,
+        Math.max(0, teardownDeadline - Date.now()),
+        preChatSettled,
+      )
     }
 
     // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Its
@@ -5980,6 +6065,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(
           `Refusing managed-worktree removal for ${sessionId}: agent did not confirm it stopped`,
         )
+        retainFence()
         return {
           deleted: false,
           worktreeRemoval: {
@@ -6585,8 +6671,10 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      releasePreChat()
-      const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
+      const chatIterator = this.releasePreChatBarrierOnStart(
+        agent.chat(effectiveMessage, modelInputAttachments.attachments),
+        releasePreChat,
+      )
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {

@@ -9,14 +9,20 @@ describe('native Pi models', () => {
       allowModelNetwork: false,
     });
     const registry = new ModelRegistry(runtime);
+    const expectedCosts = {
+      'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+      'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
+      'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
 
     for (const provider of ['openai', 'openai-codex']) {
-      for (const modelId of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+      for (const modelId of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const) {
         expect(registry.find(provider, modelId)).toMatchObject({
           id: modelId,
           provider,
           contextWindow: 272_000,
           maxTokens: 128_000,
+          cost: expectedCosts[modelId],
         });
       }
     }

@@ -45,8 +45,7 @@ function installFakeChild(agent: PiAgent, child: FakeChild): any {
 }
 
 async function drainMicrotasks(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let i = 0; i < 10; i++) await Promise.resolve()
 }
 
 describe('PiAgent teardown quiescence', () => {
@@ -126,7 +125,13 @@ describe('PiAgent teardown quiescence', () => {
       const pending = new Promise((resolve, reject) => {
         internals.pendingLlmQueries.set('llm-test', { resolve, reject })
       })
-      const rejection = expect(pending).rejects.toThrow('Pi subprocess exited')
+      const rejection = pending.then(
+        () => { throw new Error('pending RPC unexpectedly resolved') },
+        (error) => {
+          expect(error).toBeInstanceOf(Error)
+          expect((error as Error).message).toContain('Pi subprocess exited')
+        },
+      )
       const stopping = internals.killSubprocessGracefully(100, false)
       jest.advanceTimersByTime(100)
       await drainMicrotasks()
@@ -140,17 +145,39 @@ describe('PiAgent teardown quiescence', () => {
     }
   })
 
+  it('keeps an unconfirmed child tracked across non-strict cleanup calls', () => {
+    const agent = new PiAgent(createConfig())
+    const child = new FakeChild()
+    const internals = installFakeChild(agent, child)
+    internals.subprocessExitUnconfirmed = true
+
+    internals.killSubprocess()
+
+    expect(internals.subprocess).toBe(child)
+    expect(internals.subprocessExitUnconfirmed).toBe(true)
+    internals.handleSubprocessExit(child, null, 'SIGTERM')
+    expect(internals.subprocess).toBeNull()
+    agent.destroy()
+  })
+
   it('does not let a stale child exit clear a replacement', () => {
     const agent = new PiAgent(createConfig())
     const oldChild = new FakeChild()
     const replacement = new FakeChild()
     const internals = installFakeChild(agent, replacement)
+    let overflowResets = 0
+    internals.adapter = { resetOverflowState: () => { overflowResets += 1 } }
+    internals.callbackPort = 1234
 
     internals.handleSubprocessExit(oldChild, 0, null)
     expect(internals.subprocess).toBe(replacement)
+    expect(overflowResets).toBe(0)
+    expect(internals.callbackPort).toBe(1234)
 
     internals.handleSubprocessExit(replacement, 0, null)
     expect(internals.subprocess).toBeNull()
+    expect(overflowResets).toBe(1)
+    expect(internals.callbackPort).toBe(0)
     agent.destroy()
   })
 })

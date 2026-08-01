@@ -440,6 +440,7 @@
   "errors.failedToLoadSession": "Failed to load session",
   "errors.failedToLoadSessions": "Failed to load sessions",
   "errors.failedToLoadSessionsDesc": "Kata Agents could connect, but loading the session list failed. This is not being treated as an empty workspace to avoid hiding a real bug or data problem.",
+  "errors.piSubprocessExitUnconfirmed": "Pi subprocess exit remains unconfirmed; teardown must complete before starting a new turn",
   "errors.pleaseReload": "Please reload the page. The error has been reported.",
   "errors.retryLoadingSessions": "Retry loading sessions",
   "errors.sessionNotFound": "Session not found",

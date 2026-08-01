@@ -46,7 +46,7 @@ describe('ClaudeAgent teardown quiescence', () => {
       settled = true
     })
 
-    await Promise.resolve()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
     expect(settled).toBe(false)
 
     agent.releaseChat()

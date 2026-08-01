@@ -440,6 +440,7 @@
   "errors.failedToLoadSession": "无法加载会话",
   "errors.failedToLoadSessions": "无法加载会话列表",
   "errors.failedToLoadSessionsDesc": "Kata Agents 已连接，但加载会话列表失败。为避免隐藏真实错误或数据问题，此处不视为空 Workspace。",
+  "errors.piSubprocessExitUnconfirmed": "尚未确认 Pi 子进程已退出；必须完成清理后才能开始新一轮。",
   "errors.pleaseReload": "请重新加载页面。错误已被报告。",
   "errors.retryLoadingSessions": "重试加载会话",
   "errors.sessionNotFound": "未找到会话",

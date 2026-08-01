@@ -500,7 +500,6 @@ export default function App() {
 
     try {
       const persistedDefaultThinking = await window.electronAPI.getDefaultThinkingLevel()
-      defaultThinkingLevelRef.current = persistedDefaultThinking
       updateDefaultThinkingLevel(persistedDefaultThinking)
       const loadedSessions = await window.electronAPI.getSessions()
 

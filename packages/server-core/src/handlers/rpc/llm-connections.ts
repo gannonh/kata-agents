@@ -789,24 +789,42 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // the critical Copilot token exchange that determines the correct
       // API endpoint for the user's subscription tier (individual/business/enterprise).
       const credentials = await oauth.login({
-        prompt: async () => {
-          // Pi SDK asks for a GitHub Enterprise domain only when needed.
+        prompt: async (authPrompt) => {
+          // Copilot's current prompt is a text AuthPrompt for the Enterprise
+          // domain. Blank selects github.com; an explicit env value supports
+          // headless/managed Enterprise logins without guessing from events.
+          const enterpriseDomain = process.env.KATA_GITHUB_COPILOT_ENTERPRISE_DOMAIN?.trim() ?? ''
+          if (authPrompt.type === 'text') {
+            return enterpriseDomain
+          }
+          if (authPrompt.type === 'select') {
+            if (enterpriseDomain) {
+              const configured = authPrompt.options.find(option =>
+                option.id === enterpriseDomain || option.label === enterpriseDomain,
+              )
+              if (configured) return configured.id
+            }
+            return authPrompt.options.find(option =>
+              option.id === 'github.com' || option.label.toLowerCase() === 'github.com',
+            )?.id ?? ''
+          }
           return ''
         },
         notify: event => {
-          if (event.type === 'device_code' || event.type === 'auth_url') {
-            const userCode = event.type === 'device_code'
-              ? event.userCode
-              : event.instructions?.match(/:\s*(\S+)/)?.[1] ?? ''
-            const verificationUri = event.type === 'device_code'
-              ? event.verificationUri
-              : event.url
-            deps.platform.logger?.info(`[GitHub OAuth] Device code: ${userCode}`)
+          if (event.type === 'device_code') {
+            deps.platform.logger?.info(`[GitHub OAuth] Device code: ${event.userCode}`)
             pushTyped(server, RPC_CHANNELS.copilot.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
-              userCode,
-              verificationUri,
+              userCode: event.userCode,
+              verificationUri: event.verificationUri,
             })
-            server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, verificationUri).catch(err => {
+            server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, event.verificationUri).catch(err => {
+              deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
+            })
+            return
+          }
+          if (event.type === 'auth_url') {
+            deps.platform.logger?.info(`[GitHub OAuth] ${event.instructions ?? 'Opening authorization URL'}`)
+            server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, event.url).catch(err => {
               deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
             })
             return

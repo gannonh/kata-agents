@@ -440,6 +440,7 @@
   "errors.failedToLoadSession": "No se pudo cargar la sesión",
   "errors.failedToLoadSessions": "No se pudieron cargar las sesiones",
   "errors.failedToLoadSessionsDesc": "Kata Agents pudo conectarse, pero falló al cargar la lista de sesiones. No se trata como un Workspace vacío para evitar ocultar un error real o un problema de datos.",
+  "errors.piSubprocessExitUnconfirmed": "La salida del subproceso de Pi aún no está confirmada; el desmontaje debe completarse antes de iniciar un nuevo turno.",
   "errors.pleaseReload": "Por favor recarga la página. El error ha sido reportado.",
   "errors.retryLoadingSessions": "Reintentar cargar sesiones",
   "errors.sessionNotFound": "Sesión no encontrada",

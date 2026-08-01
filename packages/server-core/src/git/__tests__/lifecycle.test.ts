@@ -914,7 +914,8 @@ describe('SessionManager.deleteSession — backend quiescence contract', () => {
     const blocked = await sm.deleteSession('wedged', { removeManagedWorktree: true })
     expect(blocked.deleted).toBe(false)
     expect(blocked.worktreeRemoval?.blocked).toBe(true)
-    expect(blocked.worktreeRemoval?.blockedReason).toContain('has not finished stopping')
+    expect(blocked.worktreeRemoval?.blockedReasonCode).toBe('agent_not_quiesced')
+    expect((sm as any).sessionTeardownFences.has('wedged')).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
     expect((sm as any).sessions.has('wedged')).toBe(true)
 
@@ -939,6 +940,25 @@ describe('SessionManager.deleteSession — backend quiescence contract', () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  test('releases the pre-chat barrier when the generator starts, not when it first yields', async () => {
+    const { sm } = makeManager()
+    let releaseFirstEvent!: () => void
+    const firstEvent = new Promise<void>((resolve) => { releaseFirstEvent = resolve })
+    const releaseBarrier = (sm as any).registerPreChatBarrier('barrier')
+    const source = (async function* () {
+      await firstEvent
+      yield { type: 'complete' }
+    })()
+    const wrapped = (sm as any).releasePreChatBarrierOnStart(source, releaseBarrier)
+
+    const first = wrapped.next()
+    await expect((sm as any).awaitPendingPreChat('barrier', 50)).resolves.toBe(true)
+
+    releaseFirstEvent()
+    await expect(first).resolves.toMatchObject({ done: false, value: { type: 'complete' } })
+    await expect(wrapped.next()).resolves.toMatchObject({ done: true })
   })
 
   test('holds the destructive inspection until the final write is inside the quiesced boundary', async () => {

@@ -440,6 +440,7 @@
   "errors.failedToLoadSession": "セッションの読み込みに失敗しました",
   "errors.failedToLoadSessions": "セッション一覧の読み込みに失敗しました",
   "errors.failedToLoadSessionsDesc": "Kata Agentsは接続できましたが、セッション一覧の読み込みに失敗しました。実際のバグやデータの問題を隠さないよう、空のWorkspaceとして扱っていません。",
+  "errors.piSubprocessExitUnconfirmed": "Piサブプロセスの終了はまだ確認されていません。新しいターンを開始する前に、終了処理を完了する必要があります。",
   "errors.pleaseReload": "ページを再読み込みしてください。エラーは報告されました。",
   "errors.retryLoadingSessions": "セッション一覧を再読み込み",
   "errors.sessionNotFound": "セッションが見つかりません",

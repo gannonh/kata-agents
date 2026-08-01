@@ -46,6 +46,7 @@ import { EventQueue } from './backend/event-queue.ts';
 // System prompt for Kata Agent context
 import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
+import { i18n } from '../i18n/index.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
@@ -414,7 +415,7 @@ export class PiAgent extends BaseAgent {
    */
   private async ensureSubprocess(): Promise<void> {
     if (this.subprocess && this.subprocessExitUnconfirmed) {
-      throw new Error('Pi subprocess exit remains unconfirmed; teardown must complete before starting a new turn');
+      throw new Error(i18n.t('errors.piSubprocessExitUnconfirmed'));
     }
     if (this.subprocess && this.subprocessReady) {
       await this.subprocessReady;
@@ -1777,6 +1778,8 @@ export class PiAgent extends BaseAgent {
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
+    this.callbackPort = 0;
+    this.adapter.resetOverflowState();
 
     // If we were processing, emit error + complete
     const exitReason = signal ? `signal ${signal}` : `code ${code}`;
@@ -2406,9 +2409,14 @@ export class PiAgent extends BaseAgent {
    * Await the shared turn barrier, then stop the persistent Pi child and
    * require confirmed operating-system exit before destructive teardown.
    */
-  override async quiesceForTeardown(reason: AbortReason): Promise<void> {
-    await super.quiesceForTeardown(reason);
-    await this.killSubprocessGracefully(2_000, true);
+  override async quiesceForTeardown(reason: AbortReason, timeoutMs = 3_000): Promise<void> {
+    // Keep the subprocess shutdown inside the caller's destructive teardown
+    // budget. The final 1s is reserved for the SIGKILL confirmation window.
+    const deadline = Date.now() + timeoutMs;
+    await super.quiesceForTeardown(reason, timeoutMs);
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const sigkillGraceMs = Math.min(remainingMs, 1_000);
+    await this.killSubprocessGracefully(Math.max(0, remainingMs - sigkillGraceMs), true);
   }
 
   /**
@@ -2516,8 +2524,15 @@ export class PiAgent extends BaseAgent {
       }
       child.kill('SIGTERM');
       this.rejectPendingSubprocessRequests('SIGTERM requested');
-      this.subprocess = null;
-      this.subprocessExitUnconfirmed = false;
+      // An unconfirmed strict-teardown child must remain tracked until its
+      // exact exit event arrives; reconnect/clear-history must not spawn a
+      // replacement alongside it.
+      if (!this.subprocessExitUnconfirmed) {
+        this.subprocess = null;
+      }
+      if (!this.subprocess) {
+        this.subprocessExitUnconfirmed = false;
+      }
     }
 
     this.subprocessReady = null;

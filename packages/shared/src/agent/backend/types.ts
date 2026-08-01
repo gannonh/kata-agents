@@ -375,9 +375,10 @@ export interface AgentBackend {
    *
    * This is reserved for irreversible lifecycle boundaries such as managed
    * checkout removal. Ordinary stop, redirect, and handoff callers should keep
-   * using forceAbort()/interruptForHandoff().
+   * using forceAbort()/interruptForHandoff(). `timeoutMs` is the caller's
+   * teardown budget for backend-owned shutdown work when one is available.
    */
-  quiesceForTeardown(reason: AbortReason): Promise<void>;
+  quiesceForTeardown(reason: AbortReason, timeoutMs?: number): Promise<void>;
 
   /**
    * Interrupt the current turn because control is being handed to the UI.

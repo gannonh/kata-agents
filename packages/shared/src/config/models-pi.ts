@@ -136,20 +136,20 @@ function isBareBedrockClaudeModel(modelId: string): boolean {
  * Get Pi models for a specific auth provider directly from the Pi SDK.
  */
 export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
-  let models: ModelDefinition[] = [];
+  let sdkModels: Model<Api>[] = [];
   try {
-    models = getModels(piAuthProvider as Parameters<typeof getModels>[0])
-      .filter(m => !isExcludedPiModel(m.id))
-      // Bedrock: exclude bare Claude models without region prefix — they're
-      // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
-      // Regional variants from the same catalog are kept.
-      .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
-      .map(piModelToDefinition);
+    sdkModels = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
   } catch {
     // Provider not recognized by SDK.
   }
 
-  return models;
+  return sdkModels
+    .filter(m => !isExcludedPiModel(m.id))
+    // Bedrock: exclude bare Claude models without region prefix — they're
+    // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
+    // Regional variants from the same catalog are kept.
+    .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
+    .map(piModelToDefinition);
 }
 
 /**

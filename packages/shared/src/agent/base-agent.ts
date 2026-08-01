@@ -1119,7 +1119,7 @@ ${formattedMessages}
    * Request a hard abort and await the current chat generation's complete
    * unwind. Provider subclasses extend this for persistent child processes.
    */
-  async quiesceForTeardown(reason: AbortReason): Promise<void> {
+  async quiesceForTeardown(reason: AbortReason, _timeoutMs?: number): Promise<void> {
     const idleChatPromise = this.idleChatPromise;
     this.forceAbort(reason);
     await idleChatPromise;

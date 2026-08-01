@@ -440,6 +440,7 @@
   "errors.failedToLoadSession": "A munkamenet betöltése sikertelen",
   "errors.failedToLoadSessions": "A munkamenetek betöltése sikertelen",
   "errors.failedToLoadSessionsDesc": "A Kata Agents kapcsolódott, de a munkamenetek listájának betöltése nem sikerült. Ez nem üres munkaterületként van kezelve, hogy ne rejtsen el egy valódi hibát vagy adatproblémát.",
+  "errors.piSubprocessExitUnconfirmed": "A Pi-alfolyamat kilépése még nincs megerősítve; a leállításnak be kell fejeződnie, mielőtt új kör indítható.",
   "errors.pleaseReload": "Kérjük, töltsd újra az oldalt. A hiba jelentve lett.",
   "errors.retryLoadingSessions": "Munkamenetek újratöltése",
   "errors.sessionNotFound": "A munkamenet nem található",
