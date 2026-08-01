@@ -55,7 +55,11 @@ import type { Credential, TextContent as PiTextContent } from '@earendil-works/p
 // copy), so one registration covers both pi-ai and pi-agent-core module scopes.
 import { setBedrockProviderModule } from '@earendil-works/pi-ai/api/bedrock-converse-stream.lazy';
 import { bedrockProviderModule } from '@earendil-works/pi-ai/bedrock-provider';
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 setBedrockProviderModule(bedrockProviderModule);
+// Bun bundles the Pi server into one file, so Pi's lazy OAuth imports cannot
+// resolve their sibling modules at runtime. Register the bundled loaders first.
+registerBunOAuthFlows();
 
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
