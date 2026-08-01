@@ -202,12 +202,14 @@ export function DeleteSessionDialog({
                 disabled={summary.blocked || busy}
                 onChange={(e) => setRemoveWorktree(e.target.checked)}
               />
-              <span className="flex flex-col gap-1">
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                  <GitFork className="h-3.5 w-3.5 shrink-0" />
-                  {branch
-                    ? t('git.delete.removeWorktreeLabelBranch', { branch })
-                    : t('git.delete.removeWorktreeLabel')}
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="flex min-w-0 items-start gap-1.5 font-medium">
+                  <GitFork className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0">
+                    {branch
+                      ? t('git.delete.removeWorktreeLabelBranch', { branch })
+                      : t('git.delete.removeWorktreeLabel')}
+                  </span>
                 </span>
 
                 {summary.blocked ? (
