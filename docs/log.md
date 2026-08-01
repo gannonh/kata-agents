@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Provider-aware reasoning levels implemented**: model-specific OpenAI, ChatGPT/Codex, Copilot, and Pi-managed reasoning controls now expose supported levels, restore persisted app defaults for new sessions, and preserve existing session values. See the [build report](specs/2026-08-01-provider-aware-reasoning-levels-build-report.md).
+
 * **Provider-aware reasoning levels planned**: added the draft [provider-aware reasoning levels spec](specs/2026-08-01-provider-aware-reasoning-levels-design.md) for model-specific OpenAI, ChatGPT/Codex, and Pi-managed reasoning controls, including the `minimal` level and renderer capability metadata.
 
 * **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so the session delete action can offer its worktree-aware confirmation without waiting for a restart or full session reload. The worktree icon and supporting text remain aligned when the label wraps.

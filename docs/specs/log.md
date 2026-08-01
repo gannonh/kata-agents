@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Implemented provider-aware reasoning levels**: [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md) moved to Implemented after shared, server-core, Pi, Electron, i18n, generated-bundle, and independent review checks passed. The [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md) records 105 focused test passes and the generated-resource verification.
+
 * **Drafted provider-aware reasoning levels**: added [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md), covering model capability metadata, OpenAI/ChatGPT/Codex/Pi-managed controls, the `minimal` level, and focused verification criteria.
 
 * **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon and supporting text remain aligned when the label wraps.
