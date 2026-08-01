@@ -73,14 +73,22 @@ export interface ThinkingCapabilityModel {
  *
  * An omitted capability list means that the provider did not report model-level
  * capabilities, so callers retain the compatibility list. An explicit empty
- * list represents a reported model with no selectable reasoning levels.
+ * list represents a reported model with no selectable reasoning levels. Pi
+ * models that support native xhigh also expose the app-level max alias; runtime
+ * mapping still sends that alias as Pi xhigh.
  */
 export function getThinkingLevelDefinitionsForModel(
   model?: ThinkingCapabilityModel,
 ): readonly ThinkingLevelDefinition[] {
   if (model?.supportsThinking === false) return [];
   if (Array.isArray(model?.supportedThinkingLevels)) {
-    return THINKING_LEVELS.filter(({ id }) => model.supportedThinkingLevels!.includes(id));
+    const levels = THINKING_LEVELS.filter(({ id }) => model.supportedThinkingLevels!.includes(id));
+    const hasPiXHigh = model?.provider === 'pi' && levels.some(({ id }) => id === 'xhigh');
+    const hasMaxAlias = levels.some(({ id }) => id === 'max');
+    if (hasPiXHigh && !hasMaxAlias) {
+      levels.push(THINKING_LEVELS.find(({ id }) => id === 'max')!);
+    }
+    return levels;
   }
   return THINKING_LEVELS;
 }
@@ -96,14 +104,10 @@ export function normalizeThinkingLevelForModel(
   const definitions = getThinkingLevelDefinitionsForModel(model);
   if (definitions.length === 0) return undefined;
 
-  const isKnownPiCapabilityList = model?.provider === 'pi'
-    && Array.isArray(model.supportedThinkingLevels);
-  const available = definitions
-    .map(({ id }) => id)
-    .filter((id) => !(isKnownPiCapabilityList && id === 'max'));
+  const available = definitions.map(({ id }) => id);
   if (available.length === 0) return undefined;
 
-  const requested = isKnownPiCapabilityList && level === 'max' ? 'xhigh' : level;
+  const requested = level;
   const requestedIndex = THINKING_LEVEL_IDS.indexOf(requested);
   if (requestedIndex === -1) return available[0];
 

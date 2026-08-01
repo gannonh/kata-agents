@@ -1,4 +1,4 @@
-import type { ModelDefinition } from '@config/models'
+import { modelIdsMatch, type ModelDefinition } from '@config/models'
 import {
   getThinkingLevelDefinitionsForModel,
   normalizeThinkingLevelForModel,
@@ -10,6 +10,17 @@ export interface ThinkingLevelPickerState {
   levels: readonly ThinkingLevelDefinition[]
   displayedLevel: ThinkingLevel
   disabled: boolean
+}
+
+/** Find the capability-bearing definition for the currently selected model. */
+export function findSelectedModel(
+  models: readonly (ModelDefinition | string)[],
+  currentModel: string,
+): ModelDefinition | undefined {
+  const selected = models.find(
+    model => typeof model !== 'string' && modelIdsMatch(model.id, currentModel),
+  )
+  return selected && typeof selected !== 'string' ? selected : undefined
 }
 
 /** Resolve one consistent reasoning-control state for the desktop and compact pickers. */

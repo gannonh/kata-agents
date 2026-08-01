@@ -43,7 +43,7 @@ describe('thinking level capabilities', () => {
     })).toBe('low')
   })
 
-  it('aliases max to native xhigh for Pi capability lists', () => {
+  it('retains the app max alias when Pi supports native xhigh', () => {
     const model = {
       provider: 'pi' as const,
       supportsThinking: true,
@@ -51,8 +51,21 @@ describe('thinking level capabilities', () => {
     }
 
     expect(getThinkingLevelDefinitionsForModel(model).map(level => level.id)).toEqual([
-      'minimal', 'low', 'medium', 'high', 'xhigh',
+      'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
     ])
-    expect(normalizeThinkingLevelForModel('max', model)).toBe('xhigh')
+    expect(normalizeThinkingLevelForModel('max', model)).toBe('max')
+  })
+
+  it('does not expose the max alias when Pi lacks native xhigh', () => {
+    const model = {
+      provider: 'pi' as const,
+      supportsThinking: true,
+      supportedThinkingLevels: ['minimal', 'low', 'medium', 'high'] as const,
+    }
+
+    expect(getThinkingLevelDefinitionsForModel(model).map(level => level.id)).toEqual([
+      'minimal', 'low', 'medium', 'high',
+    ])
+    expect(normalizeThinkingLevelForModel('max', model)).toBe('high')
   })
 })

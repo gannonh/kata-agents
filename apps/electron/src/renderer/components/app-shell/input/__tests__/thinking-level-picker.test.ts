@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { ModelDefinition } from '@config/models'
-import { resolveThinkingLevelPickerState } from '../thinking-level-picker'
+import { findSelectedModel, resolveThinkingLevelPickerState } from '../thinking-level-picker'
 
 function model(overrides: Partial<ModelDefinition> = {}): ModelDefinition {
   return {
@@ -22,13 +22,13 @@ describe('resolveThinkingLevelPickerState', () => {
     }))
 
     expect(state.levels.map(level => level.id)).toEqual([
-      'minimal', 'low', 'medium', 'high', 'xhigh',
+      'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
     ])
     expect(state.displayedLevel).toBe('medium')
     expect(state.disabled).toBe(false)
   })
 
-  it('normalizes max to native xhigh and disables explicit non-reasoning models', () => {
+  it('retains max when Pi supports xhigh and disables explicit non-reasoning models', () => {
     const piState = resolveThinkingLevelPickerState('max', model({
       supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
       supportsThinking: true,
@@ -38,9 +38,17 @@ describe('resolveThinkingLevelPickerState', () => {
       supportsThinking: false,
     }))
 
-    expect(piState.displayedLevel).toBe('xhigh')
+    expect(piState.displayedLevel).toBe('max')
     expect(textState.levels).toEqual([])
     expect(textState.disabled).toBe(true)
+  })
+
+  it('resolves Pi metadata when the selected model ID omits the catalog prefix', () => {
+    const selected = findSelectedModel([
+      model({ id: 'pi/gpt-5.6-luna', supportedThinkingLevels: ['minimal', 'xhigh'] }),
+    ], 'gpt-5.6-luna')
+
+    expect(selected?.id).toBe('pi/gpt-5.6-luna')
   })
 
   it('keeps the compatibility list when a model has no capability metadata', () => {

@@ -40,7 +40,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
-import { resolveThinkingLevelPickerState } from './thinking-level-picker'
+import { findSelectedModel, resolveThinkingLevelPickerState } from './thinking-level-picker'
 
 interface CompactModelSelectorProps {
   currentModel: string
@@ -121,12 +121,10 @@ export function CompactModelSelector({
     return model.name ?? stripPiPrefixForDisplay(model.id)
   }, [availableModels, currentModel, connectionDefaultModel])
 
-  const selectedModel = React.useMemo(() => {
-    const model = availableModels.find(
-      m => typeof m !== 'string' && m.id === currentModel,
-    )
-    return model && typeof model !== 'string' ? model : undefined
-  }, [availableModels, currentModel])
+  const selectedModel = React.useMemo(
+    () => findSelectedModel(availableModels, currentModel),
+    [availableModels, currentModel],
+  )
 
   const {
     levels: availableThinkingLevels,

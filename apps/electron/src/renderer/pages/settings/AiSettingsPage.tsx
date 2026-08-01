@@ -57,7 +57,7 @@ import { useWorkspaceIcon } from '@/hooks/useWorkspaceIcon'
 import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
-import { getModelShortName, type ModelDefinition } from '@config/models'
+import { getModelShortName, modelIdsMatch, type ModelDefinition } from '@config/models'
 import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
 import { toast } from 'sonner'
 
@@ -111,7 +111,7 @@ function getModelDefinitionForConnection(
   const models = connection.models && connection.models.length > 0
     ? connection.models
     : getModelsForProviderType(connection.providerType, connection.piAuthProvider)
-  const model = models.find(entry => typeof entry !== 'string' && entry.id === modelId)
+  const model = models.find(entry => typeof entry !== 'string' && modelIdsMatch(entry.id, modelId))
   return model && typeof model !== 'string' ? model : undefined
 }
 

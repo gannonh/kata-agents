@@ -123,6 +123,12 @@ export interface ModelDefinition {
   supportsImages?: boolean;
 }
 
+/** Match Pi model IDs whether the renderer-facing value includes `pi/`. */
+export function modelIdsMatch(left: string, right: string): boolean {
+  const withoutPiPrefix = (id: string) => id.startsWith('pi/') ? id.slice(3) : id
+  return left === right || withoutPiPrefix(left) === withoutPiPrefix(right)
+}
+
 // ============================================
 // MODEL REGISTRY (Single Source of Truth)
 // ============================================
