@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import { FEATURE_FLAG_CONFIG } from '../../packages/shared/src/feature-flags'
 
 // NOTE: Source map upload to Sentry is intentionally disabled.
 // To re-enable, uncomment the sentryVitePlugin below and add SENTRY_AUTH_TOKEN,
@@ -11,11 +12,8 @@ import { resolve } from 'path'
 const FEATURE_FLAG_ENV_KEYS = [
   'NODE_ENV',
   'KATA_DEBUG',
-  'KATA_FEATURE_DEVELOPER_FEEDBACK',
-  'KATA_FEATURE_EMBEDDED_SERVER',
-  'KATA_FEATURE_GIT_WORKSPACE_V1',
-  'KATA_FEATURE_SHARE_ONLINE',
-] as const
+  ...Object.values(FEATURE_FLAG_CONFIG).map(({ env }) => env),
+]
 
 function getRendererFeatureFlags(mode: string): Record<string, string | undefined> {
   const repoRoot = resolve(__dirname, '../..')

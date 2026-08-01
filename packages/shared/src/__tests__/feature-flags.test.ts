@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled, isShareOnlineEnabled } from '../feature-flags.ts';
+import { FEATURE_FLAGS, getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled, isShareOnlineEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
   KATA_DEBUG: process.env.KATA_DEBUG,
+  KATA_FEATURE_FAST_MODE: process.env.KATA_FEATURE_FAST_MODE,
   KATA_FEATURE_DEVELOPER_FEEDBACK: process.env.KATA_FEATURE_DEVELOPER_FEEDBACK,
   KATA_FEATURE_EMBEDDED_SERVER: process.env.KATA_FEATURE_EMBEDDED_SERVER,
   KATA_FEATURE_GIT_WORKSPACE_V1: process.env.KATA_FEATURE_GIT_WORKSPACE_V1,
@@ -16,6 +17,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_DEBUG === undefined) delete process.env.KATA_DEBUG;
   else process.env.KATA_DEBUG = ORIGINAL_ENV.KATA_DEBUG;
+
+  if (ORIGINAL_ENV.KATA_FEATURE_FAST_MODE === undefined) delete process.env.KATA_FEATURE_FAST_MODE;
+  else process.env.KATA_FEATURE_FAST_MODE = ORIGINAL_ENV.KATA_FEATURE_FAST_MODE;
 
   if (ORIGINAL_ENV.KATA_FEATURE_DEVELOPER_FEEDBACK === undefined) delete process.env.KATA_FEATURE_DEVELOPER_FEEDBACK;
   else process.env.KATA_FEATURE_DEVELOPER_FEEDBACK = ORIGINAL_ENV.KATA_FEATURE_DEVELOPER_FEEDBACK;
@@ -45,6 +49,17 @@ describe('feature-flags runtime helpers', () => {
     process.env.KATA_DEBUG = '1';
 
     expect(isDevRuntime()).toBe(true);
+  });
+
+  it('FEATURE_FLAGS.fastMode uses the central default and environment override', () => {
+    delete process.env.KATA_FEATURE_FAST_MODE;
+    expect(FEATURE_FLAGS.fastMode).toBe(false);
+
+    process.env.KATA_FEATURE_FAST_MODE = '1';
+    expect(FEATURE_FLAGS.fastMode).toBe(true);
+
+    process.env.KATA_FEATURE_FAST_MODE = '0';
+    expect(FEATURE_FLAGS.fastMode).toBe(false);
   });
 
   it('isDeveloperFeedbackEnabled honors explicit override false', () => {

@@ -62,87 +62,78 @@ export function isDevRuntime(): boolean {
   return nodeEnv === 'development' || nodeEnv === 'dev' || getFeatureFlagEnv('KATA_DEBUG') === '1';
 }
 
+type FeatureFlagDefault = boolean | (() => boolean);
+
 /**
- * Runtime-evaluated check for developer feedback feature.
- * Explicit env override has precedence over dev-runtime defaults.
+ * The single source of truth for feature defaults and their environment overrides.
+ * Environment values take precedence over these defaults at runtime.
  */
+export const FEATURE_FLAG_CONFIG = {
+  fastMode: {
+    env: 'KATA_FEATURE_FAST_MODE',
+    default: false,
+  },
+  developerFeedback: {
+    env: 'KATA_FEATURE_DEVELOPER_FEEDBACK',
+    default: () => isDevRuntime(),
+  },
+  embeddedServer: {
+    env: 'KATA_FEATURE_EMBEDDED_SERVER',
+    default: false,
+  },
+  gitWorkspaceV1: {
+    env: 'KATA_FEATURE_GIT_WORKSPACE_V1',
+    default: false,
+  },
+  shareOnline: {
+    env: 'KATA_FEATURE_SHARE_ONLINE',
+    default: false,
+  },
+} satisfies Record<string, { env: string; default: FeatureFlagDefault }>;
+
+function resolveFeatureFlag(name: keyof typeof FEATURE_FLAG_CONFIG): boolean {
+  const definition = FEATURE_FLAG_CONFIG[name];
+  const override = parseBooleanEnv(getFeatureFlagEnv(definition.env));
+  if (override !== undefined) return override;
+  return typeof definition.default === 'function'
+    ? definition.default()
+    : definition.default;
+}
+
+/** Runtime-evaluated check for the developer feedback feature. */
 export function isDeveloperFeedbackEnabled(): boolean {
-  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_DEVELOPER_FEEDBACK'));
-  if (override !== undefined) return override;
-  return isDevRuntime();
+  return resolveFeatureFlag('developerFeedback');
 }
 
-/**
- * Runtime-evaluated check for embedded server settings page.
- *
- * Defaults to disabled. Override with KATA_FEATURE_EMBEDDED_SERVER=1|0.
- */
+/** Runtime-evaluated check for the embedded server settings page. */
 export function isEmbeddedServerEnabled(): boolean {
-  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_EMBEDDED_SERVER'));
-  if (override !== undefined) return override;
-  return false;
+  return resolveFeatureFlag('embeddedServer');
 }
 
-/**
- * Runtime-evaluated check for the Git/GitHub V1 managed-worktree workspace feature.
- *
- * Gates the complete user-facing Git workspace feature (composer Workspace/ref
- * controls, managed worktrees, checkout preparation, and Git mutation handlers).
- * Defaults to disabled in stable and nightly. Override with
- * KATA_FEATURE_GIT_WORKSPACE_V1=1|0. Server mutation handlers reject
- * feature-only operations while this flag is disabled so renderer/server state
- * cannot drift.
- */
+/** Runtime-evaluated check for the Git/GitHub V1 managed-worktree feature. */
 export function isGitWorkspaceV1Enabled(): boolean {
-  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_GIT_WORKSPACE_V1'));
-  if (override !== undefined) return override;
-  return false;
+  return resolveFeatureFlag('gitWorkspaceV1');
 }
 
-/**
- * Runtime-evaluated check for online session sharing.
- *
- * Defaults to disabled. Override with KATA_FEATURE_SHARE_ONLINE=1|0.
- */
+/** Runtime-evaluated check for online session sharing. */
 export function isShareOnlineEnabled(): boolean {
-  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_SHARE_ONLINE'));
-  if (override !== undefined) return override;
-  return false;
+  return resolveFeatureFlag('shareOnline');
 }
 
 export const FEATURE_FLAGS = {
   /** Enable Opus 4.7 fast mode (speed:"fast" + beta header). 6x pricing. */
-  fastMode: false,
-  /**
-   * Enable agent developer feedback tool.
-   *
-   * Defaults to enabled in explicit development runtimes; disabled otherwise.
-   * Override with KATA_FEATURE_DEVELOPER_FEEDBACK=1|0.
-   */
+  get fastMode(): boolean {
+    return resolveFeatureFlag('fastMode');
+  },
   get developerFeedback(): boolean {
     return isDeveloperFeedbackEnabled();
   },
-  /**
-   * Enable embedded server settings page.
-   *
-   * Defaults to disabled. Override with KATA_FEATURE_EMBEDDED_SERVER=1|0.
-   */
   get embeddedServer(): boolean {
     return isEmbeddedServerEnabled();
   },
-  /**
-   * Enable the Git/GitHub V1 managed-worktree workspace feature.
-   *
-   * Defaults to disabled. Override with KATA_FEATURE_GIT_WORKSPACE_V1=1|0.
-   */
   get gitWorkspaceV1(): boolean {
     return isGitWorkspaceV1Enabled();
   },
-  /**
-   * Enable online session sharing.
-   *
-   * Defaults to disabled. Override with KATA_FEATURE_SHARE_ONLINE=1|0.
-   */
   get shareOnline(): boolean {
     return isShareOnlineEnabled();
   },
