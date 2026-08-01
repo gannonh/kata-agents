@@ -41,6 +41,7 @@ import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 
 export interface SessionMenuProps {
   /** Session data — display state is derived from this */
@@ -95,6 +96,7 @@ export function SessionMenu({
   const sharedUrl = item.sharedUrl
   const currentSessionStatus = getSessionStatus(item)
   const sessionLabels = item.labels ?? []
+  const shareOnlineEnabled = FEATURE_FLAGS.shareOnline
   const _hasMessages = hasMessagesMeta(item)
   const _hasUnread = hasUnreadMeta(item)
 
@@ -106,27 +108,29 @@ export function SessionMenu({
   return (
     <>
       {/* Share/Shared based on shared state */}
-      {!sharedUrl ? (
-        <MenuItem onClick={actions.share}>
-          <CloudUpload className="h-3.5 w-3.5" />
-          <span className="flex-1">{t("sessionMenu.share")}</span>
-        </MenuItem>
-      ) : (
-        <Sub>
-          <SubTrigger className="pr-2">
+      {shareOnlineEnabled && (
+        !sharedUrl ? (
+          <MenuItem onClick={actions.share}>
             <CloudUpload className="h-3.5 w-3.5" />
-            <span className="flex-1">{t("sessionMenu.shared")}</span>
-          </SubTrigger>
-          <SubContent>
-            <ShareMenuItems
-              onOpenInBrowser={actions.openSharedInBrowser}
-              onCopyLink={actions.copySharedLink}
-              onUpdateShare={actions.updateShare}
-              onRevokeShare={actions.revokeShare}
-              menu={{ MenuItem, Separator }}
-            />
-          </SubContent>
-        </Sub>
+            <span className="flex-1">{t("sessionMenu.share")}</span>
+          </MenuItem>
+        ) : (
+          <Sub>
+            <SubTrigger className="pr-2">
+              <CloudUpload className="h-3.5 w-3.5" />
+              <span className="flex-1">{t("sessionMenu.shared")}</span>
+            </SubTrigger>
+            <SubContent>
+              <ShareMenuItems
+                onOpenInBrowser={actions.openSharedInBrowser}
+                onCopyLink={actions.copySharedLink}
+                onUpdateShare={actions.updateShare}
+                onRevokeShare={actions.revokeShare}
+                menu={{ MenuItem, Separator }}
+              />
+            </SubContent>
+          </Sub>
+        )
       )}
 
       {/* Send to Workspace — visible when at least one other workspace exists */}

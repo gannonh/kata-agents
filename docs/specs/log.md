@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Online sharing feature gate**: hid the unfinished Share Online affordances by default behind `KATA_FEATURE_SHARE_ONLINE`, with renderer injection and a local `.env` value of `0`.
+
 * **ChatGPT/Codex OAuth bundle fix**: registered Pi's statically bundled OAuth loaders in the embedded server so bundled OpenAI Codex sessions do not attempt missing sibling-module imports. The generated bundle verifier and a fake-token subprocess smoke test cover the path.
 
 * **ChatGPT/Codex OAuth fix**: corrected Pi subprocess credential injection so `openai-codex` receives Pi 0.83's native OAuth credential shape during startup and token refresh, while regular OpenAI API-key connections retain API-key auth. Added regression coverage for credential shaping and the Pi runtime auth contract.

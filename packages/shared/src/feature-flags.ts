@@ -99,6 +99,17 @@ export function isGitWorkspaceV1Enabled(): boolean {
   return false;
 }
 
+/**
+ * Runtime-evaluated check for online session sharing.
+ *
+ * Defaults to disabled. Override with KATA_FEATURE_SHARE_ONLINE=1|0.
+ */
+export function isShareOnlineEnabled(): boolean {
+  const override = parseBooleanEnv(getFeatureFlagEnv('KATA_FEATURE_SHARE_ONLINE'));
+  if (override !== undefined) return override;
+  return false;
+}
+
 export const FEATURE_FLAGS = {
   /** Enable Opus 4.7 fast mode (speed:"fast" + beta header). 6x pricing. */
   fastMode: false,
@@ -126,5 +137,13 @@ export const FEATURE_FLAGS = {
    */
   get gitWorkspaceV1(): boolean {
     return isGitWorkspaceV1Enabled();
+  },
+  /**
+   * Enable online session sharing.
+   *
+   * Defaults to disabled. Override with KATA_FEATURE_SHARE_ONLINE=1|0.
+   */
+  get shareOnline(): boolean {
+    return isShareOnlineEnabled();
   },
 } as const;

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled } from '../feature-flags.ts';
+import { getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled, isShareOnlineEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -7,6 +7,7 @@ const ORIGINAL_ENV = {
   KATA_FEATURE_DEVELOPER_FEEDBACK: process.env.KATA_FEATURE_DEVELOPER_FEEDBACK,
   KATA_FEATURE_EMBEDDED_SERVER: process.env.KATA_FEATURE_EMBEDDED_SERVER,
   KATA_FEATURE_GIT_WORKSPACE_V1: process.env.KATA_FEATURE_GIT_WORKSPACE_V1,
+  KATA_FEATURE_SHARE_ONLINE: process.env.KATA_FEATURE_SHARE_ONLINE,
 };
 
 afterEach(() => {
@@ -24,6 +25,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
   else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1;
+
+  if (ORIGINAL_ENV.KATA_FEATURE_SHARE_ONLINE === undefined) delete process.env.KATA_FEATURE_SHARE_ONLINE;
+  else process.env.KATA_FEATURE_SHARE_ONLINE = ORIGINAL_ENV.KATA_FEATURE_SHARE_ONLINE;
 
   delete globalThis.__KATA_FEATURE_FLAGS__;
 });
@@ -129,5 +133,17 @@ describe('feature-flags runtime helpers', () => {
     };
 
     expect(isGitWorkspaceV1Enabled()).toBe(true);
+  });
+
+  it('isShareOnlineEnabled defaults to false when no override is set', () => {
+    delete process.env.KATA_FEATURE_SHARE_ONLINE;
+
+    expect(isShareOnlineEnabled()).toBe(false);
+  });
+
+  it('isShareOnlineEnabled honors an explicit override', () => {
+    process.env.KATA_FEATURE_SHARE_ONLINE = '1';
+
+    expect(isShareOnlineEnabled()).toBe(true);
   });
 });
