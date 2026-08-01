@@ -12,7 +12,8 @@ status: Implemented
 [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md)
 
 Base SHA: `56f446a3`
-Final HEAD: `d5098b200088d5729a9c1baa782574493364f3e9`
+Initial implementation HEAD: `d5098b200088d5729a9c1baa782574493364f3e9`
+Follow-up correction: `2d5c093` adds the Pi max alias and model-ID normalization described below.
 
 ## Completed work
 
@@ -20,6 +21,7 @@ Final HEAD: `d5098b200088d5729a9c1baa782574493364f3e9`
 - Added renderer-safe `supportedThinkingLevels` metadata for Pi, supplemental OpenAI/Codex, Anthropic, and Copilot model paths.
 - Added provider-scoped hydration for persisted string-only Pi model entries.
 - Updated the full composer, compact selector, app settings, and workspace settings to filter and normalize model-specific levels.
+- Preserved the app-level `max` alias for Pi models with native `xhigh`, and normalized `pi/`-prefixed and bare model IDs before resolving renderer capabilities.
 - Restored persisted app-level defaults for new sessions while preserving existing session values when the app default changes.
 - Added bundle smoke verification at `scripts/verify-pi-agent-server-bundle.ts`.
 - Added the pending release-note entry.
@@ -45,7 +47,7 @@ The generated Electron Pi resource is intentionally ignored by `.gitignore`; the
 
 ## Manual verification
 
-Credential-backed Electron model-menu review was not run in this build because no provider credentials or E2E session were supplied. The renderer capability helper has focused coverage for OpenAI/Codex-style capabilities, native `xhigh`, `minimal`, compatibility fallback, and non-reasoning models.
+Credential-backed Electron model-menu review was not run in this build because no provider credentials or E2E session were supplied. The renderer capability helper has focused coverage for OpenAI/Codex-style capabilities, native `xhigh`, the Pi `max` alias, `minimal`, compatibility fallback, non-reasoning models, and `pi/`-prefixed model IDs.
 
 ## Approved deviations
 

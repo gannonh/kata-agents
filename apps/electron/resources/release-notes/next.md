@@ -11,7 +11,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Improvements
 
 - **GPT-5.6 OpenAI models** — Added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, including runtime resolution and updated defaults.
-- **Provider-aware reasoning levels** — Restored model-specific reasoning controls for OpenAI API, ChatGPT/Codex, Copilot, and Pi-managed models. The selectors now expose supported levels such as `minimal`, preserve the `max` to `xhigh` compatibility mapping, and use persisted app defaults for new sessions.
+- **Provider-aware reasoning levels** — Restored model-specific reasoning controls for OpenAI API, ChatGPT/Codex, Copilot, and Pi-managed models. The selectors now change with the selected model, expose supported levels such as `minimal`, retain the app-level `max` alias for Pi models that support `xhigh`, and use persisted app defaults for new sessions.
 - **Default theme brand color** — The distributed Default theme now uses the Kata brand highlight color instead of the previous purple accent across bundled theme files and renderer defaults.
 - **CLI rename** — The terminal client package is now `@kata-sh/agents-cli` with binary `kata-agents-cli`. Bundled docs and reference guides were updated to match.
 
