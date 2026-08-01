@@ -79,11 +79,11 @@ export const FEATURE_FLAG_CONFIG = {
   },
   embeddedServer: {
     env: 'KATA_FEATURE_EMBEDDED_SERVER',
-    default: false,
+    default: true,
   },
   gitWorkspaceV1: {
     env: 'KATA_FEATURE_GIT_WORKSPACE_V1',
-    default: false,
+    default: true,
   },
   shareOnline: {
     env: 'KATA_FEATURE_SHARE_ONLINE',

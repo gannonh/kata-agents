@@ -320,7 +320,7 @@ describe('checkManagedCheckoutIdentity', () => {
 
 describe('registerGitHandlers', () => {
   beforeEach(() => {
-    delete process.env[FLAG]
+    process.env[FLAG] = '0'
   })
   afterEach(() => {
     if (ORIGINAL === undefined) delete process.env[FLAG]

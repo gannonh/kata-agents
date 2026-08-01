@@ -85,10 +85,10 @@ describe('feature-flags runtime helpers', () => {
     expect(isDeveloperFeedbackEnabled()).toBe(true);
   });
 
-  it('isEmbeddedServerEnabled defaults to false when no override is set', () => {
+  it('isEmbeddedServerEnabled defaults to true when no override is set', () => {
     delete process.env.KATA_FEATURE_EMBEDDED_SERVER;
 
-    expect(isEmbeddedServerEnabled()).toBe(false);
+    expect(isEmbeddedServerEnabled()).toBe(true);
   });
 
   it('isEmbeddedServerEnabled honors explicit override true', () => {
@@ -123,10 +123,10 @@ describe('feature-flags runtime helpers', () => {
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 
-  it('isGitWorkspaceV1Enabled defaults to false when no override is set', () => {
+  it('isGitWorkspaceV1Enabled defaults to true when no override is set', () => {
     delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
 
-    expect(isGitWorkspaceV1Enabled()).toBe(false);
+    expect(isGitWorkspaceV1Enabled()).toBe(true);
   });
 
   it('isGitWorkspaceV1Enabled honors explicit override true', () => {

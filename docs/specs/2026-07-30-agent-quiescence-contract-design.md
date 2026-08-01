@@ -190,7 +190,7 @@ backends; both must implement the real contract.
 
 - Changing ordinary `forceAbort`, `abort`, `interruptForHandoff`, or `redirect`
   semantics.
-- Enabling `KATA_FEATURE_GIT_WORKSPACE_V1` by default.
+- Changing the Git V1 rollout policy; the feature default is documented in its own rollout record.
 - Changing worktree removal fingerprints, confirmation copy, registry
   ownership, or the staged deletion transaction.
 - Adding worktree handoff, snapshots, automatic cleanup, or conversation-fork

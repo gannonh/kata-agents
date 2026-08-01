@@ -11,7 +11,8 @@ timestamp: 2026-07-26T00:00:00Z
 
 ## Status
 Implemented and verified — all four phases are built behind
-`KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). The macOS `@git` tier now
+`KATA_FEATURE_GIT_WORKSPACE_V1`, enabled by default with an explicit `=0`
+override. The macOS `@git` tier now
 contains an executable real-Electron/real-Git lifecycle flow, and visual
 evidence for all four slices is checked in under
 [`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
@@ -544,8 +545,8 @@ Conflicted, diverged, detached, missing-upstream, missing-identity, and external
 
 Gate the complete user-facing feature with `KATA_FEATURE_GIT_WORKSPACE_V1` and a shared `FEATURE_FLAGS.gitWorkspaceV1` accessor, following `packages/shared/src/feature-flags.ts`.
 
-- The flag remains disabled by default in stable and nightly until all four slices pass Verify.
-- Developers and explicit test runs enable the flag while building and verifying each slice.
+- The flag is enabled by default in stable and nightly after the 0.10.8 rollout; set `KATA_FEATURE_GIT_WORKSPACE_V1=0` to disable it.
+- Developers and explicit test runs can override the default while building and verifying each slice.
 - Server mutation handlers reject feature-only operations while the flag is disabled, so renderer/server state cannot drift.
 - Existing `git:getBranch` display remains available while the flag is disabled.
 - Removing the flag is follow-up cleanup after V1 stability, not part of the feature implementation gate.

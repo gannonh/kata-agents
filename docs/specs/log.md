@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Stable feature defaults**: enabled the Git/GitHub V1 managed-worktree experience and the Server settings page by default. Both remain disableable through their `KATA_FEATURE_*` environment overrides; updated the release documentation for the 0.10.8 stable rollout.
+
 * **Online sharing feature gate**: hid the unfinished Share Online affordances by default behind `KATA_FEATURE_SHARE_ONLINE`, with renderer injection and a local `.env` value of `0`.
 
 * **ChatGPT/Codex OAuth bundle fix**: registered Pi's statically bundled OAuth loaders in the embedded server so bundled OpenAI Codex sessions do not attempt missing sibling-module imports. The generated bundle verifier and a fake-token subprocess smoke test cover the path.

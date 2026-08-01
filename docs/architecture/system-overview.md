@@ -62,8 +62,8 @@ See [CLI reference](/reference/cli.md) for the full command surface and connecti
 
 ## Git & GitHub worktrees (preview)
 
-Gated behind `KATA_FEATURE_GIT_WORKSPACE_V1` (off by default). Git, worktree, and
-`gh` behavior is owned entirely by the server that owns the workspace filesystem;
+Enabled by default and disableable with `KATA_FEATURE_GIT_WORKSPACE_V1=0`. Git,
+worktree, and `gh` behavior is owned entirely by the server that owns the workspace filesystem;
 the desktop renderer and CLI are thin clients that address operations by session
 ID and never pass repository paths. This keeps local embedded and remote headless
 workspaces at parity.

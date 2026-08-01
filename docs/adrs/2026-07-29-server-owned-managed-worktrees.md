@@ -51,8 +51,9 @@ The **workspace-owning server owns all managed-worktree lifecycle and Git behavi
   are not portable, so imported sessions start without a `checkout` and derive live Git context from
   their `workingDirectory`.
 - The feature is gated end-to-end by `KATA_FEATURE_GIT_WORKSPACE_V1` / `FEATURE_FLAGS.gitWorkspaceV1`
-  (disabled by default). Read-only repository/ref discovery is always available; mutation handlers
-  reject while the flag is off.
+  (enabled by default since 0.10.8, with `KATA_FEATURE_GIT_WORKSPACE_V1=0` as an override).
+  Read-only repository/ref discovery is always available; mutation handlers reject while the flag
+  is off.
 
 ### Deletion and removal are one ordered server operation
 

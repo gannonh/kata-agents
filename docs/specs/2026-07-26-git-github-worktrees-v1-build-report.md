@@ -13,8 +13,9 @@ timestamp: 2026-07-29T00:00:00Z
 - [2026-07-26-git-github-worktrees-v1-design.md](./2026-07-26-git-github-worktrees-v1-design.md) (Status: Implemented)
 - ADR: [2026-07-29-server-owned-managed-worktrees.md](../adrs/2026-07-29-server-owned-managed-worktrees.md)
 
-Feature is gated behind `KATA_FEATURE_GIT_WORKSPACE_V1` and **off by default**.
-This build did not change the flag default.
+Feature is gated behind `KATA_FEATURE_GIT_WORKSPACE_V1` and **enabled by default**.
+Set `KATA_FEATURE_GIT_WORKSPACE_V1=0` to disable it. This rollout changes the
+flag default after the four V1 slices were implemented and verified.
 
 ## SHAs
 

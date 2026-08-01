@@ -175,7 +175,7 @@ describe('SessionManager.prepareCheckout — managed worktree', () => {
   })
 
   test('rejects when the feature flag is disabled', async () => {
-    delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '0'
     const repo = tmp()
     await initRepo(repo)
     const { sm } = makeManager()
