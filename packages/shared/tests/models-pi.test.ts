@@ -57,6 +57,10 @@ describe('models-pi filtering', () => {
       xhigh: null,
       max: undefined,
     })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(deriveSupportedThinkingLevelsFromPiModel(true, {
+      xhigh: 'xhigh',
+      max: null,
+    })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
     expect(deriveSupportedThinkingLevelsFromPiModel(false, {
       xhigh: 'xhigh',
       max: 'max',

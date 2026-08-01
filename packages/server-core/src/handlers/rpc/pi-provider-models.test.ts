@@ -1,43 +1,36 @@
 import { describe, expect, it } from 'bun:test'
+import { getModels } from '@earendil-works/pi-ai/compat'
 import { toPiProviderModelInfo } from './pi-provider-models.ts'
 
+function getNativeGpt56Sol(provider: 'openai' | 'openai-codex') {
+  const model = getModels(provider).find(candidate => candidate.id === 'gpt-5.6-sol')
+  if (!model) throw new Error(`Pi catalog is missing GPT-5.6 Sol for ${provider}`)
+  return {
+    id: model.id,
+    name: model.name,
+    costInput: model.cost.input,
+    costOutput: model.cost.output,
+    contextWindow: model.contextWindow,
+    reasoning: model.reasoning,
+    thinkingLevelMap: model.thinkingLevelMap,
+  }
+}
+
 describe('toPiProviderModelInfo', () => {
-  it('preserves native Pi 0.83 GPT-5.6 Sol metadata for OpenAI/Codex DTOs', () => {
-    const openai = toPiProviderModelInfo({
-      id: 'gpt-5.6-sol',
-      name: 'GPT-5.6 Sol',
-      costInput: 5,
-      costOutput: 30,
-      contextWindow: 272_000,
-      reasoning: true,
-      thinkingLevelMap: {
-        off: 'none',
-        minimal: null,
-        low: 'low',
-        medium: 'medium',
-        high: 'high',
-        xhigh: 'xhigh',
-        max: 'max',
-      },
-    })
-    const codex = toPiProviderModelInfo({
-      id: 'gpt-5.6-sol',
-      name: 'GPT-5.6 Sol',
-      costInput: 5,
-      costOutput: 30,
-      contextWindow: 272_000,
-      reasoning: true,
-      thinkingLevelMap: { minimal: 'low', xhigh: 'xhigh', max: 'max' },
-    })
+  it('converts native Pi catalog records into provider-specific GPT-5.6 Sol DTOs', () => {
+    const openaiModel = getNativeGpt56Sol('openai')
+    const codexModel = getNativeGpt56Sol('openai-codex')
+    const openai = toPiProviderModelInfo(openaiModel)
+    const codex = toPiProviderModelInfo(codexModel)
 
     expect(openai).toMatchObject({
       id: 'pi/gpt-5.6-sol',
-      contextWindow: 272_000,
+      contextWindow: openaiModel.contextWindow,
       supportedThinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     })
     expect(codex).toMatchObject({
       id: 'pi/gpt-5.6-sol',
-      contextWindow: 272_000,
+      contextWindow: codexModel.contextWindow,
       supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     })
   })
