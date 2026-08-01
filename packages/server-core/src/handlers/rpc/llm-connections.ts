@@ -14,6 +14,7 @@ import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { randomUUID } from 'node:crypto'
 import { CLIENT_OPEN_EXTERNAL } from '@kata-sh/server-core/transport'
+import { toPiProviderModelInfo } from './pi-provider-models.ts'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
@@ -379,7 +380,6 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const { getModels } = await import('@mariozechner/pi-ai')
     const {
       SUPPLEMENTAL_OPENAI_MODELS,
-      deriveSupportedThinkingLevelsFromPiModel,
       getPiModelsForAuthProvider,
     } = await import('@kata-sh/shared/config')
     try {
@@ -401,16 +401,15 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         models: sorted.map(m => {
           const id = m.id.startsWith('pi/') ? m.id : `pi/${m.id}`
           const definition = convertedDefinitions.get(id)
-          return {
+          return toPiProviderModelInfo({
             id,
             name: m.name,
             costInput: m.cost.input,
             costOutput: m.cost.output,
             contextWindow: m.contextWindow,
             reasoning: m.reasoning,
-            supportedThinkingLevels: definition?.supportedThinkingLevels
-              ?? deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
-          }
+            thinkingLevelMap: m.thinkingLevelMap,
+          }, definition)
         }),
         totalCount: sorted.length,
       }

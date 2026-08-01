@@ -31,11 +31,7 @@ import {
   resolveEffectiveConnectionSlug,
   type LlmConnectionWithStatus,
 } from '@config/llm-connections'
-import {
-  getThinkingLevelDefinitionsForModel,
-  normalizeThinkingLevelForModel,
-  type ThinkingLevel,
-} from '@kata-sh/shared/agent/thinking-levels'
+import { type ThinkingLevel } from '@kata-sh/shared/agent/thinking-levels'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { derivePickerMode } from './picker-mode'
 import {
@@ -44,6 +40,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
+import { resolveThinkingLevelPickerState } from './thinking-level-picker'
 
 interface CompactModelSelectorProps {
   currentModel: string
@@ -131,12 +128,14 @@ export function CompactModelSelector({
     return model && typeof model !== 'string' ? model : undefined
   }, [availableModels, currentModel])
 
-  const availableThinkingLevels = React.useMemo(
-    () => connectionUnavailable ? [] : getThinkingLevelDefinitionsForModel(selectedModel),
-    [connectionUnavailable, selectedModel],
+  const {
+    levels: availableThinkingLevels,
+    displayedLevel: displayedThinkingLevel,
+    disabled: thinkingDisabled,
+  } = React.useMemo(
+    () => resolveThinkingLevelPickerState(thinkingLevel, selectedModel, connectionUnavailable),
+    [thinkingLevel, selectedModel, connectionUnavailable],
   )
-  const displayedThinkingLevel = normalizeThinkingLevelForModel(thinkingLevel, selectedModel) ?? thinkingLevel
-  const thinkingDisabled = availableThinkingLevels.length === 0
 
   const connectionsByProvider = React.useMemo(
     () => groupConnectionsByProvider(llmConnections),

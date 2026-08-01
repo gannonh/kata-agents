@@ -30,6 +30,11 @@ describe('thinking level capabilities', () => {
 
     expect(normalizeThinkingLevelForModel('medium', model)).toBe('high')
     expect(normalizeThinkingLevelForModel('off', model)).toBe('low')
+    expect(normalizeThinkingLevelForModel('medium', {
+      provider: 'pi',
+      supportsThinking: true,
+      supportedThinkingLevels: ['low', 'xhigh'],
+    })).toBe('low')
   })
 
   it('aliases max to native xhigh for Pi capability lists', () => {

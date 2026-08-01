@@ -78,12 +78,7 @@ import { WorkspaceCheckoutBadge, useCheckoutBound, type WorkspaceCheckoutHandle 
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/modes'
-import {
-  type ThinkingLevel,
-  getThinkingLevelDefinitionsForModel,
-  normalizeThinkingLevelForModel,
-  getThinkingLevelNameKey,
-} from '@kata-sh/shared/agent/thinking-levels'
+import { type ThinkingLevel, getThinkingLevelNameKey } from '@kata-sh/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -103,6 +98,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
+import { resolveThinkingLevelPickerState } from './thinking-level-picker'
 
 function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -384,12 +380,14 @@ export function FreeFormInput({
     return model && typeof model !== 'string' ? model : undefined
   }, [availableModels, currentModel])
 
-  const availableThinkingLevels = React.useMemo(
-    () => connectionUnavailable ? [] : getThinkingLevelDefinitionsForModel(selectedModel),
-    [connectionUnavailable, selectedModel],
+  const {
+    levels: availableThinkingLevels,
+    displayedLevel: displayedThinkingLevel,
+    disabled: thinkingDisabled,
+  } = React.useMemo(
+    () => resolveThinkingLevelPickerState(thinkingLevel, selectedModel, connectionUnavailable),
+    [thinkingLevel, selectedModel, connectionUnavailable],
   )
-  const displayedThinkingLevel = normalizeThinkingLevelForModel(thinkingLevel, selectedModel) ?? thinkingLevel
-  const thinkingDisabled = availableThinkingLevels.length === 0
 
   // Get display name for current model (full name, not short name)
   const currentModelDisplayName = React.useMemo(() => {

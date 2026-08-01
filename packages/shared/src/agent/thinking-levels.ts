@@ -106,13 +106,14 @@ export function normalizeThinkingLevelForModel(
   const requestedIndex = THINKING_LEVEL_IDS.indexOf(requested);
   if (requestedIndex === -1) return available[0];
 
-  for (let index = requestedIndex; index < THINKING_LEVEL_IDS.length; index += 1) {
-    const candidate = THINKING_LEVEL_IDS[index];
-    if (candidate && available.includes(candidate)) return candidate;
-  }
-  for (let index = requestedIndex - 1; index >= 0; index -= 1) {
-    const candidate = THINKING_LEVEL_IDS[index];
-    if (candidate && available.includes(candidate)) return candidate;
+  for (let distance = 0; distance < THINKING_LEVEL_IDS.length; distance += 1) {
+    const higherIndex = requestedIndex + distance;
+    const higher = THINKING_LEVEL_IDS[higherIndex];
+    if (higher && available.includes(higher)) return higher;
+
+    const lowerIndex = requestedIndex - distance;
+    const lower = THINKING_LEVEL_IDS[lowerIndex];
+    if (lower && available.includes(lower)) return lower;
   }
   return available[0];
 }
