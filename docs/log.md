@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so the session delete action can offer its worktree-aware confirmation without waiting for a restart or full session reload.
+
 * **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex catalogs, including Pi runtime registration and updated defaults. Added the preview Git workspace flag to `.env.example`.
 
 ## 2026-07-31
