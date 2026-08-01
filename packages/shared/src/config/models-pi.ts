@@ -18,12 +18,12 @@ import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 
-const PI_THINKING_LEVEL_IDS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+const PI_THINKING_LEVEL_IDS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 /**
  * Derive renderer-safe levels using Pi's `getSupportedThinkingLevels` rules.
- * `null` disables a level, omitted non-xhigh levels use provider defaults, and
- * xhigh requires an explicit non-null mapping.
+ * `null` disables a level, omitted lower levels use provider defaults, and
+ * xhigh and max require explicit non-null mappings.
  */
 export function deriveSupportedThinkingLevelsFromPiModel(
   reasoning: boolean,
@@ -33,7 +33,7 @@ export function deriveSupportedThinkingLevelsFromPiModel(
   return PI_THINKING_LEVEL_IDS.filter((level) => {
     const mapped = thinkingLevelMap?.[level];
     if (mapped === null) return false;
-    if (level === 'xhigh') return mapped !== undefined;
+    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
     return true;
   });
 }
@@ -75,95 +75,6 @@ export function piModelToDefinition(m: Model<Api>): ModelDefinition {
     supportsThinking: m.reasoning,
     supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
   };
-}
-
-/**
- * Supplemental OpenAI model metadata that may land after the Pi SDK catalog.
- * Keep this provider-specific so the runtime can resolve the same models for
- * both OpenAI API-key and ChatGPT/Codex authentication.
- */
-export interface SupplementalPiModel {
-  id: string;
-  name: string;
-  description: string;
-  provider: 'openai' | 'openai-codex';
-  api: 'openai-responses' | 'openai-codex-responses';
-  baseUrl: string;
-  reasoning: boolean;
-  thinkingLevelMap: Record<string, string | null | undefined>;
-  input: Array<'text' | 'image'>;
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
-  contextWindow: number;
-  maxTokens: number;
-}
-
-const GPT_56_MODEL_SPECS = [
-  {
-    id: 'gpt-5.6-sol',
-    name: 'GPT-5.6 Sol',
-    description: 'Frontier GPT-5.6 model for complex work',
-    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-  },
-  {
-    id: 'gpt-5.6-terra',
-    name: 'GPT-5.6 Terra',
-    description: 'Balanced GPT-5.6 model for everyday work',
-    cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
-  },
-  {
-    id: 'gpt-5.6-luna',
-    name: 'GPT-5.6 Luna',
-    description: 'Fast, cost-efficient GPT-5.6 model',
-    cost: { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0 },
-  },
-] as const;
-
-/**
- * OpenAI's GPT-5.6 family is available in the official API and Codex
- * catalogs, but the currently pinned Pi SDK does not include it yet.
- */
-export const SUPPLEMENTAL_OPENAI_MODELS: readonly SupplementalPiModel[] =
-  (['openai', 'openai-codex'] as const).flatMap((provider) =>
-    GPT_56_MODEL_SPECS.map((model) => ({
-      ...model,
-      provider,
-      api: provider === 'openai' ? 'openai-responses' : 'openai-codex-responses',
-      baseUrl: provider === 'openai' ? 'https://api.openai.com/v1' : 'https://chatgpt.com/backend-api',
-      reasoning: true,
-      thinkingLevelMap: provider === 'openai'
-        ? { off: null, xhigh: 'xhigh' }
-        : { minimal: 'low', xhigh: 'xhigh' },
-      input: ['text', 'image'],
-      contextWindow: 1_050_000,
-      maxTokens: 128_000,
-    } satisfies SupplementalPiModel)),
-  );
-
-export function supplementalPiModelToDefinition(model: SupplementalPiModel): ModelDefinition {
-  return {
-    id: `pi/${model.id}`,
-    name: model.name,
-    shortName: model.name,
-    description: `${model.description} via Kata Agents Backend`,
-    provider: 'pi',
-    contextWindow: model.contextWindow,
-    supportsThinking: model.reasoning,
-    supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(model.reasoning, model.thinkingLevelMap),
-  };
-}
-
-function dedupeModelDefinitions(models: ModelDefinition[]): ModelDefinition[] {
-  const seen = new Set<string>();
-  return models.filter((model) => {
-    if (seen.has(model.id)) return false;
-    seen.add(model.id);
-    return true;
-  });
 }
 
 /**
@@ -235,14 +146,10 @@ export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinit
       .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
       .map(piModelToDefinition);
   } catch {
-    // Provider not recognized by SDK — use supplemental entries when available.
+    // Provider not recognized by SDK.
   }
 
-  const supplemental = SUPPLEMENTAL_OPENAI_MODELS
-    .filter(model => model.provider === piAuthProvider)
-    .map(supplementalPiModelToDefinition);
-
-  return dedupeModelDefinitions([...models, ...supplemental]);
+  return models;
 }
 
 /**
@@ -262,10 +169,6 @@ export function getAllPiModels(): ModelDefinition[] {
     }
   }
 
-  const existingIds = new Set(allModels.map(model => model.id));
-  allModels.push(...SUPPLEMENTAL_OPENAI_MODELS
-    .filter(model => !existingIds.has(`pi/${model.id}`))
-    .map(supplementalPiModelToDefinition));
   return allModels;
 }
 

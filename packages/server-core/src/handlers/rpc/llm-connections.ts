@@ -378,22 +378,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_MODELS, async (_ctx, provider: string) => {
     const { getModels } = await import('@earendil-works/pi-ai/compat')
-    const {
-      SUPPLEMENTAL_OPENAI_MODELS,
-      getPiModelsForAuthProvider,
-    } = await import('@kata-sh/shared/config')
+    const { getPiModelsForAuthProvider } = await import('@kata-sh/shared/config')
     try {
-      const models = [
-        ...getModels(provider as Parameters<typeof getModels>[0]),
-        ...SUPPLEMENTAL_OPENAI_MODELS.filter(model => model.provider === provider),
-      ]
-      const seen = new Set<string>()
-      const uniqueModels = models.filter(model => {
-        if (seen.has(model.id)) return false
-        seen.add(model.id)
-        return true
-      })
-      const sorted = [...uniqueModels].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
+      const sorted = [...getModels(provider as Parameters<typeof getModels>[0])]
+        .sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
       const convertedDefinitions = new Map(
         getPiModelsForAuthProvider(provider).map(model => [model.id, model]),
       )

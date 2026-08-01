@@ -42,26 +42,30 @@ describe('models-pi filtering', () => {
     expect(ids).toContain('pi/deepseek-v4-pro');
   });
 
-  it('derives Pi capability levels using null and xhigh map semantics', () => {
+  it('derives Pi capability levels using null, xhigh, and max map semantics', () => {
     expect(deriveSupportedThinkingLevelsFromPiModel(true, {
       off: null,
       xhigh: 'xhigh',
-    })).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+      max: 'max',
+    })).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     expect(deriveSupportedThinkingLevelsFromPiModel(true, {
       minimal: 'low',
       xhigh: 'xhigh',
-    })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+      max: 'max',
+    })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     expect(deriveSupportedThinkingLevelsFromPiModel(true, {
       xhigh: null,
+      max: undefined,
     })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
     expect(deriveSupportedThinkingLevelsFromPiModel(false, {
       xhigh: 'xhigh',
+      max: 'max',
     })).toEqual(['off']);
   });
 
   it('maps known Copilot effort labels and ignores unknown labels', () => {
-    expect(mapReportedReasoningEfforts(['minimal', 'medium', 'future-effort', 'xhigh'])).toEqual([
-      'minimal', 'medium', 'xhigh',
+    expect(mapReportedReasoningEfforts(['minimal', 'medium', 'future-effort', 'xhigh', 'max'])).toEqual([
+      'minimal', 'medium', 'xhigh', 'max',
     ]);
     expect(mapReportedReasoningEfforts([])).toEqual([]);
     expect(mapReportedReasoningEfforts(undefined)).toBeUndefined();
@@ -76,10 +80,10 @@ describe('models-pi filtering', () => {
       const models = getPiModelsForAuthProvider(provider);
       const ids = models.map(m => m.id);
       expect(ids).toEqual(expect.arrayContaining(expected));
-      const gpt = models.find(m => m.id === 'pi/gpt-5.6-sol');
-      expect(gpt?.supportedThinkingLevels).toEqual(provider === 'openai'
-        ? ['minimal', 'low', 'medium', 'high', 'xhigh']
-        : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+      const luna = models.find(m => m.id === 'pi/gpt-5.6-luna');
+      expect(luna?.supportedThinkingLevels).toEqual(provider === 'openai'
+        ? ['off', 'low', 'medium', 'high', 'xhigh', 'max']
+        : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     }
   });
 });

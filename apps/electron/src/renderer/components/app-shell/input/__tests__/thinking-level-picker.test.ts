@@ -22,15 +22,15 @@ describe('resolveThinkingLevelPickerState', () => {
     }))
 
     expect(state.levels.map(level => level.id)).toEqual([
-      'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+      'minimal', 'low', 'medium', 'high', 'xhigh',
     ])
     expect(state.displayedLevel).toBe('medium')
     expect(state.disabled).toBe(false)
   })
 
-  it('retains max when Pi supports xhigh and disables explicit non-reasoning models', () => {
+  it('retains native Pi max and disables explicit non-reasoning models', () => {
     const piState = resolveThinkingLevelPickerState('max', model({
-      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
       supportsThinking: true,
     }))
     const textState = resolveThinkingLevelPickerState('medium', model({

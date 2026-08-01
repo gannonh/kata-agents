@@ -80,7 +80,6 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowKataMetadataProperties, stripKataMetadata } from './kata-metadata-schema.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
-import { registerSupplementalOpenAIModels } from './supplemental-models.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -519,10 +518,6 @@ async function createAuthenticatedRegistry(): Promise<{
     allowModelNetwork: false,
   });
   const modelRegistry = new PiModelRegistry(modelRuntime);
-  const piAuthProvider = initConfig?.piAuth?.provider;
-  if (piAuthProvider === 'openai' || piAuthProvider === 'openai-codex') {
-    registerSupplementalOpenAIModels(modelRegistry);
-  }
 
   // Register custom endpoint models dynamically via Pi SDK's registerProvider API.
   // This makes arbitrary OpenAI/Anthropic-compatible endpoints work through the Pi SDK
