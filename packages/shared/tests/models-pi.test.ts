@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import { getPiApiKeyProviders, getPiModelsForAuthProvider } from '../src/config/models-pi.ts';
+import {
+  deriveSupportedThinkingLevelsFromPiModel,
+  getPiApiKeyProviders,
+  getPiModelsForAuthProvider,
+  mapReportedReasoningEfforts,
+} from '../src/config/models-pi.ts';
 
 describe('models-pi filtering', () => {
   it('excludes codex-mini-latest for openai models', () => {
@@ -37,12 +42,42 @@ describe('models-pi filtering', () => {
     expect(ids).toContain('pi/deepseek-v4-pro');
   });
 
+  it('derives Pi capability levels using null and xhigh map semantics', () => {
+    expect(deriveSupportedThinkingLevelsFromPiModel(true, {
+      off: null,
+      xhigh: 'xhigh',
+    })).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
+    expect(deriveSupportedThinkingLevelsFromPiModel(true, {
+      minimal: 'low',
+      xhigh: 'xhigh',
+    })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+    expect(deriveSupportedThinkingLevelsFromPiModel(true, {
+      xhigh: null,
+    })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(deriveSupportedThinkingLevelsFromPiModel(false, {
+      xhigh: 'xhigh',
+    })).toEqual([]);
+  });
+
+  it('maps known Copilot effort labels and ignores unknown labels', () => {
+    expect(mapReportedReasoningEfforts(['minimal', 'medium', 'future-effort', 'xhigh'])).toEqual([
+      'minimal', 'medium', 'xhigh',
+    ]);
+    expect(mapReportedReasoningEfforts([])).toEqual([]);
+    expect(mapReportedReasoningEfforts(undefined)).toBeUndefined();
+  });
+
   it('includes GPT-5.6 models for OpenAI API and Codex catalogs', () => {
     const expected = ['pi/gpt-5.6-sol', 'pi/gpt-5.6-terra', 'pi/gpt-5.6-luna'];
 
     for (const provider of ['openai', 'openai-codex']) {
-      const ids = getPiModelsForAuthProvider(provider).map(m => m.id);
+      const models = getPiModelsForAuthProvider(provider);
+      const ids = models.map(m => m.id);
       expect(ids).toEqual(expect.arrayContaining(expected));
+      const gpt = models.find(m => m.id === 'pi/gpt-5.6-sol');
+      expect(gpt?.supportedThinkingLevels).toEqual(provider === 'openai'
+        ? ['minimal', 'low', 'medium', 'high', 'xhigh']
+        : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
     }
   });
 });

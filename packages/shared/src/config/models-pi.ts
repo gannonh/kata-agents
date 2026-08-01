@@ -16,6 +16,39 @@
 import { getProviders, getModels } from '@mariozechner/pi-ai';
 import type { KnownProvider, Model, Api } from '@mariozechner/pi-ai';
 import type { ModelDefinition } from './models.ts';
+import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+
+const PI_THINKING_LEVEL_IDS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+
+/**
+ * Derive renderer-safe levels using Pi's `getSupportedThinkingLevels` rules.
+ * `null` disables a level, omitted non-xhigh levels use provider defaults, and
+ * xhigh requires an explicit non-null mapping.
+ */
+export function deriveSupportedThinkingLevelsFromPiModel(
+  reasoning: boolean,
+  thinkingLevelMap?: Record<string, string | null | undefined>,
+): ThinkingLevel[] {
+  if (!reasoning) return [];
+  return PI_THINKING_LEVEL_IDS.filter((level) => {
+    const mapped = thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === 'xhigh') return mapped !== undefined;
+    return true;
+  });
+}
+
+/**
+ * Map provider-reported reasoning effort labels to the shared vocabulary.
+ * Unknown labels are ignored so provider additions do not drop the model.
+ */
+export function mapReportedReasoningEfforts(
+  efforts?: readonly string[],
+): ThinkingLevel[] | undefined {
+  if (efforts === undefined) return undefined;
+  const reported = new Set(efforts.map((effort) => effort.toLowerCase()));
+  return PI_THINKING_LEVEL_IDS.filter((level) => reported.has(level));
+}
 
 // ============================================
 // PI MODEL DISCOVERY
@@ -24,7 +57,7 @@ import type { ModelDefinition } from './models.ts';
 /**
  * Convert a Pi SDK Model to our ModelDefinition format.
  */
-function piModelToDefinition(m: Model<Api>): ModelDefinition {
+export function piModelToDefinition(m: Model<Api>): ModelDefinition {
   const lastPart = m.name.split(/[\s-]/).pop() ?? m.name;
   const shortName = m.name.length > 20 ? lastPart : m.name;
 
@@ -36,6 +69,7 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
     provider: 'pi',
     contextWindow: m.contextWindow,
     supportsThinking: m.reasoning,
+    supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
   };
 }
 
@@ -106,7 +140,7 @@ export const SUPPLEMENTAL_OPENAI_MODELS: readonly SupplementalPiModel[] =
     } satisfies SupplementalPiModel)),
   );
 
-function supplementalPiModelToDefinition(model: SupplementalPiModel): ModelDefinition {
+export function supplementalPiModelToDefinition(model: SupplementalPiModel): ModelDefinition {
   return {
     id: `pi/${model.id}`,
     name: model.name,
@@ -115,6 +149,7 @@ function supplementalPiModelToDefinition(model: SupplementalPiModel): ModelDefin
     provider: 'pi',
     contextWindow: model.contextWindow,
     supportsThinking: model.reasoning,
+    supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(model.reasoning, model.thinkingLevelMap),
   };
 }
 

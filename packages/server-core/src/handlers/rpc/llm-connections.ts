@@ -1,5 +1,5 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@kata-sh/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@kata-sh/shared/config'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, hydratePiConnectionList, hydratePiConnectionModels, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@kata-sh/shared/config'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { setSetupDeferred } from '@kata-sh/shared/config/storage'
 import {
@@ -377,9 +377,22 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_MODELS, async (_ctx, provider: string) => {
     const { getModels } = await import('@mariozechner/pi-ai')
+    const {
+      SUPPLEMENTAL_OPENAI_MODELS,
+      deriveSupportedThinkingLevelsFromPiModel,
+    } = await import('@kata-sh/shared/config')
     try {
-      const models = getModels(provider as Parameters<typeof getModels>[0])
-      const sorted = [...models].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
+      const models = [
+        ...getModels(provider as Parameters<typeof getModels>[0]),
+        ...SUPPLEMENTAL_OPENAI_MODELS.filter(model => model.provider === provider),
+      ]
+      const seen = new Set<string>()
+      const uniqueModels = models.filter(model => {
+        if (seen.has(model.id)) return false
+        seen.add(model.id)
+        return true
+      })
+      const sorted = [...uniqueModels].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
       return {
         models: sorted.map(m => ({
           id: m.id.startsWith('pi/') ? m.id : `pi/${m.id}`,
@@ -388,8 +401,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
           costOutput: m.cost.output,
           contextWindow: m.contextWindow,
           reasoning: m.reasoning,
+          supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
         })),
-        totalCount: models.length,
+        totalCount: sorted.length,
       }
     } catch {
       return { models: [], totalCount: 0 }
@@ -402,12 +416,12 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // List all LLM connections (includes built-in and custom)
   server.handle(RPC_CHANNELS.llmConnections.LIST, async (): Promise<LlmConnection[]> => {
-    return getLlmConnections()
+    return hydratePiConnectionList(getLlmConnections())
   })
 
   // List all LLM connections with authentication status
   server.handle(RPC_CHANNELS.llmConnections.LIST_WITH_STATUS, async (): Promise<LlmConnectionWithStatus[]> => {
-    const connections = getLlmConnections()
+    const connections = hydratePiConnectionList(getLlmConnections())
     const credentialManager = getCredentialManager()
     const defaultSlug = getDefaultLlmConnection()
 
@@ -424,7 +438,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // Get a specific LLM connection by slug
   server.handle(RPC_CHANNELS.llmConnections.GET, async (_ctx, slug: string): Promise<LlmConnection | null> => {
-    return getLlmConnection(slug)
+    const connection = getLlmConnection(slug)
+    return connection ? hydratePiConnectionModels(connection) : null
   })
 
   // Get stored API key for an LLM connection (masked — for edit form display only)

@@ -82,13 +82,22 @@ const CustomEndpointSchema = z.object({
   supportsImages: z.boolean().optional(),
 });
 
+const ThinkingLevelSchema = z.enum([...THINKING_LEVEL_IDS] as [string, ...string[]]);
+
 const LlmConnectionSchema = z.object({
   slug: z.string().min(1),
   name: z.string().min(1),
   providerType: LlmProviderTypeSchema,
   authType: LlmAuthTypeSchema,
   baseUrl: z.string().optional(),
-  models: z.array(z.union([z.string(), z.object({ id: z.string() }).passthrough()])).optional(),
+  models: z.array(z.union([
+    z.string(),
+    z.object({
+      id: z.string(),
+      supportsThinking: z.boolean().optional(),
+      supportedThinkingLevels: z.array(ThinkingLevelSchema).optional(),
+    }).passthrough(),
+  ])).optional(),
   defaultModel: z.string().optional(),
   modelSelectionMode: z.enum(['automaticallySyncedFromProvider', 'userDefined3Tier']).optional(),
   customEndpoint: CustomEndpointSchema.optional(),

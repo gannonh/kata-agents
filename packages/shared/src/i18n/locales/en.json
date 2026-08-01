@@ -1420,6 +1420,8 @@
   "thinking.maxDesc": "Maximum effort reasoning",
   "thinking.medium": "Medium",
   "thinking.mediumDesc": "Balanced speed and reasoning",
+  "thinking.minimal": "Minimal",
+  "thinking.minimalDesc": "Minimum reasoning effort",
   "thinking.notSupported": "Not supported by this model",
   "thinking.off": "No Thinking",
   "thinking.offDesc": "Fastest responses, no reasoning",

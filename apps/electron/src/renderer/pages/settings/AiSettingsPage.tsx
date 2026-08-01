@@ -23,7 +23,12 @@ import { useSetAtom } from 'jotai'
 import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
 import { motion, AnimatePresence } from 'motion/react'
 import type { LlmConnectionWithStatus, ThinkingLevel, WorkspaceSettings, Workspace } from '../../../shared/types'
-import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '@kata-sh/shared/agent/thinking-levels'
+import {
+  DEFAULT_THINKING_LEVEL,
+  THINKING_LEVELS,
+  getThinkingLevelDefinitionsForModel,
+  normalizeThinkingLevelForModel,
+} from '@kata-sh/shared/agent/thinking-levels'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import {
   DropdownMenu,
@@ -96,6 +101,18 @@ function getModelOptionsForConnection(
     description: m.description,
     descriptionKey: m.descriptionKey,
   }))
+}
+
+function getModelDefinitionForConnection(
+  connection: LlmConnectionWithStatus | undefined,
+  modelId: string | undefined,
+): ModelDefinition | undefined {
+  if (!connection || !modelId) return undefined
+  const models = connection.models && connection.models.length > 0
+    ? connection.models
+    : getModelsForProviderType(connection.providerType, connection.piAuthProvider)
+  const model = models.find(entry => typeof entry !== 'string' && entry.id === modelId)
+  return model && typeof model !== 'string' ? model : undefined
 }
 
 export const meta: DetailsPageMeta = {
@@ -486,13 +503,27 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
   // Get display values
   const currentConnection = settings?.defaultLlmConnection || 'global'
   const currentModel = settings?.model || 'global'
-  const currentThinking = settings?.thinkingLevel || 'global'
 
   // Derive workspace's effective connection (override or default)
   const workspaceEffectiveConnection = useMemo(() => {
     const connSlug = settings?.defaultLlmConnection
     return connSlug ? llmConnections.find(c => c.slug === connSlug) : llmConnections.find(c => c.isDefault)
   }, [settings?.defaultLlmConnection, llmConnections])
+
+  const workspaceThinkingModel = useMemo(
+    () => getModelDefinitionForConnection(
+      workspaceEffectiveConnection,
+      settings?.model ?? workspaceEffectiveConnection?.defaultModel,
+    ),
+    [settings?.model, workspaceEffectiveConnection],
+  )
+  const workspaceThinkingLevels = useMemo(
+    () => getThinkingLevelDefinitionsForModel(workspaceThinkingModel),
+    [workspaceThinkingModel],
+  )
+  const displayedWorkspaceThinking = settings?.thinkingLevel
+    ? normalizeThinkingLevelForModel(settings.thinkingLevel, workspaceThinkingModel) ?? settings.thinkingLevel
+    : 'global'
 
   // Get summary text for collapsed state
   const getSummary = () => {
@@ -589,11 +620,12 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
               <SettingsMenuSelectRow
                 label={t("settings.ai.thinking")}
                 description={t("settings.ai.thinkingDesc")}
-                value={currentThinking}
+                value={displayedWorkspaceThinking}
                 onValueChange={handleThinkingChange}
+                disabled={workspaceThinkingLevels.length === 0 && !settings?.thinkingLevel}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
+                  ...workspaceThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
                     value: id,
                     label: t(nameKey),
                     description: t(descriptionKey),
@@ -625,7 +657,7 @@ function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMe
 
 export default function AiSettingsPage() {
   const { t } = useTranslation()
-  const { llmConnections, refreshLlmConnections, activeWorkspaceId } = useAppShellContext()
+  const { llmConnections, refreshLlmConnections, activeWorkspaceId, onDefaultThinkingLevelChange } = useAppShellContext()
 
   // API Setup overlay state
   const [showApiSetup, setShowApiSetup] = useState(false)
@@ -957,6 +989,15 @@ export default function AiSettingsPage() {
   }, [llmConnections])
 
   const defaultModel = defaultConnection?.defaultModel ?? ''
+  const defaultThinkingModel = useMemo(
+    () => getModelDefinitionForConnection(defaultConnection, defaultModel),
+    [defaultConnection, defaultModel],
+  )
+  const defaultThinkingLevels = useMemo(
+    () => getThinkingLevelDefinitionsForModel(defaultThinkingModel),
+    [defaultThinkingModel],
+  )
+  const displayedDefaultThinking = normalizeThinkingLevelForModel(defaultThinking, defaultThinkingModel) ?? defaultThinking
 
   // App-level default handlers
   const handleDefaultModelChange = useCallback(async (model: string) => {
@@ -980,12 +1021,14 @@ export default function AiSettingsPage() {
       if (!result.success) {
         console.error('Failed to set default thinking level:', result.error)
         setDefaultThinking(previous)
+      } else {
+        onDefaultThinkingLevelChange?.(level)
       }
     } catch (error) {
       console.error('Failed to set default thinking level:', error)
       setDefaultThinking(previous)
     }
-  }, [defaultThinking])
+  }, [defaultThinking, onDefaultThinkingLevelChange])
 
   const handleExtendedPromptCacheChange = useCallback(async (enabled: boolean) => {
     setExtendedPromptCache(enabled)
@@ -1079,9 +1122,10 @@ export default function AiSettingsPage() {
                   <SettingsMenuSelectRow
                     label={t("settings.ai.thinking")}
                     description={t("settings.ai.thinkingDesc")}
-                    value={defaultThinking}
+                    value={displayedDefaultThinking}
                     onValueChange={(v) => handleDefaultThinkingChange(v as ThinkingLevel)}
-                    options={THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
+                    disabled={defaultThinkingLevels.length === 0}
+                    options={defaultThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
                       value: id,
                       label: t(nameKey),
                       description: t(descriptionKey),

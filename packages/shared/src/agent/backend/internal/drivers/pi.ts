@@ -1,10 +1,15 @@
 import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.ts';
 import type { ModelDefinition } from '../../../../config/models.ts';
-import { getAllPiModels, getPiModelsForAuthProvider, isDeprecatedClaudeOpus46Model } from '../../../../config/models-pi.ts';
+import {
+  getAllPiModels,
+  getPiModelsForAuthProvider,
+  isDeprecatedClaudeOpus46Model,
+  mapReportedReasoningEfforts,
+} from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 
 // ── Copilot model types ────────────────────────────────────────────────
-type RawCopilotModel = {
+export type RawCopilotModel = {
   id: string;
   name: string;
   supportedReasoningEfforts?: string[];
@@ -112,16 +117,22 @@ function filterEnabledModels(models: RawCopilotModel[]): RawCopilotModel[] {
 }
 
 /** Convert raw Copilot models to our ModelDefinition format. */
-function toModelDefinitions(models: RawCopilotModel[]): ModelDefinition[] {
-  return models.map(m => ({
-    id: m.id,
-    name: m.name,
-    shortName: m.name,
-    description: '',
-    provider: 'pi' as const,
-    contextWindow: m.contextWindow || 200_000,
-    supportsThinking: !!(m.supportedReasoningEfforts && m.supportedReasoningEfforts.length > 0),
-  }));
+export function toModelDefinitions(models: RawCopilotModel[]): ModelDefinition[] {
+  return models.map(m => {
+    const supportedThinkingLevels = mapReportedReasoningEfforts(m.supportedReasoningEfforts);
+    return {
+      id: m.id,
+      name: m.name,
+      shortName: m.name,
+      description: '',
+      provider: 'pi' as const,
+      contextWindow: m.contextWindow || 200_000,
+      supportsThinking: supportedThinkingLevels === undefined
+        ? undefined
+        : supportedThinkingLevels.length > 0,
+      ...(supportedThinkingLevels !== undefined ? { supportedThinkingLevels } : {}),
+    };
+  });
 }
 
 /** Log a breakdown of models by policy state. */

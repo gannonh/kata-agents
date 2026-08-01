@@ -1420,6 +1420,8 @@
   "thinking.maxDesc": "Maximaler Denkaufwand",
   "thinking.medium": "Mittel",
   "thinking.mediumDesc": "Ausgewogene Geschwindigkeit und Denkleistung",
+  "thinking.minimal": "Minimal",
+  "thinking.minimalDesc": "Minimaler Denkaufwand",
   "thinking.notSupported": "Von diesem Modell nicht unterstützt",
   "thinking.off": "Kein Denken",
   "thinking.offDesc": "Schnellste Antworten, kein Denken",

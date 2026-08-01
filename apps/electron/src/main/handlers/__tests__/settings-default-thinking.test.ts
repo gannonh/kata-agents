@@ -91,6 +91,15 @@ describe('settings default thinking RPC handlers', () => {
     expect(setDefaultThinkingLevelMock).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts minimal as a persisted thinking level', async () => {
+    const setHandler = handlers.get(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL)
+    expect(setHandler).toBeTruthy()
+
+    const result = await setHandler!({ clientId: 'client-1' }, 'minimal')
+    expect(result).toEqual({ success: true })
+    expect(setDefaultThinkingLevelMock).toHaveBeenCalledWith('minimal')
+  })
+
   it('rejects invalid thinking level values before persistence', async () => {
     const setHandler = handlers.get(RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL)
     expect(setHandler).toBeTruthy()

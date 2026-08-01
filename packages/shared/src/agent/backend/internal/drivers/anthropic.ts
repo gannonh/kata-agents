@@ -103,6 +103,7 @@ export const anthropicDriver: ProviderDriver = {
           provider: 'anthropic' as const,
           contextWindow: getModelContextWindow(m.id) ?? 200_000,
           supportsThinking: registryModel?.supportsThinking,
+          supportedThinkingLevels: registryModel?.supportedThinkingLevels,
           supportsImages: registryModel?.supportsImages,
         };
       });

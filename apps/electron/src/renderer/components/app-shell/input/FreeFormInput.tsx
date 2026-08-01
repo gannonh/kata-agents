@@ -78,7 +78,12 @@ import { WorkspaceCheckoutBadge, useCheckoutBound, type WorkspaceCheckoutHandle 
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/modes'
-import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@kata-sh/shared/agent/thinking-levels'
+import {
+  type ThinkingLevel,
+  getThinkingLevelDefinitionsForModel,
+  normalizeThinkingLevelForModel,
+  getThinkingLevelNameKey,
+} from '@kata-sh/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -374,13 +379,17 @@ export function FreeFormInput({
     return connection.models || ANTHROPIC_MODELS
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
-  const availableThinkingLevels = THINKING_LEVELS
-
-  // Disable thinking selector when the current model explicitly doesn't support it
-  const thinkingDisabled = React.useMemo(() => {
+  const selectedModel = React.useMemo(() => {
     const model = availableModels.find(m => typeof m !== 'string' && m.id === currentModel)
-    return typeof model !== 'string' && model?.supportsThinking === false
+    return model && typeof model !== 'string' ? model : undefined
   }, [availableModels, currentModel])
+
+  const availableThinkingLevels = React.useMemo(
+    () => connectionUnavailable ? [] : getThinkingLevelDefinitionsForModel(selectedModel),
+    [connectionUnavailable, selectedModel],
+  )
+  const displayedThinkingLevel = normalizeThinkingLevelForModel(thinkingLevel, selectedModel) ?? thinkingLevel
+  const thinkingDisabled = availableThinkingLevels.length === 0
 
   // Get display name for current model (full name, not short name)
   const currentModelDisplayName = React.useMemo(() => {
@@ -2383,13 +2392,13 @@ export function FreeFormInput({
                   <DropdownMenuSub>
                     <StyledDropdownMenuSubTrigger disabled={thinkingDisabled} className={cn("flex items-center justify-between px-2 py-2 rounded-lg", thinkingDisabled && "opacity-50 cursor-not-allowed")}>
                       <div className="text-left flex-1">
-                        <div className="font-medium text-sm">{t(getThinkingLevelNameKey(thinkingLevel))}</div>
+                        <div className="font-medium text-sm">{t(getThinkingLevelNameKey(displayedThinkingLevel))}</div>
                         <div className="text-xs text-muted-foreground">{thinkingDisabled ? t('thinking.notSupported') : t('thinking.extendedDesc')}</div>
                       </div>
                     </StyledDropdownMenuSubTrigger>
                     <StyledDropdownMenuSubContent className="min-w-[220px]">
                       {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
-                        const isSelected = thinkingLevel === id
+                        const isSelected = displayedThinkingLevel === id
                         return (
                           <StyledDropdownMenuItem
                             key={id}

@@ -1,12 +1,13 @@
 /**
  * Thinking Level Configuration
  *
- * Six-tier thinking system for extended reasoning:
+ * Seven-tier thinking system for extended reasoning:
  * - OFF: No extended thinking (disabled)
+ * - Minimal: Minimum supported reasoning effort
  * - Low: Light reasoning, faster responses
  * - Medium: Balanced speed and reasoning (default)
  * - High: Deep reasoning for complex tasks
- * - XHigh: Extra-high reasoning — Anthropic's recommended level for Opus agentic/coding work
+ * - XHigh: Extra-high reasoning - Anthropic's recommended level for Opus agentic/coding work
  * - Max: Maximum effort reasoning
  *
  * Session-level setting with workspace defaults.
@@ -23,10 +24,11 @@
  * `ThinkingLevel` type, `THINKING_LEVELS` metadata, the Zod schema in
  * `validators.ts`, and runtime validation/error messages all derive from this.
  *
- * Order is significant: it determines UI ordering (low → max).
+ * Order is significant: it determines UI ordering (off → max).
  */
 export const THINKING_LEVEL_IDS = [
   'off',
+  'minimal',
   'low',
   'medium',
   'high',
@@ -52,12 +54,68 @@ export interface ThinkingLevelDefinition {
  */
 export const THINKING_LEVELS: readonly ThinkingLevelDefinition[] = [
   { id: 'off', nameKey: 'thinking.off', descriptionKey: 'thinking.offDesc' },
+  { id: 'minimal', nameKey: 'thinking.minimal', descriptionKey: 'thinking.minimalDesc' },
   { id: 'low', nameKey: 'thinking.low', descriptionKey: 'thinking.lowDesc' },
   { id: 'medium', nameKey: 'thinking.medium', descriptionKey: 'thinking.mediumDesc' },
   { id: 'high', nameKey: 'thinking.high', descriptionKey: 'thinking.highDesc' },
   { id: 'xhigh', nameKey: 'thinking.xhigh', descriptionKey: 'thinking.xhighDesc' },
   { id: 'max', nameKey: 'thinking.max', descriptionKey: 'thinking.maxDesc' },
 ] as const;
+
+export interface ThinkingCapabilityModel {
+  provider?: 'anthropic' | 'pi';
+  supportsThinking?: boolean;
+  supportedThinkingLevels?: readonly ThinkingLevel[];
+}
+
+/**
+ * Resolve the renderer-safe reasoning options for a model.
+ *
+ * An omitted capability list means that the provider did not report model-level
+ * capabilities, so callers retain the compatibility list. An explicit empty
+ * list represents a reported model with no selectable reasoning levels.
+ */
+export function getThinkingLevelDefinitionsForModel(
+  model?: ThinkingCapabilityModel,
+): readonly ThinkingLevelDefinition[] {
+  if (model?.supportsThinking === false) return [];
+  if (model?.supportedThinkingLevels !== undefined) {
+    return THINKING_LEVELS.filter(({ id }) => model.supportedThinkingLevels!.includes(id));
+  }
+  return THINKING_LEVELS;
+}
+
+/**
+ * Normalize a level against a model's capabilities using Pi's nearest-level
+ * ordering. Levels at or above the requested position win ties.
+ */
+export function normalizeThinkingLevelForModel(
+  level: ThinkingLevel,
+  model?: ThinkingCapabilityModel,
+): ThinkingLevel | undefined {
+  const definitions = getThinkingLevelDefinitionsForModel(model);
+  if (definitions.length === 0) return undefined;
+
+  const isKnownPiCapabilityList = model?.provider === 'pi' && model.supportedThinkingLevels !== undefined;
+  const available = definitions
+    .map(({ id }) => id)
+    .filter((id) => !(isKnownPiCapabilityList && id === 'max'));
+  if (available.length === 0) return undefined;
+
+  const requested = isKnownPiCapabilityList && level === 'max' ? 'xhigh' : level;
+  const requestedIndex = THINKING_LEVEL_IDS.indexOf(requested);
+  if (requestedIndex === -1) return available[0];
+
+  for (let index = requestedIndex; index < THINKING_LEVEL_IDS.length; index += 1) {
+    const candidate = THINKING_LEVEL_IDS[index];
+    if (candidate && available.includes(candidate)) return candidate;
+  }
+  for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+    const candidate = THINKING_LEVEL_IDS[index];
+    if (candidate && available.includes(candidate)) return candidate;
+  }
+  return available[0];
+}
 
 /** Default thinking level for new sessions when workspace has no default */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
@@ -69,6 +127,7 @@ export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
  */
 export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null> = {
   off: null,
+  minimal: 'low',
   low: 'low',
   medium: 'medium',
   high: 'high',
@@ -88,6 +147,7 @@ export const THINKING_TO_EFFORT: Record<ThinkingLevel, 'low' | 'medium' | 'high'
 const TOKEN_BUDGETS = {
   haiku: {
     off: 0,
+    minimal: 2_000,
     low: 2_000,
     medium: 4_000,
     high: 6_000,
@@ -96,6 +156,7 @@ const TOKEN_BUDGETS = {
   },
   default: {
     off: 0,
+    minimal: 4_000,
     low: 4_000,
     medium: 10_000,
     high: 20_000,

@@ -1420,6 +1420,8 @@
   "thinking.maxDesc": "Maximális erőfeszítésű gondolkodás",
   "thinking.medium": "Közepes",
   "thinking.mediumDesc": "Kiegyensúlyozott sebesség és gondolkodás",
+  "thinking.minimal": "Minimális",
+  "thinking.minimalDesc": "Minimális erőfeszítésű gondolkodás",
   "thinking.notSupported": "Ez a modell nem támogatja",
   "thinking.off": "Gondolkodás kikapcsolva",
   "thinking.offDesc": "Leggyorsabb válaszok, gondolkodás nélkül",

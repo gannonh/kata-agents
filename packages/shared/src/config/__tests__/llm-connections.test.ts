@@ -10,12 +10,60 @@ import {
   fromBedrockNativeId,
   normalizeBedrockModelId,
   deriveBedrockRegionPrefix,
+  hydratePiConnectionModels,
 } from '../llm-connections'
 import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isClaudeModel } from '../models'
 
 // ============================================================
 // getDefaultModelsForConnection
 // ============================================================
+
+describe('hydratePiConnectionModels', () => {
+  it('hydrates string entries with provider-scoped OpenAI and Codex capabilities', () => {
+    const base = {
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      createdAt: Date.now(),
+      models: ['pi/gpt-5.6-sol', 'custom-model', 'pi/gpt-5.6-sol'],
+    }
+
+    const openai = hydratePiConnectionModels({ ...base, piAuthProvider: 'openai' })
+    const codex = hydratePiConnectionModels({ ...base, piAuthProvider: 'openai-codex' })
+
+    expect(openai.models?.map(model => typeof model === 'string' ? model : (model as any).id)).toEqual([
+      'pi/gpt-5.6-sol', 'custom-model', 'pi/gpt-5.6-sol',
+    ])
+    expect(typeof openai.models?.[0]).toBe('object')
+    expect((openai.models?.[0] as any).supportedThinkingLevels).toEqual([
+      'minimal', 'low', 'medium', 'high', 'xhigh',
+    ])
+    expect((codex.models?.[0] as any).supportedThinkingLevels).toEqual([
+      'off', 'minimal', 'low', 'medium', 'high', 'xhigh',
+    ])
+    expect(openai.models?.[1]).toBe('custom-model')
+  })
+
+  it('fills missing capabilities without replacing explicit model overrides', () => {
+    const connection = hydratePiConnectionModels({
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      piAuthProvider: 'openai-codex',
+      createdAt: Date.now(),
+      models: [{ id: 'pi/gpt-5.6-sol', name: 'Custom name', supportsImages: false }] as any,
+    })
+
+    expect(connection.models?.[0]).toMatchObject({
+      id: 'pi/gpt-5.6-sol',
+      name: 'Custom name',
+      supportsImages: false,
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+    })
+  })
+})
 
 describe('getDefaultModelsForConnection', () => {
   it('anthropic returns ANTHROPIC_MODELS (ModelDefinition[])', () => {

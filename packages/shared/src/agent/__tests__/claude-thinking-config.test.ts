@@ -69,6 +69,20 @@ describe('resolveClaudeThinkingOptions', () => {
     })
   })
 
+  it('maps minimal to low effort on adaptive backends', () => {
+    const result = resolveClaudeThinkingOptions({
+      thinkingLevel: 'minimal',
+      model: 'claude-opus-4-7',
+      providerType: 'anthropic',
+      minimizeThinking: false,
+    })
+
+    expect(result).toEqual({
+      thinking: { type: 'adaptive' },
+      effort: 'low',
+    })
+  })
+
   it('passes xhigh as effort on adaptive backends (Opus 4.7+)', () => {
     const result = resolveClaudeThinkingOptions({
       thinkingLevel: 'xhigh',

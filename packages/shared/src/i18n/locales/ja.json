@@ -1420,6 +1420,8 @@
   "thinking.maxDesc": "最大限の推論",
   "thinking.medium": "中",
   "thinking.mediumDesc": "速度と推論のバランス",
+  "thinking.minimal": "最小",
+  "thinking.minimalDesc": "最小限の推論",
   "thinking.notSupported": "このモデルではサポートされていません",
   "thinking.off": "思考なし",
   "thinking.offDesc": "最速の応答、推論なし",

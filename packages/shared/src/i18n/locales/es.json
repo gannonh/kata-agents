@@ -1420,6 +1420,8 @@
   "thinking.maxDesc": "Razonamiento con máximo esfuerzo",
   "thinking.medium": "Medio",
   "thinking.mediumDesc": "Velocidad y razonamiento equilibrados",
+  "thinking.minimal": "Mínimo",
+  "thinking.minimalDesc": "Razonamiento con el mínimo esfuerzo",
   "thinking.notSupported": "No compatible con este modelo",
   "thinking.off": "Sin Pensamiento",
   "thinking.offDesc": "Respuestas más rápidas, sin razonamiento",

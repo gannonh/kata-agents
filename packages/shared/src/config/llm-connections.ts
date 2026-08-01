@@ -532,6 +532,71 @@ export function setModelSupportsImages(
 }
 
 /**
+ * Hydrate Pi model entries with provider-scoped catalog capabilities.
+ *
+ * Older persisted connections may contain bare string IDs. Matching is done
+ * against the resolver selected by `piAuthProvider`, while preserving the
+ * stored ID, ordering, duplicates, unknown strings, and explicit overrides.
+ */
+export function hydratePiConnectionModels<T extends LlmConnection>(connection: T): T {
+  if (connection.providerType !== 'pi' || !connection.models?.length) return connection;
+
+  const catalog = getModelsForProviderType('pi', connection.piAuthProvider);
+  if (catalog.length === 0) return connection;
+
+  const byId = new Map(catalog.map(model => [model.id, model]));
+  const findCatalogModel = (id: string): ModelDefinition | undefined => {
+    const exact = byId.get(id);
+    if (exact) return exact;
+    const normalized = id.startsWith('pi/') ? id : `pi/${id}`;
+    return byId.get(normalized);
+  };
+
+  let changed = false;
+  const models = connection.models.map((entry) => {
+    const entryId = typeof entry === 'string' ? entry : entry.id;
+    const catalogModel = findCatalogModel(entryId);
+    if (!catalogModel) return entry;
+
+    if (typeof entry === 'string') {
+      changed = true;
+      return entry === catalogModel.id ? catalogModel : { ...catalogModel, id: entry };
+    }
+
+    const hydrated = {
+      ...catalogModel,
+      ...entry,
+    };
+    if (
+      entry.supportedThinkingLevels === undefined
+      && catalogModel.supportedThinkingLevels !== undefined
+    ) {
+      hydrated.supportedThinkingLevels = catalogModel.supportedThinkingLevels;
+    }
+    if (entry.supportsThinking === undefined && catalogModel.supportsThinking !== undefined) {
+      hydrated.supportsThinking = catalogModel.supportsThinking;
+    }
+    if (
+      hydrated.name !== entry.name
+      || hydrated.description !== entry.description
+      || hydrated.supportedThinkingLevels !== entry.supportedThinkingLevels
+      || hydrated.supportsThinking !== entry.supportsThinking
+    ) {
+      changed = true;
+      return hydrated;
+    }
+    return entry;
+  });
+
+  return changed ? { ...connection, models } : connection;
+}
+
+/** Hydrate every Pi connection in a renderer-facing connection collection. */
+export function hydratePiConnectionList<T extends LlmConnection>(connections: T[]): T[] {
+  return connections.map(hydratePiConnectionModels);
+}
+
+/**
  * Resolve whether a given model on a connection accepts image input.
  *
  * For `pi_compat` (custom-endpoint) connections this mirrors the precedence used

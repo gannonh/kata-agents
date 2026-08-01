@@ -9,6 +9,14 @@
  * 2. The convenience exports (ANTHROPIC_MODELS, OPENAI_MODELS) auto-update
  * 3. Update llm-connections.ts if adding a new built-in connection
  */
+import { THINKING_LEVEL_IDS, type ThinkingLevel } from '../agent/thinking-levels.ts';
+
+// Static Anthropic models use the existing Anthropic-facing levels. Pi's
+// provider-specific catalogs add `minimal` only when the model reports it.
+const ANTHROPIC_SUPPORTED_THINKING_LEVELS: ThinkingLevel[] = THINKING_LEVEL_IDS.filter(
+  (level): level is ThinkingLevel => level !== 'minimal',
+);
+
 // Bedrock-native → bare Anthropic ID reverse mapping.
 // Duplicated from llm-connections.ts to avoid circular imports (llm-connections imports models).
 // Must stay in sync with BEDROCK_MODEL_MAP in llm-connections.ts.
@@ -109,6 +117,8 @@ export interface ModelDefinition {
   contextWindow: number;
   /** Whether this model supports thinking/reasoning effort. Defaults to true when undefined. */
   supportsThinking?: boolean;
+  /** Native shared reasoning levels reported by the provider for this model. */
+  supportedThinkingLevels?: ThinkingLevel[];
   /** Explicit per-model image input capability hint, primarily for custom endpoints. */
   supportsImages?: boolean;
 }
@@ -133,6 +143,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.opusDesc',
     provider: 'anthropic',
     contextWindow: 1_000_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
     id: 'claude-opus-4-7',
@@ -142,6 +153,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.opusDesc',
     provider: 'anthropic',
     contextWindow: 1_000_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -151,6 +163,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.sonnetDesc',
     provider: 'anthropic',
     contextWindow: 200_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
     id: 'claude-haiku-4-5-20251001',
@@ -160,6 +173,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.haikuDesc',
     provider: 'anthropic',
     contextWindow: 200_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
     id: 'claude-fable-5',
@@ -169,6 +183,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.fableDesc',
     provider: 'anthropic',
     contextWindow: 1_000_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
 
   // ----------------------------------------

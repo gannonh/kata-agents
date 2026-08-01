@@ -1426,6 +1426,8 @@
   "thinking.maxDesc": "Rozumowanie z maksymalnym wysiłkiem",
   "thinking.medium": "Średnie",
   "thinking.mediumDesc": "Zrównoważona szybkość i rozumowanie",
+  "thinking.minimal": "Minimalne",
+  "thinking.minimalDesc": "Rozumowanie z minimalnym wysiłkiem",
   "thinking.notSupported": "Nieobsługiwane przez ten model",
   "thinking.off": "Bez rozumowania",
   "thinking.offDesc": "Najszybsze odpowiedzi, bez rozumowania",
