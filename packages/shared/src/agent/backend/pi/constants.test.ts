@@ -10,8 +10,8 @@ describe('THINKING_TO_PI', () => {
     expect(THINKING_TO_PI.minimal).toBe('minimal')
   })
 
-  it('saturates Craft max to Pi xhigh (Pi has no higher tier)', () => {
-    expect(THINKING_TO_PI.max).toBe('xhigh')
+  it('maps max to Pi max natively', () => {
+    expect(THINKING_TO_PI.max).toBe('max')
   })
 
   it('passes lower tiers through unchanged', () => {

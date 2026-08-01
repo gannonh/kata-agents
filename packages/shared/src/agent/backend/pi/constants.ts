@@ -9,8 +9,8 @@ import type { ThinkingLevel as PiThinkingLevel } from '@earendil-works/pi-agent-
 import type { ThinkingLevel } from '../../thinking-levels.ts';
 
 /**
- * Map Craft's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
- * Pi's ceiling is `xhigh`; Craft's `max` saturates there.
+ * Map Kata's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
+ * Pi 0.83 supports the native `max` reasoning level.
  */
 export const THINKING_TO_PI: Record<ThinkingLevel, PiThinkingLevel> = {
   off: 'off',
@@ -19,7 +19,7 @@ export const THINKING_TO_PI: Record<ThinkingLevel, PiThinkingLevel> = {
   medium: 'medium',
   high: 'high',
   xhigh: 'xhigh',
-  max: 'xhigh',
+  max: 'max',
 };
 
 /**
