@@ -28,7 +28,7 @@ Follow-up correction: `2d5c093` adds the Pi max alias and model-ID normalization
 
 ## Verification evidence
 
-- Focused reasoning/provider/renderer suite: **105 passed, 0 failed** across 11 files.
+- Focused reasoning/provider/renderer suite: **107 passed, 0 failed** across 11 files, including the Pi max-alias and model-ID normalization regressions.
 - `cd packages/shared && bun run tsc --noEmit`: passed.
 - `cd packages/server-core && bun run typecheck`: passed.
 - `cd packages/pi-agent-server && bun run typecheck`: passed.
@@ -42,8 +42,8 @@ The generated Electron Pi resource is intentionally ignored by `.gitignore`; the
 
 ## Review gates
 
-- Independent spec-compliance review: passed after the nearest-level, renderer-test, provider-DTO, status, and documentation fixes.
-- Independent code-quality review: passed after provider identity, malformed capability, session-default preservation, and generated-resource verification concerns were addressed.
+- Independent spec-compliance review: passed after the nearest-level, renderer-test, provider-DTO, status, documentation, Pi max-alias, and model-ID normalization fixes.
+- Independent code-quality review: passed after provider identity, malformed capability, session-default preservation, generated-resource verification, Pi max-alias, and model-ID normalization concerns were addressed.
 
 ## Manual verification
 
