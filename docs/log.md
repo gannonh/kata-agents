@@ -2,6 +2,8 @@
 
 ## 2026-08-01
 
+* **ChatGPT/Codex OAuth fix**: corrected Pi subprocess credential injection so `openai-codex` receives Pi 0.83's native OAuth credential shape during startup and token refresh, while regular OpenAI API-key connections retain API-key auth. Added regression coverage for credential shaping and the Pi runtime auth contract.
+
 * **Pi SDK 0.83 migration implemented**: migrated the embedded Pi runtime to the Pi CLI-aligned `@earendil-works` 0.83 package family, adopted native GPT-5.6 model catalogs and reasoning metadata, mapped native `max`, and verified the generated bundle. See the [migration spec](specs/2026-08-01-pi-sdk-0.83-migration-design.md) and [build report](specs/2026-08-01-pi-sdk-0.83-migration-build-report.md).
 
 * **Pi SDK 0.83 migration approved**: added the [Pi SDK migration spec](specs/2026-08-01-pi-sdk-0.83-migration-design.md) for the current Pi CLI-aligned `@earendil-works` package family, native model catalogs, and native reasoning levels.

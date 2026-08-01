@@ -21,4 +21,22 @@ describe('native Pi models', () => {
       }
     }
   });
+
+  it('accepts native OAuth credentials for the OAuth-only Codex provider', async () => {
+    const credentials = new InMemoryCredentialStore();
+    await credentials.modify('openai-codex', async () => ({
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: Date.now() + 60 * 60_000,
+    }));
+    const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
+    const model = runtime.getModel('openai-codex', 'gpt-5.6-luna');
+
+    expect(model).toBeDefined();
+    await expect(runtime.getAuth(model!)).resolves.toMatchObject({
+      auth: { apiKey: 'access-token' },
+      source: 'OAuth',
+    });
+  });
 });
