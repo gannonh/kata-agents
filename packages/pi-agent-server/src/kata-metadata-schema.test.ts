@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createEditToolDefinition } from '@mariozechner/pi-coding-agent';
+import { createEditToolDefinition } from '@earendil-works/pi-coding-agent';
 import { allowKataMetadataProperties, stripKataMetadata } from './kata-metadata-schema.ts';
 
 describe('Craft metadata schema compatibility for Pi tools', () => {
@@ -40,6 +40,7 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
 
   it('widens the actual Pi Edit tool schema without making metadata required', () => {
     const editTool = createEditToolDefinition('/tmp');
+    const originalSchema = editTool.parameters as { additionalProperties?: unknown };
     const widened = allowKataMetadataProperties(editTool.parameters);
     const widenedSchema = widened as {
       additionalProperties?: unknown;
@@ -47,7 +48,7 @@ describe('Craft metadata schema compatibility for Pi tools', () => {
       required?: string[];
     };
 
-    expect(widenedSchema.additionalProperties).toBe(false);
+    expect(widenedSchema.additionalProperties).toBe(originalSchema.additionalProperties);
     expect(widenedSchema.properties._displayName).toBeDefined();
     expect(widenedSchema.properties._intent).toBeDefined();
     expect(widenedSchema.required ?? []).not.toContain('_displayName');

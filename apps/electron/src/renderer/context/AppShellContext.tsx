@@ -71,6 +71,10 @@ export interface AppShellContextType {
   // Unified session options map
   /** All session-scoped options in one map. Use useSessionOptionsFor() hook for easy access. */
   sessionOptions: Map<string, SessionOptions>
+  /** Persisted app-level thinking default used for new sessions. */
+  defaultThinkingLevel?: import('../../shared/types').ThinkingLevel
+  /** Update the in-memory app default after the settings page persists it. */
+  onDefaultThinkingLevelChange?: (level: import('../../shared/types').ThinkingLevel) => void
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
@@ -253,9 +257,12 @@ export function useSessionOptionsFor(sessionId: string): {
   setPermissionMode: (mode: PermissionMode) => void
   isSafeModeActive: () => boolean
 } {
-  const { sessionOptions, onSessionOptionsChange } = useAppShellContext()
+  const { sessionOptions, defaultThinkingLevel, onSessionOptionsChange } = useAppShellContext()
 
-  const options = sessionOptions.get(sessionId) ?? defaultSessionOptions
+  const options = sessionOptions.get(sessionId) ?? {
+    ...defaultSessionOptions,
+    thinkingLevel: defaultThinkingLevel ?? defaultSessionOptions.thinkingLevel,
+  }
 
   const setOption = useCallback(<K extends keyof SessionOptions>(
     key: K,

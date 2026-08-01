@@ -180,10 +180,15 @@ export interface WorktreeRemovalConfirmation {
   confirmationFingerprint: string
 }
 
+export type WorktreeRemovalBlockedReasonCode = 'agent_not_quiesced'
+
 export interface WorktreeRemovalResult {
   removed: boolean
   branchPruned: boolean
   blocked: boolean
+  /** Stable reason for a localized client message when removal is blocked. */
+  blockedReasonCode?: WorktreeRemovalBlockedReasonCode
+  /** Optional server detail retained for non-localized diagnostics/fallbacks. */
   blockedReason?: string
 }
 

@@ -136,7 +136,10 @@ export function DeleteSessionDialog({
         // checkout are both intact. Keep the dialog open so the user can retry
         // without the removal choice.
         toast.error(t('git.delete.removalBlockedToast'), {
-          description: result?.worktreeRemoval?.blockedReason,
+          description:
+            result?.worktreeRemoval?.blockedReasonCode === 'agent_not_quiesced'
+              ? t('git.delete.agentTeardownBlocked')
+              : result?.worktreeRemoval?.blockedReason,
         })
         // Re-inspect so the displayed counts match the state that caused the
         // block; leaving the stale summary up would invite confirming the same
@@ -150,7 +153,12 @@ export function DeleteSessionDialog({
       // it separately when it did not happen.
       const removal = result.worktreeRemoval
       if (removal && !removal.removed) {
-        toast.error(t('git.delete.removalFailedToast'), { description: removal.blockedReason })
+        toast.error(t('git.delete.removalFailedToast'), {
+          description:
+            removal.blockedReasonCode === 'agent_not_quiesced'
+              ? t('git.delete.agentTeardownBlocked')
+              : removal.blockedReason,
+        })
       }
       onDeleted?.(sessionId)
       onOpenChange(false)
@@ -194,21 +202,23 @@ export function DeleteSessionDialog({
                 disabled={summary.blocked || busy}
                 onChange={(e) => setRemoveWorktree(e.target.checked)}
               />
-              <span className="flex flex-col gap-1">
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                  <GitFork className="h-3.5 w-3.5 shrink-0" />
-                  {branch
-                    ? t('git.delete.removeWorktreeLabelBranch', { branch })
-                    : t('git.delete.removeWorktreeLabel')}
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="flex min-w-0 items-start gap-1.5 font-medium">
+                  <GitFork className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0">
+                    {branch
+                      ? t('git.delete.removeWorktreeLabelBranch', { branch })
+                      : t('git.delete.removeWorktreeLabel')}
+                  </span>
                 </span>
 
                 {summary.blocked ? (
-                  <span className="text-[12px] text-muted-foreground">
+                  <span className="pl-5 text-[12px] text-muted-foreground">
                     {t('git.delete.sharedBlocked', { count: summary.otherOwnerCount })}
                   </span>
                 ) : (
                   <>
-                    <span className="text-[12px] text-muted-foreground">
+                    <span className="pl-5 text-[12px] text-muted-foreground">
                       {t('git.delete.worktreeKeptNote')}
                     </span>
                     {removalChosen && summary.destructive && (
@@ -237,7 +247,7 @@ export function DeleteSessionDialog({
                       </span>
                     )}
                     {removalChosen && summary.branchHasUniqueWork && (
-                      <span className="text-[12px] text-muted-foreground">
+                      <span className="pl-5 text-[12px] text-muted-foreground">
                         {t('git.delete.branchKeptNote')}
                       </span>
                     )}

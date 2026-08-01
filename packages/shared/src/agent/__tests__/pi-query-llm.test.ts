@@ -206,7 +206,9 @@ describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
     expect((agent as any).pendingLlmQueries.size).toBe(2);
 
     // Simulate subprocess death (the exit handler clears pending queries).
-    (agent as any).handleSubprocessExit(1, null);
+    const child = {} as any;
+    (agent as any).subprocess = child;
+    (agent as any).handleSubprocessExit(child, 1, null);
 
     const [r1, r2] = await Promise.allSettled([p1, p2]);
     expect(r1.status).toBe('rejected');

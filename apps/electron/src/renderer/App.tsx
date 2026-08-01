@@ -3,10 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, ThinkingLevel } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@kata-sh/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
-import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
+import {
+  defaultSessionOptions,
+  mergeSessionOptions,
+  preserveSessionOptionsOnDefaultChange,
+} from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
@@ -296,6 +300,12 @@ export default function App() {
   const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
   // Global default LLM connection slug (from app config)
   const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+  const [defaultThinkingLevel, setDefaultThinkingLevel] = useState<ThinkingLevel>(DEFAULT_THINKING_LEVEL)
+  const defaultThinkingLevelRef = useRef(defaultThinkingLevel)
+
+  useEffect(() => {
+    defaultThinkingLevelRef.current = defaultThinkingLevel
+  }, [defaultThinkingLevel])
 
   // Derive connection default model override from the default LLM connection
   const defaultConnection = useMemo(() => {
@@ -314,6 +324,17 @@ export default function App() {
   const sessionDraftsRef = useRef<Map<string, SessionDraft>>(new Map())
   // Unified session options for all session-scoped settings
   const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
+
+  const updateDefaultThinkingLevel = useCallback((level: ThinkingLevel) => {
+    const previousDefault = defaultThinkingLevelRef.current
+    const sessions = store.get(sessionIdsAtom)
+      .map(sessionId => store.get(sessionAtomFamily(sessionId)))
+      .filter((session): session is Session => session !== null)
+
+    defaultThinkingLevelRef.current = level
+    setDefaultThinkingLevel(level)
+    setSessionOptions(current => preserveSessionOptionsOnDefaultChange(current, sessions, previousDefault))
+  }, [store])
 
   // Theme state (app-level only)
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
@@ -373,7 +394,10 @@ export default function App() {
   const applyPermissionModeState = useCallback((sessionId: string, state: PermissionModeState, source: 'event' | 'reconcile') => {
     setSessionOptions(prev => {
       const next = new Map(prev)
-      const current = next.get(sessionId) ?? defaultSessionOptions
+      const current = next.get(sessionId) ?? {
+        ...defaultSessionOptions,
+        thinkingLevel: defaultThinkingLevelRef.current,
+      }
       const currentVersion = current.permissionModeVersion ?? -1
 
       if (state.modeVersion < currentVersion) {
@@ -433,11 +457,11 @@ export default function App() {
         ...defaultSessionOptions,
         ...current,
         permissionMode: session.permissionMode ?? defaultSessionOptions.permissionMode,
-        thinkingLevel: session.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+        thinkingLevel: session.thinkingLevel ?? defaultThinkingLevelRef.current,
       }
 
       const hasNonDefaultMode = merged.permissionMode !== defaultSessionOptions.permissionMode
-      const hasNonDefaultThinking = merged.thinkingLevel !== DEFAULT_THINKING_LEVEL
+      const hasNonDefaultThinking = merged.thinkingLevel !== defaultThinkingLevelRef.current
 
       if (!hasNonDefaultMode && !hasNonDefaultThinking && merged.permissionModeVersion == null) {
         next.delete(session.id)
@@ -475,6 +499,8 @@ export default function App() {
     setSessionLoadError(null)
 
     try {
+      const persistedDefaultThinking = await window.electronAPI.getDefaultThinkingLevel()
+      updateDefaultThinkingLevel(persistedDefaultThinking)
       const loadedSessions = await window.electronAPI.getSessions()
 
       // Initialize per-session atoms and metadata map
@@ -485,11 +511,11 @@ export default function App() {
       const optionsMap = new Map<string, SessionOptions>()
       for (const s of loadedSessions) {
         const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
-        const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== DEFAULT_THINKING_LEVEL
+        const hasNonDefaultThinking = s.thinkingLevel && s.thinkingLevel !== persistedDefaultThinking
         if (hasNonDefaultMode || hasNonDefaultThinking) {
           optionsMap.set(s.id, {
             permissionMode: s.permissionMode ?? 'ask',
-            thinkingLevel: s.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+            thinkingLevel: s.thinkingLevel ?? persistedDefaultThinking,
           })
         }
       }
@@ -521,7 +547,7 @@ export default function App() {
       setSessionLoadError(formatSessionLoadFailure(err))
       setSessionsLoaded(true)
     }
-  }, [initializeSessions, initialSessionId, reconcilePermissionModeState, windowWorkspaceId])
+  }, [initializeSessions, initialSessionId, reconcilePermissionModeState, updateDefaultThinkingLevel, windowWorkspaceId])
 
   const refreshSessionListMetadataFromServer = useCallback(async (options: SessionListRefreshOptions = {}): Promise<Map<string, SessionMeta> | null> => {
     const {
@@ -825,7 +851,10 @@ export default function App() {
               // Backward compatibility: apply mode optimistically then reconcile authoritative state.
               setSessionOptions(prevOpts => {
                 const next = new Map(prevOpts)
-                const current = next.get(effect.sessionId) ?? defaultSessionOptions
+                const current = next.get(effect.sessionId) ?? {
+                  ...defaultSessionOptions,
+                  thinkingLevel: defaultThinkingLevelRef.current,
+                }
                 next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
                 return next
               })
@@ -1425,7 +1454,10 @@ export default function App() {
   const handleSessionOptionsChange = useCallback((sessionId: string, updates: SessionOptionUpdates) => {
     setSessionOptions(prev => {
       const next = new Map(prev)
-      const current = next.get(sessionId) ?? defaultSessionOptions
+      const current = next.get(sessionId) ?? {
+        ...defaultSessionOptions,
+        thinkingLevel: defaultThinkingLevelRef.current,
+      }
       next.set(sessionId, mergeSessionOptions(current, updates))
       return next
     })
@@ -1439,7 +1471,7 @@ export default function App() {
       // Sync thinking level change with backend (session-level, persisted)
       window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
     }
-  }, [sessionOptions])
+  }, [])
 
   // Handle input draft changes per session with debounced persistence
   const draftSaveTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -1845,6 +1877,8 @@ export default function App() {
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
     sessionOptions,
+    defaultThinkingLevel,
+    onDefaultThinkingLevelChange: updateDefaultThinkingLevel,
     // Session callbacks
     onCreateSession: handleCreateSession,
     onSendMessage: handleSendMessage,
@@ -1891,6 +1925,8 @@ export default function App() {
     getDraftAttachmentRefs,
     hydrateDraftAttachments,
     sessionOptions,
+    defaultThinkingLevel,
+    updateDefaultThinkingLevel,
     handleCreateSession,
     handleSendMessage,
     handleRenameSession,

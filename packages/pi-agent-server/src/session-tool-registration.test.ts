@@ -9,16 +9,16 @@ import {
   createLsToolDefinition,
   type ToolDefinition,
   type CreateAgentSessionOptions,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import type { WebSearchProvider } from './tools/search/types.ts';
 
 /**
- * Regression contract for Pi SDK 0.70.0 tool registration.
+ * Regression contract for Pi SDK 0.83 tool registration.
  *
  * Pre-fix bug (PR #330): subprocess passed `tools: AgentTool[]` to
- * `createAgentSession`. Pi SDK 0.70.0 redefined `CreateAgentSessionOptions.tools`
+ * `createAgentSession`. Pi SDK 0.83 redefined `CreateAgentSessionOptions.tools`
  * as `string[]` (a name allowlist), so `new Set(tool_objects).has('name_string')`
  * returned false for every lookup in `_refreshToolRegistry` → every tool silently
  * filtered out → LLM saw only the default `[read, bash, edit, write]`.
@@ -86,7 +86,7 @@ describe('Pi subprocess tool shape contract', () => {
   });
 });
 
-describe('Pi SDK 0.70.0 CreateAgentSessionOptions contract', () => {
+describe('Pi SDK 0.83 CreateAgentSessionOptions contract', () => {
   it('`tools` field is typed as string[] (name allowlist, not objects)', () => {
     // Compile-time proof. If Pi SDK ever changes this back to accept tool
     // objects, the line below will become a type error and this test will

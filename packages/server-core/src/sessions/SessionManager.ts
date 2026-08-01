@@ -191,8 +191,6 @@ const METADATA_WRITE_GUARD_MS = 5000
  * make a session undeletable.
  */
 const AGENT_QUIESCE_TIMEOUT_MS = 5000
-/** Poll interval, and the floor delay that lets an in-flight write land. */
-const AGENT_QUIESCE_POLL_MS = 100
 
 /**
  * Text sent to the session when a plan is approved from outside the desktop
@@ -1131,6 +1129,14 @@ interface PendingDelta {
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  /** Sends that have started but have not yet entered agent.chat(). */
+  private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
+  /** Counts concurrent delete operations so a fence is cleared only after all settle. */
+  private sessionTeardownFences: Map<string, number> = new Map()
+  /** Keeps a blocked destructive deletion fenced until a later retry succeeds. */
+  private sessionTeardownFenceHolds: Set<string> = new Set()
+  /** Reused by retries while a timed-out backend teardown is still running. */
+  private agentTeardownPromises: Map<string, Promise<boolean>> = new Map()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -1190,6 +1196,144 @@ export class SessionManager implements ISessionManager {
     sessionId: string
     topicName: string
   }) => Promise<void>
+
+  private registerPreChatBarrier(sessionId: string): () => void {
+    let resolveBarrier!: () => void
+    let barriers = this.pendingPreChatBarriers.get(sessionId)
+    if (!barriers) {
+      barriers = new Set<Promise<void>>()
+      this.pendingPreChatBarriers.set(sessionId, barriers)
+    }
+    const barrier = new Promise<void>((resolve) => {
+      resolveBarrier = resolve
+    })
+    barriers.add(barrier)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      barriers!.delete(barrier)
+      resolveBarrier()
+      if (barriers!.size === 0 && this.pendingPreChatBarriers.get(sessionId) === barriers) {
+        this.pendingPreChatBarriers.delete(sessionId)
+      }
+    }
+  }
+
+  private async awaitPendingPreChat(sessionId: string, timeoutMs: number): Promise<boolean> {
+    const barriers = this.pendingPreChatBarriers.get(sessionId)
+    if (!barriers || barriers.size === 0) return true
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const settled = await Promise.race([
+      Promise.all([...barriers]).then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(false), timeoutMs)
+      }),
+    ])
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    return settled
+  }
+
+  private async withPreChatBarrier<T>(
+    sessionId: string,
+    operation: (release: () => void) => Promise<T>,
+  ): Promise<T> {
+    const release = this.registerPreChatBarrier(sessionId)
+    try {
+      return await operation(release)
+    } finally {
+      release()
+    }
+  }
+
+  private async withSessionTeardownFence<T>(
+    sessionId: string,
+    operation: (
+      retainFence: () => void,
+      preChatSettled: boolean,
+      teardownDeadline: number,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const hadRetainedFence = this.sessionTeardownFenceHolds.has(sessionId)
+    this.sessionTeardownFences.set(sessionId, (this.sessionTeardownFences.get(sessionId) ?? 0) + 1)
+    const teardownDeadline = Date.now() + AGENT_QUIESCE_TIMEOUT_MS
+    const preChatSettled = await this.awaitPendingPreChat(sessionId, AGENT_QUIESCE_TIMEOUT_MS)
+    let retainFence = false
+    let operationCompleted = false
+    try {
+      const result = await operation(
+        () => {
+          retainFence = true
+        },
+        preChatSettled,
+        teardownDeadline,
+      )
+      operationCompleted = true
+      return result
+    } finally {
+      if (retainFence) {
+        this.sessionTeardownFenceHolds.add(sessionId)
+      } else if (operationCompleted && hadRetainedFence) {
+        // A successful retry releases the hold left by the prior blocked delete.
+        this.sessionTeardownFenceHolds.delete(sessionId)
+      }
+
+      const count = this.sessionTeardownFences.get(sessionId) ?? 1
+      const releases = retainFence || !hadRetainedFence || !operationCompleted ? 1 : 2
+      const remaining = Math.max(0, count - releases)
+      if (remaining > 0) {
+        this.sessionTeardownFences.set(sessionId, remaining)
+      } else if (this.sessionTeardownFenceHolds.has(sessionId)) {
+        // Keep one fence reference for a blocked destructive deletion. This
+        // prevents queued/new sends from racing a late teardown completion.
+        this.sessionTeardownFences.set(sessionId, 1)
+      } else {
+        this.sessionTeardownFences.delete(sessionId)
+        const managed = this.sessions.get(sessionId)
+        if (managed && !managed.isProcessing && managed.messageQueue.length > 0) {
+          setImmediate(() => this.processNextQueuedMessage(sessionId))
+        }
+      }
+    }
+  }
+
+  /**
+   * Start an async chat generator before releasing the SessionManager pre-chat
+   * barrier. Calling `next()` runs BaseAgent.beginChatGeneration() immediately,
+   * even though the generator may not yield its first event until later.
+   */
+  private async *releasePreChatBarrierOnStart(
+    iterator: AsyncGenerator<AgentEvent>,
+    release: () => void,
+  ): AsyncGenerator<AgentEvent> {
+    const firstNext = iterator.next()
+    release()
+    let completed = false
+    try {
+      let result = await firstNext
+      while (!result.done) {
+        yield result.value
+        result = await iterator.next()
+      }
+      completed = true
+    } finally {
+      if (!completed) await iterator.return?.(undefined)
+    }
+  }
+
+  private async awaitActiveAgentTeardown(
+    sessionId: string,
+    managed: ManagedSession,
+  ): Promise<void> {
+    const teardown = this.agentTeardownPromises.get(sessionId)
+    if (!teardown) return
+    const quiesced = await teardown
+    if (!quiesced) throw new Error('Agent teardown was not confirmed for this session')
+    if (this.sessions.get(sessionId) !== managed || this.sessionTeardownFences.has(sessionId)) {
+      throw new Error('Session is being torn down')
+    }
+  }
 
   /**
    * Centralized setter for session processing state.
@@ -5538,67 +5682,68 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Wait for an aborted turn to actually finish before its checkout is inspected
-   * or removed.
-   *
-   * `forceAbort` only *requests* teardown, so a fixed sleep is a guess: work
-   * still in flight can land files afterwards, and a forced worktree removal
-   * would then discard work the destructive confirmation never counted.
-   *
-   * The backend's own `isProcessing()` cannot be the barrier here — `forceAbort`
-   * clears the exact state it reads (`ClaudeAgent` nulls `currentQuery`,
-   * `PiAgent` sets `_isProcessing = false`), so it reports idle the instant the
-   * abort is requested and would wave us through immediately. The meaningful
-   * signal is the session-level `isProcessing` flag, which is cleared by
-   * `onProcessingStopped` only after the abort has propagated out of the send
-   * loop and the turn has unwound. Both are checked, so neither can report idle
-   * on its own.
-   *
-   * Returns whether the turn confirmed it stopped. `false` means "unknown, and
-   * we stopped waiting" — callers must treat the checkout as still live rather
-   * than assume it is safe to remove.
-   *
-   * This is a turn-loop barrier, not a filesystem one: it does not prove the
-   * spawned subprocess has exited or that its last write landed. Closing that
-   * needs a real quiescence contract on the backend interface (see #21); the
-   * floor delay below only gives an already-issued write time to land.
+   * Await the backend-owned teardown contract before reading or removing a
+   * managed checkout. The rejection path is converted into a blocked result by
+   * the caller, and the rejection handler is attached before the timeout race
+   * so a late backend failure cannot become an unhandled rejection.
    */
-  private async waitForAgentQuiescence(
+  private async awaitAgentTeardown(
     sessionId: string,
     managed: ManagedSession,
     timeoutMs = AGENT_QUIESCE_TIMEOUT_MS,
+    preChatSettled?: boolean,
   ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    const settled = preChatSettled ?? await this.awaitPendingPreChat(sessionId, timeoutMs)
+    if (!settled) {
+      sessionLog.warn(
+        `Pre-chat processing for ${sessionId} did not settle within ${timeoutMs}ms; not treating its checkout as safe to remove`,
+      )
+      return false
+    }
+
+    const remainingMs = Math.max(0, deadline - Date.now())
     const agent = managed.agent
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-    // Floor delay, kept from the original fixed wait: it protects session-file
-    // writes during rapid deletes and lets an in-flight write land. It is now a
-    // minimum rather than the whole guarantee.
-    await sleep(AGENT_QUIESCE_POLL_MS)
+    if (remainingMs === 0 && agent) {
+      sessionLog.warn(
+        `No teardown budget remained for ${sessionId} after pre-chat processing; not treating its checkout as safe to remove`,
+      )
+      return false
+    }
     if (!agent) return true
 
-    const deadline = Date.now() + timeoutMs
-    for (;;) {
-      // Both are evaluated every iteration, never short-circuited: the session
-      // flag is the one `forceAbort` does not clear, and the backend flag can
-      // still report work the session layer has not observed yet.
-      const sessionBusy = managed.isProcessing === true
-      let backendBusy = false
-      try {
-        backendBusy = agent.isProcessing()
-      } catch {
-        // A backend that cannot report its state leaves the session flag as the
-        // whole signal.
-        backendBusy = false
-      }
-      if (!sessionBusy && !backendBusy) return true
-      if (Date.now() >= deadline) {
-        sessionLog.warn(
-          `Turn for ${sessionId} still processing ${timeoutMs}ms after abort; not treating its checkout as idle`,
+    let teardown = this.agentTeardownPromises.get(sessionId)
+    if (!teardown) {
+      const created = Promise.resolve()
+        .then(() => agent.quiesceForTeardown(AbortReason.UserStop, remainingMs))
+        .then(
+          () => true,
+          (error) => {
+            sessionLog.warn(
+              `Agent teardown for ${sessionId} was not confirmed: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return false
+          },
         )
-        return false
-      }
-      await sleep(AGENT_QUIESCE_POLL_MS)
+      this.agentTeardownPromises.set(sessionId, created)
+      void created.then(() => {
+        if (this.agentTeardownPromises.get(sessionId) === created) this.agentTeardownPromises.delete(sessionId)
+      })
+      teardown = created
     }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<boolean>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(false), remainingMs)
+    })
+    const quiesced = await Promise.race([teardown, timeout])
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    if (!quiesced) {
+      sessionLog.warn(
+        `Agent for ${sessionId} did not confirm teardown within ${timeoutMs}ms; not treating its checkout as safe to remove`,
+      )
+    }
+    return quiesced
   }
 
   /** Throw unless the session is empty (no messages, no SDK session, no agent). */
@@ -5878,18 +6023,24 @@ export class SessionManager implements ISessionManager {
       return { deleted: false }
     }
 
+    return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
     // Quiesce the agent BEFORE anything reads or removes the checkout. A live
     // turn writes into the worktree, so inspecting removal risk or removing the
     // checkout while it runs could discard files the destructive confirmation
-    // never counted (spec: AC19). Also prevents overlapping writes from
-    // corrupting session files during rapid deletes.
+    // never counted (spec: AC19). Managed-worktree removal calls this even when
+    // the session/backend flags report idle, because Pi owns a persistent child
+    // outside those inferred turn flags.
     let agentQuiesced = true
-    if (managed.isProcessing && managed.agent) {
-      managed.agent.forceAbort(AbortReason.UserStop)
-      agentQuiesced = await this.waitForAgentQuiescence(sessionId, managed)
+    if (managed.isProcessing || options?.removeManagedWorktree) {
+      agentQuiesced = await this.awaitAgentTeardown(
+        sessionId,
+        managed,
+        Math.max(0, teardownDeadline - Date.now()),
+        preChatSettled,
+      )
     }
 
     // Managed-worktree removal is an opt-in extra step (spec: AC18–AC19). Its
@@ -5914,14 +6065,14 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(
           `Refusing managed-worktree removal for ${sessionId}: agent did not confirm it stopped`,
         )
+        retainFence()
         return {
           deleted: false,
           worktreeRemoval: {
             removed: false,
             branchPruned: false,
             blocked: true,
-            blockedReason:
-              'The agent has not finished stopping, so its worktree cannot be removed safely yet. Try again in a moment.',
+            blockedReasonCode: 'agent_not_quiesced',
           },
         }
       }
@@ -6091,6 +6242,7 @@ export class SessionManager implements ISessionManager {
     return completedWorktreeRemoval
       ? { deleted: true, worktreeRemoval: completedWorktreeRemoval }
       : { deleted: true }
+    })
   }
 
   async sendMessage(
@@ -6121,6 +6273,15 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    if (this.sessionTeardownFences.has(sessionId)) {
+      throw new Error('Session is being torn down')
+    }
+    await this.awaitActiveAgentTeardown(sessionId, managed)
+    if (this.sessions.get(sessionId) !== managed || this.sessionTeardownFences.has(sessionId)) {
+      throw new Error('Session is being torn down')
+    }
+
+    return this.withPreChatBarrier(sessionId, async (releasePreChat) => {
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Source-activation auto-retry dedup (kata-agents-oss#804). When the server
@@ -6510,7 +6671,10 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
+      const chatIterator = this.releasePreChatBarrierOnStart(
+        agent.chat(effectiveMessage, modelInputAttachments.attachments),
+        releasePreChat,
+      )
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
@@ -6696,6 +6860,7 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
+    })
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
@@ -6950,8 +7115,13 @@ export class SessionManager implements ISessionManager {
 
     // 5. Check queue and process or complete
     if (managed.messageQueue.length > 0) {
-      // Has queued messages - process next
-      this.processNextQueuedMessage(sessionId)
+      // A delete fence owns the session until teardown/removal settles. Leave
+      // queued messages intact so a blocked delete can resume them afterward.
+      if (this.sessionTeardownFences.has(sessionId)) {
+        sessionLog.info(`Deferring queued replay while session teardown is in progress: ${sessionId}`)
+      } else {
+        this.processNextQueuedMessage(sessionId)
+      }
     } else {
       // Session is truly done — release browser ownership.
       // The window stays alive (hidden) and becomes reusable by future sessions.

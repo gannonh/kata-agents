@@ -1,5 +1,5 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@kata-sh/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@kata-sh/shared/config'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, hydratePiConnectionList, hydratePiConnectionModels, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@kata-sh/shared/config'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { setSetupDeferred } from '@kata-sh/shared/config/storage'
 import {
@@ -14,6 +14,7 @@ import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { randomUUID } from 'node:crypto'
 import { CLIENT_OPEN_EXTERNAL } from '@kata-sh/server-core/transport'
+import { toPiProviderModelInfo } from './pi-provider-models.ts'
 
 // Local OAuth state
 let copilotOAuthAbort: AbortController | null = null
@@ -376,20 +377,29 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   })
 
   server.handle(RPC_CHANNELS.pi.GET_PROVIDER_MODELS, async (_ctx, provider: string) => {
-    const { getModels } = await import('@mariozechner/pi-ai')
+    const { getModels } = await import('@earendil-works/pi-ai/compat')
+    const { getPiModelsForAuthProvider } = await import('@kata-sh/shared/config')
     try {
-      const models = getModels(provider as Parameters<typeof getModels>[0])
-      const sorted = [...models].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
+      const sorted = [...getModels(provider as Parameters<typeof getModels>[0])]
+        .sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
+      const convertedDefinitions = new Map(
+        getPiModelsForAuthProvider(provider).map(model => [model.id, model]),
+      )
       return {
-        models: sorted.map(m => ({
-          id: m.id.startsWith('pi/') ? m.id : `pi/${m.id}`,
-          name: m.name,
-          costInput: m.cost.input,
-          costOutput: m.cost.output,
-          contextWindow: m.contextWindow,
-          reasoning: m.reasoning,
-        })),
-        totalCount: models.length,
+        models: sorted.map(m => {
+          const id = m.id.startsWith('pi/') ? m.id : `pi/${m.id}`
+          const definition = convertedDefinitions.get(id)
+          return toPiProviderModelInfo({
+            id,
+            name: m.name,
+            costInput: m.cost.input,
+            costOutput: m.cost.output,
+            contextWindow: m.contextWindow,
+            reasoning: m.reasoning,
+            thinkingLevelMap: m.thinkingLevelMap,
+          }, definition)
+        }),
+        totalCount: sorted.length,
       }
     } catch {
       return { models: [], totalCount: 0 }
@@ -402,12 +412,12 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // List all LLM connections (includes built-in and custom)
   server.handle(RPC_CHANNELS.llmConnections.LIST, async (): Promise<LlmConnection[]> => {
-    return getLlmConnections()
+    return hydratePiConnectionList(getLlmConnections())
   })
 
   // List all LLM connections with authentication status
   server.handle(RPC_CHANNELS.llmConnections.LIST_WITH_STATUS, async (): Promise<LlmConnectionWithStatus[]> => {
-    const connections = getLlmConnections()
+    const connections = hydratePiConnectionList(getLlmConnections())
     const credentialManager = getCredentialManager()
     const defaultSlug = getDefaultLlmConnection()
 
@@ -424,7 +434,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // Get a specific LLM connection by slug
   server.handle(RPC_CHANNELS.llmConnections.GET, async (_ctx, slug: string): Promise<LlmConnection | null> => {
-    return getLlmConnection(slug)
+    const connection = getLlmConnection(slug)
+    return connection ? hydratePiConnectionModels(connection) : null
   })
 
   // Get stored API key for an LLM connection (masked — for edit form display only)
@@ -763,7 +774,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     error?: string
   }> => {
     try {
-      const { loginGitHubCopilot } = await import('@mariozechner/pi-ai/oauth')
+      const { githubCopilotProvider } = await import('@earendil-works/pi-ai/providers/github-copilot')
+      const oauth = githubCopilotProvider().auth.oauth
+      if (!oauth) throw new Error('Pi SDK did not configure GitHub Copilot OAuth')
       const credentialManager = getCredentialManager()
 
       // Cancel any previous in-flight flow
@@ -775,27 +788,50 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       // Use Pi SDK's login flow — this handles the device code flow AND
       // the critical Copilot token exchange that determines the correct
       // API endpoint for the user's subscription tier (individual/business/enterprise).
-      const credentials = await loginGitHubCopilot({
-        onAuth: (url, instructions) => {
-          // Extract user code from instructions (format: "Enter code: XXXX-YYYY")
-          const codeMatch = instructions?.match(/:\s*(\S+)/)
-          const userCode = codeMatch?.[1] ?? ''
-          deps.platform.logger?.info(`[GitHub OAuth] Device code: ${userCode}`)
-          pushTyped(server, RPC_CHANNELS.copilot.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
-            userCode,
-            verificationUri: url,
-          })
-          // Open GitHub device code page on the client's machine
-          server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, url).catch(err => {
-            deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
-          })
-        },
-        onPrompt: async () => {
-          // Pi SDK asks for GitHub Enterprise domain — return empty for github.com
+      const credentials = await oauth.login({
+        prompt: async (authPrompt) => {
+          // Copilot's current prompt is a text AuthPrompt for the Enterprise
+          // domain. Blank selects github.com; an explicit env value supports
+          // headless/managed Enterprise logins without guessing from events.
+          const enterpriseDomain = process.env.KATA_GITHUB_COPILOT_ENTERPRISE_DOMAIN?.trim() ?? ''
+          if (authPrompt.type === 'text') {
+            return enterpriseDomain
+          }
+          if (authPrompt.type === 'select') {
+            if (enterpriseDomain) {
+              const configured = authPrompt.options.find(option =>
+                option.id === enterpriseDomain || option.label === enterpriseDomain,
+              )
+              if (configured) return configured.id
+            }
+            return authPrompt.options.find(option =>
+              option.id === 'github.com' || option.label.toLowerCase() === 'github.com',
+            )?.id ?? ''
+          }
           return ''
         },
-        onProgress: (message) => {
-          deps.platform.logger?.info(`[GitHub OAuth] ${message}`)
+        notify: event => {
+          if (event.type === 'device_code') {
+            deps.platform.logger?.info(`[GitHub OAuth] Device code: ${event.userCode}`)
+            pushTyped(server, RPC_CHANNELS.copilot.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
+              userCode: event.userCode,
+              verificationUri: event.verificationUri,
+            })
+            server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, event.verificationUri).catch(err => {
+              deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
+            })
+            return
+          }
+          if (event.type === 'auth_url') {
+            deps.platform.logger?.info(`[GitHub OAuth] ${event.instructions ?? 'Opening authorization URL'}`)
+            server.invokeClient(ctx.clientId, CLIENT_OPEN_EXTERNAL, event.url).catch(err => {
+              deps.platform.logger?.warn(`Failed to open browser for GitHub OAuth: ${err}`)
+            })
+            return
+          }
+          if (event.type === 'progress' || event.type === 'info') {
+            deps.platform.logger?.info(`[GitHub OAuth] ${event.message}`)
+          }
         },
         signal: copilotOAuthAbort.signal,
       })

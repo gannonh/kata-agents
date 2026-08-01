@@ -10,12 +10,73 @@ import {
   fromBedrockNativeId,
   normalizeBedrockModelId,
   deriveBedrockRegionPrefix,
+  hydratePiConnectionModels,
 } from '../llm-connections'
 import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isClaudeModel } from '../models'
 
 // ============================================================
 // getDefaultModelsForConnection
 // ============================================================
+
+describe('hydratePiConnectionModels', () => {
+  it('hydrates string entries with provider-scoped OpenAI and Codex capabilities', () => {
+    const base = {
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      createdAt: Date.now(),
+      models: ['pi/gpt-5.6-sol', 'custom-model', 'pi/gpt-5.6-sol'],
+    }
+
+    const openai = hydratePiConnectionModels({ ...base, piAuthProvider: 'openai' })
+    const codex = hydratePiConnectionModels({ ...base, piAuthProvider: 'openai-codex' })
+
+    expect(openai.models?.map(model => typeof model === 'string' ? model : (model as any).id)).toEqual([
+      'pi/gpt-5.6-sol', 'custom-model', 'pi/gpt-5.6-sol',
+    ])
+    expect(typeof openai.models?.[0]).toBe('object')
+    expect((openai.models?.[0] as any).supportedThinkingLevels).toEqual([
+      'off', 'low', 'medium', 'high', 'xhigh', 'max',
+    ])
+    expect((codex.models?.[0] as any).supportedThinkingLevels).toEqual([
+      'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+    ])
+    expect(openai.models?.[1]).toBe('custom-model')
+  })
+
+  it('does not guess capabilities when provider identity is missing', () => {
+    const connection = {
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      createdAt: Date.now(),
+      models: ['pi/gpt-5.6-sol'],
+    }
+
+    expect(hydratePiConnectionModels(connection)).toBe(connection)
+  })
+
+  it('fills missing capabilities without replacing explicit model overrides', () => {
+    const connection = hydratePiConnectionModels({
+      slug: 'pi-test',
+      name: 'Pi test',
+      providerType: 'pi' as const,
+      authType: 'api_key' as const,
+      piAuthProvider: 'openai-codex',
+      createdAt: Date.now(),
+      models: [{ id: 'pi/gpt-5.6-sol', name: 'Custom name', supportsImages: false }] as any,
+    })
+
+    expect(connection.models?.[0]).toMatchObject({
+      id: 'pi/gpt-5.6-sol',
+      name: 'Custom name',
+      supportsImages: false,
+      supportedThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    })
+  })
+})
 
 describe('getDefaultModelsForConnection', () => {
   it('anthropic returns ANTHROPIC_MODELS (ModelDefinition[])', () => {
@@ -67,11 +128,14 @@ describe('getDefaultModelForConnection', () => {
     expect(modelIds).toContain(defaultModel)
   })
 
-  it('Pi openai default is in its own model list', () => {
-    const defaultModel = getDefaultModelForConnection('pi', 'openai')
-    const models = getDefaultModelsForConnection('pi', 'openai')
-    const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
-    expect(modelIds).toContain(defaultModel)
+  it('Pi OpenAI defaults use GPT-5.6 Sol and remain selectable', () => {
+    for (const provider of ['openai', 'openai-codex']) {
+      const defaultModel = getDefaultModelForConnection('pi', provider)
+      const models = getDefaultModelsForConnection('pi', provider)
+      const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
+      expect(defaultModel).toBe('pi/gpt-5.6-sol')
+      expect(modelIds).toContain(defaultModel)
+    }
   })
 
   it('Pi deepseek default is in its own model list', () => {

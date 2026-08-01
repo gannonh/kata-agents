@@ -10,11 +10,17 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Pi SDK 0.83** — Updated the embedded Pi runtime to the Pi CLI-aligned 0.83 package family, including native GPT-5.6 model catalogs and provider-reported reasoning levels.
+- **GPT-5.6 OpenAI models** — Added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, including runtime resolution and updated defaults.
+- **Provider-aware reasoning levels** — Restored model-specific reasoning controls for OpenAI API, ChatGPT/Codex, Copilot, and Pi-managed models. The selectors now change with the selected model, expose supported levels such as `minimal` and native Pi `max`, omit unsupported levels, and use persisted app defaults for new sessions.
 - **Default theme brand color** — The distributed Default theme now uses the Kata brand highlight color instead of the previous purple accent across bundled theme files and renderer defaults.
 - **CLI rename** — The terminal client package is now `@kata-sh/agents-cli` with binary `kata-agents-cli`. Bundled docs and reference guides were updated to match.
 
 ## Bug Fixes
 
+- **Online sharing affordance** — Hid the unfinished Share Online controls by default behind `KATA_FEATURE_SHARE_ONLINE=0`; developers can opt in with `KATA_FEATURE_SHARE_ONLINE=1`.
+- **ChatGPT/Codex authentication** — Fixed OpenAI model sessions failing with `No API key found for openai-codex` after OAuth authentication by preserving Pi's native OAuth credential format across startup and token refresh, and registering the bundled Pi OAuth loaders.
+- **Managed worktree deletion confirmation** — Preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon and supporting text stay aligned with the wrapped label.
 - **Documentation help links** — The app Help dropdown now opens the hosted Mintlify docs site at `https://agents.kata.sh/docs`, and the linked Sources, Skills, Statuses, Permissions, Automations, Messaging, and All Documentation pages exist in the docs site.
 
 ## Breaking Changes

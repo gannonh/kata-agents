@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'bun:test';
-import { piDriver } from './pi.ts';
+import { piDriver, toModelDefinitions } from './pi.ts';
+
+describe('Copilot reasoning capabilities', () => {
+  it('preserves models and maps known reported efforts', () => {
+    const [model] = toModelDefinitions([{
+      id: 'gpt-5-copilot',
+      name: 'GPT-5 Copilot',
+      supportedReasoningEfforts: ['minimal', 'high', 'future-effort'],
+    }]);
+
+    expect(model).toMatchObject({
+      id: 'gpt-5-copilot',
+      supportsThinking: true,
+      supportedThinkingLevels: ['minimal', 'high'],
+    });
+  });
+
+  it('ignores malformed reported effort values without dropping the model', () => {
+    const [model] = toModelDefinitions([{
+      id: 'malformed',
+      name: 'Malformed',
+      supportedReasoningEfforts: [1 as any, null as any, 'high'],
+    }]);
+
+    expect(model).toMatchObject({
+      id: 'malformed',
+      supportsThinking: true,
+      supportedThinkingLevels: ['high'],
+    });
+  });
+
+  it('distinguishes missing and explicitly empty effort metadata', () => {
+    const models = toModelDefinitions([
+      { id: 'unknown', name: 'Unknown' },
+      { id: 'disabled', name: 'Disabled', supportedReasoningEfforts: [] },
+      { id: 'future-only', name: 'Future', supportedReasoningEfforts: ['future-effort'] },
+    ]);
+
+    expect(models[0]?.supportedThinkingLevels).toBeUndefined();
+    expect(models[0]?.supportsThinking).toBeUndefined();
+    expect(models[1]).toMatchObject({ supportsThinking: false, supportedThinkingLevels: [] });
+    expect(models[2]).toMatchObject({ supportsThinking: false, supportedThinkingLevels: [] });
+  });
+});
 
 describe('piDriver.buildRuntime custom endpoint models', () => {
   it('preserves explicit per-model supportsImages values', () => {

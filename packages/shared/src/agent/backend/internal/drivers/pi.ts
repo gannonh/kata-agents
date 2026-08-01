@@ -1,10 +1,15 @@
 import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.ts';
 import type { ModelDefinition } from '../../../../config/models.ts';
-import { getAllPiModels, getPiModelsForAuthProvider, isDeprecatedClaudeOpus46Model } from '../../../../config/models-pi.ts';
+import {
+  getAllPiModels,
+  getPiModelsForAuthProvider,
+  isDeprecatedClaudeOpus46Model,
+  mapReportedReasoningEfforts,
+} from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 
 // ── Copilot model types ────────────────────────────────────────────────
-type RawCopilotModel = {
+export type RawCopilotModel = {
   id: string;
   name: string;
   supportedReasoningEfforts?: string[];
@@ -43,10 +48,17 @@ async function listModelsViaHttp(
   githubToken: string,
   timeoutMs: number,
 ): Promise<RawCopilotModel[]> {
-  const { refreshGitHubCopilotToken } = await import('@mariozechner/pi-ai/oauth');
+  const { githubCopilotProvider } = await import('@earendil-works/pi-ai/providers/github-copilot');
+  const oauth = githubCopilotProvider().auth.oauth;
+  if (!oauth) throw new Error('Pi SDK did not configure GitHub Copilot OAuth');
 
   // Step 1: Exchange GitHub OAuth token → Copilot API token
-  const creds = await refreshGitHubCopilotToken(githubToken);
+  const creds = await oauth.refresh({
+    type: 'oauth',
+    access: '',
+    refresh: githubToken,
+    expires: 0,
+  });
   const copilotToken = creds.access;
 
   // Step 2: Extract base URL from token
@@ -82,13 +94,18 @@ async function listModelsViaHttp(
 
     console.warn(`[listModelsViaHttp] GET /models returned ${models.length} models`);
 
-    return models.map(m => ({
-      id: m.id as string,
-      name: (m.name || m.id) as string,
-      supportedReasoningEfforts: (m.supportedReasoningEfforts || m.supported_reasoning_efforts) as string[] | undefined,
-      policy: m.policy as { state: string } | undefined,
-      contextWindow: ((m.capabilities as Record<string, unknown>)?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
-    }));
+    return models.map(m => {
+      const reportedEfforts = m.supportedReasoningEfforts || m.supported_reasoning_efforts;
+      return {
+        id: m.id as string,
+        name: (m.name || m.id) as string,
+        supportedReasoningEfforts: Array.isArray(reportedEfforts)
+          ? reportedEfforts.filter((effort): effort is string => typeof effort === 'string')
+          : undefined,
+        policy: m.policy as { state: string } | undefined,
+        contextWindow: ((m.capabilities as Record<string, unknown>)?.limits as Record<string, unknown>)?.max_context_window_tokens as number | undefined,
+      };
+    });
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new Error('Copilot models API timed out');
@@ -112,16 +129,22 @@ function filterEnabledModels(models: RawCopilotModel[]): RawCopilotModel[] {
 }
 
 /** Convert raw Copilot models to our ModelDefinition format. */
-function toModelDefinitions(models: RawCopilotModel[]): ModelDefinition[] {
-  return models.map(m => ({
-    id: m.id,
-    name: m.name,
-    shortName: m.name,
-    description: '',
-    provider: 'pi' as const,
-    contextWindow: m.contextWindow || 200_000,
-    supportsThinking: !!(m.supportedReasoningEfforts && m.supportedReasoningEfforts.length > 0),
-  }));
+export function toModelDefinitions(models: RawCopilotModel[]): ModelDefinition[] {
+  return models.map(m => {
+    const supportedThinkingLevels = mapReportedReasoningEfforts(m.supportedReasoningEfforts);
+    return {
+      id: m.id,
+      name: m.name,
+      shortName: m.name,
+      description: '',
+      provider: 'pi' as const,
+      contextWindow: m.contextWindow || 200_000,
+      supportsThinking: supportedThinkingLevels === undefined
+        ? undefined
+        : supportedThinkingLevels.length > 0,
+      ...(supportedThinkingLevels !== undefined ? { supportedThinkingLevels } : {}),
+    };
+  });
 }
 
 /** Log a breakdown of models by policy state. */
@@ -287,7 +310,7 @@ export const piDriver: ProviderDriver = {
     let modelApi: string | undefined;
     let modelBaseUrl: string | undefined;
     try {
-      const { getModels } = await import('@mariozechner/pi-ai');
+      const { getModels } = await import('@earendil-works/pi-ai/compat');
       const models = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
       const requestedId = args.model.startsWith('pi/') ? args.model.slice(3) : args.model;
       const match = models.find(m => m.id === requestedId) || models[0];

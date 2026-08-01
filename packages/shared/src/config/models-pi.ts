@@ -1,7 +1,7 @@
 /**
  * Pi Model & Provider Discovery (from SDK)
  *
- * Separated from models.ts because @mariozechner/pi-ai transitively pulls in
+ * Separated from models.ts because @earendil-works/pi-ai transitively pulls in
  * @aws-sdk/client-bedrock-runtime → @smithy/node-http-handler → Node.js `stream`,
  * which breaks the Vite renderer build (browser context, no Node.js modules).
  *
@@ -13,9 +13,46 @@
  * NEVER import this file from renderer components or from files that the renderer imports.
  */
 
-import { getProviders, getModels } from '@mariozechner/pi-ai';
-import type { KnownProvider, Model, Api } from '@mariozechner/pi-ai';
+import { getProviders, getModels } from '@earendil-works/pi-ai/compat';
+import type { Model, Api } from '@earendil-works/pi-ai';
 import type { ModelDefinition } from './models.ts';
+import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+
+const PI_THINKING_LEVEL_IDS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/**
+ * Derive renderer-safe levels using Pi's `getSupportedThinkingLevels` rules.
+ * `null` disables a level, omitted lower levels use provider defaults, and
+ * xhigh and max require explicit non-null mappings.
+ */
+export function deriveSupportedThinkingLevelsFromPiModel(
+  reasoning: boolean,
+  thinkingLevelMap?: Record<string, string | null | undefined>,
+): ThinkingLevel[] {
+  if (!reasoning) return ['off'];
+  return PI_THINKING_LEVEL_IDS.filter((level) => {
+    const mapped = thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
+    return true;
+  });
+}
+
+/**
+ * Map provider-reported reasoning effort labels to the shared vocabulary.
+ * Unknown labels are ignored so provider additions do not drop the model.
+ */
+export function mapReportedReasoningEfforts(
+  efforts?: readonly string[],
+): ThinkingLevel[] | undefined {
+  if (efforts === undefined || !Array.isArray(efforts)) return undefined;
+  const reported = new Set(
+    efforts
+      .filter((effort): effort is string => typeof effort === 'string')
+      .map((effort) => effort.toLowerCase()),
+  );
+  return PI_THINKING_LEVEL_IDS.filter((level) => reported.has(level));
+}
 
 // ============================================
 // PI MODEL DISCOVERY
@@ -24,7 +61,7 @@ import type { ModelDefinition } from './models.ts';
 /**
  * Convert a Pi SDK Model to our ModelDefinition format.
  */
-function piModelToDefinition(m: Model<Api>): ModelDefinition {
+export function piModelToDefinition(m: Model<Api>): ModelDefinition {
   const lastPart = m.name.split(/[\s-]/).pop() ?? m.name;
   const shortName = m.name.length > 20 ? lastPart : m.name;
 
@@ -36,6 +73,7 @@ function piModelToDefinition(m: Model<Api>): ModelDefinition {
     provider: 'pi',
     contextWindow: m.contextWindow,
     supportsThinking: m.reasoning,
+    supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
   };
 }
 
@@ -98,25 +136,24 @@ function isBareBedrockClaudeModel(modelId: string): boolean {
  * Get Pi models for a specific auth provider directly from the Pi SDK.
  */
 export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
+  let sdkModels: Model<Api>[] = [];
   try {
-    const models = getModels(piAuthProvider as KnownProvider);
-    if (models.length > 0) {
-      return models
-        .filter(m => !isExcludedPiModel(m.id))
-        // Bedrock: exclude bare Claude models without region prefix — they're
-        // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
-        // Regional variants from the same catalog are kept.
-        .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
-        .map(piModelToDefinition);
-    }
+    sdkModels = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
   } catch {
-    // Provider not recognized by SDK — fall through
+    // Provider not recognized by SDK.
   }
-  return [];
+
+  return sdkModels
+    .filter(m => !isExcludedPiModel(m.id))
+    // Bedrock: exclude bare Claude models without region prefix — they're
+    // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
+    // Regional variants from the same catalog are kept.
+    .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
+    .map(piModelToDefinition);
 }
 
 /**
- * Get all Pi models across all providers from the SDK.
+ * Get all Pi models across all providers from the Pi SDK catalog.
  */
 export function getAllPiModels(): ModelDefinition[] {
   const allModels: ModelDefinition[] = [];
@@ -131,6 +168,7 @@ export function getAllPiModels(): ModelDefinition[] {
       // Skip providers that fail
     }
   }
+
   return allModels;
 }
 

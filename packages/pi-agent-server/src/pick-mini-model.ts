@@ -1,4 +1,4 @@
-import type { ModelRegistry as PiModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { ModelRegistry as PiModelRegistry } from '@earendil-works/pi-coding-agent';
 import { resolvePiModel, isDeniedMiniModelId } from './model-resolution.ts';
 import { PI_PREFERRED_DEFAULTS } from '../../shared/src/config/llm-connections.ts';
 
@@ -9,7 +9,7 @@ import { PI_PREFERRED_DEFAULTS } from '../../shared/src/config/llm-connections.t
  * under `anthropic` auth. For `openai` / `openai-codex` / `google` /
  * `github-copilot` / `amazon-bedrock` we need a model from that provider's
  * preferred list — otherwise the ephemeral session ends up with no explicit
- * model and Pi SDK's internal default (post-0.70.0 an openai model) is used,
+ * model and Pi SDK's internal default (current an openai model) is used,
  * surfacing as a misleading "No API key found for openai" error when the user
  * is authenticated under a different provider.
  *

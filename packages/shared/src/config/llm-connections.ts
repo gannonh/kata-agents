@@ -8,7 +8,7 @@
 
 // Import model types and lists from centralized registry
 // NOTE: Pi SDK functions (getPiModelsForAuthProvider, getAllPiModels) are NOT imported
-// here because @mariozechner/pi-ai transitively pulls in @aws-sdk which uses Node.js
+// here because @earendil-works/pi-ai transitively pulls in @aws-sdk which uses Node.js
 // `stream` module — breaking the Vite renderer build. Instead, Pi model resolution is
 // injected at app startup via registerPiModelResolver().
 import {
@@ -28,7 +28,7 @@ let _piModelResolver: PiModelResolver = () => [];
 /**
  * Register the Pi model resolver function.
  * Must be called from main process at app startup (before any Pi connections are used).
- * This avoids pulling @mariozechner/pi-ai into the renderer bundle.
+ * This avoids pulling @earendil-works/pi-ai into the renderer bundle.
  */
 export function registerPiModelResolver(resolver: PiModelResolver): void {
   _piModelResolver = resolver;
@@ -43,7 +43,7 @@ export function registerPiModelResolver(resolver: PiModelResolver): void {
  * This is separate from auth mechanism - a provider may support multiple auth types.
  *
  * - 'anthropic': Direct Anthropic API (api.anthropic.com) — uses Claude Agent SDK
- * - 'pi': Pi unified LLM API (20+ providers via @mariozechner/pi-ai)
+ * - 'pi': Pi unified LLM API (20+ providers via @earendil-works/pi-ai)
  * - 'pi_compat': Pi with custom endpoint (Ollama, self-hosted models, Anthropic-compat endpoints)
  *
  * Legacy values (bedrock, vertex, anthropic_compat) are migrated on startup
@@ -532,6 +532,73 @@ export function setModelSupportsImages(
 }
 
 /**
+ * Hydrate Pi model entries with provider-scoped catalog capabilities.
+ *
+ * Older persisted connections may contain bare string IDs. Matching is done
+ * against the resolver selected by `piAuthProvider`, while preserving the
+ * stored ID, ordering, duplicates, unknown strings, and explicit overrides.
+ */
+export function hydratePiConnectionModels<T extends LlmConnection>(connection: T): T {
+  if (connection.providerType !== 'pi' || !connection.models?.length || !connection.piAuthProvider) {
+    return connection;
+  }
+
+  const catalog = getModelsForProviderType('pi', connection.piAuthProvider);
+  if (catalog.length === 0) return connection;
+
+  const byId = new Map(catalog.map(model => [model.id, model]));
+  const findCatalogModel = (id: string): ModelDefinition | undefined => {
+    const exact = byId.get(id);
+    if (exact) return exact;
+    const normalized = id.startsWith('pi/') ? id : `pi/${id}`;
+    return byId.get(normalized);
+  };
+
+  let changed = false;
+  const models = connection.models.map((entry) => {
+    const entryId = typeof entry === 'string' ? entry : entry.id;
+    const catalogModel = findCatalogModel(entryId);
+    if (!catalogModel) return entry;
+
+    if (typeof entry === 'string') {
+      changed = true;
+      return entry === catalogModel.id ? catalogModel : { ...catalogModel, id: entry };
+    }
+
+    const hydrated = {
+      ...catalogModel,
+      ...entry,
+    };
+    if (
+      entry.supportedThinkingLevels === undefined
+      && catalogModel.supportedThinkingLevels !== undefined
+    ) {
+      hydrated.supportedThinkingLevels = catalogModel.supportedThinkingLevels;
+    }
+    if (entry.supportsThinking === undefined && catalogModel.supportsThinking !== undefined) {
+      hydrated.supportsThinking = catalogModel.supportsThinking;
+    }
+    if (
+      hydrated.name !== entry.name
+      || hydrated.description !== entry.description
+      || hydrated.supportedThinkingLevels !== entry.supportedThinkingLevels
+      || hydrated.supportsThinking !== entry.supportsThinking
+    ) {
+      changed = true;
+      return hydrated;
+    }
+    return entry;
+  });
+
+  return changed ? { ...connection, models } : connection;
+}
+
+/** Hydrate every Pi connection in a renderer-facing connection collection. */
+export function hydratePiConnectionList<T extends LlmConnection>(connections: T[]): T[] {
+  return connections.map(hydratePiConnectionModels);
+}
+
+/**
  * Resolve whether a given model on a connection accepts image input.
  *
  * For `pi_compat` (custom-endpoint) connections this mirrors the precedence used
@@ -605,8 +672,8 @@ export function getModelsForProviderType(providerType: LlmProviderType, piAuthPr
  */
 export const PI_PREFERRED_DEFAULTS: Record<string, string[]> = {
   anthropic: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-fable-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  openai: ['gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
-  'openai-codex': ['gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
+  openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
+  'openai-codex': ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'o4-mini', 'o3', 'gpt-4o'],
   // Stable models first so the connection-setup test (which uses
   // getDefaultModelForConnection) lands on a reliable model.
   // gemini-3-pro-preview and gemini-3.1-pro-preview are intermittently

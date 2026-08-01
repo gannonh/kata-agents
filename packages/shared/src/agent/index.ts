@@ -76,10 +76,15 @@ export { PERMISSION_MODE_MESSAGES, PERMISSION_MODE_PROMPTS } from './plan-types.
 export {
   type ThinkingLevel,
   type ThinkingLevelDefinition,
+  type ThinkingCapabilityModel,
+  THINKING_LEVEL_IDS,
   THINKING_LEVELS,
   DEFAULT_THINKING_LEVEL,
   getThinkingTokens,
   getThinkingLevelNameKey,
+  getThinkingLevelDefinitionsForModel,
+  normalizeThinkingLevelForModel,
+  THINKING_TO_EFFORT,
   isValidThinkingLevel,
 } from './thinking-levels.ts';
 

@@ -1,5 +1,33 @@
 # Documentation Bundle Update Log
 
+## 2026-08-01
+
+* **Online sharing feature gate**: hid the unfinished Share Online affordances by default behind `KATA_FEATURE_SHARE_ONLINE`, with renderer injection and a local `.env` value of `0`.
+
+* **ChatGPT/Codex OAuth bundle fix**: registered Pi's statically bundled OAuth loaders in the embedded server so bundled OpenAI Codex sessions do not attempt missing sibling-module imports. The generated bundle verifier and a fake-token subprocess smoke test cover the path.
+
+* **ChatGPT/Codex OAuth fix**: corrected Pi subprocess credential injection so `openai-codex` receives Pi 0.83's native OAuth credential shape during startup and token refresh, while regular OpenAI API-key connections retain API-key auth. Added regression coverage for credential shaping and the Pi runtime auth contract.
+
+* **Pi SDK 0.83 migration implemented**: migrated the embedded Pi runtime to the Pi CLI-aligned `@earendil-works` 0.83 package family, adopted native GPT-5.6 model catalogs and reasoning metadata, mapped native `max`, and verified the generated bundle. See the [migration spec](specs/2026-08-01-pi-sdk-0.83-migration-design.md) and [build report](specs/2026-08-01-pi-sdk-0.83-migration-build-report.md).
+
+* **Pi SDK 0.83 migration approved**: added the [Pi SDK migration spec](specs/2026-08-01-pi-sdk-0.83-migration-design.md) for the current Pi CLI-aligned `@earendil-works` package family, native model catalogs, and native reasoning levels.
+
+* **Provider-aware reasoning levels implemented**: model-specific OpenAI, ChatGPT/Codex, Copilot, and Pi-managed reasoning controls now expose supported levels, restore persisted app defaults for new sessions, preserve existing session values, use native Pi `max` when reported, and resolve prefixed model IDs. See the [build report](specs/2026-08-01-provider-aware-reasoning-levels-build-report.md).
+
+* **Provider-aware reasoning levels planned**: added the draft [provider-aware reasoning levels spec](specs/2026-08-01-provider-aware-reasoning-levels-design.md) for model-specific OpenAI, ChatGPT/Codex, and Pi-managed reasoning controls, including the `minimal` level and renderer capability metadata.
+
+* **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so the session delete action can offer its worktree-aware confirmation without waiting for a restart or full session reload. The worktree icon and supporting text remain aligned when the label wraps.
+
+* **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex catalogs, including Pi runtime registration and updated defaults. Added the preview Git workspace flag to `.env.example`.
+
+## 2026-07-31
+
+* **Agent quiescence implemented**: issue #21's awaitable teardown contract shipped on the existing feature branch and draft PR, with the shared barrier, provider teardown, SessionManager boundary, deterministic lifecycle regression coverage, and full affected verification matrix.
+
+## 2026-07-30
+
+* **Agent quiescence plan drafted**: added the approval-gated [awaitable agent teardown quiescence spec](specs/2026-07-30-agent-quiescence-contract-design.md), linked it from the specs roadmap and documentation index, and mapped issue #21 to a required backend teardown contract, provider process-exit guarantees, SessionManager integration, deterministic safety tests, and a lesser-model Build handoff.
+
 ## 2026-07-29
 
 * **Git/GitHub V1 final review hardening**: documented complete ignored-file destructive inventory, final-snapshot ordering, and cleanup-exception containment in the [managed-worktree ADR](adrs/2026-07-29-server-owned-managed-worktrees.md), with regression coverage for all three findings from the final-head review.

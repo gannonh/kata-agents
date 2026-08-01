@@ -28,6 +28,7 @@ import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loaded
 import { getSessionTitle } from '@/utils/session'
 import { ChangesAffordance } from '@/components/right-sidebar/git-changes/ChangesAffordance'
 import { GitActionControl } from '@/components/right-sidebar/git-changes/GitActionControl'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
 
@@ -411,6 +412,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
   const isArchived = session?.isArchived || sessionMeta?.isArchived || false
   const sharedUrl = session?.sharedUrl || sessionMeta?.sharedUrl || null
+  const shareOnlineEnabled = FEATURE_FLAGS.shareOnline
   const currentSessionStatus = session?.sessionStatus || sessionMeta?.sessionStatus || 'todo'
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
   const hasUnreadMessages = sessionMeta
@@ -523,7 +525,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }, [sessionId])
 
   // Share button with dropdown menu rendered in PanelHeader actions slot
-  const shareButton = React.useMemo(() => (
+  const shareButton = React.useMemo(() => shareOnlineEnabled ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <PanelHeaderCenterButton
@@ -582,7 +584,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         )}
       </StyledDropdownMenuContent>
     </DropdownMenu>
-  ), [sharedUrl, handleShare, handleOpenInBrowser, handleCopyLink, handleUpdateShare, handleRevokeShare])
+  ) : null, [shareOnlineEnabled, sharedUrl, handleShare, handleOpenInBrowser, handleCopyLink, handleUpdateShare, handleRevokeShare])
 
   const compactInfoButton = React.useMemo(() => {
     if (!isCompactMode || !sessionMeta) return undefined

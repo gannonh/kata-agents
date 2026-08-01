@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Command as CommandPrimitive } from 'cmdk'
 import { AlertTriangle, Check, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
 
@@ -12,7 +12,7 @@ import type {
   RepositoryContext,
 } from '@kata-sh/shared/protocol'
 
-import { sessionAtomFamily } from '@/atoms/sessions'
+import { sessionAtomFamily, updateSessionAtom } from '@/atoms/sessions'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
@@ -111,6 +111,7 @@ function WorkspaceCheckoutBadgeInner(
   // preparation and on resume/restart — this is what keeps a resumed session
   // locked to its worktree/shared identity instead of resetting to Current.
   const session = useAtomValue(sessionAtomFamily(sessionId ?? '__no_session__'))
+  const updateSession = useSetAtom(updateSessionAtom)
   const persistedCheckout = session?.checkout ?? null
   const sharedOwnerCount = session?.sharedOwnerCount
 
@@ -193,6 +194,21 @@ function WorkspaceCheckoutBadgeInner(
       const result = await window.electronAPI.prepareGitCheckout(sessionId, gate.intent)
       setPrepared(result)
       setOpen(false)
+      // Keep the authoritative session atom in sync immediately. The server
+      // persists the checkout during preparation, but the normal working
+      // directory event only carries the path. Delete-session routing needs
+      // the checkout metadata before the next user action.
+      if (sessionId) {
+        updateSession(sessionId, (current) =>
+          current
+            ? {
+                ...current,
+                checkout: result.checkout,
+                workingDirectory: result.workingDirectory,
+              }
+            : current,
+        )
+      }
       onWorkingDirectoryChange(result.workingDirectory)
       onCheckoutPrepared?.(result)
       return { status: 'ready' }
@@ -212,6 +228,7 @@ function WorkspaceCheckoutBadgeInner(
     persistedCheckout,
     context,
     sessionId,
+    updateSession,
     onWorkingDirectoryChange,
     onCheckoutPrepared,
     t,

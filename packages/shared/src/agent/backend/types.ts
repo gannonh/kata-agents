@@ -370,6 +370,17 @@ export interface AgentBackend {
   forceAbort(reason: AbortReason): void;
 
   /**
+   * Request teardown and resolve only after all active turns and any
+   * backend-owned child processes have quiesced.
+   *
+   * This is reserved for irreversible lifecycle boundaries such as managed
+   * checkout removal. Ordinary stop, redirect, and handoff callers should keep
+   * using forceAbort()/interruptForHandoff(). `timeoutMs` is the caller's
+   * teardown budget for backend-owned shutdown work when one is available.
+   */
+  quiesceForTeardown(reason: AbortReason, timeoutMs?: number): Promise<void>;
+
+  /**
    * Interrupt the current turn because control is being handed to the UI.
    *
    * Used for pause points like plan submission and auth requests, where the
@@ -638,7 +649,7 @@ export interface BackendConfig extends CoreBackendConfig {
    * Provider/SDK to use for this backend.
    * Determines which agent class is instantiated:
    * - 'anthropic' → ClaudeAgent (Anthropic SDK)
-   * - 'pi' → PiAgent (Pi via @mariozechner/pi-coding-agent)
+   * - 'pi' → PiAgent (Pi via @earendil-works/pi-coding-agent)
    */
   provider: AgentProvider;
 

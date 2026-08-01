@@ -77,6 +77,7 @@ import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/sessio
 import { getFileManagerName } from '@/lib/platform'
 import { useMessagingConnect, type MessagingPlatform } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
+import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 
 type View = 'root' | 'status' | 'labels' | 'share' | 'messaging'
 
@@ -176,6 +177,7 @@ export function CompactSessionMenu({
   const isFlagged = item.isFlagged ?? false
   const isArchived = item.isArchived ?? false
   const sharedUrl = item.sharedUrl
+  const shareOnlineEnabled = FEATURE_FLAGS.shareOnline
   const currentSessionStatus = getSessionStatus(item)
   const sessionLabels = item.labels ?? []
   const _hasMessages = hasMessagesMeta(item)
@@ -290,6 +292,7 @@ export function CompactSessionMenu({
           {view === 'root' && (
             <RootPane
               sharedUrl={sharedUrl}
+              showShareOnline={shareOnlineEnabled}
               sessionStatuses={sessionStatuses}
               currentSessionStatus={currentSessionStatus}
               labelsCount={sessionLabels.length}
@@ -339,7 +342,7 @@ export function CompactSessionMenu({
             />
           )}
 
-          {view === 'share' && sharedUrl && (
+          {shareOnlineEnabled && view === 'share' && sharedUrl && (
             <SharePane
               onOpenInBrowser={closeAfter(actions.openSharedInBrowser)!}
               onCopyLink={closeAfter(actions.copySharedLink)!}
@@ -363,6 +366,7 @@ export function CompactSessionMenu({
 
 interface RootPaneProps {
   sharedUrl?: string
+  showShareOnline: boolean
   sessionStatuses: SessionStatus[]
   currentSessionStatus: SessionStatusId
   labelsCount: number
@@ -394,6 +398,7 @@ interface RootPaneProps {
 
 function RootPane({
   sharedUrl,
+  showShareOnline,
   sessionStatuses,
   currentSessionStatus,
   labelsCount,
@@ -435,15 +440,17 @@ function RootPane({
   return (
     <div className="flex flex-col">
       {/* Share / Shared */}
-      {!sharedUrl ? (
-        <Row icon={<CloudUpload className="h-4 w-4" />} label={t('sessionMenu.share')} onTap={onShare} />
-      ) : (
-        <Row
-          icon={<CloudUpload className="h-4 w-4" />}
-          label={t('sessionMenu.shared')}
-          chevron
-          onTap={onOpenShareSub}
-        />
+      {showShareOnline && (
+        !sharedUrl ? (
+          <Row icon={<CloudUpload className="h-4 w-4" />} label={t('sessionMenu.share')} onTap={onShare} />
+        ) : (
+          <Row
+            icon={<CloudUpload className="h-4 w-4" />}
+            label={t('sessionMenu.shared')}
+            chevron
+            onTap={onOpenShareSub}
+          />
+        )
       )}
 
       {hasRemoteWorkspaces && onSendToWorkspace && (

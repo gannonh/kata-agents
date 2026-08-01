@@ -4,12 +4,12 @@
  * Thin subprocess client for the Pi coding agent. Spawns a pi-agent-server
  * subprocess and communicates via JSONL over stdin/stdout.
  *
- * The subprocess runs the Pi SDK (@mariozechner/pi-coding-agent) in-process,
+ * The subprocess runs the Pi SDK (@earendil-works/pi-coding-agent) in-process,
  * handles tool wrapping, permission enforcement, and LLM queries.
  * This file manages subprocess lifecycle, JSONL protocol, event forwarding,
  * and proxy tool routing for MCP/API sources.
  *
- * Auth is API key based. Keys are retrieved from the credential manager
+ * API keys and native OAuth credentials are retrieved from the credential manager
  * and passed to the subprocess during initialization.
  */
 
@@ -46,6 +46,7 @@ import { EventQueue } from './backend/event-queue.ts';
 // System prompt for Kata Agent context
 import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
+import { i18n } from '../i18n/index.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
@@ -115,6 +116,41 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'browser_tool',
 ]);
 
+export type PiAuthCredential =
+  | { type: 'api_key'; key: string }
+  | { type: 'oauth'; access: string; refresh: string; expires: number };
+
+/**
+ * Convert an app-managed OAuth record to the credential shape expected by Pi.
+ * ChatGPT/Codex is OAuth-only in Pi 0.83; an access token without its refresh
+ * token must not be mislabeled as an API key.
+ */
+export function buildPiAuthCredential(
+  provider: string,
+  oauth: { accessToken: string; refreshToken?: string; expiresAt?: number },
+): PiAuthCredential | null {
+  if (provider === 'openai-codex') {
+    if (!oauth.refreshToken) return null;
+    return {
+      type: 'oauth',
+      access: oauth.accessToken,
+      refresh: oauth.refreshToken,
+      expires: oauth.expiresAt ?? 0,
+    };
+  }
+
+  if (provider === 'github-copilot' && oauth.refreshToken) {
+    return {
+      type: 'oauth',
+      access: oauth.accessToken,
+      refresh: oauth.refreshToken,
+      expires: oauth.expiresAt ?? 0,
+    };
+  }
+
+  return { type: 'api_key', key: oauth.accessToken };
+}
+
 /**
  * Map a transport `err.code` to an agent-facing string for `browser_tool` failures.
  * Returns null for unknown codes so callers can fall back to the raw `err.message`.
@@ -163,6 +199,8 @@ export class PiAgent extends BaseAgent {
 
   // Subprocess process handle
   private subprocess: ChildProcess | null = null;
+  // True while a strict teardown has not observed this exact child exit.
+  private subprocessExitUnconfirmed = false;
   private readline: ReadlineInterface | null = null;
   private subprocessReady: Promise<void> | null = null;
   private subprocessReadyResolve: (() => void) | null = null;
@@ -376,6 +414,9 @@ export class PiAgent extends BaseAgent {
    * Lazy initialization -- spawns on first use.
    */
   private async ensureSubprocess(): Promise<void> {
+    if (this.subprocess && this.subprocessExitUnconfirmed) {
+      throw new Error(i18n.t('errors.piSubprocessExitUnconfirmed'));
+    }
     if (this.subprocess && this.subprocessReady) {
       await this.subprocessReady;
       return;
@@ -439,7 +480,9 @@ export class PiAgent extends BaseAgent {
     // are valid, and non-local endpoints should fail explicitly instead of using unrelated creds.
     const piAuth = await this.getPiAuth();
     const isCustomEndpointMode = !!runtime.customEndpoint;
-    const legacyApiKey = (!piAuth && !isCustomEndpointMode) ? await this.getApiKey() : undefined;
+    const legacyApiKey = (!piAuth && !runtime.piAuthProvider && !isCustomEndpointMode)
+      ? await this.getApiKey()
+      : undefined;
     if (isCustomEndpointMode && !piAuth) {
       this.debug('Custom endpoint mode: no provider credential configured, sending empty API key');
     }
@@ -466,6 +509,7 @@ export class PiAgent extends BaseAgent {
     });
 
     this.subprocess = child;
+    this.subprocessExitUnconfirmed = false;
 
     // Set up readline for JSONL parsing from stdout
     this.readline = createInterface({
@@ -491,7 +535,7 @@ export class PiAgent extends BaseAgent {
 
     // Handle subprocess exit
     child.on('exit', (code, signal) => {
-      this.handleSubprocessExit(code, signal);
+      this.handleSubprocessExit(child, code, signal);
     });
 
     child.on('error', (error) => {
@@ -598,16 +642,13 @@ export class PiAgent extends BaseAgent {
    * Returns a provider-aware credential object for the subprocess,
    * or null if no piAuthProvider is configured (falls back to legacy getApiKey).
    *
-   * OAuth tokens from Craft (Claude Max, ChatGPT Plus, Copilot) are passed as
-   * api_key type because they function as bearer tokens that the Pi SDK's provider
-   * modules use directly. The OAuth exchange happens on the Craft side; by the time
-   * it reaches Pi, it's just an access token.
+   * OAuth records are converted to the credential shape required by each Pi
+   * provider. The OpenAI Codex provider requires native OAuth credentials.
    */
   private async getPiAuth(): Promise<{
     provider: string;
     credential:
-      | { type: 'api_key'; key: string }
-      | { type: 'oauth'; access: string; refresh: string; expires: number }
+      | PiAuthCredential
       | { type: 'iam'; accessKeyId: string; secretAccessKey: string; region?: string; sessionToken?: string }
   } | null> {
     const piAuthProvider = getBackendRuntime(this.config).piAuthProvider;
@@ -620,28 +661,12 @@ export class PiAgent extends BaseAgent {
       if (this.config.authType === 'oauth') {
         const oauth = await credentialManager.getLlmOAuth(slug);
         if (oauth?.accessToken) {
-          // Copilot: pass full OAuth credential so the Pi SDK can derive the
-          // correct API endpoint from the Copilot token's proxy-ep field.
-          // The refresh token is the GitHub access token used to obtain fresh
-          // Copilot tokens when they expire (~1 hour).
-          if (piAuthProvider === 'github-copilot' && oauth.refreshToken) {
-            this.debug(`Retrieved Copilot OAuth credential for Pi provider: ${piAuthProvider}`);
-            return {
-              provider: piAuthProvider,
-              credential: {
-                type: 'oauth',
-                access: oauth.accessToken,
-                refresh: oauth.refreshToken,
-                expires: oauth.expiresAt ?? 0,
-              },
-            };
+          const credential = buildPiAuthCredential(piAuthProvider, oauth);
+          if (credential) {
+            this.debug(`Retrieved ${credential.type} credential for Pi provider: ${piAuthProvider}`);
+            return { provider: piAuthProvider, credential };
           }
-          // Other OAuth providers: pass as api_key (bearer token)
-          this.debug(`Retrieved OAuth access token for Pi provider: ${piAuthProvider}`);
-          return {
-            provider: piAuthProvider,
-            credential: { type: 'api_key', key: oauth.accessToken },
-          };
+          this.debug(`OAuth credential for Pi provider ${piAuthProvider} is missing a refresh token`);
         }
       } else if (this.config.authType === 'iam_credentials') {
         // AWS IAM credentials — pass structured fields so the subprocess can
@@ -761,8 +786,15 @@ export class PiAgent extends BaseAgent {
       try {
         if (piAuthProvider === 'github-copilot') {
           // Copilot: refresh the short-lived Copilot token using the GitHub access token
-          const { refreshGitHubCopilotToken } = await import('@mariozechner/pi-ai/oauth');
-          const newCreds = await refreshGitHubCopilotToken(stored.refreshToken);
+          const { githubCopilotProvider } = await import('@earendil-works/pi-ai/providers/github-copilot');
+          const oauth = githubCopilotProvider().auth.oauth;
+          if (!oauth) throw new Error('Pi SDK did not configure GitHub Copilot OAuth');
+          const newCreds = await oauth.refresh({
+            type: 'oauth',
+            access: '',
+            refresh: stored.refreshToken,
+            expires: 0,
+          });
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,
@@ -1689,9 +1721,56 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Reject or deny every request that can be left waiting when the subprocess
+   * is detached before its exit event is observed.
+   */
+  private rejectPendingSubprocessRequests(exitReason: string): void {
+    for (const [, pending] of this.pendingPermissions) {
+      pending.resolve(false);
+    }
+    this.pendingPermissions.clear();
+
+    const error = new Error(`Pi subprocess exited unexpectedly (${exitReason})`);
+    for (const [, pending] of this.pendingMiniCompletions) {
+      pending.reject(error);
+    }
+    this.pendingMiniCompletions.clear();
+    for (const [, pending] of this.pendingLlmQueries) {
+      pending.reject(error);
+    }
+    this.pendingLlmQueries.clear();
+    for (const [, pending] of this.pendingEnsureSessionReady) {
+      pending.reject(error);
+    }
+    this.pendingEnsureSessionReady.clear();
+    for (const [, pending] of this.pendingCompactions) {
+      pending.reject(error);
+    }
+    this.pendingCompactions.clear();
+    for (const [, pending] of this.pendingAutoCompactionToggles) {
+      pending.reject(error);
+    }
+    this.pendingAutoCompactionToggles.clear();
+    for (const [, pending] of this.pendingRuntimeConfigUpdates) {
+      pending.reject(error);
+    }
+    this.pendingRuntimeConfigUpdates.clear();
+    for (const [, pending] of this.pendingToolExecutions) {
+      pending.reject(new Error('Pi subprocess exited'));
+    }
+    this.pendingToolExecutions.clear();
+  }
+
+  /**
    * Handle subprocess exit.
    */
-  private handleSubprocessExit(code: number | null, signal: string | null): void {
+  private handleSubprocessExit(child: ChildProcess, code: number | null, signal: string | null): void {
+    if (this.subprocess !== child) {
+      this.debug('Ignoring exit from stale Pi subprocess');
+      return;
+    }
+
+    this.subprocessExitUnconfirmed = false;
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
@@ -1699,10 +1778,12 @@ export class PiAgent extends BaseAgent {
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
+    this.callbackPort = 0;
+    this.adapter.resetOverflowState();
 
     // If we were processing, emit error + complete
+    const exitReason = signal ? `signal ${signal}` : `code ${code}`;
     if (this._isProcessing) {
-      const exitReason = signal ? `signal ${signal}` : `code ${code}`;
       this.eventQueue.enqueue({
         type: 'error',
         message: `Pi subprocess exited unexpectedly (${exitReason})`,
@@ -1710,47 +1791,7 @@ export class PiAgent extends BaseAgent {
       this.eventQueue.complete();
     }
 
-    // Reject pending mini completions with error (not null) so callers
-    // get a meaningful error instead of silently returning "no response"
-    const exitReason = signal ? `signal ${signal}` : `code ${code}`;
-    for (const [, pending] of this.pendingMiniCompletions) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingMiniCompletions.clear();
-
-    // Reject pending llm_query calls (call_llm in-flight during subprocess crash)
-    for (const [, pending] of this.pendingLlmQueries) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingLlmQueries.clear();
-
-    // Reject pending ensure_session_ready requests
-    for (const [, pending] of this.pendingEnsureSessionReady) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingEnsureSessionReady.clear();
-
-    // Reject pending compact/toggle requests
-    for (const [, pending] of this.pendingCompactions) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingCompactions.clear();
-
-    for (const [, pending] of this.pendingAutoCompactionToggles) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingAutoCompactionToggles.clear();
-
-    for (const [, pending] of this.pendingRuntimeConfigUpdates) {
-      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
-    }
-    this.pendingRuntimeConfigUpdates.clear();
-
-    // Reject all pending tool executions
-    for (const [, pending] of this.pendingToolExecutions) {
-      pending.reject(new Error('Pi subprocess exited'));
-    }
-    this.pendingToolExecutions.clear();
+    this.rejectPendingSubprocessRequests(exitReason);
 
     // Drop any cached pre-tool metadata for the dead subprocess.
     this.preToolMetadataByCallId.clear();
@@ -2365,6 +2406,20 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Await the shared turn barrier, then stop the persistent Pi child and
+   * require confirmed operating-system exit before destructive teardown.
+   */
+  override async quiesceForTeardown(reason: AbortReason, timeoutMs = 3_000): Promise<void> {
+    // Keep the subprocess shutdown inside the caller's destructive teardown
+    // budget. The final 1s is reserved for the SIGKILL confirmation window.
+    const deadline = Date.now() + timeoutMs;
+    await super.quiesceForTeardown(reason, timeoutMs);
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const sigkillGraceMs = Math.min(remainingMs, 1_000);
+    await this.killSubprocessGracefully(Math.max(0, remainingMs - sigkillGraceMs), true);
+  }
+
+  /**
    * Reconnect by killing subprocess -- next chat() will spawn fresh.
    */
   async reconnect(): Promise<void> {
@@ -2376,7 +2431,7 @@ export class PiAgent extends BaseAgent {
    * Gracefully stop the subprocess and wait briefly for the child to exit.
    * Used before an idle runtime restart so we don't leave transient children behind.
    */
-  private async killSubprocessGracefully(timeoutMs = 2_000): Promise<void> {
+  private async killSubprocessGracefully(timeoutMs = 2_000, requireExit = false): Promise<void> {
     const child = this.subprocess;
     if (!child) {
       this.killSubprocess();
@@ -2409,27 +2464,44 @@ export class PiAgent extends BaseAgent {
       child.kill('SIGKILL');
       result = await Promise.race([
         waitForExit,
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 1_000)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), Math.min(timeoutMs, 1_000))),
       ]);
     }
 
-    if (this.readline) {
-      this.readline.close();
-      this.readline = null;
+    const childIsCurrent = this.subprocess === child;
+    if (childIsCurrent) {
+      // Strict teardown keeps this exact child tracked when exit is unconfirmed.
+      if (this.readline) {
+        this.readline.close();
+        this.readline = null;
+      }
+      this.subprocessReady = null;
+      this.subprocessReadyResolve = null;
+      this.callbackPort = 0;
+      this.preToolMetadataByCallId.clear();
+      this.adapter.resetOverflowState();
+      this.rejectPendingSubprocessRequests(
+        result ? (result.signal ? `signal ${result.signal}` : `code ${result.code}`) : 'SIGKILL timeout',
+      );
     }
-    if (this.subprocess === child) {
-      this.subprocess = null;
-    }
-    this.subprocessReady = null;
-    this.subprocessReadyResolve = null;
-    this.callbackPort = 0;
-    this.preToolMetadataByCallId.clear();
-    this.adapter.resetOverflowState();
 
     if (result) {
+      if (childIsCurrent) {
+        this.subprocess = null;
+        this.subprocessExitUnconfirmed = false;
+      }
       this.debug(`Pi subprocess ${pid ?? '(unknown pid)'} stopped for restart: code=${result.code}, signal=${result.signal}`);
     } else {
-      this.debug(`Pi subprocess ${pid ?? '(unknown pid)'} stop timed out after SIGKILL`);
+      const message = `Pi subprocess ${pid ?? '(unknown pid)'} stop timed out after SIGKILL`;
+      this.debug(message);
+      if (childIsCurrent) {
+        this.subprocessExitUnconfirmed = requireExit;
+        if (!requireExit) {
+          this.subprocess = null;
+          this.subprocessExitUnconfirmed = false;
+        }
+      }
+      if (requireExit) throw new Error(message);
     }
   }
 
@@ -2443,14 +2515,24 @@ export class PiAgent extends BaseAgent {
     }
 
     if (this.subprocess) {
+      const child = this.subprocess;
       // Try graceful shutdown first
       try {
         this.send({ type: 'shutdown' });
       } catch {
         // stdin may already be closed
       }
-      this.subprocess.kill('SIGTERM');
-      this.subprocess = null;
+      child.kill('SIGTERM');
+      this.rejectPendingSubprocessRequests('SIGTERM requested');
+      // An unconfirmed strict-teardown child must remain tracked until its
+      // exact exit event arrives; reconnect/clear-history must not spawn a
+      // replacement alongside it.
+      if (!this.subprocessExitUnconfirmed) {
+        this.subprocess = null;
+      }
+      if (!this.subprocess) {
+        this.subprocessExitUnconfirmed = false;
+      }
     }
 
     this.subprocessReady = null;

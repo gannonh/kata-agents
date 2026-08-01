@@ -146,8 +146,11 @@ export class ManagedWorktreeService {
 
   /** True when `path` is contained within the configured worktree root. */
   isUnderWorktreeRoot(path: string): boolean {
-    const root = resolvePath(this.worktreeRoot)
-    const p = resolvePath(path)
+    // Git may report macOS temporary paths through /private/var while the
+    // configured root was created through /var. Canonicalize both sides before
+    // containment checks so the safety guard does not reject its own checkout.
+    const root = safeRealpath(this.worktreeRoot)
+    const p = safeRealpath(path)
     const rel = relative(root, p)
     return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
   }

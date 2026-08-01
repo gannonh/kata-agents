@@ -1790,12 +1790,19 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
           const canonicalCurrentIds = currentIds.map((id) => {
             if (allowedIds.has(id)) return id;
             if (!id.startsWith('pi/')) {
-              const prefixed = `pi/${id}`;
-              if (allowedIds.has(prefixed)) return prefixed;
+              // Legacy Pi connections stored bare provider/model IDs. Keep
+              // those selections even when the current SDK catalog has since
+              // retired the model; migration must not silently erase a tier.
+              return `pi/${id}`;
             }
             return id;
           });
-          const filtered = canonicalCurrentIds.filter(id => allowedIds.has(id));
+          const filtered = canonicalCurrentIds.filter((id, index) => {
+            // Preserve legacy bare IDs after canonicalizing them. Already
+            // prefixed IDs still go through the catalog allow-list so stale
+            // or corrupt entries can be removed safely.
+            return allowedIds.has(id) || !currentIds[index]?.startsWith('pi/');
+          });
 
           if (!modelSetEquals(canonicalCurrentIds, currentIds) || filtered.length !== currentIds.length) {
             debug('[storage] backfill userDefined filtered', {

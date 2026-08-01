@@ -31,10 +31,7 @@ import {
   resolveEffectiveConnectionSlug,
   type LlmConnectionWithStatus,
 } from '@config/llm-connections'
-import {
-  THINKING_LEVELS,
-  type ThinkingLevel,
-} from '@kata-sh/shared/agent/thinking-levels'
+import { type ThinkingLevel } from '@kata-sh/shared/agent/thinking-levels'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { derivePickerMode } from './picker-mode'
 import {
@@ -43,6 +40,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
+import { findSelectedModel, resolveThinkingLevelPickerState } from './thinking-level-picker'
 
 interface CompactModelSelectorProps {
   currentModel: string
@@ -123,12 +121,19 @@ export function CompactModelSelector({
     return model.name ?? stripPiPrefixForDisplay(model.id)
   }, [availableModels, currentModel, connectionDefaultModel])
 
-  const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(
-      m => typeof m !== 'string' && m.id === currentModel,
-    )
-    return typeof model !== 'string' && model?.supportsThinking === false
-  }, [availableModels, currentModel])
+  const selectedModel = React.useMemo(
+    () => findSelectedModel(availableModels, currentModel),
+    [availableModels, currentModel],
+  )
+
+  const {
+    levels: availableThinkingLevels,
+    displayedLevel: displayedThinkingLevel,
+    disabled: thinkingDisabled,
+  } = React.useMemo(
+    () => resolveThinkingLevelPickerState(thinkingLevel, selectedModel, connectionUnavailable),
+    [thinkingLevel, selectedModel, connectionUnavailable],
+  )
 
   const connectionsByProvider = React.useMemo(
     () => groupConnectionsByProvider(llmConnections),
@@ -395,13 +400,13 @@ export function CompactModelSelector({
           )}
 
           {/* === Thinking section === */}
-          {THINKING_LEVELS.length > 0 && pickerMode !== 'unavailable' && (
+          {availableThinkingLevels.length > 0 && pickerMode !== 'unavailable' && (
             <>
               <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
                 {t('chat.modelPicker.thinkingSection')}
               </div>
-              {THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => {
-                const isSelected = thinkingLevel === id
+              {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
+                const isSelected = displayedThinkingLevel === id
                 return (
                   <DrawerClose asChild key={id}>
                     <button

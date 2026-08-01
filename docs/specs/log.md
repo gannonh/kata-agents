@@ -1,5 +1,33 @@
 # Specs Update Log
 
+## 2026-08-01
+
+* **Online sharing feature gate**: hid the unfinished Share Online affordances by default behind `KATA_FEATURE_SHARE_ONLINE`, with renderer injection and a local `.env` value of `0`.
+
+* **ChatGPT/Codex OAuth bundle fix**: registered Pi's statically bundled OAuth loaders in the embedded server so bundled OpenAI Codex sessions do not attempt missing sibling-module imports. The generated bundle verifier and a fake-token subprocess smoke test cover the path.
+
+* **ChatGPT/Codex OAuth fix**: corrected Pi subprocess credential injection so `openai-codex` receives Pi 0.83's native OAuth credential shape during startup and token refresh, while regular OpenAI API-key connections retain API-key auth. Added regression coverage for credential shaping and the Pi runtime auth contract.
+
+* **Implemented Pi SDK 0.83 migration**: moved the embedded Pi runtime from retired `@mariozechner` packages to the Pi CLI-aligned `@earendil-works` 0.83 package family, adopted native GPT-5.6 catalogs and reasoning metadata, mapped native `max`, and verified the generated bundle. See the [migration spec](2026-08-01-pi-sdk-0.83-migration-design.md) and [build report](2026-08-01-pi-sdk-0.83-migration-build-report.md).
+
+* **Approved Pi SDK 0.83 migration**: added [2026-08-01-pi-sdk-0.83-migration-design.md](2026-08-01-pi-sdk-0.83-migration-design.md) to move from retired `@mariozechner` Pi dependencies to the Pi CLI-aligned `@earendil-works` 0.83 package family and expose native reasoning metadata.
+
+* **Implemented provider-aware reasoning levels**: [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md) moved to Implemented after shared, server-core, Pi, Electron, i18n, generated-bundle, and independent review checks passed. The implementation uses native Pi `max` metadata when reported and normalizes prefixed model IDs. The [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md) records the evidence.
+
+* **Drafted provider-aware reasoning levels**: added [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md), covering model capability metadata, OpenAI/ChatGPT/Codex/Pi-managed controls, the `minimal` level, and focused verification criteria.
+
+* **Managed worktree deletion confirmation**: preparing a worktree now updates renderer session state immediately, so deleting that session opens the worktree-aware confirmation instead of the generic session prompt. The worktree icon and supporting text remain aligned when the label wraps.
+
+* **GPT-5.6 model catalog**: added GPT-5.6 Sol, Terra, and Luna to the OpenAI API-key and ChatGPT/Codex model catalogs, with runtime resolution and preferred-default coverage. Added focused catalog and registry tests.
+
+## 2026-07-31
+
+* **Implemented awaitable agent teardown contract**: [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) is now Implemented after the user-approved Build on draft PR #23. Evidence covers the shared barrier, Claude query unwind, Pi child exit, SessionManager removal boundary, and deterministic race tests.
+
+## 2026-07-30
+
+* **Drafted awaitable agent teardown quiescence contract**: added [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md) for [#21](https://github.com/gannonh/kata-agents/issues/21). The approval-gated plan keeps synchronous `forceAbort` semantics, adds required `quiesceForTeardown(reason)`, tracks nested `BaseAgent.chat()` completion, requires confirmed Pi child-process exit, replaces SessionManager polling and its 100 ms floor, and provides phased tasks, pass/fail acceptance criteria, deterministic race tests, and a lesser-model Build handoff.
+
 ## 2026-07-29
 
 * **Final destructive-removal review fixes (PR #20)**: [2026-07-26-git-github-worktrees-v1-design.md](2026-07-26-git-github-worktrees-v1-design.md) — ignored files are now counted and hashed even though normal status omits them; identity validation runs before the authoritative content snapshot so no awaited guard follows the confirmed fingerprint; and synchronous browser, agent, or pool-server cleanup errors are contained so a completed checkout removal cannot leave session deletion half-applied. Regression coverage reproduces all three final-head review findings.
