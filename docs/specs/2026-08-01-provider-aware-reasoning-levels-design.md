@@ -2,13 +2,13 @@
 type: Spec
 title: Provider-aware reasoning levels
 description: Restore model-specific reasoning level settings for OpenAI and Pi-managed providers, including ChatGPT/Codex connections.
-status: Draft
+status: Approved
 ---
 
 # Provider-aware reasoning levels
 
 ## Status
-Draft
+Approved
 
 ## Goal
 

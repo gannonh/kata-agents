@@ -56,7 +56,7 @@ describe('models-pi filtering', () => {
     })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
     expect(deriveSupportedThinkingLevelsFromPiModel(false, {
       xhigh: 'xhigh',
-    })).toEqual([]);
+    })).toEqual(['off']);
   });
 
   it('maps known Copilot effort labels and ignores unknown labels', () => {

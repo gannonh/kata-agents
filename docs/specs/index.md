@@ -4,7 +4,7 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-* [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md): Provider-aware reasoning controls for OpenAI API, ChatGPT/Codex, and other Pi-managed models, including model capability metadata and the `minimal` level. **Status: Draft.**
+* [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md): Provider-aware reasoning controls for OpenAI API, ChatGPT/Codex, and other Pi-managed models, including model capability metadata and the `minimal` level. **Status: Approved.**
 
 * [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md): Required backend teardown contract for destructive checkout operations. Tracks [#21](https://github.com/gannonh/kata-agents/issues/21) and replaces processing-flag polling plus the 100 ms grace delay with nested-turn completion and provider child-process exit. **Status: Implemented.**
 

@@ -522,7 +522,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
     [workspaceThinkingModel],
   )
   const displayedWorkspaceThinking = settings?.thinkingLevel
-    ? normalizeThinkingLevelForModel(settings.thinkingLevel, workspaceThinkingModel) ?? settings.thinkingLevel
+    ? normalizeThinkingLevelForModel(settings.thinkingLevel, workspaceThinkingModel) ?? 'global'
     : 'global'
 
   // Get summary text for collapsed state
@@ -997,7 +997,9 @@ export default function AiSettingsPage() {
     () => getThinkingLevelDefinitionsForModel(defaultThinkingModel),
     [defaultThinkingModel],
   )
-  const displayedDefaultThinking = normalizeThinkingLevelForModel(defaultThinking, defaultThinkingModel) ?? defaultThinking
+  const displayedDefaultThinking = defaultThinkingLevels.length > 0
+    ? normalizeThinkingLevelForModel(defaultThinking, defaultThinkingModel) ?? defaultThinking
+    : ''
 
   // App-level default handlers
   const handleDefaultModelChange = useCallback(async (model: string) => {

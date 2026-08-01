@@ -380,6 +380,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const {
       SUPPLEMENTAL_OPENAI_MODELS,
       deriveSupportedThinkingLevelsFromPiModel,
+      getPiModelsForAuthProvider,
     } = await import('@kata-sh/shared/config')
     try {
       const models = [
@@ -393,16 +394,24 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         return true
       })
       const sorted = [...uniqueModels].sort((a, b) => b.cost.output - a.cost.output || b.cost.input - a.cost.input)
+      const convertedDefinitions = new Map(
+        getPiModelsForAuthProvider(provider).map(model => [model.id, model]),
+      )
       return {
-        models: sorted.map(m => ({
-          id: m.id.startsWith('pi/') ? m.id : `pi/${m.id}`,
-          name: m.name,
-          costInput: m.cost.input,
-          costOutput: m.cost.output,
-          contextWindow: m.contextWindow,
-          reasoning: m.reasoning,
-          supportedThinkingLevels: deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
-        })),
+        models: sorted.map(m => {
+          const id = m.id.startsWith('pi/') ? m.id : `pi/${m.id}`
+          const definition = convertedDefinitions.get(id)
+          return {
+            id,
+            name: m.name,
+            costInput: m.cost.input,
+            costOutput: m.cost.output,
+            contextWindow: m.contextWindow,
+            reasoning: m.reasoning,
+            supportedThinkingLevels: definition?.supportedThinkingLevels
+              ?? deriveSupportedThinkingLevelsFromPiModel(m.reasoning, m.thinkingLevelMap),
+          }
+        }),
         totalCount: sorted.length,
       }
     } catch {

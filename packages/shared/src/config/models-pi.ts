@@ -29,7 +29,7 @@ export function deriveSupportedThinkingLevelsFromPiModel(
   reasoning: boolean,
   thinkingLevelMap?: Record<string, string | null | undefined>,
 ): ThinkingLevel[] {
-  if (!reasoning) return [];
+  if (!reasoning) return ['off'];
   return PI_THINKING_LEVEL_IDS.filter((level) => {
     const mapped = thinkingLevelMap?.[level];
     if (mapped === null) return false;
