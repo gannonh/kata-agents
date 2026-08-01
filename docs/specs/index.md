@@ -4,8 +4,6 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
-* [2026-08-01-pi-sdk-0.83-migration-design.md](2026-08-01-pi-sdk-0.83-migration-design.md): Migrate from retired `@mariozechner` Pi packages to Pi CLI-aligned `@earendil-works` 0.83 packages and use native model reasoning metadata. **Status: Approved.**
-
 * [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md): Provider-aware reasoning controls for OpenAI API, ChatGPT/Codex, and other Pi-managed models, including model capability metadata and the `minimal` level. **Status: Implemented.** See the [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md).
 
 * [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md): Required backend teardown contract for destructive checkout operations. Tracks [#21](https://github.com/gannonh/kata-agents/issues/21) and replaces processing-flag polling plus the 100 ms grace delay with nested-turn completion and provider child-process exit. **Status: Implemented.**
@@ -17,6 +15,8 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 Completed under [2026-06-22-complete-kata-brand-transition-design.md](2026-06-22-complete-kata-brand-transition-design.md). Build report: [2026-06-22-complete-kata-brand-transition-build-report.md](2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [2026-06-23-complete-kata-brand-transition-verify-report.md](2026-06-23-complete-kata-brand-transition-verify-report.md).
 
 ## Completed
+
+* [2026-08-01-pi-sdk-0.83-migration-design.md](2026-08-01-pi-sdk-0.83-migration-design.md): Migrate from retired `@mariozechner` Pi packages to Pi CLI-aligned `@earendil-works` 0.83 packages and use native model reasoning metadata. **Status: Implemented.** See the [build report](2026-08-01-pi-sdk-0.83-migration-build-report.md).
 
 * [2026-06-26-mcp-oauth-callback-support-plan.md](2026-06-26-mcp-oauth-callback-support-plan.md): Stateless Cloudflare Worker relay for `https://agents.kata.sh/auth/callback`, MCP OAuth `resource` parameter support, and Electron/WebUI callback completion. Build report: [2026-06-26-mcp-oauth-callback-support-build-report.md](2026-06-26-mcp-oauth-callback-support-build-report.md).
 
