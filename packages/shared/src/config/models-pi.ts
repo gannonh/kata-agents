@@ -153,7 +153,7 @@ export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinit
 }
 
 /**
- * Get all Pi models across all providers from the SDK and supplemental catalog.
+ * Get all Pi models across all providers from the Pi SDK catalog.
  */
 export function getAllPiModels(): ModelDefinition[] {
   const allModels: ModelDefinition[] = [];
