@@ -2,6 +2,8 @@
 
 ## 2026-08-02
 
+* **Managed worktree push fix**: creating a worktree from a remote-tracking base ref poisoned the new branch with an `origin/<base>` upstream, breaking push (`--no-track` at creation; `GitActionService.push` heals mismatched upstreams). GitHub E2E now drives the remote-base-ref UAT path.
+
 * **WebUI OAuth relay E2E unblocked**: `packages/server-core/src/webui/auth.ts` adds a Node `crypto.scrypt` password-hash fallback for the Node-launched WebUI harness while retaining Bun Argon2id as primary; the relay specs now run against the real local OAuth/MCP fixture and pass.
 
 * **Root test baseline recorded**: root `bun run test` has 24 failures that reproduce identically on the base SHA; none are regressions from this work. Tracked in GitHub issue #25. The `validate:ci` gate passes.

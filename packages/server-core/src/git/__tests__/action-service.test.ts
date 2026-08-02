@@ -274,6 +274,60 @@ describe('GitActionService.pull / push', () => {
     expect(res.stages[0]!.status).toBe('failed')
     expect(res.stages[0]!.error).toMatch(/remote/i)
   })
+
+  test('push heals a mismatched upstream inherited from a remote base ref', async () => {
+    // UAT regression: `git worktree add -b <branch> <path> origin/main` leaves
+    // branch.<branch>.merge=refs/heads/main (branch.autoSetupMerge), and the
+    // resulting plain `git push` refuses in simple mode: "The upstream branch
+    // of your current branch does not match the name of your current branch".
+    const remote = await bareRemote()
+    const seed = await cloneWithIdentity(remote)
+    writeFile(seed, 'f.txt', '1\n')
+    await git(seed, ['add', '.'])
+    await git(seed, ['commit', '-m', 'c1'])
+    await git(seed, ['push', '-u', 'origin', 'main'])
+
+    const source = await cloneWithIdentity(remote)
+    const wt = join(tmp(), 'wt')
+    await git(source, ['worktree', 'add', '-b', 'kata/test1234', wt, 'origin/main'])
+    // The poison state this test guards: the new branch tracks origin/main.
+    expect((await git(wt, ['rev-parse', '--abbrev-ref', '@{u}'])).trim()).toBe('origin/main')
+
+    writeFile(wt, 'test.txt', 'hello\n')
+    await git(wt, ['add', '.'])
+    await git(wt, ['commit', '-m', 'add test.txt'])
+
+    const res = await svc.push(wt)
+    expect(res.stages[0]!.status).toBe('succeeded')
+    // Upstream now names the branch's own remote counterpart.
+    expect((await git(wt, ['rev-parse', '--abbrev-ref', '@{u}'])).trim()).toBe(
+      'origin/kata/test1234',
+    )
+    const remoteHead = (
+      await runGit(['--git-dir', remote, 'rev-parse', 'refs/heads/kata/test1234'], {
+        cwd: process.cwd(),
+        env: GIT_ENV,
+      })
+    ).stdout.trim()
+    expect(remoteHead).toBe((await git(wt, ['rev-parse', 'HEAD'])).trim())
+  })
+
+  test('push keeps a matching upstream on a non-primary remote (fork workflow)', async () => {
+    // A current-checkout branch that legitimately tracks another remote under
+    // the same branch name must not be retargeted.
+    const origin = await bareRemote()
+    const upstream = await bareRemote()
+    const work = await cloneWithIdentity(origin)
+    writeFile(work, 'f.txt', '1\n')
+    await git(work, ['add', '.'])
+    await git(work, ['commit', '-m', 'c1'])
+    await git(work, ['remote', 'add', 'upstream', upstream])
+    await git(work, ['push', '-u', 'upstream', 'main'])
+
+    const res = await svc.push(work)
+    expect(res.stages[0]!.status).toBe('succeeded')
+    expect((await git(work, ['rev-parse', '--abbrev-ref', '@{u}'])).trim()).toBe('upstream/main')
+  })
 })
 
 describe('GitActionService.commit — literal pathspecs', () => {

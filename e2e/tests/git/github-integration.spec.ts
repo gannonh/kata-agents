@@ -157,9 +157,13 @@ test.describe(`Authenticated GitHub V1 flow ${E2E_TAGS.git}`, () => {
       await workspaceControl.locator("button").click();
       await page.getByTestId("git-workspace-new-worktree").click();
       await expect(page.getByTestId("git-workspace-ref-search")).toBeVisible();
+      // Select the remote-tracking base ref — the UAT path that previously
+      // left the worktree branch tracking origin/<base> and broke push.
+      const remoteBaseRef = `origin/${repository.baseRef}`;
       await expect(
-        page.getByText(repository.baseRef, { exact: true }),
+        page.getByText(remoteBaseRef, { exact: true }),
       ).toBeVisible();
+      await page.getByText(remoteBaseRef, { exact: true }).click();
       await page.getByTestId("git-workspace-create").click();
       await expect(page.getByTestId("git-workspace-identity")).toContainText(
         /kata-agent\/[0-9a-f]{8}/,
