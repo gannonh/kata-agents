@@ -16,6 +16,7 @@ import minimaxIcon from '@/assets/provider-icons/minimax.svg'
 import mistralIcon from '@/assets/provider-icons/mistral.svg'
 import ollamaIcon from '@/assets/provider-icons/ollama.svg'
 import openaiIcon from '@/assets/provider-icons/openai.svg'
+import openaiWhiteIcon from '@/assets/provider-icons/openai-white.svg'
 import openrouterIcon from '@/assets/provider-icons/openrouter.svg'
 import piIcon from '@/assets/provider-icons/pi.svg'
 import vercelIcon from '@/assets/provider-icons/vercel.svg'
@@ -43,6 +44,17 @@ export const providerIcons = {
 } as const
 
 export type ProviderIconKey = keyof typeof providerIcons
+
+/** Return the OpenAI mark with contrast for the active color mode. */
+export function getOpenAiIcon(isDark: boolean): string {
+  return isDark ? openaiWhiteIcon : openaiIcon
+}
+
+/** Apply theme-specific variants to a provider icon when available. */
+export function getProviderIconForTheme(providerIcon: string | null, isDark: boolean): string | null {
+  if (providerIcon === openaiIcon) return getOpenAiIcon(isDark)
+  return providerIcon
+}
 
 /** Human-readable provider names */
 const providerDisplayNames: Record<string, string> = {

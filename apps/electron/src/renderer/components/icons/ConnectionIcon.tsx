@@ -12,7 +12,8 @@
  */
 
 import { Brain } from 'lucide-react'
-import { getProviderIcon } from '@/lib/provider-icons'
+import { getProviderIcon, getProviderIconForTheme } from '@/lib/provider-icons'
+import { useTheme } from '@/context/ThemeContext'
 import { getModelDisplayName } from '@config/models'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import type { LlmConnectionWithStatus } from '../../../shared/types'
@@ -29,10 +30,14 @@ interface ConnectionIconProps {
 }
 
 export function ConnectionIcon({ connection, size = 16, className = '', showTooltip = false }: ConnectionIconProps) {
-  const providerIcon = getProviderIcon(
-    connection.providerType || connection.type || '',
-    connection.baseUrl,
-    connection.piAuthProvider
+  const { isDark } = useTheme()
+  const providerIcon = getProviderIconForTheme(
+    getProviderIcon(
+      connection.providerType || connection.type || '',
+      connection.baseUrl,
+      connection.piAuthProvider
+    ),
+    isDark
   )
 
   const iconElement = providerIcon ? (

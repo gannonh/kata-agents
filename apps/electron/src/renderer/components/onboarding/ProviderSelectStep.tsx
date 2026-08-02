@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
+import { getOpenAiIcon } from "@/lib/provider-icons"
+import { useTheme } from "@/context/ThemeContext"
 import { Key, Monitor } from "lucide-react"
 import { KataAgentsSymbol } from "@/components/icons/KataAgentsSymbol"
 import { StepFormLayout } from "./primitives"
 
 import claudeIcon from "@/assets/provider-icons/claude.svg"
-import openaiIcon from "@/assets/provider-icons/openai.svg"
 import copilotIcon from "@/assets/provider-icons/copilot.svg"
 
 /**
@@ -21,9 +22,14 @@ interface ProviderOption {
   icon: React.ReactNode
 }
 
+function OpenAiIcon() {
+  const { isDark } = useTheme()
+  return <img src={getOpenAiIcon(isDark)} alt="" className="size-5 rounded-[3px]" />
+}
+
 const PROVIDER_ICONS: Record<ProviderChoice, React.ReactNode> = {
   claude: <img src={claudeIcon} alt="" className="size-5 rounded-[3px]" />,
-  chatgpt: <img src={openaiIcon} alt="" className="size-5 rounded-[3px]" />,
+  chatgpt: <OpenAiIcon />,
   copilot: <img src={copilotIcon} alt="" className="size-5 rounded-[3px]" />,
   api_key: <Key className="size-5" />,
   local: <Monitor className="size-5" />,
