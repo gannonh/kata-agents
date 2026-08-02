@@ -184,13 +184,38 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     return { content: readFileSync(path, 'utf-8'), exists: true, path }
   })
 
-  // Write user preferences file (validates JSON before saving)
+  // Write user preferences file (validates JSON before saving).
+  // Appearance settings owns expandToolActivityByDefault, so merge the current
+  // value into every full-document write in this synchronous critical section.
+  // This prevents a read-then-write race between PreferencesPage and Appearance.
   server.handle(RPC_CHANNELS.preferences.WRITE, async (_, content: string) => {
     try {
-      JSON.parse(content) // Validate JSON
+      const incoming = JSON.parse(content) as Record<string, unknown>
+      if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+        throw new Error('Preferences must be a JSON object')
+      }
+
       const path = getPreferencesPath()
+      let currentExpansion: boolean | undefined
+      if (existsSync(path)) {
+        try {
+          const current = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>
+          if (typeof current?.expandToolActivityByDefault === 'boolean') {
+            currentExpansion = current.expandToolActivityByDefault
+          }
+        } catch {
+          // Replace malformed existing preferences with the validated payload.
+        }
+      }
+
+      if (currentExpansion === undefined) {
+        delete incoming.expandToolActivityByDefault
+      } else {
+        incoming.expandToolActivityByDefault = currentExpansion
+      }
+
       mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, content, 'utf-8')
+      writeFileSync(path, JSON.stringify(incoming, null, 2), 'utf-8')
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

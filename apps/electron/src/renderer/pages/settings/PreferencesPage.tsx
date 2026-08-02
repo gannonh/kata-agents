@@ -36,8 +36,6 @@ interface PreferencesFormState {
   city: string
   country: string
   notes: string
-  /** Preserved while this page edits the user-facing preference fields. */
-  expandToolActivityByDefault?: boolean
 }
 
 const emptyFormState: PreferencesFormState = {
@@ -58,17 +56,15 @@ function parsePreferences(json: string): PreferencesFormState {
       city: prefs.location?.city || '',
       country: prefs.location?.country || '',
       notes: prefs.notes || '',
-      expandToolActivityByDefault: typeof prefs.expandToolActivityByDefault === 'boolean'
-        ? prefs.expandToolActivityByDefault
-        : undefined,
     }
   } catch {
     return emptyFormState
   }
 }
 
-// Serialize form state to JSON
-function serializePreferences(state: PreferencesFormState): string {
+// Serialize form state to JSON. The timestamp is injectable so saved-state
+// comparisons do not report a change solely because time has passed.
+function serializePreferences(state: PreferencesFormState, updatedAt = Date.now()): string {
   const prefs: Record<string, unknown> = {}
 
   if (state.name) prefs.name = state.name
@@ -82,30 +78,9 @@ function serializePreferences(state: PreferencesFormState): string {
   }
 
   if (state.notes) prefs.notes = state.notes
-  if (state.expandToolActivityByDefault !== undefined) {
-    prefs.expandToolActivityByDefault = state.expandToolActivityByDefault
-  }
-  prefs.updatedAt = Date.now()
+  prefs.updatedAt = updatedAt
 
   return JSON.stringify(prefs, null, 2)
-}
-
-/**
- * Preserve the independently managed expansion preference when this page writes
- * the full preferences document. Appearance settings can update it while this
- * form remains mounted, so the form's initial snapshot is not authoritative.
- *
- * A failed refresh rejects the save rather than falling back to the stale form
- * snapshot, which would reintroduce the data-loss race this protects against.
- */
-async function serializePreferencesWithLatestExpansion(state: PreferencesFormState): Promise<string> {
-  const result = await window.electronAPI.readPreferences()
-  const current = JSON.parse(result.content) as Record<string, unknown>
-  const expandToolActivityByDefault = typeof current.expandToolActivityByDefault === 'boolean'
-    ? current.expandToolActivityByDefault
-    : undefined
-
-  return serializePreferences({ ...state, expandToolActivityByDefault })
 }
 
 export default function PreferencesPage() {
@@ -131,7 +106,7 @@ export default function PreferencesPage() {
         const parsed = parsePreferences(result.content)
         setFormState(parsed)
         setPreferencesPath(result.path)
-        lastSavedRef.current = serializePreferences(parsed)
+        lastSavedRef.current = serializePreferences(parsed, 0)
       } catch (err) {
         console.error('Failed to load stored user preferences:', err)
         setFormState(emptyFormState)
@@ -159,10 +134,10 @@ export default function PreferencesPage() {
     // Debounce save by 500ms
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        const json = await serializePreferencesWithLatestExpansion(formState)
+        const json = serializePreferences(formState)
         const result = await window.electronAPI.writePreferences(json)
         if (result.success) {
-          lastSavedRef.current = json
+          lastSavedRef.current = serializePreferences(formState, 0)
         } else {
           console.error('Failed to save preferences:', result.error)
         }
@@ -186,16 +161,16 @@ export default function PreferencesPage() {
         clearTimeout(saveTimeoutRef.current)
       }
 
-      // Check if there are unsaved changes and save immediately. Refresh the
-      // independently managed expansion field before writing the full document.
-      if (lastSavedRef.current !== serializePreferences(formStateRef.current) && !isInitialLoadRef.current) {
+      // Check if there are unsaved changes and save immediately. The server
+      // preserves independently managed fields during this full-document write.
+      const currentState = formStateRef.current
+      if (lastSavedRef.current !== serializePreferences(currentState, 0) && !isInitialLoadRef.current) {
         // Fire and forget - we can't await in cleanup.
-        void serializePreferencesWithLatestExpansion(formStateRef.current)
-          .then((currentJson) => {
-            if (lastSavedRef.current !== currentJson) {
-              return window.electronAPI.writePreferences(currentJson)
+        void window.electronAPI.writePreferences(serializePreferences(currentState))
+          .then((result) => {
+            if (!result.success) {
+              console.error('Failed to save preferences on unmount:', result.error)
             }
-            return undefined
           })
           .catch((err) => {
             console.error('Failed to save preferences on unmount:', err)
