@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Claude Opus 5 and Sonnet 5** — Added both models to direct Anthropic and Bedrock-aware catalogs, including 1M-token context metadata and Sonnet 5 adaptive-thinking handling. Updated the Claude Agent SDK to 0.3.220.
+
 ## Bug Fixes
 
 - **OpenAI model picker order** — ChatGPT/Codex models now appear as GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5.5, GPT-5.4, GPT-5.4 mini, and GPT-5.3 Codex Spark.

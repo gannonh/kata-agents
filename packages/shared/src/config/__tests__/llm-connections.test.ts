@@ -12,7 +12,7 @@ import {
   deriveBedrockRegionPrefix,
   hydratePiConnectionModels,
 } from '../llm-connections'
-import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isClaudeModel } from '../models'
+import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isAdaptiveThinkingAlwaysOnModel, isClaudeModel } from '../models'
 
 // ============================================================
 // getDefaultModelsForConnection
@@ -402,5 +402,47 @@ describe('Claude Fable 5', () => {
     expect(fromBedrockNativeId('anthropic.claude-fable-5')).toBe('claude-fable-5')
     // Bedrock-native id resolves to display metadata too
     expect(getModelDisplayName('us.anthropic.claude-fable-5')).toBe('Fable 5')
+  })
+})
+
+describe('Claude Opus 5 and Sonnet 5', () => {
+  it('registers both models with 1M context windows', () => {
+    const opus = ANTHROPIC_MODELS.find(m => m.id === 'claude-opus-5')
+    const sonnet = ANTHROPIC_MODELS.find(m => m.id === 'claude-sonnet-5')
+
+    expect(opus).toMatchObject({
+      name: 'Opus 5',
+      shortName: 'Opus',
+      contextWindow: 1_000_000,
+      descriptionKey: 'model.opusDesc',
+    })
+    expect(sonnet).toMatchObject({
+      name: 'Sonnet 5',
+      shortName: 'Sonnet',
+      contextWindow: 1_000_000,
+      descriptionKey: 'model.sonnetDesc',
+    })
+  })
+
+  it('preserves Opus 4.8 as the Anthropic default while exposing newer models', () => {
+    expect(getDefaultModelForConnection('anthropic')).toBe('claude-opus-4-8')
+    expect(getModelDisplayName('claude-opus-5')).toBe('Opus 5')
+    expect(getModelDisplayName('claude-sonnet-5')).toBe('Sonnet 5')
+    expect(getModelContextWindow('claude-opus-5')).toBe(1_000_000)
+    expect(getModelContextWindow('claude-sonnet-5')).toBe(1_000_000)
+  })
+
+  it('round-trips new models through Bedrock inference-profile mappings', () => {
+    expect(toBedrockNativeId('claude-opus-5')).toBe('us.anthropic.claude-opus-5')
+    expect(toBedrockNativeId('claude-sonnet-5', 'eu')).toBe('eu.anthropic.claude-sonnet-5')
+    expect(fromBedrockNativeId('us.anthropic.claude-opus-5')).toBe('claude-opus-5')
+    expect(fromBedrockNativeId('global.anthropic.claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(getModelDisplayName('eu.anthropic.claude-opus-5')).toBe('Opus 5')
+  })
+
+  it('marks Sonnet 5 as always-on adaptive thinking', () => {
+    expect(isAdaptiveThinkingAlwaysOnModel('claude-sonnet-5')).toBe(true)
+    expect(isAdaptiveThinkingAlwaysOnModel('us.anthropic.claude-sonnet-5')).toBe(true)
+    expect(isAdaptiveThinkingAlwaysOnModel('claude-opus-5')).toBe(false)
   })
 })

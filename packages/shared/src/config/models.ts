@@ -22,36 +22,44 @@ const ANTHROPIC_SUPPORTED_THINKING_LEVELS: ThinkingLevel[] = THINKING_LEVEL_IDS.
 // Must stay in sync with BEDROCK_MODEL_MAP in llm-connections.ts.
 const BEDROCK_TO_BARE: Record<string, string> = {
   // US inference profile IDs (primary)
+  'us.anthropic.claude-opus-5': 'claude-opus-5',
   'us.anthropic.claude-opus-4-8': 'claude-opus-4-8',
   'us.anthropic.claude-fable-5': 'claude-fable-5',
   'us.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   // Compatibility alias for an earlier incorrect 4.7 mapping.
   'us.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
+  'us.anthropic.claude-sonnet-5': 'claude-sonnet-5',
   'us.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'us.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'us.anthropic.claude-opus-4-5-20251101-v1:0': 'claude-opus-4-5-20251101',
   'us.anthropic.claude-sonnet-4-5-20250929-v1:0': 'claude-sonnet-4-5-20250929',
   // EU inference profile IDs
+  'eu.anthropic.claude-opus-5': 'claude-opus-5',
   'eu.anthropic.claude-opus-4-8': 'claude-opus-4-8',
   'eu.anthropic.claude-fable-5': 'claude-fable-5',
   'eu.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'eu.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
+  'eu.anthropic.claude-sonnet-5': 'claude-sonnet-5',
   'eu.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'eu.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'eu.anthropic.claude-opus-4-5-20251101-v1:0': 'claude-opus-4-5-20251101',
   'eu.anthropic.claude-sonnet-4-5-20250929-v1:0': 'claude-sonnet-4-5-20250929',
   // Global inference profile IDs
+  'global.anthropic.claude-opus-5': 'claude-opus-5',
   'global.anthropic.claude-opus-4-8': 'claude-opus-4-8',
   'global.anthropic.claude-fable-5': 'claude-fable-5',
   'global.anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'global.anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
+  'global.anthropic.claude-sonnet-5': 'claude-sonnet-5',
   'global.anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   // Base IDs (no region prefix)
+  'anthropic.claude-opus-5': 'claude-opus-5',
   'anthropic.claude-opus-4-8': 'claude-opus-4-8',
   'anthropic.claude-fable-5': 'claude-fable-5',
   'anthropic.claude-opus-4-7': 'claude-opus-4-7',
   'anthropic.claude-opus-4-7-v1': 'claude-opus-4-7',
+  'anthropic.claude-sonnet-5': 'claude-sonnet-5',
   'anthropic.claude-sonnet-4-6': 'claude-sonnet-4-6',
   'anthropic.claude-haiku-4-5-20251001-v1:0': 'claude-haiku-4-5-20251001',
   'anthropic.claude-opus-4-5-20251101-v1:0': 'claude-opus-4-5-20251101',
@@ -152,6 +160,16 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
+    id: 'claude-opus-5',
+    name: 'Opus 5',
+    shortName: 'Opus',
+    description: 'Most capable for complex work',
+    descriptionKey: 'model.opusDesc',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
+  },
+  {
     id: 'claude-opus-4-7',
     name: 'Opus 4.7',
     shortName: 'Opus',
@@ -169,6 +187,16 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.sonnetDesc',
     provider: 'anthropic',
     contextWindow: 200_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
+  },
+  {
+    id: 'claude-sonnet-5',
+    name: 'Sonnet 5',
+    shortName: 'Sonnet',
+    description: 'Best for everyday tasks',
+    descriptionKey: 'model.sonnetDesc',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
@@ -346,15 +374,13 @@ export function isClaudeModel(modelId: string): boolean {
 }
 
 /**
- * Mythos-class models (Claude Fable 5 / Mythos 5 / Mythos Preview) where adaptive
- * thinking is ALWAYS ON and `thinking: { type: 'disabled' }` is rejected by the
- * Messages API. Callers must use adaptive thinking + the `effort` parameter to
- * control depth on these models — there is no way to turn thinking off.
- * (The Messages API is unchanged for Opus/Sonnet/Haiku, which still accept `disabled`.)
- * Matches bare, pi/-prefixed, and Bedrock-native id forms.
+ * Always-on adaptive-thinking models (Claude Fable 5 / Mythos 5 / Mythos Preview /
+ * Sonnet 5) reject `thinking: { type: 'disabled' }` in the Messages API. Callers
+ * must use adaptive thinking + the `effort` parameter to control depth on these
+ * models. Matches bare, pi/-prefixed, and Bedrock-native id forms.
  */
 export function isAdaptiveThinkingAlwaysOnModel(modelId: string): boolean {
-  return /claude-(fable|mythos)/i.test(modelId);
+  return /claude-(fable|mythos|sonnet-5)/i.test(modelId);
 }
 
 
