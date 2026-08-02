@@ -58,7 +58,7 @@ import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, modelIdsMatch, type ModelDefinition } from '@config/models'
-import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { getModelsForConnection, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
 import { toast } from 'sonner'
 
 /**
@@ -81,26 +81,14 @@ function getModelOptionsForConnection(
 ): Array<{ value: string; label: string; description: string; descriptionKey?: string }> {
   if (!connection) return []
 
-  // If connection has explicit models, use those
-  if (connection.models && connection.models.length > 0) {
-    return connection.models.map((m) => {
-      if (typeof m === 'string') {
-        return { value: m, label: getModelShortName(m), description: '' }
-      }
-      // ModelDefinition object
-      const def = m as ModelDefinition
-      return { value: def.id, label: def.name, description: def.description, descriptionKey: def.descriptionKey }
-    })
-  }
-
-  // Fall back to registry models for this provider type
-  const registryModels = getModelsForProviderType(connection.providerType, connection.piAuthProvider)
-  return registryModels.map((m) => ({
-    value: m.id,
-    label: m.name,
-    description: m.description,
-    descriptionKey: m.descriptionKey,
-  }))
+  return getModelsForConnection(connection).map((m) => {
+    if (typeof m === 'string') {
+      return { value: m, label: getModelShortName(m), description: '' }
+    }
+    // ModelDefinition object
+    const def = m as ModelDefinition
+    return { value: def.id, label: def.name, description: def.description, descriptionKey: def.descriptionKey }
+  })
 }
 
 function getModelDefinitionForConnection(
@@ -108,9 +96,7 @@ function getModelDefinitionForConnection(
   modelId: string | undefined,
 ): ModelDefinition | undefined {
   if (!connection || !modelId) return undefined
-  const models = connection.models && connection.models.length > 0
-    ? connection.models
-    : getModelsForProviderType(connection.providerType, connection.piAuthProvider)
+  const models = getModelsForConnection(connection)
   const model = models.find(entry => typeof entry !== 'string' && modelIdsMatch(entry.id, modelId))
   return model && typeof model !== 'string' ? model : undefined
 }
@@ -857,13 +843,13 @@ export default function AiSettingsPage() {
     }
 
     // Build model string from connection's models array
-    const modelStr = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
+    const modelStr = getModelsForConnection(connection)
+      .map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .join(', ') || connection.defaultModel || ''
 
     // Set initial values before opening overlay so ApiKeyInput mounts with them
-    const modelIds = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
+    const modelIds = getModelsForConnection(connection)
+      .map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .filter(Boolean)
 
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()

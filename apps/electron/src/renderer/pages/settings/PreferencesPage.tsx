@@ -62,8 +62,9 @@ function parsePreferences(json: string): PreferencesFormState {
   }
 }
 
-// Serialize form state to JSON
-function serializePreferences(state: PreferencesFormState): string {
+// Serialize form state to JSON. The timestamp is injectable so saved-state
+// comparisons do not report a change solely because time has passed.
+function serializePreferences(state: PreferencesFormState, updatedAt = Date.now()): string {
   const prefs: Record<string, unknown> = {}
 
   if (state.name) prefs.name = state.name
@@ -77,7 +78,7 @@ function serializePreferences(state: PreferencesFormState): string {
   }
 
   if (state.notes) prefs.notes = state.notes
-  prefs.updatedAt = Date.now()
+  prefs.updatedAt = updatedAt
 
   return JSON.stringify(prefs, null, 2)
 }
@@ -105,7 +106,7 @@ export default function PreferencesPage() {
         const parsed = parsePreferences(result.content)
         setFormState(parsed)
         setPreferencesPath(result.path)
-        lastSavedRef.current = serializePreferences(parsed)
+        lastSavedRef.current = serializePreferences(parsed, 0)
       } catch (err) {
         console.error('Failed to load stored user preferences:', err)
         setFormState(emptyFormState)
@@ -136,7 +137,7 @@ export default function PreferencesPage() {
         const json = serializePreferences(formState)
         const result = await window.electronAPI.writePreferences(json)
         if (result.success) {
-          lastSavedRef.current = json
+          lastSavedRef.current = serializePreferences(formState, 0)
         } else {
           console.error('Failed to save preferences:', result.error)
         }
@@ -160,13 +161,20 @@ export default function PreferencesPage() {
         clearTimeout(saveTimeoutRef.current)
       }
 
-      // Check if there are unsaved changes and save immediately
-      const currentJson = serializePreferences(formStateRef.current)
-      if (lastSavedRef.current !== currentJson && !isInitialLoadRef.current) {
-        // Fire and forget - we can't await in cleanup
-        window.electronAPI.writePreferences(currentJson).catch((err) => {
-          console.error('Failed to save preferences on unmount:', err)
-        })
+      // Check if there are unsaved changes and save immediately. The server
+      // preserves independently managed fields during this full-document write.
+      const currentState = formStateRef.current
+      if (lastSavedRef.current !== serializePreferences(currentState, 0) && !isInitialLoadRef.current) {
+        // Fire and forget - we can't await in cleanup.
+        void window.electronAPI.writePreferences(serializePreferences(currentState))
+          .then((result) => {
+            if (!result.success) {
+              console.error('Failed to save preferences on unmount:', result.error)
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to save preferences on unmount:', err)
+          })
       }
     }
   }, [])

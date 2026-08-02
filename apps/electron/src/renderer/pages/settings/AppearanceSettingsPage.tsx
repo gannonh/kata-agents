@@ -29,6 +29,7 @@ import {
   SettingsToggle,
 } from '@/components/settings'
 import * as storage from '@/lib/local-storage'
+import { useToolActivityExpansion } from '@/hooks/useToolActivityExpansion'
 import { useWorkspaceIcons } from '@/hooks/useWorkspaceIcon'
 import { Info_DataTable, SortableHeader } from '@/components/info/Info_DataTable'
 import { Info_Badge } from '@/components/info/Info_Badge'
@@ -145,6 +146,12 @@ export default function AppearanceSettingsPage() {
     setRichToolDescriptions(checked)
     await window.electronAPI?.setRichToolDescriptions?.(checked)
   }, [])
+
+  // Chat activity expansion preference (persisted in preferences.json)
+  const {
+    expandToolActivityByDefault,
+    setExpandToolActivityByDefault,
+  } = useToolActivityExpansion()
 
   // Load preset themes on mount
   useEffect(() => {
@@ -368,6 +375,12 @@ export default function AppearanceSettingsPage() {
                     description={t("settings.appearance.richToolDescriptionsDesc")}
                     checked={richToolDescriptions}
                     onCheckedChange={handleRichToolDescriptionsChange}
+                  />
+                  <SettingsToggle
+                    label={t("settings.appearance.expandToolActivity")}
+                    description={t("settings.appearance.expandToolActivityDesc")}
+                    checked={expandToolActivityByDefault}
+                    onCheckedChange={setExpandToolActivityByDefault}
                   />
                 </SettingsCard>
               </SettingsSection>

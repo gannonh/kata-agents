@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "Tema predeterminado",
   "settings.appearance.description": "Tema, fuente, iconos de herramientas",
   "settings.appearance.editFile": "Editar archivo",
+  "settings.appearance.expandToolActivity": "Expandir la actividad de herramientas",
+  "settings.appearance.expandToolActivityDesc": "Abrir automáticamente las entradas y salidas de las herramientas en el chat",
   "settings.appearance.font": "Fuente",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "Sistema",

@@ -14,7 +14,9 @@ describe('isClaudeModel', () => {
   // Direct Anthropic model IDs
   it('detects direct Anthropic Claude model IDs', () => {
     expect(isClaudeModel('claude-sonnet-4-6')).toBe(true);
+    expect(isClaudeModel('claude-sonnet-5')).toBe(true);
     expect(isClaudeModel('claude-opus-4-8')).toBe(true);
+    expect(isClaudeModel('claude-opus-5')).toBe(true);
     expect(isClaudeModel('claude-haiku-4-5-20251001')).toBe(true);
     expect(isClaudeModel('claude-3-5-sonnet-20241022')).toBe(true);
   });
@@ -93,12 +95,17 @@ describe('getModelShortName', () => {
   });
 });
 
-describe('Opus registry', () => {
-  it('includes Opus 4.8 and keeps Opus 4.7, but excludes deprecated Opus 4.6', () => {
-    const ids = ANTHROPIC_MODELS.map(m => m.id);
-    expect(ids).toContain('claude-opus-4-8');
-    expect(ids).toContain('claude-opus-4-7');
-    expect(ids).not.toContain('claude-opus-4-6');
+describe('Anthropic model registry', () => {
+  it('uses the requested Anthropic picker order', () => {
+    expect(ANTHROPIC_MODELS.map(m => m.id)).toEqual([
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-sonnet-5',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5-20251001',
+    ]);
   });
 
   it('resolves "Opus" shortName to 4.8', () => {
@@ -106,6 +113,7 @@ describe('Opus registry', () => {
   });
 
   it('normalizes deprecated Opus IDs to Opus 4.8 without migrating Opus 4.7', () => {
+    expect(normalizeDeprecatedModelId('claude-opus-4-1-20250805')).toBe('claude-opus-4-8');
     expect(normalizeDeprecatedModelId('claude-opus-4-6')).toBe('claude-opus-4-8');
     expect(normalizeDeprecatedModelId('pi/claude-opus-4-6')).toBe('pi/claude-opus-4-8');
     expect(normalizeDeprecatedModelId('us.anthropic.claude-opus-4-6-v1')).toBe('us.anthropic.claude-opus-4-8');

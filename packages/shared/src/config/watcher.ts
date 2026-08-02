@@ -101,6 +101,7 @@ export interface UserPreferences {
     country?: string;
   };
   notes?: string;
+  expandToolActivityByDefault?: boolean;
   /** Internal: mirrors Appearance → Language. Maintained by the main-process i18n IPC handler. */
   uiLanguage?: string;
   updatedAt?: number;

@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "Standarddesign",
   "settings.appearance.description": "Design, Schrift, Werkzeugsymbole",
   "settings.appearance.editFile": "Datei bearbeiten",
+  "settings.appearance.expandToolActivity": "Werkzeugaktivität erweitern",
+  "settings.appearance.expandToolActivityDesc": "Werkzeugeingaben und -ausgaben im Chat automatisch öffnen",
   "settings.appearance.font": "Schriftart",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "System",

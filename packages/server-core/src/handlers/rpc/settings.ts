@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
-import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel } from '@kata-sh/shared/config'
+import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel, getExpandToolActivityByDefault, setExpandToolActivityByDefault } from '@kata-sh/shared/config'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@kata-sh/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { getWorkspaceOrThrow } from '@kata-sh/server-core/handlers'
-import type { RpcServer } from '@kata-sh/server-core/transport'
+import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@kata-sh/server-core/transport'
 import { isValidWorkingDirectory } from '../../utils/path-validation'
@@ -29,6 +29,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.power.GET_KEEP_AWAKE,
   RPC_CHANNELS.appearance.GET_RICH_TOOL_DESCRIPTIONS,
   RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS,
+  RPC_CHANNELS.appearance.GET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT,
+  RPC_CHANNELS.appearance.SET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT,
   RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE,
   RPC_CHANNELS.caching.SET_EXTENDED_PROMPT_CACHE,
   RPC_CHANNELS.caching.GET_ENABLE_1M_CONTEXT,
@@ -182,13 +184,38 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     return { content: readFileSync(path, 'utf-8'), exists: true, path }
   })
 
-  // Write user preferences file (validates JSON before saving)
+  // Write user preferences file (validates JSON before saving).
+  // Appearance settings owns expandToolActivityByDefault, so merge the current
+  // value into every full-document write in this synchronous critical section.
+  // This prevents a read-then-write race between PreferencesPage and Appearance.
   server.handle(RPC_CHANNELS.preferences.WRITE, async (_, content: string) => {
     try {
-      JSON.parse(content) // Validate JSON
+      const incoming = JSON.parse(content) as Record<string, unknown>
+      if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+        throw new Error('Preferences must be a JSON object')
+      }
+
       const path = getPreferencesPath()
+      let currentExpansion: boolean | undefined
+      if (existsSync(path)) {
+        try {
+          const current = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>
+          if (typeof current?.expandToolActivityByDefault === 'boolean') {
+            currentExpansion = current.expandToolActivityByDefault
+          }
+        } catch {
+          // Replace malformed existing preferences with the validated payload.
+        }
+      }
+
+      if (currentExpansion === undefined) {
+        delete incoming.expandToolActivityByDefault
+      } else {
+        incoming.expandToolActivityByDefault = currentExpansion
+      }
+
       mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, content, 'utf-8')
+      writeFileSync(path, JSON.stringify(incoming, null, 2), 'utf-8')
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -283,6 +310,17 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS, async (_ctx, enabled: boolean) => {
     const { setRichToolDescriptions } = await import('@kata-sh/shared/config/storage')
     setRichToolDescriptions(enabled)
+  })
+
+  // Get default tool activity expansion setting
+  server.handle(RPC_CHANNELS.appearance.GET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT, async () => {
+    return getExpandToolActivityByDefault()
+  })
+
+  // Set default tool activity expansion setting
+  server.handle(RPC_CHANNELS.appearance.SET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT, async (_ctx, enabled: boolean) => {
+    setExpandToolActivityByDefault(enabled)
+    pushTyped(server, RPC_CHANNELS.appearance.EXPAND_TOOL_ACTIVITY_BY_DEFAULT_CHANGED, { to: 'all' }, enabled)
   })
 
   // ============================================================

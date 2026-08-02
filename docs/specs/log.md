@@ -2,6 +2,14 @@
 
 ## 2026-08-02
 
+* **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
+
+* **Claude model picker catalog**: direct Anthropic connections now use the requested Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5 order, remove retired Opus 4.1, and retain active provider entries when a persisted catalog is stale; user-owned model lists remain unchanged.
+
+* **Claude Opus 5 and Sonnet 5**: upgraded the Claude Agent SDK to 0.3.220 and registered both models in direct Anthropic and Bedrock-aware catalogs with 1M-token metadata; Sonnet 5 uses the always-on adaptive-thinking path.
+
+* **OpenAI model picker order**: ChatGPT/Codex models now display in the requested GPT-5.6 Sol, Terra, Luna, GPT-5.5, GPT-5.4, GPT-5.4 mini, and GPT-5.3 Codex Spark order, including startup synchronization for existing automatically managed connections.
+
 * **Managed worktree push fix**: creating a worktree from a remote-tracking base ref poisoned the new branch with an `origin/<base>` upstream, breaking push (`--no-track` at creation; `GitActionService.push` heals mismatched upstreams). GitHub E2E now drives the remote-base-ref UAT path.
 
 * **WebUI OAuth relay E2E unblocked**: `packages/server-core/src/webui/auth.ts` adds a Node `crypto.scrypt` password-hash fallback for the Node-launched WebUI harness while retaining Bun Argon2id as primary; the relay specs now run against the real local OAuth/MCP fixture and pass.

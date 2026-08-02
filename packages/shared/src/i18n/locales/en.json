@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "Default Theme",
   "settings.appearance.description": "Theme, font, tool icons",
   "settings.appearance.editFile": "Edit File",
+  "settings.appearance.expandToolActivity": "Expand tool activity",
+  "settings.appearance.expandToolActivityDesc": "Open tool inputs and outputs automatically in chat",
   "settings.appearance.font": "Font",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "System",

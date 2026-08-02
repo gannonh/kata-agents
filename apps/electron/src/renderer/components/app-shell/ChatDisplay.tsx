@@ -67,6 +67,7 @@ import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
+import { useToolActivityExpansion } from "@/hooks/useToolActivityExpansion"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
@@ -561,12 +562,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   })
 
   // TurnCard expansion state — persisted to localStorage across session switches
+  const { expandToolActivityByDefault } = useToolActivityExpansion()
   const {
-    expandedTurns,
+    isTurnExpanded,
     toggleTurn,
     expandedActivityGroups,
     setExpandedActivityGroups,
-  } = useTurnCardExpansion(session?.id)
+  } = useTurnCardExpansion(session?.id, expandToolActivityByDefault)
 
 
   // ============================================================================
@@ -1717,7 +1719,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         intent={turn.intent}
                         isStreaming={turn.isStreaming}
                         isComplete={turn.isComplete}
-                        isExpanded={expandedTurns.has(assistantUiKey)}
+                        isExpanded={isTurnExpanded(assistantUiKey)}
                         onExpandedChange={(expanded) => toggleTurn(assistantUiKey, expanded)}
                         expandedActivityGroups={expandedActivityGroups}
                         onExpandedActivityGroupsChange={setExpandedActivityGroups}

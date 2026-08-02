@@ -22,7 +22,10 @@ const EXPECTED_CHANNELS: string[] = [
   'LLM_Connection:setDefault',
   'LLM_Connection:setWorkspaceDefault',
   'LLM_Connection:test',
+  'appearance:expandToolActivityByDefaultChanged',
+  'appearance:getExpandToolActivityByDefault',
   'appearance:getRichToolDescriptions',
+  'appearance:setExpandToolActivityByDefault',
   'appearance:setRichToolDescriptions',
   'auth:logout',
   'auth:showDeleteSessionConfirmation',
@@ -378,6 +381,12 @@ describe('BroadcastEventMap payload shapes', () => {
   it('skills:changed carries (workspaceId, skills)', () => {
     type Payload = BroadcastEventMap[typeof RPC_CHANNELS.skills.CHANGED]
     const _check: AssertTuple<Payload, 2> = true
+    expect(_check).toBe(true)
+  })
+
+  it('appearance expansion change carries the enabled value', () => {
+    type Payload = BroadcastEventMap[typeof RPC_CHANNELS.appearance.EXPAND_TOOL_ACTIVITY_BY_DEFAULT_CHANGED]
+    const _check: AssertTuple<Payload, 1> = true
     expect(_check).toBe(true)
   })
 })

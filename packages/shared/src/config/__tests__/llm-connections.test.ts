@@ -3,6 +3,7 @@ import '../../../tests/setup/register-pi-model-resolver.ts'
 import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
+  getModelsForConnection,
   isCompatProvider,
   isAnthropicProvider,
   isPiProvider,
@@ -12,11 +13,64 @@ import {
   deriveBedrockRegionPrefix,
   hydratePiConnectionModels,
 } from '../llm-connections'
-import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isClaudeModel } from '../models'
+import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelShortName, isAdaptiveThinkingAlwaysOnModel, isClaudeModel } from '../models'
 
 // ============================================================
 // getDefaultModelsForConnection
 // ============================================================
+
+describe('getModelsForConnection', () => {
+  it('orders the registry models and removes deprecated entries from a stale catalog', () => {
+    const models = getModelsForConnection({
+      providerType: 'anthropic',
+      modelSelectionMode: 'automaticallySyncedFromProvider',
+      models: [
+        'claude-fable-5',
+        'claude-opus-4-8',
+        'claude-opus-4-7',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5-20251001',
+        'claude-opus-4-1-20250805',
+      ],
+    })
+    const ids = models.map(model => typeof model === 'string' ? model : model.id)
+
+    expect(ids).toEqual([
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-sonnet-5',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5-20251001',
+    ])
+  })
+
+  it('preserves user-defined model lists', () => {
+    const models = getModelsForConnection({
+      providerType: 'anthropic',
+      modelSelectionMode: 'userDefined3Tier',
+      models: ['claude-opus-4-8'],
+    })
+
+    expect(models).toEqual(['claude-opus-4-8'])
+  })
+
+  it('uses the provider resolver when a Pi connection has no stored models', () => {
+    const models = getModelsForConnection({
+      providerType: 'pi',
+      piAuthProvider: 'anthropic',
+    })
+
+    expect(models.length).toBeGreaterThan(0)
+    expect(models.every(model => (typeof model === 'string' ? model : model.id).startsWith('pi/'))).toBe(true)
+  })
+
+  it('keeps model-less custom endpoints empty', () => {
+    expect(getModelsForConnection({ providerType: 'pi_compat' })).toEqual([])
+    expect(getModelsForConnection({ providerType: 'pi_compat', models: [] })).toEqual([])
+  })
+})
 
 describe('hydratePiConnectionModels', () => {
   it('hydrates string entries with provider-scoped OpenAI and Codex capabilities', () => {
@@ -112,12 +166,12 @@ describe('getDefaultModelsForConnection', () => {
 // ============================================================
 
 describe('getDefaultModelForConnection', () => {
-  it('returns first model ID for anthropic', () => {
+  it('keeps Opus 4.8 as the Anthropic default independently of picker order', () => {
     const modelId = getDefaultModelForConnection('anthropic')
     expect(typeof modelId).toBe('string')
     expect(modelId.length).toBeGreaterThan(0)
-    // Should match the first ANTHROPIC_MODELS entry
-    expect(modelId).toBe(ANTHROPIC_MODELS[0]!.id)
+    expect(modelId).toBe('claude-opus-4-8')
+    expect(ANTHROPIC_MODELS.map(model => model.id)).toContain(modelId)
   })
 
   // Regression: Pi 'anthropic' default must be present in its own model list
@@ -402,5 +456,47 @@ describe('Claude Fable 5', () => {
     expect(fromBedrockNativeId('anthropic.claude-fable-5')).toBe('claude-fable-5')
     // Bedrock-native id resolves to display metadata too
     expect(getModelDisplayName('us.anthropic.claude-fable-5')).toBe('Fable 5')
+  })
+})
+
+describe('Claude Opus 5 and Sonnet 5', () => {
+  it('registers both models with 1M context windows', () => {
+    const opus = ANTHROPIC_MODELS.find(m => m.id === 'claude-opus-5')
+    const sonnet = ANTHROPIC_MODELS.find(m => m.id === 'claude-sonnet-5')
+
+    expect(opus).toMatchObject({
+      name: 'Opus 5',
+      shortName: 'Opus',
+      contextWindow: 1_000_000,
+      descriptionKey: 'model.opusDesc',
+    })
+    expect(sonnet).toMatchObject({
+      name: 'Sonnet 5',
+      shortName: 'Sonnet',
+      contextWindow: 1_000_000,
+      descriptionKey: 'model.sonnetDesc',
+    })
+  })
+
+  it('preserves Opus 4.8 as the Anthropic default while exposing newer models', () => {
+    expect(getDefaultModelForConnection('anthropic')).toBe('claude-opus-4-8')
+    expect(getModelDisplayName('claude-opus-5')).toBe('Opus 5')
+    expect(getModelDisplayName('claude-sonnet-5')).toBe('Sonnet 5')
+    expect(getModelContextWindow('claude-opus-5')).toBe(1_000_000)
+    expect(getModelContextWindow('claude-sonnet-5')).toBe(1_000_000)
+  })
+
+  it('round-trips new models through Bedrock inference-profile mappings', () => {
+    expect(toBedrockNativeId('claude-opus-5')).toBe('us.anthropic.claude-opus-5')
+    expect(toBedrockNativeId('claude-sonnet-5', 'eu')).toBe('eu.anthropic.claude-sonnet-5')
+    expect(fromBedrockNativeId('us.anthropic.claude-opus-5')).toBe('claude-opus-5')
+    expect(fromBedrockNativeId('global.anthropic.claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(getModelDisplayName('eu.anthropic.claude-opus-5')).toBe('Opus 5')
+  })
+
+  it('marks Sonnet 5 as always-on adaptive thinking', () => {
+    expect(isAdaptiveThinkingAlwaysOnModel('claude-sonnet-5')).toBe(true)
+    expect(isAdaptiveThinkingAlwaysOnModel('us.anthropic.claude-sonnet-5')).toBe(true)
+    expect(isAdaptiveThinkingAlwaysOnModel('claude-opus-5')).toBe(false)
   })
 })

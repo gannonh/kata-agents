@@ -13,9 +13,12 @@ describe('anthropicDriver.fetchModels', () => {
       data: [
         { id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6', created_at: '2026-01-01T00:00:00Z', type: 'model' },
         { id: 'claude-opus-4-8', display_name: 'Claude Opus 4.8', created_at: '2026-05-01T00:00:00Z', type: 'model' },
+        { id: 'claude-opus-5', display_name: 'Claude Opus 5', created_at: '2026-07-24T00:00:00Z', type: 'model' },
         { id: 'claude-opus-4-7', display_name: 'Claude Opus 4.7', created_at: '2026-04-01T00:00:00Z', type: 'model' },
         { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5', created_at: '2025-11-01T00:00:00Z', type: 'model' },
+        { id: 'claude-opus-4-1-20250805', display_name: 'Claude Opus 4.1', created_at: '2025-08-05T00:00:00Z', type: 'model' },
         { id: 'claude-sonnet-4-6', display_name: 'Claude Sonnet 4.6', created_at: '2026-01-01T00:00:00Z', type: 'model' },
+        { id: 'claude-sonnet-5', display_name: 'Claude Sonnet 5', created_at: '2026-06-30T00:00:00Z', type: 'model' },
       ],
       has_more: false,
       first_id: 'claude-opus-4-6',
@@ -39,10 +42,15 @@ describe('anthropicDriver.fetchModels', () => {
     expect(result.serverDefault).toBe('claude-opus-4-8');
     expect(result.models.map(m => m.id)).toEqual([
       'claude-opus-4-8',
+      'claude-opus-5',
       'claude-opus-4-7',
       'claude-sonnet-4-6',
+      'claude-sonnet-5',
     ]);
+    expect(result.models.some(m => m.id === 'claude-opus-4-1-20250805')).toBe(false);
     expect(result.models[0]!.name).toBe('Opus 4.8');
     expect(result.models[0]!.contextWindow).toBe(1_000_000);
+    expect(result.models.find(m => m.id === 'claude-opus-5')!.contextWindow).toBe(1_000_000);
+    expect(result.models.find(m => m.id === 'claude-sonnet-5')!.contextWindow).toBe(1_000_000);
   });
 });

@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "默认主题",
   "settings.appearance.description": "主题、字体、工具图标",
   "settings.appearance.editFile": "编辑文件",
+  "settings.appearance.expandToolActivity": "展开工具活动",
+  "settings.appearance.expandToolActivityDesc": "在聊天中自动展开工具输入和输出",
   "settings.appearance.font": "字体",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "系统",

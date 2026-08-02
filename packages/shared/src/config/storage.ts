@@ -1723,6 +1723,10 @@ function modelSetEquals(a: string[], b: string[]): boolean {
   return true;
 }
 
+function modelListEquals(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
 export function inferModelSelectionMode(
   connection: Pick<LlmConnection, 'models'>,
   providerDefaultModelIds: string[],
@@ -1779,7 +1783,7 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
 
       if (mode === 'automaticallySyncedFromProvider') {
         const currentIds = normalizeModelIds(connection.models);
-        if (providerDefaultModelIds.length > 0 && !modelSetEquals(currentIds, providerDefaultModelIds)) {
+        if (providerDefaultModelIds.length > 0 && !modelListEquals(currentIds, providerDefaultModelIds)) {
           connection.models = defaultModels;
           changed = true;
         }

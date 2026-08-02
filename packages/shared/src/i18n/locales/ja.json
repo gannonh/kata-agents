@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "デフォルトテーマ",
   "settings.appearance.description": "テーマ、フォント、ツールアイコン",
   "settings.appearance.editFile": "ファイルを編集",
+  "settings.appearance.expandToolActivity": "ツールアクティビティを展開",
+  "settings.appearance.expandToolActivityDesc": "チャットでツールの入力と出力を自動的に開きます",
   "settings.appearance.font": "フォント",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "システム",

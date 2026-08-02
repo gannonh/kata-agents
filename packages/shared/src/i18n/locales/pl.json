@@ -938,6 +938,8 @@
   "settings.appearance.defaultTheme": "Domyślny motyw",
   "settings.appearance.description": "Motyw, czcionka, ikony narzędzi",
   "settings.appearance.editFile": "Edytuj plik",
+  "settings.appearance.expandToolActivity": "Rozwiń aktywność narzędzi",
+  "settings.appearance.expandToolActivityDesc": "Automatycznie otwieraj dane wejściowe i wyjściowe narzędzi na czacie",
   "settings.appearance.font": "Czcionka",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "System",

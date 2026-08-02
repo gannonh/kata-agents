@@ -62,6 +62,7 @@ import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
 import { ANTHROPIC_MODELS, getModelShortName, getModelDisplayName, getModelContextWindow, type ModelDefinition } from '@config/models'
 import {
+  getModelsForConnection,
   resolveEffectiveConnectionSlug,
   isCompatProvider,
   modelSupportsImages,
@@ -372,7 +373,8 @@ export function FreeFormInput({
       return ANTHROPIC_MODELS // Safety net — shouldn't happen
     }
 
-    return connection.models || ANTHROPIC_MODELS
+    // Preserve provider-aware empty results (notably model-less pi_compat endpoints).
+    return getModelsForConnection(connection)
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
   const selectedModel = React.useMemo(
@@ -2219,8 +2221,8 @@ export function FreeFormInput({
                           </StyledDropdownMenuSubTrigger>
                           {isAuthenticated && (
                             <StyledDropdownMenuSubContent className="min-w-[220px]">
-                              {/* Show models for this connection - use provider-specific models as fallback */}
-                              {(conn.models || ANTHROPIC_MODELS).map((model) => {
+                              {/* Resolve models through the connection's provider-aware catalog. */}
+                              {getModelsForConnection(conn).map((model) => {
                                 const modelId = typeof model === 'string' ? model : model.id
                                 const modelName = typeof model === 'string'
                                   ? stripPiPrefixForDisplay(getModelShortName(model))

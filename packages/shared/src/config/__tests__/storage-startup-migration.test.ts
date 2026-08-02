@@ -178,6 +178,40 @@ describe('startup migration (integration)', () => {
     expect(modelIds).toContain(connection.defaultModel)
   })
 
+  it('reorders automatically synced OpenAI Codex models to provider display order', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const expectedModels = [
+      'pi/gpt-5.6-sol',
+      'pi/gpt-5.6-terra',
+      'pi/gpt-5.6-luna',
+      'pi/gpt-5.5',
+      'pi/gpt-5.4',
+      'pi/gpt-5.4-mini',
+      'pi/gpt-5.3-codex-spark',
+    ]
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'chatgpt-plus',
+        name: 'ChatGPT Plus',
+        providerType: 'pi',
+        authType: 'oauth',
+        piAuthProvider: 'openai-codex',
+        modelSelectionMode: 'automaticallySyncedFromProvider',
+        createdAt: Date.now(),
+        models: [...expectedModels].reverse(),
+        defaultModel: expectedModels[0],
+      },
+    ])
+
+    runMigration(configDir)
+
+    const migrated = JSON.parse(readFileSync(configPath, 'utf-8'))
+    const connection = migrated.llmConnections.find((entry: any) => entry.slug === 'chatgpt-plus')
+    expect(connection).toBeDefined()
+    expect(getModelIds(connection)).toEqual(expectedModels)
+  })
+
   it('repairs userDefined3Tier lists by removing invalid IDs and fixing default model', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
 

@@ -33,6 +33,7 @@ type BindingListener = (workspaceId: string) => void
 type WhatsAppEventListener = (payload: { workspaceId: string; event: WhatsAppUiEvent }) => void
 
 const PLAYGROUND_WORKSPACE_ID = 'playground-workspace'
+let playgroundExpandToolActivityByDefault = false
 
 type AllowListPlatform = 'telegram' | 'whatsapp' | 'lark'
 
@@ -319,6 +320,11 @@ export const mockElectronAPI = {
   // ChatDisplay required mocks
   readPreferences: async () => {
     return { diffViewerSettings: { showFilePath: true, expandedSections: {} } }
+  },
+
+  getExpandToolActivityByDefault: async () => playgroundExpandToolActivityByDefault,
+  setExpandToolActivityByDefault: async (enabled: boolean) => {
+    playgroundExpandToolActivityByDefault = enabled
   },
 
   writePreferences: async (prefs: unknown) => {
