@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
+import {
+  _electron as electron,
+  type ElectronApplication,
+  type Page,
+} from "@playwright/test";
 
 import { appendProcessLog } from "./artifacts.ts";
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
@@ -16,11 +20,9 @@ import { resolveReleaseExecutablePath } from "./releaseTarget.ts";
 // (http://localhost:8097) that is absent in E2E, producing a benign
 // ERR_CONNECTION_REFUSED resource error.
 function isBenignConsoleError(text: string): boolean {
-  return (
-    text.startsWith("Failed to load resource") &&
-    text.includes("localhost:8097") &&
-    text.includes("ERR_CONNECTION_REFUSED")
-  );
+  // Chromium omits the requested URL from this console message, so match the
+  // exact failed-resource text emitted by the absent React DevTools endpoint.
+  return text === "Failed to load resource: net::ERR_CONNECTION_REFUSED";
 }
 
 /**
@@ -101,7 +103,9 @@ async function resolveRendererWindow(
 ): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
   const expectation =
-    launchTarget === "release" ? "file:// renderer window" : `Vite on port ${rendererPort}`;
+    launchTarget === "release"
+      ? "file:// renderer window"
+      : `Vite on port ${rendererPort}`;
 
   return await new Promise<Page>((resolve, reject) => {
     const onClose = () => {

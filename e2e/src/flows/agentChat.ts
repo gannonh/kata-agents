@@ -41,14 +41,35 @@ export async function startNewSession(page: Page): Promise<void> {
 export async function selectModel(page: Page, modelId?: string): Promise<void> {
   const targetModel = modelId ?? readAgentProviderConfig().model;
   await page.locator(MODEL_PICKER_TRIGGER_SELECTOR).first().click();
-  const modelItem = page.locator(`[data-model-id="${targetModel}"]`).first();
-  await modelItem.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
-  await modelItem.click();
+
+  // Pi-managed connections expose renderer-safe IDs with a `pi/` prefix,
+  // while the E2E environment intentionally uses the provider's bare model
+  // name. Accept both forms without changing the configured model value.
+  const candidates = [
+    targetModel,
+    targetModel.startsWith("pi/") ? targetModel.slice(3) : `pi/${targetModel}`,
+    `chatgpt-plus:${targetModel}`,
+    `chatgpt-plus:pi/${targetModel.replace(/^pi\//, "")}`,
+  ];
+  for (const candidate of [...new Set(candidates)]) {
+    const modelItem = page.locator(`[data-model-id="${candidate}"]`).first();
+    if (await modelItem.isVisible().catch(() => false)) {
+      await modelItem.click();
+      return;
+    }
+  }
+
+  throw new Error(
+    `E2E model picker: could not find "${targetModel}". Tried ${[...new Set(candidates)].join(", ")}.`,
+  );
 }
 
 export async function sendAgentPrompt(page: Page, text: string): Promise<void> {
   const input = page.locator(CHAT_INPUT_SELECTOR);
-  await input.waitFor({ state: "visible", timeout: E2E_TIMEOUTS.electronWindowMs });
+  await input.waitFor({
+    state: "visible",
+    timeout: E2E_TIMEOUTS.electronWindowMs,
+  });
   await input.click();
   await input.fill(text);
   await page.locator(SEND_BUTTON_SELECTOR).click();
