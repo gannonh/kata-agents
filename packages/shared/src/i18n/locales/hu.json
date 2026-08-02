@@ -932,6 +932,8 @@
   "settings.appearance.defaultTheme": "Alapértelmezett téma",
   "settings.appearance.description": "Téma, betűtípus, eszközikonok",
   "settings.appearance.editFile": "Fájl szerkesztése",
+  "settings.appearance.expandToolActivity": "Eszköztevékenység kibontása",
+  "settings.appearance.expandToolActivityDesc": "Az eszközök bemenetének és kimenetének automatikus megnyitása a csevegésben",
   "settings.appearance.font": "Betűtípus",
   "settings.appearance.fontInter": "Inter",
   "settings.appearance.fontSystem": "Rendszer",

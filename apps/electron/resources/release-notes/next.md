@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Expanded tool activity preference** — Appearance → Interface now lets users keep tool inputs and outputs expanded by default. Individual turns can still be collapsed or expanded independently.
+
 - **Claude model catalog** — Direct Anthropic models now appear as Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5. Retired Opus 4.1 is removed, existing connections retain active provider entries, and the Claude Agent SDK is updated to 0.3.220 with 1M-token metadata and Sonnet 5 adaptive-thinking support.
 
 ## Bug Fixes

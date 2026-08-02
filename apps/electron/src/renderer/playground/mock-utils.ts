@@ -321,6 +321,9 @@ export const mockElectronAPI = {
     return { diffViewerSettings: { showFilePath: true, expandedSections: {} } }
   },
 
+  getExpandToolActivityByDefault: async () => false,
+  setExpandToolActivityByDefault: async (_enabled: boolean) => {},
+
   writePreferences: async (prefs: unknown) => {
     console.log('[Playground] writePreferences called:', prefs)
   },

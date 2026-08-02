@@ -33,6 +33,8 @@ export interface UserPreferences {
   diffViewer?: DiffViewerPreferences;
   // Whether to include Co-Authored-By trailer on git commits (default: true)
   includeCoAuthoredBy?: boolean;
+  // Whether tool activity sections start expanded in chat (default: false)
+  expandToolActivityByDefault?: boolean;
   /**
    * Internal: persisted UI language code (mirrors Appearance → Language).
    * Maintained only by the main-process `i18n:changeLanguage` IPC handler.
@@ -219,4 +221,22 @@ export function formatPreferencesDisplay(): string {
 export function getCoAuthorPreference(): boolean {
   const prefs = loadPreferences();
   return prefs.includeCoAuthoredBy !== false;
+}
+
+/**
+ * Whether tool activity sections should start expanded in chat.
+ * Defaults to collapsed when the preference is not explicitly enabled.
+ */
+export function getExpandToolActivityByDefault(): boolean {
+  return loadPreferences().expandToolActivityByDefault === true;
+}
+
+/**
+ * Persist the default tool activity expansion preference.
+ * Idempotent to avoid unnecessary preferences file writes.
+ */
+export function setExpandToolActivityByDefault(enabled: boolean): void {
+  const current = loadPreferences();
+  if (current.expandToolActivityByDefault === enabled) return;
+  savePreferences({ ...current, expandToolActivityByDefault: enabled });
 }

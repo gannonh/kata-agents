@@ -36,6 +36,8 @@ interface PreferencesFormState {
   city: string
   country: string
   notes: string
+  /** Preserved while this page edits the user-facing preference fields. */
+  expandToolActivityByDefault?: boolean
 }
 
 const emptyFormState: PreferencesFormState = {
@@ -56,6 +58,9 @@ function parsePreferences(json: string): PreferencesFormState {
       city: prefs.location?.city || '',
       country: prefs.location?.country || '',
       notes: prefs.notes || '',
+      expandToolActivityByDefault: typeof prefs.expandToolActivityByDefault === 'boolean'
+        ? prefs.expandToolActivityByDefault
+        : undefined,
     }
   } catch {
     return emptyFormState
@@ -77,6 +82,9 @@ function serializePreferences(state: PreferencesFormState): string {
   }
 
   if (state.notes) prefs.notes = state.notes
+  if (state.expandToolActivityByDefault !== undefined) {
+    prefs.expandToolActivityByDefault = state.expandToolActivityByDefault
+  }
   prefs.updatedAt = Date.now()
 
   return JSON.stringify(prefs, null, 2)

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
-import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel } from '@kata-sh/shared/config'
+import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel, getExpandToolActivityByDefault, setExpandToolActivityByDefault } from '@kata-sh/shared/config'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@kata-sh/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -29,6 +29,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.power.GET_KEEP_AWAKE,
   RPC_CHANNELS.appearance.GET_RICH_TOOL_DESCRIPTIONS,
   RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS,
+  RPC_CHANNELS.appearance.GET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT,
+  RPC_CHANNELS.appearance.SET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT,
   RPC_CHANNELS.caching.GET_EXTENDED_PROMPT_CACHE,
   RPC_CHANNELS.caching.SET_EXTENDED_PROMPT_CACHE,
   RPC_CHANNELS.caching.GET_ENABLE_1M_CONTEXT,
@@ -283,6 +285,16 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS, async (_ctx, enabled: boolean) => {
     const { setRichToolDescriptions } = await import('@kata-sh/shared/config/storage')
     setRichToolDescriptions(enabled)
+  })
+
+  // Get default tool activity expansion setting
+  server.handle(RPC_CHANNELS.appearance.GET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT, async () => {
+    return getExpandToolActivityByDefault()
+  })
+
+  // Set default tool activity expansion setting
+  server.handle(RPC_CHANNELS.appearance.SET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT, async (_ctx, enabled: boolean) => {
+    setExpandToolActivityByDefault(enabled)
   })
 
   // ============================================================
