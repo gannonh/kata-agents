@@ -197,7 +197,7 @@ export class ManagedWorktreeService {
 
         try {
           mkdirSync(join(this.worktreeRoot, workspaceId, repoKey), { recursive: true })
-          await runGit(['worktree', 'add', '-b', branch, worktreePath, baseRef], {
+          await runGit(['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseRef], {
             cwd: repositoryRoot,
             timeoutMs: 120_000,
           })

@@ -196,10 +196,8 @@ export class GitActionService {
     if (!ctx.primaryRemote) {
       return single(failure('push', 'No remote is configured for this repository.'))
     }
-    const hasUpstream = await this.hasUpstream(root)
-    const args = hasUpstream
-      ? ['push']
-      : ['push', '-u', ctx.primaryRemote, ctx.currentBranch]
+    const upstream = await this.getUpstream(root)
+    const args = this.resolvePushArgs(ctx.primaryRemote, ctx.currentBranch, upstream)
     try {
       await runGit(args, { cwd: root, timeoutMs: 120_000 })
       return { stages: [{ stage: 'push', status: 'succeeded' }] }
@@ -214,20 +212,44 @@ export class GitActionService {
 
   // --- internals -----------------------------------------------------------
 
+  /**
+   * Plain `git push` (simple mode) only succeeds when the configured upstream
+   * branch has the same name as the local branch. A branch created from a
+   * remote-tracking base ref can inherit a mismatched upstream (for example a
+   * managed worktree branch tracking origin/main), which makes plain push
+   * fail; push that branch explicitly to the same-named branch on its
+   * upstream's remote, healing the tracking config.
+   */
+  private resolvePushArgs(
+    primaryRemote: string,
+    currentBranch: string,
+    upstream: string | null,
+  ): string[] {
+    if (upstream) {
+      const slash = upstream.indexOf('/')
+      const upstreamRemote = slash > 0 ? upstream.slice(0, slash) : null
+      const upstreamBranch = slash > 0 ? upstream.slice(slash + 1) : null
+      if (upstreamBranch === currentBranch) return ['push']
+      if (upstreamRemote) return ['push', '-u', upstreamRemote, currentBranch]
+    }
+    return ['push', '-u', primaryRemote, currentBranch]
+  }
+
   private async resolveRoot(dir: string): Promise<string | null> {
     const ctx = await this.repository.getContext(dir)
     return ctx.isGitRepository ? ctx.repositoryRoot : null
   }
 
-  private async hasUpstream(root: string): Promise<boolean> {
+  private async getUpstream(root: string): Promise<string | null> {
     try {
       const res = await runGit(
         ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
         { cwd: root, okExitCodes: [128] },
       )
-      return res.exitCode === 0 && res.stdout.trim().length > 0
+      const name = res.stdout.trim()
+      return res.exitCode === 0 && name.length > 0 ? name : null
     } catch {
-      return false
+      return null
     }
   }
 

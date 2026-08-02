@@ -3,7 +3,8 @@ import { readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync } from 
 import { join } from 'node:path'
 import { createGitServices } from '../index'
 import { RepositoryService } from '../repository-service'
-import { initRepo, makeTmpDir, cleanup, git, writeFile } from './test-helpers'
+import { initRepo, makeTmpDir, cleanup, git, writeFile, GIT_ENV } from './test-helpers'
+import { runGit } from '../command-runner'
 
 const cleanups: string[] = []
 function tmp(): string {
@@ -54,6 +55,42 @@ describe('ManagedWorktreeService.createWorktree', () => {
 
     // Registry persisted it.
     expect(svc.registry.get(record.managedWorktreeId)).toBeTruthy()
+  })
+
+  test('a worktree created from a remote-tracking base ref inherits no upstream tracking', async () => {
+    // UAT regression: without --no-track, `git worktree add -b <branch> <path>
+    // origin/main` sets branch.<branch>.merge=refs/heads/main
+    // (branch.autoSetupMerge), and the first push then fails with "The
+    // upstream branch of your current branch does not match the name of your
+    // current branch."
+    const remote = tmp()
+    await runGit(['init', '--bare', '-b', 'main', remote], { cwd: process.cwd(), env: GIT_ENV })
+    const repo = tmp()
+    await initRepo(repo)
+    await git(repo, ['remote', 'add', 'origin', remote])
+    await git(repo, ['push', '-u', 'origin', 'main'])
+
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'sess1',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'origin/main',
+    })
+
+    const upstream = await runGit(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+      { cwd: record.checkoutPath, env: GIT_ENV, okExitCodes: [128] },
+    )
+    expect(upstream.exitCode).toBe(128)
+    const mergeCfg = await runGit(['config', '--get', `branch.${record.expectedBranch}.merge`], {
+      cwd: repo,
+      env: GIT_ENV,
+      okExitCodes: [1],
+    })
+    expect(mergeCfg.exitCode).toBe(1)
   })
 
   test('rejects an unknown base ref', async () => {
