@@ -6,7 +6,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **Claude Opus 5 and Sonnet 5** — Added both models to direct Anthropic and Bedrock-aware catalogs, including 1M-token context metadata and Sonnet 5 adaptive-thinking handling. Existing Claude connections retain their provider models while exposing newly registered catalog entries. Updated the Claude Agent SDK to 0.3.220.
+- **Claude model catalog** — Direct Anthropic models now appear as Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5. Retired Opus 4.1 is removed, existing connections retain active provider entries, and the Claude Agent SDK is updated to 0.3.220 with 1M-token metadata and Sonnet 5 adaptive-thinking support.
 
 ## Bug Fixes
 

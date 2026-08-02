@@ -2,7 +2,7 @@
 
 ## 2026-08-02
 
-* **Claude model picker catalog fallback**: existing direct Anthropic connections now retain provider-discovered entries while exposing newly registered catalog models; user-owned model lists remain unchanged. This keeps Claude Opus 5 and Sonnet 5 visible when a persisted catalog is stale or discovery is limited.
+* **Claude model picker catalog**: direct Anthropic connections now use the requested Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5 order, remove retired Opus 4.1, and retain active provider entries when a persisted catalog is stale; user-owned model lists remain unchanged.
 
 * **Claude Opus 5 and Sonnet 5**: upgraded the Claude Agent SDK to 0.3.220 and registered both models in direct Anthropic and Bedrock-aware catalogs with 1M-token metadata; Sonnet 5 uses the always-on adaptive-thinking path.
 

@@ -2222,7 +2222,7 @@ export function FreeFormInput({
                           {isAuthenticated && (
                             <StyledDropdownMenuSubContent className="min-w-[220px]">
                               {/* Show models for this connection - use provider-specific models as fallback */}
-                              {(conn.models || ANTHROPIC_MODELS).map((model) => {
+                              {(conn.models?.length ? getModelsForConnection(conn) : ANTHROPIC_MODELS).map((model) => {
                                 const modelId = typeof model === 'string' ? model : model.id
                                 const modelName = typeof model === 'string'
                                   ? stripPiPrefixForDisplay(getModelShortName(model))

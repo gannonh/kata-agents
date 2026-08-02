@@ -70,6 +70,7 @@ function bedrockToBareId(modelId: string): string {
 }
 
 const DEPRECATED_MODEL_REPLACEMENTS: Record<string, string> = {
+  'claude-opus-4-1-20250805': 'claude-opus-4-8',
   'claude-opus-4-5-20251101': 'claude-opus-4-8',
   'claude-opus-4-6': 'claude-opus-4-8',
   'anthropic.claude-opus-4-5-20251101-v1:0': 'anthropic.claude-opus-4-8',
@@ -150,8 +151,18 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
   // Anthropic Claude Models
   // ----------------------------------------
   {
-    id: 'claude-opus-4-8',
-    name: 'Opus 4.8',
+    id: 'claude-fable-5',
+    name: 'Fable 5',
+    shortName: 'Fable',
+    description: 'Next-generation model for complex work',
+    descriptionKey: 'model.fableDesc',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
+  },
+  {
+    id: 'claude-opus-5',
+    name: 'Opus 5',
     shortName: 'Opus',
     description: 'Most capable for complex work',
     descriptionKey: 'model.opusDesc',
@@ -160,8 +171,8 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
-    id: 'claude-opus-5',
-    name: 'Opus 5',
+    id: 'claude-opus-4-8',
+    name: 'Opus 4.8',
     shortName: 'Opus',
     description: 'Most capable for complex work',
     descriptionKey: 'model.opusDesc',
@@ -180,16 +191,6 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
-    id: 'claude-sonnet-4-6',
-    name: 'Sonnet 4.6',
-    shortName: 'Sonnet',
-    description: 'Best for everyday tasks',
-    descriptionKey: 'model.sonnetDesc',
-    provider: 'anthropic',
-    contextWindow: 200_000,
-    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
-  },
-  {
     id: 'claude-sonnet-5',
     name: 'Sonnet 5',
     shortName: 'Sonnet',
@@ -200,6 +201,16 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
   {
+    id: 'claude-sonnet-4-6',
+    name: 'Sonnet 4.6',
+    shortName: 'Sonnet',
+    description: 'Best for everyday tasks',
+    descriptionKey: 'model.sonnetDesc',
+    provider: 'anthropic',
+    contextWindow: 200_000,
+    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
+  },
+  {
     id: 'claude-haiku-4-5-20251001',
     name: 'Haiku 4.5',
     shortName: 'Haiku',
@@ -207,16 +218,6 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     descriptionKey: 'model.haikuDesc',
     provider: 'anthropic',
     contextWindow: 200_000,
-    supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
-  },
-  {
-    id: 'claude-fable-5',
-    name: 'Fable 5',
-    shortName: 'Fable',
-    description: 'Next-generation model for complex work',
-    descriptionKey: 'model.fableDesc',
-    provider: 'anthropic',
-    contextWindow: 1_000_000,
     supportedThinkingLevels: ANTHROPIC_SUPPORTED_THINKING_LEVELS,
   },
 
@@ -254,9 +255,19 @@ export const MODELS = ANTHROPIC_MODELS;
 // MODEL ID HELPERS (Derived from Registry)
 // ============================================
 
+/**
+ * Keep stable defaults independent of the display order in MODEL_REGISTRY.
+ * Opus 4.8 remains the default while newer Opus models appear first in the picker.
+ */
+const PREFERRED_MODEL_IDS_BY_SHORT_NAME: Record<string, string> = {
+  Opus: 'claude-opus-4-8',
+};
+
 /** Get the first model ID matching a short name, or undefined if not found */
 function findModelIdByShortName(shortName: string): string | undefined {
-  return MODEL_REGISTRY.find(m => m.shortName === shortName)?.id;
+  const preferredId = PREFERRED_MODEL_IDS_BY_SHORT_NAME[shortName];
+  return MODEL_REGISTRY.find(m => m.id === preferredId && m.shortName === shortName)?.id
+    ?? MODEL_REGISTRY.find(m => m.shortName === shortName)?.id;
 }
 
 /** Get the first model ID matching a short name (throws if not found) */

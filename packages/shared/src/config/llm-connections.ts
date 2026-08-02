@@ -14,6 +14,7 @@
 import {
   type ModelDefinition,
   ANTHROPIC_MODELS,
+  DEFAULT_MODEL,
   normalizeDeprecatedModelId,
 } from './models';
 import type { CredentialManager } from '../credentials/manager.ts';
@@ -655,9 +656,9 @@ export function getModelsForProviderType(providerType: LlmProviderType, piAuthPr
  * Resolve the models shown for a connection.
  *
  * Direct Anthropic connections can retain a provider-discovered catalog from an
- * earlier app version or a limited discovery response. Keep those entries and
- * append known registry models so newly supported models remain selectable.
- * User-owned model lists stay unchanged.
+ * earlier app version or a limited discovery response. Use the registry order
+ * for known models, retain unknown active provider entries, and omit deprecated
+ * entries. User-owned model lists stay unchanged.
  */
 export function getModelsForConnection(
   connection: Pick<LlmConnection, 'providerType' | 'models' | 'piAuthProvider' | 'modelSelectionMode'>,
@@ -665,11 +666,16 @@ export function getModelsForConnection(
   const storedModels = connection.models ?? [];
   if (storedModels.length > 0) {
     if (connection.providerType === 'anthropic' && connection.modelSelectionMode !== 'userDefined3Tier') {
-      const storedIds = new Set(storedModels.map(model => typeof model === 'string' ? model : model.id));
-      return [
-        ...storedModels,
-        ...ANTHROPIC_MODELS.filter(model => !storedIds.has(model.id)),
-      ];
+      const idOf = (model: ModelDefinition | string) => typeof model === 'string' ? model : model.id;
+      const activeStoredModels = storedModels.filter(model => {
+        const id = idOf(model);
+        return normalizeDeprecatedModelId(id) === id;
+      });
+      const storedById = new Map(activeStoredModels.map(model => [idOf(model), model]));
+      const registryIds = new Set(ANTHROPIC_MODELS.map(model => model.id));
+      const knownModels = ANTHROPIC_MODELS.map(model => storedById.get(model.id) ?? model);
+      const unknownModels = activeStoredModels.filter(model => !registryIds.has(idOf(model)));
+      return [...knownModels, ...unknownModels];
     }
     return storedModels;
   }
@@ -747,13 +753,16 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType, piA
 
 /**
  * Get the default model ID for a connection's provider type.
- * Derived from the first entry in getDefaultModelsForConnection() — single source of truth.
+ * Anthropic keeps its stable Opus 4.8 default independently of picker order;
+ * Pi providers use their preferred catalog order.
  *
  * @param providerType - Provider type from the connection
  * @param piAuthProvider - Optional Pi auth provider for filtering Pi models
  * @returns Default model ID string
  */
 export function getDefaultModelForConnection(providerType: LlmProviderType, piAuthProvider?: string): string {
+  if (providerType === 'anthropic') return DEFAULT_MODEL;
+
   const models = getDefaultModelsForConnection(providerType, piAuthProvider);
   const first = models[0];
   if (!first) return '';  // Dynamic provider — no default

@@ -20,17 +20,30 @@ import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelS
 // ============================================================
 
 describe('getModelsForConnection', () => {
-  it('appends newly registered Anthropic models to a stale provider catalog', () => {
+  it('orders the registry models and removes deprecated entries from a stale catalog', () => {
     const models = getModelsForConnection({
       providerType: 'anthropic',
       modelSelectionMode: 'automaticallySyncedFromProvider',
-      models: [ANTHROPIC_MODELS.find(model => model.id === 'claude-opus-4-8')!],
+      models: [
+        'claude-fable-5',
+        'claude-opus-4-8',
+        'claude-opus-4-7',
+        'claude-sonnet-4-6',
+        'claude-haiku-4-5-20251001',
+        'claude-opus-4-1-20250805',
+      ],
     })
     const ids = models.map(model => typeof model === 'string' ? model : model.id)
 
-    expect(ids[0]).toBe('claude-opus-4-8')
-    expect(ids).toContain('claude-opus-5')
-    expect(ids).toContain('claude-sonnet-5')
+    expect(ids).toEqual([
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-sonnet-5',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5-20251001',
+    ])
   })
 
   it('preserves user-defined model lists', () => {
@@ -138,12 +151,12 @@ describe('getDefaultModelsForConnection', () => {
 // ============================================================
 
 describe('getDefaultModelForConnection', () => {
-  it('returns first model ID for anthropic', () => {
+  it('keeps Opus 4.8 as the Anthropic default independently of picker order', () => {
     const modelId = getDefaultModelForConnection('anthropic')
     expect(typeof modelId).toBe('string')
     expect(modelId.length).toBeGreaterThan(0)
-    // Should match the first ANTHROPIC_MODELS entry
-    expect(modelId).toBe(ANTHROPIC_MODELS[0]!.id)
+    expect(modelId).toBe('claude-opus-4-8')
+    expect(ANTHROPIC_MODELS.map(model => model.id)).toContain(modelId)
   })
 
   // Regression: Pi 'anthropic' default must be present in its own model list

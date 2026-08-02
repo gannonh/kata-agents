@@ -843,13 +843,13 @@ export default function AiSettingsPage() {
     }
 
     // Build model string from connection's models array
-    const modelStr = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
+    const modelStr = getModelsForConnection(connection)
+      .map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .join(', ') || connection.defaultModel || ''
 
     // Set initial values before opening overlay so ApiKeyInput mounts with them
-    const modelIds = connection.models
-      ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
+    const modelIds = getModelsForConnection(connection)
+      .map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .filter(Boolean)
 
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
