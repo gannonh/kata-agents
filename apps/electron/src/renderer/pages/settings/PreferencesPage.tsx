@@ -90,6 +90,24 @@ function serializePreferences(state: PreferencesFormState): string {
   return JSON.stringify(prefs, null, 2)
 }
 
+/**
+ * Preserve the independently managed expansion preference when this page writes
+ * the full preferences document. Appearance settings can update it while this
+ * form remains mounted, so the form's initial snapshot is not authoritative.
+ *
+ * A failed refresh rejects the save rather than falling back to the stale form
+ * snapshot, which would reintroduce the data-loss race this protects against.
+ */
+async function serializePreferencesWithLatestExpansion(state: PreferencesFormState): Promise<string> {
+  const result = await window.electronAPI.readPreferences()
+  const current = JSON.parse(result.content) as Record<string, unknown>
+  const expandToolActivityByDefault = typeof current.expandToolActivityByDefault === 'boolean'
+    ? current.expandToolActivityByDefault
+    : undefined
+
+  return serializePreferences({ ...state, expandToolActivityByDefault })
+}
+
 export default function PreferencesPage() {
   const { t } = useTranslation()
   const [formState, setFormState] = useState<PreferencesFormState>(emptyFormState)
@@ -141,7 +159,7 @@ export default function PreferencesPage() {
     // Debounce save by 500ms
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        const json = serializePreferences(formState)
+        const json = await serializePreferencesWithLatestExpansion(formState)
         const result = await window.electronAPI.writePreferences(json)
         if (result.success) {
           lastSavedRef.current = json
@@ -168,13 +186,20 @@ export default function PreferencesPage() {
         clearTimeout(saveTimeoutRef.current)
       }
 
-      // Check if there are unsaved changes and save immediately
-      const currentJson = serializePreferences(formStateRef.current)
-      if (lastSavedRef.current !== currentJson && !isInitialLoadRef.current) {
-        // Fire and forget - we can't await in cleanup
-        window.electronAPI.writePreferences(currentJson).catch((err) => {
-          console.error('Failed to save preferences on unmount:', err)
-        })
+      // Check if there are unsaved changes and save immediately. Refresh the
+      // independently managed expansion field before writing the full document.
+      if (lastSavedRef.current !== serializePreferences(formStateRef.current) && !isInitialLoadRef.current) {
+        // Fire and forget - we can't await in cleanup.
+        void serializePreferencesWithLatestExpansion(formStateRef.current)
+          .then((currentJson) => {
+            if (lastSavedRef.current !== currentJson) {
+              return window.electronAPI.writePreferences(currentJson)
+            }
+            return undefined
+          })
+          .catch((err) => {
+            console.error('Failed to save preferences on unmount:', err)
+          })
       }
     }
   }, [])

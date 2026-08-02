@@ -577,6 +577,7 @@ export interface ElectronAPI {
   setRichToolDescriptions(enabled: boolean): Promise<void>
   getExpandToolActivityByDefault(): Promise<boolean>
   setExpandToolActivityByDefault(enabled: boolean): Promise<void>
+  onExpandToolActivityByDefaultChange(callback: (enabled: boolean) => void): () => void
 
   // Prompt caching & context
   getExtendedPromptCache(): Promise<boolean>

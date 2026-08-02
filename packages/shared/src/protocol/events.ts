@@ -39,6 +39,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.theme.SYSTEM_CHANGED]: [isDark: boolean]
   [RPC_CHANNELS.theme.PREFERENCES_CHANGED]: [preferences: { mode: string; colorTheme: string; font: string }]
   [RPC_CHANNELS.theme.WORKSPACE_THEME_CHANGED]: [data: { workspaceId: string; themeId: string | null }]
+  [RPC_CHANNELS.appearance.EXPAND_TOOL_ACTIVITY_BY_DEFAULT_CHANGED]: [enabled: boolean]
 
   // Update broadcasts (global) — canonical state for sidebar pill + Settings
   [RPC_CHANNELS.update.STATE_CHANGED]: [state: DesktopUpdateState]

@@ -13,7 +13,8 @@
 
 import { Brain } from 'lucide-react'
 import { getProviderIcon, getProviderIconForTheme } from '@/lib/provider-icons'
-import { useTheme } from '@/context/ThemeContext'
+import { useContext } from 'react'
+import { ThemeContext } from '@/context/ThemeContext'
 import { getModelDisplayName } from '@config/models'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import type { LlmConnectionWithStatus } from '../../../shared/types'
@@ -30,7 +31,8 @@ interface ConnectionIconProps {
 }
 
 export function ConnectionIcon({ connection, size = 16, className = '', showTooltip = false }: ConnectionIconProps) {
-  const { isDark } = useTheme()
+  // Standalone playground/test renders may not install ThemeProvider.
+  const isDark = useContext(ThemeContext)?.isDark ?? false
   const providerIcon = getProviderIconForTheme(
     getProviderIcon(
       connection.providerType || connection.type || '',

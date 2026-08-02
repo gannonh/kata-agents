@@ -14,7 +14,7 @@ import {
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontFamily = 'inter' | 'system'
 
-interface ThemeContextType {
+export interface ThemeContextType {
   // Preferences (persisted at app level)
   mode: ThemeMode
   /** App-level default color theme (used when workspace has no override) */
@@ -72,7 +72,7 @@ interface StoredTheme {
   isUserOverride?: boolean
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 const bundledThemeModules = import.meta.glob('../../../resources/themes/*.json', {
   eager: true,

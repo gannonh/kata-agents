@@ -6,7 +6,7 @@ import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
 import { getWorkspaceOrThrow } from '@kata-sh/server-core/handlers'
-import type { RpcServer } from '@kata-sh/server-core/transport'
+import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@kata-sh/server-core/transport'
 import { isValidWorkingDirectory } from '../../utils/path-validation'
@@ -295,6 +295,7 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Set default tool activity expansion setting
   server.handle(RPC_CHANNELS.appearance.SET_EXPAND_TOOL_ACTIVITY_BY_DEFAULT, async (_ctx, enabled: boolean) => {
     setExpandToolActivityByDefault(enabled)
+    pushTyped(server, RPC_CHANNELS.appearance.EXPAND_TOOL_ACTIVITY_BY_DEFAULT_CHANGED, { to: 'all' }, enabled)
   })
 
   // ============================================================

@@ -109,7 +109,7 @@ export function CompactModelSelector({
   const availableModels = React.useMemo(() => {
     if (connectionUnavailable) return []
     if (!effectiveConnectionDetails) return ANTHROPIC_MODELS
-    if (!effectiveConnectionDetails.models?.length) return ANTHROPIC_MODELS
+    // Preserve provider-aware empty results (notably model-less pi_compat endpoints).
     return getModelsForConnection(effectiveConnectionDetails)
   }, [effectiveConnectionDetails, connectionUnavailable])
 
@@ -288,7 +288,7 @@ export function CompactModelSelector({
                       </button>
                       {isAuthenticated && isExpanded && (
                         <div className="pl-6 flex flex-col gap-0.5">
-                          {(conn.models?.length ? getModelsForConnection(conn) : ANTHROPIC_MODELS).map(model => {
+                          {getModelsForConnection(conn).map(model => {
                             const modelId = typeof model === 'string' ? model : model.id
                             const modelName = typeof model === 'string'
                               ? stripPiPrefixForDisplay(getModelShortName(model))

@@ -4,8 +4,9 @@ const TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT = 'kata:tool-activity-expansion-chan
 
 /**
  * Reads and updates the app-wide default for tool activity expansion.
- * The custom event keeps mounted chat views in the same renderer in sync
- * when the setting changes from Appearance settings.
+ * The Electron event keeps separate windows in sync, while the custom event
+ * keeps mounted chat views in the same renderer compatible with playgrounds
+ * and older preload bundles.
  */
 export function useToolActivityExpansion() {
   const [expandToolActivityByDefault, setExpandToolActivityByDefaultState] = useState(false)
@@ -13,14 +14,18 @@ export function useToolActivityExpansion() {
   useEffect(() => {
     let cancelled = false
 
-    const handleChange = (event: Event) => {
-      const next = (event as CustomEvent<boolean>).detail
+    const applyChange = (next: unknown) => {
       if (typeof next === 'boolean') {
         setExpandToolActivityByDefaultState(next)
       }
     }
 
-    window.addEventListener(TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT, handleChange)
+    const handleDomChange = (event: Event) => {
+      applyChange((event as CustomEvent<boolean>).detail)
+    }
+
+    window.addEventListener(TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT, handleDomChange)
+    const unsubscribe = window.electronAPI?.onExpandToolActivityByDefaultChange?.(applyChange)
 
     const loadPreference = window.electronAPI?.getExpandToolActivityByDefault
     if (loadPreference) {
@@ -37,15 +42,17 @@ export function useToolActivityExpansion() {
 
     return () => {
       cancelled = true
-      window.removeEventListener(TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT, handleChange)
+      unsubscribe?.()
+      window.removeEventListener(TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT, handleDomChange)
     }
   }, [])
 
   const setExpandToolActivityByDefault = useCallback(async (enabled: boolean) => {
-    setExpandToolActivityByDefaultState(enabled)
-
     try {
+      // Update the local UI only after persistence succeeds so a rejected save
+      // cannot leave the toggle showing a value that will be lost on reload.
       await window.electronAPI?.setExpandToolActivityByDefault(enabled)
+      setExpandToolActivityByDefaultState(enabled)
       window.dispatchEvent(new CustomEvent(TOOL_ACTIVITY_EXPANSION_CHANGED_EVENT, { detail: enabled }))
     } catch (error) {
       console.error('Failed to save tool activity expansion preference:', error)

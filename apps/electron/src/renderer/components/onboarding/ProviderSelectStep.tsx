@@ -1,7 +1,8 @@
+import { useContext } from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { getOpenAiIcon } from "@/lib/provider-icons"
-import { useTheme } from "@/context/ThemeContext"
+import { ThemeContext } from "@/context/ThemeContext"
 import { Key, Monitor } from "lucide-react"
 import { KataAgentsSymbol } from "@/components/icons/KataAgentsSymbol"
 import { StepFormLayout } from "./primitives"
@@ -23,7 +24,8 @@ interface ProviderOption {
 }
 
 function OpenAiIcon() {
-  const { isDark } = useTheme()
+  // Standalone playground/test renders may not install ThemeProvider.
+  const isDark = useContext(ThemeContext)?.isDark ?? false
   return <img src={getOpenAiIcon(isDark)} alt="" className="size-5 rounded-[3px]" />
 }
 

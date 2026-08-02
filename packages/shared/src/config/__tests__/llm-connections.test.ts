@@ -55,6 +55,21 @@ describe('getModelsForConnection', () => {
 
     expect(models).toEqual(['claude-opus-4-8'])
   })
+
+  it('uses the provider resolver when a Pi connection has no stored models', () => {
+    const models = getModelsForConnection({
+      providerType: 'pi',
+      piAuthProvider: 'anthropic',
+    })
+
+    expect(models.length).toBeGreaterThan(0)
+    expect(models.every(model => (typeof model === 'string' ? model : model.id).startsWith('pi/'))).toBe(true)
+  })
+
+  it('keeps model-less custom endpoints empty', () => {
+    expect(getModelsForConnection({ providerType: 'pi_compat' })).toEqual([])
+    expect(getModelsForConnection({ providerType: 'pi_compat', models: [] })).toEqual([])
+  })
 })
 
 describe('hydratePiConnectionModels', () => {
