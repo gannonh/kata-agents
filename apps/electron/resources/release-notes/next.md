@@ -8,6 +8,4 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Managed worktree push from a remote base ref** — Fixed push and push & PR failing with `fatal: The upstream branch of your current branch does not match the name of your current branch` when a managed worktree was created from a remote-tracking base ref such as `origin/main`. New worktrees no longer inherit upstream tracking from their base ref, and push now heals a mismatched upstream by pushing the branch to its own same-named remote branch.
-
 ## Breaking Changes
