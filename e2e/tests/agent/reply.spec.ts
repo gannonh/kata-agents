@@ -7,7 +7,10 @@ import {
   sendAgentPrompt,
   startNewSession,
 } from "../../src/flows/agentChat.ts";
-import { completeApiKeyOnboarding } from "../../src/flows/onboarding.ts";
+import {
+  completeApiKeyOnboarding,
+  completeConfiguredChatGptOnboarding,
+} from "../../src/flows/onboarding.ts";
 import {
   formatMissingPrerequisiteError,
   readAgentProviderConfig,
@@ -26,12 +29,24 @@ test.describe(`Agent reply ${E2E_TAGS.agent}`, () => {
   }) => {
     const prerequisite = readAgentProviderPrerequisite();
     if (!prerequisite.ok) {
-      throw new Error(formatMissingPrerequisiteError("Agent reply test", prerequisite.missing));
+      throw new Error(
+        formatMissingPrerequisiteError(
+          "Agent reply test",
+          prerequisite.missing,
+        ),
+      );
     }
-    const { model } = readAgentProviderConfig();
+    const { model, provider } = readAgentProviderConfig();
+    console.log(
+      `[e2e] Agent provider=${provider} model=${model} credential=${provider === "openai-codex" ? "chatgpt-plus OAuth" : "Anthropic API key"}`,
+    );
 
     const page = appWindow;
-    await completeApiKeyOnboarding(page);
+    if (provider === "openai-codex") {
+      await completeConfiguredChatGptOnboarding(page, model);
+    } else {
+      await completeApiKeyOnboarding(page);
+    }
     await waitForAppReady(page);
 
     const turn = buildDeterministicAgentTurn();

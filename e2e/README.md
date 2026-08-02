@@ -13,8 +13,11 @@ bun run electron:build   # produces apps/electron/dist/main.cjs + bootstrap-prel
 
 The harness fails loud if the desktop build artifacts are missing.
 
-For the `@agent` tier, a real Anthropic key must be in the repo root `.env`
-(either `KATA_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY`).
+For the `@agent` tier, the default is the existing `chatgpt-plus` ChatGPT
+OAuth credential. The Codex path never opens a browser or reads an API key.
+Set `KATA_E2E_AGENT_PROVIDER=anthropic` only when you explicitly want to run
+the API-key path, using a real key in the repo root `.env` (`KATA_ANTHROPIC_API_KEY`
+or `ANTHROPIC_API_KEY`).
 
 ## Commands
 
@@ -22,6 +25,7 @@ For the `@agent` tier, a real Anthropic key must be in the repo root `.env`
 bun run e2e --list                              # list desktop-dev tests
 bun run e2e                                     # all tests, desktop-dev project
 bun run e2e --grep @smoke                       # one tier
+bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
 bun run e2e:codegen                             # record WebUI flows with Playwright CodeGen
@@ -49,6 +53,7 @@ KATA_E2E_RELEASE_APP="$KATA_APP" bun run e2e:release
 ```
 
 Why a dedicated build step:
+
 - `build-dmg.sh` stages the root-hoisted `@anthropic-ai/claude-agent-sdk` and
   `@vscode/ripgrep` into `apps/electron/node_modules` so the packaged main
   process can boot. A bare `electron-builder` run ships an app that never opens
@@ -64,12 +69,13 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 
 ## Test tiers
 
-| Tag | Fixture | What it does |
-|---|---|---|
-| `@smoke` | `appWindow` | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline. |
-| `@settings` | `authenticatedAppWindow` | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted. |
-| `@agent` | (in-test) | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`. |
-| `@oauth` | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
+| Tag         | Fixture                                | What it does                                                                                                                                                                                           |
+| ----------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@smoke`    | `appWindow`                            | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline.                                                                                                            |
+| `@settings` | `authenticatedAppWindow`               | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted.                                                                                                                     |
+| `@agent`    | (in-test)                              | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
+| `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
+| `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
 
 ## Commands (OAuth tier)
 
@@ -128,25 +134,26 @@ relying on the flow as durable coverage.
 
 ## Environment variables
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `KATA_CONFIG_DIR` | Set per-run by the harness (temp dir). | — |
-| `KATA_VITE_PORT` | Set per-run by the harness (allocated free port). | — |
-| `KATA_E2E_RELEASE_APP` | Packaged `.app` path for `desktop-release`. | unset → loud error |
-| `KATA_E2E_AGENT_PROVIDER` | `@agent` provider: `anthropic` or `openai`. | `anthropic` |
-| `KATA_E2E_AGENT_MODEL` | Composer model id picked in `@agent`. | per-provider default |
-| `KATA_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY` | Anthropic key for `@agent`. | from `.env` |
-| `KATA_OPENAI_API_KEY` / `OPENAI_API_KEY` | OpenAI key for `@agent` (provider=openai). | from `.env` |
-| `KATA_E2E_WORKERS` | Worker count. | `1` |
-| `KATA_E2E_VIDEO` | `1` retains video on failure. | off |
-| `KATA_E2E_AUTH_TIMEOUT_MS` | Settings/auth wait budget. | `15000` |
-| `KATA_E2E_AGENT_REPLY_TIMEOUT_MS` | Agent reply wait budget. | `60000` |
-| `KATA_E2E_*_TIMEOUT_MS` | Other timeout knobs (see `src/config/timeouts.ts`). | per-knob |
+| Variable                                       | Purpose                                                                           | Default                                                    |
+| ---------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `KATA_CONFIG_DIR`                              | Set per-run by the harness (temp dir).                                            | —                                                          |
+| `KATA_VITE_PORT`                               | Set per-run by the harness (allocated free port).                                 | —                                                          |
+| `KATA_E2E_RELEASE_APP`                         | Packaged `.app` path for `desktop-release`.                                       | unset → loud error                                         |
+| `KATA_E2E_AGENT_PROVIDER`                      | `@agent` provider: `openai-codex` or `anthropic`.                                 | `openai-codex`                                             |
+| `KATA_E2E_AGENT_MODEL`                         | Composer model id picked in `@agent`.                                             | per-provider default                                       |
+| `KATA_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY` | Anthropic key for `@agent`.                                                       | from `.env`                                                |
+| `KATA_OPENAI_API_KEY` / `OPENAI_API_KEY`       | Reserved for future API-key provider coverage; Codex uses stored OAuth instead.   | unset                                                      |
+| `KATA_E2E_WORKERS`                             | Worker count.                                                                     | `1`                                                        |
+| `KATA_E2E_VIDEO`                               | `1` retains video on failure.                                                     | off                                                        |
+| `KATA_E2E_AUTH_TIMEOUT_MS`                     | Settings/auth wait budget.                                                        | `15000`                                                    |
+| `KATA_E2E_AGENT_REPLY_TIMEOUT_MS`              | Agent reply wait budget.                                                          | `60000`                                                    |
+| `KATA_E2E_GIT_REPO`                            | Existing GitHub checkout cloned as the source for the temporary `@git` workspace. | `/Volumes/EVO/dev/uat-runs/kata-agents/github-integration` |
+| `KATA_E2E_*_TIMEOUT_MS`                        | Other timeout knobs (see `src/config/timeouts.ts`).                               | per-knob                                                   |
 
-> `@agent` provider note: the validated onboarding UI path is the Anthropic
-> API-key endpoint. `KATA_E2E_AGENT_PROVIDER=openai` selects the OpenAI key and
-> model defaults, but a provider whose onboarding UI differs may need the
-> onboarding flow extended.
+> `@agent` provider note: `openai-codex` is the default and provisions the
+> isolated test config from the existing `chatgpt-plus` OAuth credential without
+> opening a browser or asking for an API key. `anthropic` explicitly drives the
+> API-key onboarding path.
 
 ## Architecture
 
@@ -185,3 +192,4 @@ pipeline; generic harness modules must not import flows.
 - Parallel isolation (subprocess server ports near RPC 9100) for `workers > 1`.
 - macOS CI runner strategy before any CI adoption.
 - Real `desktop-release` validation against a packaged `.app`.
+- The `@git` tier requires an authenticated `gh` session and closes its created PR and deletes its remote branch during cleanup.

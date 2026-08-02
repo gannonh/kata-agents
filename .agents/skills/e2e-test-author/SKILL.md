@@ -43,8 +43,9 @@ Read [`e2e/README.md`](../../../e2e/README.md) first.
 
 - `appWindow` — launched app, `#root` mounted. Use for `@smoke`.
 - `authenticatedAppWindow` — deferred-setup → ready shell. Use for `@settings`.
-- `@agent` drives real API-key onboarding in-test (it needs to reach ready with
-  a configured provider, not deferred setup).
+- `@agent` drives the configured real provider in-test. It defaults to the
+  existing `chatgpt-plus` OAuth credential; set `KATA_E2E_AGENT_PROVIDER=anthropic`
+  explicitly for API-key onboarding.
 
 ## Reaching app states
 
@@ -55,8 +56,11 @@ Boot is driven by `getSetupNeeds()`:
 
 ## Authoring an @agent test
 
-1. Drive `completeApiKeyOnboarding` (provider select → "I use other provider" →
-   fill the "API Key" textbox → Continue → "Get Started").
+1. Drive the provider-specific onboarding flow. The default
+   `openai-codex` path reuses the existing `chatgpt-plus` OAuth credential;
+   explicit `anthropic` uses `completeApiKeyOnboarding` (provider select → "I
+   use other provider" → fill the "API Key" textbox → Continue → "Get
+   Started").
 2. `startNewSession` to mount the composer (`[data-tutorial="chat-input"]`).
 3. `selectModel` — the onboarding default model can be stale and 404; pick a
    current registry model from the composer dropdown.
@@ -76,5 +80,5 @@ them. Wizard copy and model lists change.
 bun run e2e --list
 bun run e2e --grep @smoke      # offline
 bun run e2e --grep @settings
-bun run e2e --grep @agent      # needs provider key in .env
+bun run e2e --grep @agent      # uses ChatGPT OAuth by default; Anthropic needs a key
 ```
