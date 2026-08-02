@@ -13,13 +13,13 @@
 import type { Locale } from "date-fns";
 
 // ─── Translation resources ───────────────────────────────────────────────────
-import enMessages from "./locales/en.json";
-import esMessages from "./locales/es.json";
-import zhHansMessages from "./locales/zh-Hans.json";
-import jaMessages from "./locales/ja.json";
-import huMessages from "./locales/hu.json";
-import deMessages from "./locales/de.json";
-import plMessages from "./locales/pl.json";
+import enMessages from "./locales/en.json" with { type: "json" };
+import esMessages from "./locales/es.json" with { type: "json" };
+import zhHansMessages from "./locales/zh-Hans.json" with { type: "json" };
+import jaMessages from "./locales/ja.json" with { type: "json" };
+import huMessages from "./locales/hu.json" with { type: "json" };
+import deMessages from "./locales/de.json" with { type: "json" };
+import plMessages from "./locales/pl.json" with { type: "json" };
 
 // ─── date-fns locales ────────────────────────────────────────────────────────
 import { enUS } from "date-fns/locale/en-US";

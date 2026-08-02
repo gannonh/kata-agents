@@ -1,6 +1,6 @@
 // Version is read from package.json — the single source of truth.
 // All build scripts, CI workflows, and runtime code use this value.
-import pkg from '../../package.json';
+import pkg from '../../package.json' with { type: 'json' };
 
 export const APP_VERSION: string = pkg.version;
 
