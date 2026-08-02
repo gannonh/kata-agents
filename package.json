@@ -1,6 +1,6 @@
 {
   "name": "kata-agents",
-  "version": "0.10.8",
+  "version": "0.10.9",
   "license": "Apache-2.0",
   "description": "Kata Agents — desktop app, headless server, and CLI for AI agent sessions",
   "type": "module",
