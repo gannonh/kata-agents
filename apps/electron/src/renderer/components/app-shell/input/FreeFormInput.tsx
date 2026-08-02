@@ -62,6 +62,7 @@ import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
 import { ANTHROPIC_MODELS, getModelShortName, getModelDisplayName, getModelContextWindow, type ModelDefinition } from '@config/models'
 import {
+  getModelsForConnection,
   resolveEffectiveConnectionSlug,
   isCompatProvider,
   modelSupportsImages,
@@ -372,7 +373,8 @@ export function FreeFormInput({
       return ANTHROPIC_MODELS // Safety net — shouldn't happen
     }
 
-    return connection.models || ANTHROPIC_MODELS
+    if (!connection.models?.length) return ANTHROPIC_MODELS
+    return getModelsForConnection(connection)
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
   const selectedModel = React.useMemo(
