@@ -2,6 +2,8 @@
 
 ## 2026-08-02
 
+* **Claude model picker catalog fallback**: existing direct Anthropic connections now retain provider-discovered entries while exposing newly registered catalog models; user-owned model lists remain unchanged. This keeps Claude Opus 5 and Sonnet 5 visible when a persisted catalog is stale or discovery is limited.
+
 * **Claude Opus 5 and Sonnet 5**: upgraded the Claude Agent SDK to 0.3.220 and registered both models in direct Anthropic and Bedrock-aware catalogs with 1M-token metadata; Sonnet 5 uses the always-on adaptive-thinking path.
 
 * **OpenAI model picker order**: ChatGPT/Codex models now display in the requested GPT-5.6 Sol, Terra, Luna, GPT-5.5, GPT-5.4, GPT-5.4 mini, and GPT-5.3 Codex Spark order, including startup synchronization for existing automatically managed connections.

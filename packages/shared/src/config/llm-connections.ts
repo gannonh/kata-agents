@@ -652,6 +652,32 @@ export function getModelsForProviderType(providerType: LlmProviderType, piAuthPr
 }
 
 /**
+ * Resolve the models shown for a connection.
+ *
+ * Direct Anthropic connections can retain a provider-discovered catalog from an
+ * earlier app version or a limited discovery response. Keep those entries and
+ * append known registry models so newly supported models remain selectable.
+ * User-owned model lists stay unchanged.
+ */
+export function getModelsForConnection(
+  connection: Pick<LlmConnection, 'providerType' | 'models' | 'piAuthProvider' | 'modelSelectionMode'>,
+): Array<ModelDefinition | string> {
+  const storedModels = connection.models ?? [];
+  if (storedModels.length > 0) {
+    if (connection.providerType === 'anthropic' && connection.modelSelectionMode !== 'userDefined3Tier') {
+      const storedIds = new Set(storedModels.map(model => typeof model === 'string' ? model : model.id));
+      return [
+        ...storedModels,
+        ...ANTHROPIC_MODELS.filter(model => !storedIds.has(model.id)),
+      ];
+    }
+    return storedModels;
+  }
+
+  return getModelsForProviderType(connection.providerType, connection.piAuthProvider);
+}
+
+/**
  * Get the default model list for a connection's provider type.
  * Unlike getModelsForProviderType(), this handles compat providers by returning
  * the appropriate compat-prefixed model IDs instead of an empty array.

@@ -3,6 +3,7 @@ import '../../../tests/setup/register-pi-model-resolver.ts'
 import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
+  getModelsForConnection,
   isCompatProvider,
   isAnthropicProvider,
   isPiProvider,
@@ -17,6 +18,31 @@ import { ANTHROPIC_MODELS, getModelDisplayName, getModelContextWindow, getModelS
 // ============================================================
 // getDefaultModelsForConnection
 // ============================================================
+
+describe('getModelsForConnection', () => {
+  it('appends newly registered Anthropic models to a stale provider catalog', () => {
+    const models = getModelsForConnection({
+      providerType: 'anthropic',
+      modelSelectionMode: 'automaticallySyncedFromProvider',
+      models: [ANTHROPIC_MODELS.find(model => model.id === 'claude-opus-4-8')!],
+    })
+    const ids = models.map(model => typeof model === 'string' ? model : model.id)
+
+    expect(ids[0]).toBe('claude-opus-4-8')
+    expect(ids).toContain('claude-opus-5')
+    expect(ids).toContain('claude-sonnet-5')
+  })
+
+  it('preserves user-defined model lists', () => {
+    const models = getModelsForConnection({
+      providerType: 'anthropic',
+      modelSelectionMode: 'userDefined3Tier',
+      models: ['claude-opus-4-8'],
+    })
+
+    expect(models).toEqual(['claude-opus-4-8'])
+  })
+})
 
 describe('hydratePiConnectionModels', () => {
   it('hydrates string entries with provider-scoped OpenAI and Codex capabilities', () => {
