@@ -19,6 +19,7 @@ import {
 export function useGitStatusSubscription(
   sessionId: string | undefined,
   enabled: boolean,
+  checkoutPath?: string | null,
 ): GitStatusState {
   const state = useAtomValue(gitStatusAtomFamily(sessionId ?? '__no_session__'))
 
@@ -26,7 +27,7 @@ export function useGitStatusSubscription(
     if (!enabled || !sessionId) return
     void acquireGitStatus(sessionId)
     return () => releaseGitStatus(sessionId)
-  }, [enabled, sessionId])
+  }, [checkoutPath, enabled, sessionId])
 
   return state
 }

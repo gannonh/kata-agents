@@ -105,7 +105,11 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
   const { onSendMessage } = useAppShellContext()
   const session = useSession(sessionId ?? '__no_session__')
 
-  const { status, loading, error, lastUpdatedAt } = useGitStatusSubscription(sessionId ?? undefined, flagEnabled)
+  const { status, loading, error, lastUpdatedAt } = useGitStatusSubscription(
+    sessionId ?? undefined,
+    flagEnabled,
+    session?.checkout?.checkoutPath ?? session?.workingDirectory,
+  )
   const summary = deriveStatusSummary(status)
 
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)

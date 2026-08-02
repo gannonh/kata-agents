@@ -20,15 +20,16 @@ import { useGitStatusSubscription } from './useGitStatusSubscription'
 
 export interface ChangesAffordanceProps {
   sessionId: string
+  checkoutPath?: string | null
 }
 
-export function ChangesAffordance({ sessionId }: ChangesAffordanceProps) {
+export function ChangesAffordance({ sessionId, checkoutPath }: ChangesAffordanceProps) {
   const { t } = useTranslation()
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
   const navState = useNavigationState()
   const { updateRightSidebar } = useNavigation()
 
-  const { status } = useGitStatusSubscription(sessionId, flagEnabled)
+  const { status } = useGitStatusSubscription(sessionId, flagEnabled, checkoutPath)
   const summary = deriveStatusSummary(status)
 
   const isOpen = navState.rightSidebar?.type === 'changes'

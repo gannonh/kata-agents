@@ -95,7 +95,11 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
   const { t } = useTranslation()
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
   const session = useSession(sessionId)
-  const { status } = useGitStatusSubscription(sessionId, flagEnabled)
+  const { status } = useGitStatusSubscription(
+    sessionId,
+    flagEnabled,
+    session?.checkout?.checkoutPath ?? session?.workingDirectory,
+  )
 
   const [capability, setCapability] = React.useState<GitHubCapabilityStatus | null>(null)
   const [pullRequest, setPullRequest] = React.useState<PullRequestSummary | null>(null)
@@ -104,6 +108,7 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
   const [commitOpen, setCommitOpen] = React.useState(false)
   const [commitMode, setCommitMode] = React.useState<CommitMode>('commit')
   const [prOpen, setPrOpen] = React.useState(false)
+  const [prPushRequired, setPrPushRequired] = React.useState(false)
   const [prDefaults, setPrDefaults] = React.useState<{ title: string; body: string }>({
     title: '',
     body: '',
@@ -213,13 +218,17 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
     setCommitOpen(true)
   }, [])
 
-  const openPr = React.useCallback(() => {
-    setPrDefaults({
-      title: status?.latestCommitSubject || firstLine(session?.name ?? '') || (branch ?? ''),
-      body: status?.pullRequestTemplate ?? '',
-    })
-    setPrOpen(true)
-  }, [status?.latestCommitSubject, status?.pullRequestTemplate, session?.name, branch])
+  const openPr = React.useCallback(
+    (pushBeforeCreate = false) => {
+      setPrPushRequired(pushBeforeCreate)
+      setPrDefaults({
+        title: status?.latestCommitSubject || firstLine(session?.name ?? '') || (branch ?? ''),
+        body: status?.pullRequestTemplate ?? '',
+      })
+      setPrOpen(true)
+    },
+    [status?.latestCommitSubject, status?.pullRequestTemplate, session?.name, branch],
+  )
 
   const doPush = React.useCallback(
     () => window.electronAPI.pushGit(sessionId),
@@ -257,8 +266,10 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
         void run(doPush)
         break
       case 'push-pr':
+        openPr(true)
+        break
       case 'create-pr':
-        openPr()
+        openPr(false)
         break
       case 'pull':
         void run(() => window.electronAPI.pullGit(sessionId))
@@ -293,6 +304,12 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
       if (commitMode === 'commit-push') {
         await run(doPush)
       } else if (commitMode === 'commit-push-pr') {
+        const pushRes = await run(doPush)
+        const pushed = pushRes?.stages.some(
+          (s) => s.stage === 'push' && s.status === 'succeeded',
+        )
+        if (!pushed) return
+        setPrPushRequired(false)
         setPrDefaults({ title: firstLine(message), body: '' })
         setPrOpen(true)
       }
@@ -302,6 +319,15 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
 
   const handlePrSubmit = React.useCallback(
     async (title: string, body: string) => {
+      if (prPushRequired) {
+        const pushRes = await run(doPush)
+        const pushed = pushRes?.stages.some(
+          (s) => s.stage === 'push' && s.status === 'succeeded',
+        )
+        if (!pushed) return
+        setPrPushRequired(false)
+      }
+
       const res = await run(() =>
         window.electronAPI.createPullRequest({ sessionId, title, body }),
       )
@@ -309,7 +335,7 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
         setPrOpen(false)
       }
     },
-    [run, sessionId],
+    [doPush, prPushRequired, run, sessionId],
   )
 
   // --- render ---------------------------------------------------------------
@@ -384,7 +410,7 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
                 </StyledDropdownMenuItem>
               )}
               {menu.createPr && (
-                <StyledDropdownMenuItem onClick={openPr}>
+                <StyledDropdownMenuItem onClick={() => openPr(false)}>
                   {t('git.action.createPr')}
                 </StyledDropdownMenuItem>
               )}

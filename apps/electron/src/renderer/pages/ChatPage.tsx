@@ -607,7 +607,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const headerActions = (
     <>
       <GitActionControl sessionId={sessionId} />
-      <ChangesAffordance sessionId={sessionId} />
+      <ChangesAffordance
+        sessionId={sessionId}
+        checkoutPath={session?.checkout?.checkoutPath ?? session?.workingDirectory}
+      />
       {isCompactMode ? compactInfoButton : shareButton}
     </>
   )
