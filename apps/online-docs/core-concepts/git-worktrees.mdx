@@ -9,11 +9,12 @@ keywords: ["git", "github", "worktree", "commit", "pull request", "gh"]
   `KATA_FEATURE_GIT_WORKSPACE_V1=0` on the workspace-owning machine to disable them.
 </Note>
 
-When a session's working directory is inside a Git repository, Kata Agents can
-give that session its own **managed worktree** — an isolated checkout on a
-temporary branch — so the agent's work stays separate from your current checkout.
-You can then review the changes and commit, pull, push, or open a GitHub pull
-request without leaving the app.
+When a session's working directory is inside an existing Git repository, Kata
+Agents can give that session its own **managed worktree** — an isolated
+checkout on a temporary branch — so the agent's work stays separate from your
+current checkout. Creating a workspace or session does not initialize or
+publish a repository. You can review the changes and commit, pull, push, or
+open a GitHub pull request without leaving the app.
 
 ## Where Git runs
 

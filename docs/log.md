@@ -1,5 +1,15 @@
 # Documentation Bundle Update Log
 
+## 2026-08-02
+
+* **WebUI OAuth relay E2E unblocked**: the Node-launched WebUI harness crashed on `Bun.password`; `packages/server-core/src/webui/auth.ts` now keeps Bun Argon2id as primary and falls back to Node `crypto.scrypt` in-memory hashing only when `Bun.password` is unavailable. The relay specs were updated to the real local OAuth/MCP fixture and pass.
+
+* **Root test baseline recorded**: root `bun run test` fails 24 tests that reproduce identically on the base SHA (BrowserPaneManager mock drift, stale RPC registration expected-channel sets, cwd-dependent workspace-slug fallback, webui http-server cross-file pollution, Playwright specs swept into the Bun run). Filed as deferred work in GitHub issue #25; the `validate:ci` gate is green.
+
+* **Git/GitHub E2E verification**: updated the Git/GitHub V1 roadmap, build report, and validation evidence to record the passing macOS local lifecycle flow and authenticated real-GitHub commit/push/pull-request cleanup flow. The authenticated fixture clones the configured UAT repository and cleans up its PR and remote branch.
+
+* **Agent E2E OAuth default**: documented that `openai-codex` with the existing `chatgpt-plus` OAuth credential is the default `@agent` path; Anthropic API-key onboarding requires an explicit provider override.
+
 ## 2026-08-01
 
 * **Stable feature defaults**: enabled the Git/GitHub V1 managed-worktree experience and the Server settings page by default. Both remain disableable through their `KATA_FEATURE_*` environment overrides; updated the release documentation for the 0.10.8 stable rollout.

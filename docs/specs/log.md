@@ -1,5 +1,15 @@
 # Specs Update Log
 
+## 2026-08-02
+
+* **WebUI OAuth relay E2E unblocked**: `packages/server-core/src/webui/auth.ts` adds a Node `crypto.scrypt` password-hash fallback for the Node-launched WebUI harness while retaining Bun Argon2id as primary; the relay specs now run against the real local OAuth/MCP fixture and pass.
+
+* **Root test baseline recorded**: root `bun run test` has 24 failures that reproduce identically on the base SHA; none are regressions from this work. Tracked in GitHub issue #25. The `validate:ci` gate passes.
+
+* **Git/GitHub V1 verification completed**: the macOS `@git` suite now covers both a disposable non-GitHub lifecycle flow and an authenticated real-GitHub flow that commits, pushes, creates a pull request, and cleans up the PR and remote branch. Updated the Git/GitHub build report, roadmap, and validation evidence.
+
+* **Agent E2E OAuth default**: the local `@agent` harness now defaults to `openai-codex` with the existing `chatgpt-plus` OAuth credential and uses the Anthropic API-key path only when explicitly selected.
+
 ## 2026-08-01
 
 * **Stable feature defaults**: enabled the Git/GitHub V1 managed-worktree experience and the Server settings page by default. Both remain disableable through their `KATA_FEATURE_*` environment overrides; updated the release documentation for the 0.10.8 stable rollout.

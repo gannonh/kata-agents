@@ -3,7 +3,7 @@ type: ValidationEvidence
 title: Git and GitHub worktrees V1 — validation evidence
 description: Playground captures of the production Git workspace surfaces plus the test coverage standing in for server-side invariants with no visual surface.
 tags: [git, github, worktrees, validation, evidence, electron]
-timestamp: 2026-07-29T00:00:00Z
+timestamp: 2026-08-02T00:00:00Z
 ---
 
 # Git and GitHub worktrees V1 — validation evidence
@@ -20,11 +20,15 @@ bun run playground:dev   # → http://localhost:5173/playground.html
 # Category "Git Workspace" → "Git Workspace acceptance" → pick a variant
 ```
 
-The visual pass is paired with `e2e/tests/git/managed-worktree.spec.ts`, a
-real-Electron, real-Git test that creates a disposable repository and managed
-worktree, reviews an external file change, commits it, verifies the repository
-state, and confirms destructive worktree removal. That harness intentionally
-remains macOS-only and fails loud on unsupported hosts.
+The visual pass is paired with two real-Electron, real-Git tests. The local
+`e2e/tests/git/managed-worktree.spec.ts` flow creates a disposable repository
+with a non-GitHub remote, reviews an external file change, commits it, verifies
+the repository state, and confirms destructive worktree removal. The
+`e2e/tests/git/github-integration.spec.ts` flow clones the configured UAT
+repository to a temporary workspace, commits, pushes, creates a real pull
+request, and closes the pull request plus deletes its branch during cleanup.
+Both harnesses intentionally remain macOS-only and fail loud on unsupported
+hosts.
 
 ## Vertical slices
 
@@ -88,8 +92,11 @@ Each has real-repository coverage:
 
 - `packages/server-core/src/handlers/rpc/headless-server-flow.test.ts`: real
   repository/server lifecycle and session-addressed removal.
-- `e2e/tests/git/managed-worktree.spec.ts`: real Electron/Git vertical flow,
-  including four screenshot attachments when run on a macOS GUI host.
+- `e2e/tests/git/managed-worktree.spec.ts`: real Electron/Git local vertical
+  flow, including screenshot attachments when run on a macOS GUI host.
+- `e2e/tests/git/github-integration.spec.ts`: authenticated real GitHub flow
+  covering commit, push, pull-request creation, and cleanup of the temporary
+  remote branch.
 - `packages/server-core/src/git/__tests__/repository-service.test.ts`: PR title
   and body defaults from the latest commit subject and repository template.
 - `apps/electron/src/renderer/atoms/__tests__/git-status.test.ts`: IPC status
@@ -97,10 +104,11 @@ Each has real-repository coverage:
 
 ## Host limitations
 
-- The real Electron Playwright harness is macOS-only. It is implemented and
-  discovered on this Linux host; the captures above come from the production
-  renderer components that flow drives.
-- This host has no authenticated `gh` session, so only the non-mutating
-  missing-CLI guidance was exercised live (visible in slice 3). Authenticated
-  GitHub mutation paths stay covered by deterministic adapter tests against a
-  fake `gh` executable.
+- The real Electron Playwright harness is macOS-only and requires a GUI
+  session. The local and authenticated flows were run successfully on the
+  supported macOS host.
+- The authenticated flow requires `gh` and `KATA_E2E_GIT_REPO`. It clones the
+  configured source checkout into a temporary directory, then closes the test
+  pull request and deletes its remote branch during cleanup. Environments
+  without authenticated `gh` can run the local non-GitHub flow; deterministic
+  adapter/RPC tests cover the authenticated argument and failure paths.

@@ -170,3 +170,32 @@ that stalled the `@agent` tier. Switched to dotenv-style semantics: a `\s+#`
 comment after a value is dropped, and quoted values take their interior literally
 (including anything after the closing quote). Unquoted values also get trailing
 comments stripped. Existing `process.env` values still win.
+
+## Addendum (2026-08-02): OAuth agent default and GitHub V1 coverage
+
+The `@agent` harness now defaults to `openai-codex` with the existing
+`chatgpt-plus` ChatGPT OAuth credential and `gpt-5.6-luna`. It does not open a
+browser or read an API key. Set `KATA_E2E_AGENT_PROVIDER=anthropic` explicitly
+to exercise the Anthropic API-key onboarding path.
+
+Git/GitHub V1 added two real-Electron, real-Git flows under `@git`:
+`managed-worktree.spec.ts` covers the disposable local lifecycle against a
+non-GitHub remote, and `github-integration.spec.ts` clones the configured UAT
+repository to a temporary workspace, commits, pushes, creates a real pull
+request, and cleans up the pull request plus remote branch. Both flows pass on
+the supported macOS GUI host.
+
+The WebUI OAuth relay tier (`e2e/tests/web/oauth-relay.spec.ts`) runs the
+Node-launched server against the real local OAuth/MCP fixture. To support the
+Node harness, `packages/server-core/src/webui/auth.ts` keeps Bun Argon2id as
+the primary password hash and adds a Node `crypto.scrypt` in-memory fallback
+selected only when `Bun.password` is unavailable.
+
+Root `bun run test` status (2026-08-02): 5144 pass, 24 fail. Every named
+failure reproduces identically on the base SHA with all changes stashed, so
+none are regressions from this work: 8 BrowserPaneManager mock drift, 2 RPC
+registration expected-channel sets missing `git:*`/`rtk:*`, 1 workspace-slug
+cwd-dependent fallback, 6 webui http-server cross-file pollution (all pass
+standalone), plus Playwright specs swept into the Bun run as unhandled errors.
+Tracked as deferred work in GitHub issue #25. The CI gate (`validate:ci`)
+passes.

@@ -130,16 +130,17 @@ Commit: `d3b56b6`.
    - `apps/electron/resources/release-notes/next.md` — flag-gated feature bullet.
    - `docs/specs/index.md`, spec status → Implemented, logs updated, this report.
 6. **E2E and visual evidence (AC21).**
-   `e2e/tests/git/managed-worktree.spec.ts` is now an executable serial
-   real-Electron/real-Git flow rather than `test.fixme` placeholders. It creates
-   a disposable repository, prepares a managed worktree, verifies persisted
-   identity, reviews an external change, confirms missing-`gh` guidance is
-   non-mutating, commits through the UI, validates the real Git state, and
-   confirms destructive removal while preserving a unique branch. Stable test
-   selectors were added only at feature boundaries. A production-component
-   playground fixture and four checked-in screenshots cover the four vertical
-   slices; see
-   [`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
+   `e2e/tests/git/managed-worktree.spec.ts` is an executable serial
+   real-Electron/real-Git local flow. It creates a disposable repository with a
+   non-GitHub remote, prepares a managed worktree, verifies persisted identity,
+   reviews an external change, commits through the UI, validates the real Git
+   state, and confirms destructive removal while preserving a unique branch.
+   `e2e/tests/git/github-integration.spec.ts` clones the configured UAT
+   repository to a temporary workspace and drives authenticated commit, push,
+   pull-request creation, and cleanup of the test PR and remote branch. Stable
+   test selectors were added only at feature boundaries. A production-component
+   playground fixture and checked-in screenshots cover the four vertical
+   slices; see [`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
 7. **Tests** for delete-time cleanup safety, shared-owner block, archive
    preservation, and recovery badges as listed above.
 
@@ -158,7 +159,7 @@ Commit: `d3b56b6`.
 | 18 | Archive preserves; delete = separate choices | Implemented (Job B2/B3) | `lifecycle.test.ts`, `worktree-removal.test.ts` |
 | 19 | Removal block on shared owner; destructive confirm; branch prune | Implemented (Job B3/B7) | `remove-worktree-safety.test.ts`, `managed-worktree-service.test.ts` |
 | 20 | Recovery/blocked states; never silent switch | Implemented (Job A2/B4) | `checkout-controls.test.ts`, `git.test.ts`, `headless-server-flow.test.ts` |
-| 21 | Automated verification, real-Git lifecycle flow, visual evidence | Implemented | `headless-server-flow.test.ts`; `managed-worktree.spec.ts`; `docs/validation/git-github-worktrees-v1/` |
+| 21 | Automated verification, real-Git lifecycle flow, authenticated GitHub flow, visual evidence | Implemented | `headless-server-flow.test.ts`; `managed-worktree.spec.ts`; `github-integration.spec.ts`; `docs/validation/git-github-worktrees-v1/` |
 
 ## Verification run
 
@@ -167,21 +168,25 @@ Commit: `d3b56b6`.
 - `bun run typecheck:all` → pass across core, shared, server, Electron, and UI.
 - `bun run lint:i18n:parity` + `bun run lint:i18n:sorted` → pass
   (English plus 6 translated locales).
-- `bun run e2e -- --list --grep @git` → executable `@git` lifecycle test discovered.
+- `bun run e2e -- --list --grep @git` → both executable `@git` flows discovered.
+- `bun run e2e --grep @git` → local lifecycle and authenticated GitHub commit/push/PR cleanup flows pass on macOS.
+- `KATA_E2E_RELEASE_APP=<ad-hoc packaged app> bun run e2e:release` → all five desktop-release smoke/settings/agent/Git flows pass on macOS.
 - `NODE_OPTIONS=--max-old-space-size=4096 bunx vite build --config apps/electron/vite.config.ts` → production renderer/playground build passes.
 
 ## Environment-conditioned checks
 
-1. **Authenticated GitHub mutation.** The opt-in create/view-PR cleanup pass
+1. **Authenticated GitHub mutation.** The real create/view-PR cleanup flow
    requires `gh` to be installed and authenticated on the workspace-owning
-   machine. This validation host intentionally covered the required missing-`gh`
-   guidance path. Deterministic adapter/RPC tests still cover authenticated
-   capability, argument construction, PR parsing, push-before-create, base-ref
-   authority, partial failure, and sanitization.
+   machine plus `KATA_E2E_GIT_REPO`. The macOS UAT pass clones the configured
+   source checkout into a temporary directory, creates a real PR, then closes
+   it and deletes its remote branch during cleanup. Deterministic adapter/RPC
+   tests still cover authenticated capability, argument construction, PR
+   parsing, push-before-create, base-ref authority, partial failure, and
+   sanitization.
 2. **Real Electron execution host.** The local E2E harness is intentionally
-   macOS GUI-only. The completed `@git` test is discovered by Playwright here
-   and captures four attachments when run on its supported host; server-owned
-   lifecycle behavior runs cross-platform in the serial headless-server test.
+   macOS GUI-only. The `@git` suite now includes both a non-GitHub local
+   lifecycle flow and the authenticated GitHub flow; server-owned lifecycle
+   behavior remains covered cross-platform in the serial headless-server test.
 
 ## Post-review hardening (2026-07-29)
 
