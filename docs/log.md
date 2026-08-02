@@ -2,6 +2,8 @@
 
 ## 2026-08-02
 
+* **OpenAI model picker order**: ChatGPT/Codex models now display in the requested GPT-5.6 Sol, Terra, Luna, GPT-5.5, GPT-5.4, GPT-5.4 mini, and GPT-5.3 Codex Spark order, including startup synchronization for existing automatically managed connections.
+
 * **Managed worktree push fix**: worktrees created from a remote-tracking base ref (for example `origin/main`) inherited `branch.<branch>.merge=refs/heads/main` via `branch.autoSetupMerge`, and the resulting plain `git push` failed with the upstream-name mismatch fatal. `ManagedWorktreeService.createWorktree` now passes `--no-track`, and `GitActionService.push` heals a mismatched upstream by pushing to the branch's same-named remote counterpart while preserving matching upstreams on non-primary remotes (fork workflows). The GitHub E2E flow now selects the remote-tracking base ref, covering the UAT path.
 
 * **WebUI OAuth relay E2E unblocked**: the Node-launched WebUI harness crashed on `Bun.password`; `packages/server-core/src/webui/auth.ts` now keeps Bun Argon2id as primary and falls back to Node `crypto.scrypt` in-memory hashing only when `Bun.password` is unavailable. The relay specs were updated to the real local OAuth/MCP fixture and pass.

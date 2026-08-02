@@ -105,6 +105,19 @@ const PI_EXCLUDED_MODEL_PREFIXES: string[] = [
   'gpt-4',
 ];
 
+/** User-facing order for the compact ChatGPT/Codex model catalog. */
+const PI_DISPLAY_MODEL_ORDER: Partial<Record<string, readonly string[]>> = {
+  'openai-codex': [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex-spark',
+  ],
+};
+
 export function isDeprecatedClaudeOpus46Model(modelId: string): boolean {
   const lower = modelId.toLowerCase().replace(/^pi\//, '');
   return lower === 'claude-opus-4-6'
@@ -143,12 +156,22 @@ export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinit
     // Provider not recognized by SDK.
   }
 
+  const displayOrder = PI_DISPLAY_MODEL_ORDER[piAuthProvider];
+  const displayOrderIndex = displayOrder
+    ? new Map(displayOrder.map((modelId, index) => [modelId, index]))
+    : undefined;
+
   return sdkModels
     .filter(m => !isExcludedPiModel(m.id))
     // Bedrock: exclude bare Claude models without region prefix — they're
     // always rejected by Bedrock which requires inference profiles (us.*/eu.*/global.*).
     // Regional variants from the same catalog are kept.
     .filter(m => piAuthProvider !== 'amazon-bedrock' || !isBareBedrockClaudeModel(m.id))
+    .sort((a, b) => {
+      if (!displayOrderIndex || !displayOrder) return 0;
+      return (displayOrderIndex.get(a.id) ?? displayOrder.length)
+        - (displayOrderIndex.get(b.id) ?? displayOrder.length);
+    })
     .map(piModelToDefinition);
 }
 

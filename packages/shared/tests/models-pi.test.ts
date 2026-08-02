@@ -90,4 +90,16 @@ describe('models-pi filtering', () => {
         : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     }
   });
+
+  it('orders the ChatGPT/Codex models for the model picker', () => {
+    expect(getPiModelsForAuthProvider('openai-codex').map(model => model.id)).toEqual([
+      'pi/gpt-5.6-sol',
+      'pi/gpt-5.6-terra',
+      'pi/gpt-5.6-luna',
+      'pi/gpt-5.5',
+      'pi/gpt-5.4',
+      'pi/gpt-5.4-mini',
+      'pi/gpt-5.3-codex-spark',
+    ]);
+  });
 });
