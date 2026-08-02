@@ -4,7 +4,7 @@ export const E2E_TAGS = {
   settings: "@settings",
   agent: "@agent",
   oauth: "@oauth",
-  /** Serial Git/GitHub V1 flows (managed worktrees, Changes review). Full specs land in Phase 4. */
+  /** Serial Git/GitHub V1 flows, including the authenticated UAT repository path. */
   git: "@git",
 } as const;
 
