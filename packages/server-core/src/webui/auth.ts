@@ -7,6 +7,7 @@
  * - Rate limiting: per-IP brute-force protection on /api/auth
  */
 
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { SignJWT, jwtVerify } from 'jose'
 
 // ---------------------------------------------------------------------------
@@ -89,26 +90,91 @@ export function extractSessionCookie(cookieHeader: string | null): string | null
 }
 
 // ---------------------------------------------------------------------------
-// Password verification (argon2id via Bun.password)
+// Password verification
 // ---------------------------------------------------------------------------
+
+function scryptAsync(
+  plaintext: string,
+  salt: Buffer,
+  keyLength: number,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(
+      plaintext,
+      salt,
+      keyLength,
+      {
+        N: 16_384,
+        r: 8,
+        p: 1,
+        maxmem: 32 * 1024 * 1024,
+      },
+      (error, derivedKey) => {
+        if (error) reject(error)
+        else resolve(derivedKey)
+      },
+    )
+  })
+}
+
+const NODE_SCRYPT_PREFIX = 'scrypt'
+const NODE_SCRYPT_KEY_BYTES = 64
+
+interface BunPasswordApi {
+  hash(plaintext: string, options: { algorithm: 'argon2id' }): Promise<string>
+  verify(input: string, hash: string): Promise<boolean>
+}
+
+function getBunPasswordApi(): BunPasswordApi | undefined {
+  return (
+    globalThis as typeof globalThis & {
+      Bun?: { password?: BunPasswordApi }
+    }
+  ).Bun?.password
+}
+
+async function hashWithNode(plaintext: string): Promise<string> {
+  const salt = randomBytes(16)
+  const derivedKey = await scryptAsync(plaintext, salt, NODE_SCRYPT_KEY_BYTES)
+  return `${NODE_SCRYPT_PREFIX}$${salt.toString('base64url')}$${derivedKey.toString('base64url')}`
+}
+
+async function verifyWithNode(input: string, encodedHash: string): Promise<boolean> {
+  const [, encodedSalt, encodedKey] = encodedHash.split('$')
+  if (!encodedSalt || !encodedKey) return false
+
+  const salt = Buffer.from(encodedSalt, 'base64url')
+  const expectedKey = Buffer.from(encodedKey, 'base64url')
+  const actualKey = await scryptAsync(input, salt, expectedKey.length)
+  return actualKey.length === expectedKey.length && timingSafeEqual(actualKey, expectedKey)
+}
 
 let hashedPassword: string | null = null
 
 /**
  * Hash the login password at startup. Must be called before any auth requests.
  * The hash is stored in memory — the raw password is not retained.
+ * Bun uses its native Argon2id implementation. Node uses an in-memory scrypt
+ * hash for the Node-based WebUI E2E harness.
  */
 export async function initPasswordHash(plaintext: string): Promise<void> {
-  hashedPassword = await Bun.password.hash(plaintext, { algorithm: 'argon2id' })
+  const bunPassword = getBunPasswordApi()
+  hashedPassword = bunPassword
+    ? await bunPassword.hash(plaintext, { algorithm: 'argon2id' })
+    : await hashWithNode(plaintext)
 }
 
 /**
  * Verify a user-supplied password against the pre-hashed password.
- * Uses Bun's built-in argon2id verification (constant-time).
+ * Both runtime paths use constant-time verification.
  */
 export async function verifyPassword(input: string): Promise<boolean> {
   if (!hashedPassword) return false
-  return Bun.password.verify(input, hashedPassword)
+  if (hashedPassword.startsWith(`${NODE_SCRYPT_PREFIX}$`)) {
+    return verifyWithNode(input, hashedPassword)
+  }
+  const bunPassword = getBunPasswordApi()
+  return bunPassword ? bunPassword.verify(input, hashedPassword) : false
 }
 
 // ---------------------------------------------------------------------------
