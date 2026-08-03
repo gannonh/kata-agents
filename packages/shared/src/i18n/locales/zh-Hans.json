@@ -559,6 +559,7 @@
   "git.workspace.createWorktree": "创建工作树",
   "git.workspace.currentCheckout": "当前检出",
   "git.workspace.detached": "分离 HEAD",
+  "git.workspace.existingSelectionRequired": "发送前请选择要共享的现有工作树。",
   "git.workspace.existingWorktree": "现有工作树",
   "git.workspace.existingWorktreeNote": "新会话将共享此工作树的分支和更改。",
   "git.workspace.existingWorktreesLabel": "现有工作树",

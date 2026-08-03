@@ -259,6 +259,7 @@ function WorkspaceCheckoutBadgeInner(
       mode,
       baseRef,
       managedWorktreeId: intentKind === 'existing' ? selectedWorktreeId : null,
+      worktreeIntent: intentKind,
       workingDirectory: workingDirectory ?? null,
       prepared: !!prepared,
       hasPersistedCheckout: !!persistedCheckout,
@@ -283,7 +284,10 @@ function WorkspaceCheckoutBadgeInner(
       return { status: 'error', error: msg }
     }
     if (gate.action === 'block') {
-      const msg = t('git.workspace.baseRefRequired')
+      const msg =
+        gate.reason === 'missing-existing-selection'
+          ? t('git.workspace.existingSelectionRequired')
+          : t('git.workspace.baseRefRequired')
       setError(msg)
       setOpen(true)
       return { status: 'error', error: msg }

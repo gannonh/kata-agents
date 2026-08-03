@@ -565,6 +565,7 @@
   "git.workspace.createWorktree": "Utwórz worktree",
   "git.workspace.currentCheckout": "Bieżący checkout",
   "git.workspace.detached": "Odłączony HEAD",
+  "git.workspace.existingSelectionRequired": "Wybierz istniejący worktree do udostępnienia przed wysłaniem.",
   "git.workspace.existingWorktree": "Istniejący worktree",
   "git.workspace.existingWorktreeNote": "Nowa sesja współdzieli gałąź i zmiany tego worktree.",
   "git.workspace.existingWorktreesLabel": "Istniejące worktrees",

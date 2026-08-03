@@ -559,6 +559,7 @@
   "git.workspace.createWorktree": "ワークツリーを作成",
   "git.workspace.currentCheckout": "現在のチェックアウト",
   "git.workspace.detached": "分離 HEAD",
+  "git.workspace.existingSelectionRequired": "送信する前に、共有する既存のワークツリーを選択してください。",
   "git.workspace.existingWorktree": "既存のワークツリー",
   "git.workspace.existingWorktreeNote": "新しいセッションはこのワークツリーのブランチと変更を共有します。",
   "git.workspace.existingWorktreesLabel": "既存のワークツリー",

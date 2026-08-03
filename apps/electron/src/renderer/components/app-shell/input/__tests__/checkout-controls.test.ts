@@ -87,6 +87,7 @@ describe('resolveSendGate', () => {
       mode: 'managed-worktree',
       baseRef: null,
       managedWorktreeId: 'repo-aabbccdd',
+      worktreeIntent: 'existing',
       workingDirectory: '/repo',
       prepared: false,
       hasPersistedCheckout: false,
@@ -102,17 +103,35 @@ describe('resolveSendGate', () => {
     })
   })
 
-  test('blocks send when Existing worktree is selected but none is chosen yet', () => {
+  test('blocks an Existing intent without a selection even when a base ref is present', () => {
+    // The badge retains the Git-context base ref; without an explicit
+    // New-vs-Existing intent this would fall through to New-worktree
+    // preparation and create a worktree the user never chose.
     const decision = resolveSendGate({
       mode: 'managed-worktree',
-      baseRef: null,
+      baseRef: 'main',
       managedWorktreeId: null,
+      worktreeIntent: 'existing',
       workingDirectory: '/repo',
       prepared: false,
       hasPersistedCheckout: false,
       isGitRepository: true,
     })
-    expect(decision).toEqual({ action: 'block', reason: 'missing-base-ref' })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-existing-selection' })
+  })
+
+  test('blocks send when Existing worktree is selected but none is chosen yet', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: null,
+      worktreeIntent: 'existing',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-existing-selection' })
   })
 
   test('sends directly once a worktree has already been prepared', () => {
