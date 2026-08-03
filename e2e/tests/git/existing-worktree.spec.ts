@@ -159,10 +159,12 @@ test.describe(`Existing managed worktree sharing ${E2E_TAGS.git}`, () => {
       await page.getByTestId("git-workspace-use-worktree").click();
       await attachScreenshot(page, testInfo, "02-existing-worktree-selected");
 
-      // Persisted checkout identity: both sessions point at ONE worktree. The
-      // badge shows the Shared worktree label because owner count is now 2.
+      // Persisted checkout identity: both sessions point at ONE worktree, and
+      // both badges show the same branch label. Shared ownership is a server
+      // DTO fact (owner count 2), surfaced in the UI via the Users icon +
+      // tooltip rather than replacing the branch label.
       const identity = page.getByTestId("git-workspace-identity");
-      await expect(identity).toContainText("Shared worktree");
+      await expect(identity).toContainText(owner.checkout.expectedBranch!);
       const sessions = await readManagedWorktreeSessions(page);
       expect(sessions).toHaveLength(2);
       const sharer = sessions.find((s) => s.id !== owner.id);
@@ -173,6 +175,9 @@ test.describe(`Existing managed worktree sharing ${E2E_TAGS.git}`, () => {
       expect(sharer.checkout.checkoutPath).toBe(owner.checkout.checkoutPath);
       expect(sharer.checkout.managedWorktreeId).toBe(owner.checkout.managedWorktreeId);
       expect(sharer.checkout.expectedBranch).toBe(owner.checkout.expectedBranch);
+      // Both sessions are recorded as owners of the same worktree.
+      expect(owner.sharedOwnerCount).toBe(1);
+      expect(sharer.sharedOwnerCount).toBe(2);
       // Exactly one kata-agent branch exists — binding never recreates.
       expect(
         await git(repositoryPath, "branch", "--list", "kata-agent/*"),
@@ -205,12 +210,19 @@ test.describe(`Existing managed worktree sharing ${E2E_TAGS.git}`, () => {
       await expect(sharerOption).toBeVisible();
       await sharerOption.click();
 
-      // The remaining session still runs in the shared worktree; with the peer
-      // owner gone the badge reverts from Shared worktree to the branch label.
+      // The remaining session still runs in the shared worktree and keeps the
+      // branch label; with the peer owner gone its owner count drops back to 1
+      // so the shared indicator (Users icon + tooltip) clears.
       const sharerIdentity = page.getByTestId("git-workspace-identity");
-      await expect(sharerIdentity).toContainText(/kata-agent\/[0-9a-f]{8}/, {
+      await expect(sharerIdentity).toContainText(owner.checkout.expectedBranch!, {
         timeout: 7_000,
       });
+      await expect
+        .poll(async () => {
+          const sessions = await readManagedWorktreeSessions(page);
+          return sessions.find((s) => s.id === sharer.id)?.sharedOwnerCount;
+        })
+        .toBe(1);
 
       // Final owner deletes WITH removal → checkout is cleaned up.
       await deleteSession(page, sharer.id, "Shared Worktree Sharer", true);

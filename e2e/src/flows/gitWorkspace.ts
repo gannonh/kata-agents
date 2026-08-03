@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 export interface PreparedManagedWorktreeSession {
   readonly id: string;
+  readonly sharedOwnerCount?: number;
   readonly checkout: {
     readonly checkoutPath: string;
     readonly expectedBranch: string | null;
@@ -63,6 +64,7 @@ export async function readManagedWorktreeSessions(
           getSessions(): Promise<
             Array<{
               id: string;
+              sharedOwnerCount?: number;
               checkout?: {
                 checkoutPath: string;
                 expectedBranch: string | null;
@@ -79,6 +81,7 @@ export async function readManagedWorktreeSessions(
       .filter((candidate) => candidate.checkout?.mode === "managed-worktree")
       .map((session) => ({
         id: session.id,
+        sharedOwnerCount: session.sharedOwnerCount,
         checkout: session.checkout as PreparedManagedWorktreeSession["checkout"],
       }));
   });

@@ -72,15 +72,18 @@ owner reference is rolled back so shared-owner counts stay accurate.
 - Startup reconciliation (`reconcile`) already repairs/drops owner references
   from persisted session checkouts, so restart/resume keeps shared identity.
 - The persisted `SessionCheckoutV1.mode` stays `'managed-worktree'`, so the
-  Shared worktree label, recovery states, and mutation identity guards apply
-  unchanged.
+  branch identity label, recovery states, and mutation identity guards apply
+  unchanged. Every session bound to a worktree shows the same branch label;
+  shared ownership is conveyed by a Users icon and a Shared worktree tooltip
+  instead of replacing the branch with a generic label.
 - Empty-session auto-delete (navigate-away cleanup) now skips sessions that
   prepared a managed worktree. Previously such a session was deleted with its
   clean checkout on navigate-away; with sharing, that would silently destroy a
   checkout another session is about to bind to. The session stays visible for
   explicit deletion, which offers the worktree-aware confirmation.
 - After any session deletion, the renderer refreshes the remaining sessions'
-  DTOs so derived shared-owner counts (and the Shared worktree badge) revert
+  DTOs so derived shared-owner counts (and the shared indicator on the
+  checkout badge) revert
   immediately instead of staying stale until the next list refresh.
 
 ### UI

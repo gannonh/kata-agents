@@ -395,6 +395,9 @@ function WorkspaceCheckoutBadgeInner(
 
   // Locked managed-worktree identity (prepared, resumed, or conversation-branch
   // shared). Persists for the composer lifetime even if a later send fails.
+  // Every session shows the same branch label; shared ownership is conveyed by
+  // the Users icon and a Shared worktree tooltip so a shared checkout never
+  // hides which worktree the session is in.
   if (identity.kind === 'worktree' || identity.kind === 'shared-worktree') {
     const shared = identity.kind === 'shared-worktree'
     const branch = identity.branch ?? t('git.workspace.worktree')
@@ -451,7 +454,7 @@ function WorkspaceCheckoutBadgeInner(
       <span data-testid="git-workspace-identity">
         <FreeFormInputContextBadge
           icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}
-          label={shared ? t('git.workspace.sharedWorktree') : branch}
+          label={branch}
           isExpanded
           hasSelection
           showChevron={false}
