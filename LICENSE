@@ -176,7 +176,7 @@
 
    END OF TERMS AND CONDITIONS
 
-   Copyright 2026 Gannon Hall.
+   Copyright 2026 Craft Docs Ltd.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -189,20 +189,3 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-
-
--------------------------------------------------------------------------------
-
-Kata Agents bundles and adapts code from the following project:
-
-Craft Agents — Copyright (c) 2026 Craft Docs Ltd., distributed under the Apache 2.0 License, the full text of which is identical to the license above (with its respective copyright holder).
-
----
-
-Claude Agent SDK - Subject to Anthropic's
-Commercial Terms of Service: https://www.anthropic.com/legal/commercial-terms
-
----
-
-Third-party dependencies are listed in package.json files and are subject
-to their respective licenses.

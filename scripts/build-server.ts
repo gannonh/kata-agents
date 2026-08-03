@@ -46,6 +46,7 @@ import {
   symlinkSync,
 } from 'fs';
 import { $ } from 'bun';
+import { verifyLegalDirectory } from './verify-legal-assets';
 import {
   type Platform,
   type Arch,
@@ -116,6 +117,12 @@ function assembleResources(config: ServerBuildConfig): void {
   const { electronDir, outputDir, platform, arch } = config;
   const srcResources = join(electronDir, 'resources');
   const destResources = join(outputDir, 'resources');
+
+  console.log('  Copying legal files...');
+  for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.md']) {
+    copyFileSync(join(config.rootDir, file), join(outputDir, file));
+  }
+  verifyLegalDirectory(outputDir);
 
   console.log('  Copying docs, themes, permissions, tool-icons...');
   for (const dir of ['docs', 'themes', 'permissions', 'tool-icons']) {

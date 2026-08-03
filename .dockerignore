@@ -46,7 +46,7 @@ apps/online-docs/
 README*.md
 CONTRIBUTING*.md
 CHANGELOG*.md
-LICENSE*
+# Keep LICENSE, NOTICE, and THIRD-PARTY-NOTICES.md in the image context.
 
 # Docker files (avoid recursive context)
 Dockerfile*

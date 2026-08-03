@@ -217,6 +217,9 @@ jobs:
           fi
           echo "Found release notes: $notes"
 
+      - name: Verify legal source files
+        run: bun run verify:legal
+
   # ── Fail fast if macOS signing secrets are absent ────────────────────────────
   signing_gate:
     needs: release_meta
@@ -275,6 +278,9 @@ jobs:
         run: bun install --frozen-lockfile
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify legal files and generated notices
+        run: bun run licenses:check && bun run verify:legal
 
       - name: Align package versions to release version
         shell: bash

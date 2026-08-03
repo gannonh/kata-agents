@@ -13,6 +13,7 @@
 
 import { cpSync, copyFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+import { verifyLegalDirectory } from '../../../scripts/verify-legal-assets';
 
 // Clean stale files (e.g. renamed brand assets) so the destination mirrors the source exactly.
 rmSync('dist/resources', { recursive: true, force: true });
@@ -21,6 +22,15 @@ rmSync('dist/resources', { recursive: true, force: true });
 cpSync('resources', 'dist/resources', { recursive: true });
 
 console.log('✓ Copied resources/ → dist/resources/');
+
+// Legal files must be present at the packaged app resource root, not only in
+// the source repository. electron-builder includes dist/**/* in every target.
+const legalFiles = ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.md'];
+for (const file of legalFiles) {
+  copyFileSync(join('..', '..', file), join('dist', file));
+}
+verifyLegalDirectory('dist');
+console.log('✓ Copied and verified legal files → dist/');
 
 // Copy PowerShell parser script (for Windows command validation in Explore mode)
 // Source: packages/shared/src/agent/powershell-parser.ps1

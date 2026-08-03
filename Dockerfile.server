@@ -73,6 +73,9 @@ RUN bun install --frozen-lockfile
 
 # Copy source
 COPY . .
+# Keep the legal files explicit so future ignore-rule changes cannot remove
+# upstream attribution from the distributed image.
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 
 # Build MCP helper servers (bundled CJS — required by runtime-resolver.ts)
 RUN bun build packages/session-mcp-server/src/index.ts \

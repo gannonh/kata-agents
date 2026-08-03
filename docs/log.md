@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-03
+
+* **OSS legal distribution compliance**: restored Craft Agents' upstream `LICENSE`/`NOTICE` attribution, added the generated `THIRD-PARTY-NOTICES.md` inventory, packaged the legal files in desktop/server outputs, and added CI/release verification.
+
 ## 2026-08-02
 
 * **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
