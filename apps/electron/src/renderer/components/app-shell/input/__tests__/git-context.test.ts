@@ -1,0 +1,88 @@
+import { describe, expect, test } from 'bun:test'
+import type { RepositoryContext } from '@kata-sh/shared/protocol'
+import {
+  getGitContextRefreshKey,
+  refreshGitContext,
+  type GitContextRefreshState,
+} from '../git-context'
+
+function contextFor(branch: string): RepositoryContext {
+  return {
+    isGitRepository: true,
+    repositoryRoot: '/repo',
+    gitCommonDir: '/repo/.git',
+    currentBranch: branch,
+    detached: false,
+    headSha: null,
+    defaultRef: 'main',
+    remotes: [],
+    primaryRemote: null,
+    provider: 'other',
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
+
+describe('Git context refresh', () => {
+  test('changes its request identity when sessionId changes in the same directory', () => {
+    const featureSession = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'feature-session',
+    })
+    const mainSession = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'main-session',
+    })
+
+    expect(mainSession).not.toBe(featureSession)
+  })
+
+  test('refreshes the same directory for a new session and ignores the old result', async () => {
+    const first = deferred<RepositoryContext>()
+    const second = deferred<RepositoryContext>()
+    const requests: string[] = []
+    const states: GitContextRefreshState[] = []
+    const getContext = (directory: string) => {
+      requests.push(directory)
+      return requests.length === 1 ? first.promise : second.promise
+    }
+
+    const cancelFirst = refreshGitContext(
+      { flagEnabled: true, workingDirectory: '/repo', sessionId: 'feature-session' },
+      getContext,
+      (state) => states.push(state),
+    )
+    cancelFirst()
+
+    const secondKey = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'main-session',
+    })
+    const cancelSecond = refreshGitContext(
+      { flagEnabled: true, workingDirectory: '/repo', sessionId: 'main-session' },
+      getContext,
+      (state) => states.push(state),
+    )
+
+    expect(requests).toEqual(['/repo', '/repo'])
+    expect(states.at(-1)).toEqual({ requestKey: secondKey, context: null })
+
+    first.resolve(contextFor('feature'))
+    await Promise.resolve()
+    expect(states.some((state) => state.context?.currentBranch === 'feature')).toBe(false)
+
+    second.resolve(contextFor('main'))
+    await Promise.resolve()
+    expect(states.at(-1)).toEqual({ requestKey: secondKey, context: contextFor('main') })
+    cancelSecond()
+  })
+})

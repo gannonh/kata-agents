@@ -8,4 +8,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Git branch badge refresh** — Workspace badges now rediscover the live branch when switching sessions that share a working directory, instead of retaining the previously selected session's branch.
+
 ## Breaking Changes

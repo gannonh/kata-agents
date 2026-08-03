@@ -6,6 +6,8 @@
 
 ## 2026-08-02
 
+* **Git branch badge refresh**: fixed the Electron Workspace badge retaining a previous session's branch when sessions share a working directory; Git context requests now include session identity, clear stale state during refresh, and retain persisted managed-worktree semantics. Added focused refresh coverage and a disposable real-Git `@git` regression flow.
+
 * **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
 
 * **Claude model picker catalog**: direct Anthropic connections now use the requested Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5 order, remove retired Opus 4.1, and retain active provider entries when a persisted catalog is stale; user-owned model lists remain unchanged.
