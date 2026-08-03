@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadSession as loadStoredSession } from '@kata-sh/shared/sessions'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
@@ -331,6 +331,103 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
         managedWorktreeId: first.checkout.managedWorktreeId,
       }),
     ).rejects.toThrow(/cannot be shared/i)
+  })
+
+  test('rejects binding when the live checkout was deleted after the record became ready', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner5', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner5', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Registry still says `ready`, but the checkout is gone from disk (moved
+    // or deleted outside Kata). Binding must not persist a dead path.
+    rmSync(first.checkout.checkoutPath, { recursive: true, force: true })
+
+    injectSession(sm, 'sessStale', wsRoot)
+    await expect(
+      sm.prepareCheckout('sessStale', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId!,
+      }),
+    ).rejects.toThrow(/no longer exists/i)
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+  })
+
+  test('rejects binding when the live checkout switched branches after the record became ready', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner6', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner6', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Registry still says `ready`, but the checkout is now on another branch.
+    await git(first.checkout.checkoutPath, ['checkout', '-b', 'someone-else'])
+
+    injectSession(sm, 'sessSwitched', wsRoot)
+    await expect(
+      sm.prepareCheckout('sessSwitched', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId!,
+      }),
+    ).rejects.toThrow(/unexpected branch/i)
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+  })
+
+  test('re-checks the empty-session gate after context resolution (concurrent first-message race)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner7', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner7', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    const sharer = injectSession(sm, 'sessRace', wsRoot)
+    // Simulate another client sending the session's first message while
+    // repository discovery is still pending: the message lands before the
+    // existing-worktree branch adds ownership and binds the checkout.
+    const originalGetContext = services.repository.getContext.bind(services.repository)
+    let injected = false
+    ;(services.repository as any).getContext = async (dir: string, options?: { strict?: boolean }) => {
+      const result = await originalGetContext(dir, options)
+      if (!injected) {
+        injected = true
+        sharer.messages.push({ id: 'm1', role: 'user', content: 'hi' } as any)
+      }
+      return result
+    }
+
+    try {
+      await expect(
+        sm.prepareCheckout('sessRace', {
+          mode: 'managed-worktree',
+          workingDirectory: repo,
+          managedWorktreeId: first.checkout.managedWorktreeId!,
+        }),
+      ).rejects.toThrow(/empty session/i)
+    } finally {
+      ;(services.repository as any).getContext = originalGetContext
+    }
+    // Ownership was never added and the checkout was never rebound.
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(sharer.checkout).toBeUndefined()
   })
 
   test('releases the owner reference when binding the session fails', async () => {

@@ -5477,6 +5477,22 @@ export class SessionManager implements ISessionManager {
         throw new Error('This managed worktree belongs to a different repository.')
       }
 
+      // The registry may be stale (`ready` recorded before the checkout was
+      // deleted, moved, switched to another branch, or replaced at the same
+      // path): never persist a new session with a path that fails on its first
+      // prompt. Verify the live checkout is still the recorded repository's
+      // worktree on the expected branch.
+      const revalidated = await git.worktrees.revalidateShareable(record)
+      if (!revalidated.ok) {
+        throw new Error(revalidated.reason)
+      }
+
+      // Re-verify the empty gate after the awaits above: a concurrent send
+      // could have advanced the session while repository context was being
+      // discovered (the new-worktree path applies the same re-check after
+      // creation). Bind only while the checkout is still safe to change.
+      this.assertEmptySessionGate(managed)
+
       // `addOwner` is idempotent and throws while the record is not ready
       // (re-checked here under the same registry the list was derived from).
       git.worktrees.addOwner(record.managedWorktreeId, sessionId)
