@@ -622,9 +622,14 @@ function WorkspaceCheckoutBadgeInner(
                     <span className="flex-1 min-w-0">
                       <span className="block truncate">{worktree.expectedBranch}</span>
                       <span className="block truncate text-[11px] text-muted-foreground">
-                        {worktree.baseRef && t('git.workspace.fromRef', { ref: worktree.baseRef })}
-                        {worktree.baseRef && worktree.ownerCount > 1 && ' · '}
-                        {worktree.ownerCount > 1 &&
+                        {worktree.baseRef && worktree.ownerCount > 1 &&
+                          t('git.workspace.sharedFromRef', {
+                            count: worktree.ownerCount - 1,
+                            ref: worktree.baseRef,
+                          })}
+                        {worktree.baseRef && worktree.ownerCount <= 1 &&
+                          t('git.workspace.fromRef', { ref: worktree.baseRef })}
+                        {!worktree.baseRef && worktree.ownerCount > 1 &&
                           t('git.workspace.sharedWithCount', { count: worktree.ownerCount - 1 })}
                       </span>
                     </span>

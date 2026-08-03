@@ -578,6 +578,8 @@
   "git.workspace.recovery.missingNote": "El worktree gestionado de esta sesión se movió o eliminó fuera de Kata. Elimina la sesión para recuperarte: Kata no lo recreará automáticamente.",
   "git.workspace.searchRefs": "Buscar refs…",
   "git.workspace.searchWorktrees": "Buscar worktrees…",
+  "git.workspace.sharedFromRef_one": "Desde {{ref}} · Compartido con {{count}} sesión más",
+  "git.workspace.sharedFromRef_other": "Desde {{ref}} · Compartido con {{count}} sesiones más",
   "git.workspace.sharedWithCount_one": "Compartido con {{count}} sesión más",
   "git.workspace.sharedWithCount_other": "Compartido con {{count}} sesiones más",
   "git.workspace.sharedWorktree": "Worktree compartido",

@@ -578,6 +578,8 @@
   "git.workspace.recovery.missingNote": "このセッションの管理対象ワークツリーが Kata の外で移動または削除されました。復旧するにはセッションを削除してください。Kata は自動的に再作成しません。",
   "git.workspace.searchRefs": "ref を検索…",
   "git.workspace.searchWorktrees": "ワークツリーを検索…",
+  "git.workspace.sharedFromRef_one": "{{ref}} から · 他の {{count}} セッションと共有",
+  "git.workspace.sharedFromRef_other": "{{ref}} から · 他の {{count}} セッションと共有",
   "git.workspace.sharedWithCount_one": "他の {{count}} セッションと共有",
   "git.workspace.sharedWithCount_other": "他の {{count}} セッションと共有",
   "git.workspace.sharedWorktree": "共有ワークツリー",

@@ -578,6 +578,8 @@
   "git.workspace.recovery.missingNote": "此会话的托管工作树已在 Kata 之外被移动或删除。请删除会话以恢复——Kata 不会自动重新创建。",
   "git.workspace.searchRefs": "搜索引用…",
   "git.workspace.searchWorktrees": "搜索工作树…",
+  "git.workspace.sharedFromRef_one": "从 {{ref}} · 与另外 {{count}} 个会话共享",
+  "git.workspace.sharedFromRef_other": "从 {{ref}} · 与另外 {{count}} 个会话共享",
   "git.workspace.sharedWithCount_one": "与另外 {{count}} 个会话共享",
   "git.workspace.sharedWithCount_other": "与另外 {{count}} 个会话共享",
   "git.workspace.sharedWorktree": "共享工作树",

@@ -578,6 +578,8 @@
   "git.workspace.recovery.missingNote": "A munkamenet kezelt munkafáját a Katán kívül áthelyezték vagy eltávolították. Töröld a munkamenetet a helyreállításhoz – a Kata nem hozza létre újra automatikusan.",
   "git.workspace.searchRefs": "Refek keresése…",
   "git.workspace.searchWorktrees": "Worktree-ek keresése…",
+  "git.workspace.sharedFromRef_one": "Innen: {{ref}} · Megosztva {{count}} másik munkamenettel",
+  "git.workspace.sharedFromRef_other": "Innen: {{ref}} · Megosztva {{count}} másik munkamenettel",
   "git.workspace.sharedWithCount_one": "Megosztva {{count}} másik munkamenettel",
   "git.workspace.sharedWithCount_other": "Megosztva {{count}} másik munkamenettel",
   "git.workspace.sharedWorktree": "Megosztott worktree",

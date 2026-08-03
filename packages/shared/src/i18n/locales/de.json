@@ -578,6 +578,8 @@
   "git.workspace.recovery.missingNote": "Der verwaltete Worktree dieser Sitzung wurde außerhalb von Kata verschoben oder entfernt. Lösche die Sitzung zur Wiederherstellung – Kata erstellt ihn nicht automatisch neu.",
   "git.workspace.searchRefs": "Refs suchen…",
   "git.workspace.searchWorktrees": "Worktrees durchsuchen…",
+  "git.workspace.sharedFromRef_one": "Von {{ref}} · Mit {{count}} weiteren Sitzung geteilt",
+  "git.workspace.sharedFromRef_other": "Von {{ref}} · Mit {{count}} weiteren Sitzungen geteilt",
   "git.workspace.sharedWithCount_one": "Mit {{count}} weiteren Sitzung geteilt",
   "git.workspace.sharedWithCount_other": "Mit {{count}} weiteren Sitzungen geteilt",
   "git.workspace.sharedWorktree": "Gemeinsamer Worktree",
