@@ -78,4 +78,47 @@ test.describe(`Git branch badge refresh ${E2E_TAGS.git}`, () => {
       await rm(repositoryPath, { recursive: true, force: true });
     }
   });
+
+  test("refreshes an already-open panel when it gains focus", async ({
+    authenticatedAppWindow: page,
+  }) => {
+    const repositoryPath = await createBranchFixture();
+
+    try {
+      await useRepositoryAsWorkspaceDefault(page, repositoryPath);
+      await startNewSession(page);
+      await page.keyboard.press("Meta+t");
+
+      const panels = page.locator('[data-panel-role="content"]');
+      await expect(panels).toHaveCount(2);
+      const firstPanel = panels.nth(0);
+      const secondPanel = panels.nth(1);
+      const firstBadge = firstPanel
+        .getByTestId("git-workspace-control")
+        .locator("button");
+      const secondBadge = secondPanel
+        .getByTestId("git-workspace-control")
+        .locator("button");
+      await expect(firstBadge).toHaveAttribute(
+        "aria-label",
+        "feature/badge-refresh",
+      );
+      await expect(secondBadge).toHaveAttribute(
+        "aria-label",
+        "feature/badge-refresh",
+      );
+
+      // Change Git outside the app while the second panel remains focused.
+      await git(repositoryPath, "switch", "main");
+
+      // Clicking the existing first panel changes focus without changing its
+      // sessionId or workingDirectory, which is the regression path.
+      await firstBadge.click();
+      await page.keyboard.press("Escape");
+      await expect(firstPanel).toHaveClass(/shadow-panel-focused/);
+      await expect(firstBadge).toHaveAttribute("aria-label", "main");
+    } finally {
+      await rm(repositoryPath, { recursive: true, force: true });
+    }
+  });
 });

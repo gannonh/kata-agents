@@ -35,14 +35,33 @@ describe('Git context refresh', () => {
       flagEnabled: true,
       workingDirectory: '/repo',
       sessionId: 'feature-session',
+      isFocusedPanel: true,
     })
     const mainSession = getGitContextRefreshKey({
       flagEnabled: true,
       workingDirectory: '/repo',
       sessionId: 'main-session',
+      isFocusedPanel: true,
     })
 
     expect(mainSession).not.toBe(featureSession)
+  })
+
+  test('changes its request identity when an existing panel gains focus', () => {
+    const unfocused = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'same-session',
+      isFocusedPanel: false,
+    })
+    const focused = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'same-session',
+      isFocusedPanel: true,
+    })
+
+    expect(focused).not.toBe(unfocused)
   })
 
   test('refreshes the same directory for a new session and ignores the old result', async () => {
@@ -56,7 +75,12 @@ describe('Git context refresh', () => {
     }
 
     const cancelFirst = refreshGitContext(
-      { flagEnabled: true, workingDirectory: '/repo', sessionId: 'feature-session' },
+      {
+        flagEnabled: true,
+        workingDirectory: '/repo',
+        sessionId: 'feature-session',
+        isFocusedPanel: true,
+      },
       getContext,
       (state) => states.push(state),
     )
@@ -66,15 +90,21 @@ describe('Git context refresh', () => {
       flagEnabled: true,
       workingDirectory: '/repo',
       sessionId: 'main-session',
+      isFocusedPanel: true,
     })
     const cancelSecond = refreshGitContext(
-      { flagEnabled: true, workingDirectory: '/repo', sessionId: 'main-session' },
+      {
+        flagEnabled: true,
+        workingDirectory: '/repo',
+        sessionId: 'main-session',
+        isFocusedPanel: true,
+      },
       getContext,
       (state) => states.push(state),
     )
 
     expect(requests).toEqual(['/repo', '/repo'])
-    expect(states.at(-1)).toEqual({ requestKey: secondKey, context: null })
+    expect(states.at(-1)).toEqual({ requestKey: secondKey, context: null, status: 'loading' })
 
     first.resolve(contextFor('feature'))
     await Promise.resolve()
@@ -82,7 +112,11 @@ describe('Git context refresh', () => {
 
     second.resolve(contextFor('main'))
     await Promise.resolve()
-    expect(states.at(-1)).toEqual({ requestKey: secondKey, context: contextFor('main') })
+    expect(states.at(-1)).toEqual({
+      requestKey: secondKey,
+      context: contextFor('main'),
+      status: 'ready',
+    })
     cancelSecond()
   })
 })

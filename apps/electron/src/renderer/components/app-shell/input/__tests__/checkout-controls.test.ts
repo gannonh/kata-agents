@@ -105,7 +105,20 @@ describe('resolveSendGate', () => {
     expect(decision.action).toBe('send')
   })
 
-  test('sends directly for non-Git directories', () => {
+  test('waits for Git context before sending an unprepared worktree intent', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: false,
+      gitContextResolved: false,
+    })
+    expect(decision).toEqual({ action: 'wait' })
+  })
+
+  test('sends directly for a confirmed non-Git directory', () => {
     const decision = resolveSendGate({
       mode: 'managed-worktree',
       baseRef: null,
@@ -113,6 +126,7 @@ describe('resolveSendGate', () => {
       prepared: false,
       hasPersistedCheckout: false,
       isGitRepository: false,
+      gitContextResolved: true,
     })
     expect(decision.action).toBe('send')
   })

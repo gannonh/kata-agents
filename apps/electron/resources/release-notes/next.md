@@ -8,6 +8,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Git branch badge refresh** — Workspace badges now rediscover the live branch when switching sessions that share a working directory, instead of retaining the previously selected session's branch.
+- **Git branch badge refresh** — Workspace badges now rediscover the live branch when switching sessions that share a working directory, instead of retaining the previously selected session's branch ([#32](https://github.com/gannonh/kata-agents/pull/32), commit [ddd37f03](https://github.com/gannonh/kata-agents/commit/ddd37f03b6292595c5409cae91b2249d88cd8337)).
 
 ## Breaking Changes

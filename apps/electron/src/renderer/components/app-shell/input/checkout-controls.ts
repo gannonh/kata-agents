@@ -29,11 +29,14 @@ export interface SendGateState {
   hasPersistedCheckout: boolean
   /** Whether the active directory is inside a Git repository. */
   isGitRepository: boolean
+  /** False while Git context is still being rediscovered for this session/panel. */
+  gitContextResolved?: boolean
 }
 
 export type SendGateDecision =
   | { action: 'send' }
   | { action: 'prepare'; intent: CheckoutPrepareIntent }
+  | { action: 'wait' }
   | { action: 'block'; reason: 'missing-base-ref' }
 
 /**
@@ -41,10 +44,22 @@ export type SendGateDecision =
  *
  * A pending New worktree intent must be prepared on the workspace-owning server
  * BEFORE the message is accepted — otherwise the message would silently land in
- * the Current checkout. Current checkout, already-prepared worktrees, resumed
- * sessions, and non-Git directories send directly.
+ * the Current checkout. While Git context is unresolved, a pending worktree
+ * intent waits rather than being treated as a confirmed non-Git directory.
+ * Current checkout, already-prepared worktrees, resumed sessions, and confirmed
+ * non-Git directories send directly.
  */
 export function resolveSendGate(state: SendGateState): SendGateDecision {
+  if (
+    state.mode === 'managed-worktree' &&
+    !!state.workingDirectory &&
+    state.gitContextResolved === false &&
+    !state.prepared &&
+    !state.hasPersistedCheckout
+  ) {
+    return { action: 'wait' }
+  }
+
   if (
     !state.isGitRepository ||
     state.prepared ||

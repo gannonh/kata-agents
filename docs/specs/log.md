@@ -2,7 +2,7 @@
 
 ## 2026-08-02
 
-* **Git branch badge refresh**: closed a renderer stale-context gap in the implemented Git/GitHub V1 flow; session changes now force live Git rediscovery for shared working directories while persisted managed-worktree identity remains session-scoped. Added focused refresh coverage and a disposable real-Git Electron regression.
+* **Git branch badge refresh**: closed a renderer stale-context gap in the implemented Git/GitHub V1 flow; session and panel-focus changes now force live Git rediscovery for shared working directories while persisted managed-worktree identity remains session-scoped. Pending managed-worktree sends wait for unresolved Git context rather than bypassing preparation. Added focused refresh coverage and a disposable real-Git Electron regression.
 
 * **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
 
