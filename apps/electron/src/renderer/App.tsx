@@ -1222,8 +1222,16 @@ export default function App() {
   // offers the worktree-aware confirmation.
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
     void (async () => {
+      // The session atom may be unloaded for a lazy-loaded session while
+      // metadata is present; fall back to the backend DTO so a managed-worktree
+      // session is never auto-deleted with removeManagedWorktree enabled.
       const checkout = store.get(sessionAtomFamily(sessionId))?.checkout
       if (checkout?.mode === 'managed-worktree') return
+      if (!checkout) {
+        const sessions = await window.electronAPI.getSessions()
+        const fresh = sessions.find((s) => s.id === sessionId)
+        if (fresh?.checkout?.mode === 'managed-worktree') return
+      }
       const result = await window.electronAPI.deleteSession(sessionId, {
         removeManagedWorktree: true,
       })
@@ -1232,7 +1240,9 @@ export default function App() {
         // Keep derived shared-owner counts accurate for remaining sessions.
         void refreshSessionListMetadataFromServer({ reason: 'post-auto-delete-session' })
       }
-    })()
+    })().catch((error) => {
+      console.error(`[App] Auto-delete failed for session ${sessionId}:`, error)
+    })
   }, [store, removeSession, refreshSessionListMetadataFromServer])
 
   const handleFlagSession = useCallback((sessionId: string) => {
