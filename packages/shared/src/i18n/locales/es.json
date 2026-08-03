@@ -554,6 +554,7 @@
   "git.toast.pushFailed": "Error al hacer push",
   "git.toast.pushed": "Cambios enviados",
   "git.workspace.baseRefRequired": "Elige una referencia base para crear un nuevo worktree.",
+  "git.workspace.contextRefreshFailed": "El estado de Git no está disponible. Vuelve a enviar para reintentarlo.",
   "git.workspace.createWorktree": "Crear worktree",
   "git.workspace.currentCheckout": "Checkout actual",
   "git.workspace.detached": "HEAD desacoplado",

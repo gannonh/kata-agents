@@ -64,6 +64,46 @@ describe('Git context refresh', () => {
     expect(focused).not.toBe(unfocused)
   })
 
+  test('changes its request identity when a failed lookup is retried', () => {
+    const initial = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'same-session',
+      isFocusedPanel: true,
+      refreshToken: 0,
+    })
+    const retry = getGitContextRefreshKey({
+      flagEnabled: true,
+      workingDirectory: '/repo',
+      sessionId: 'same-session',
+      isFocusedPanel: true,
+      refreshToken: 1,
+    })
+
+    expect(retry).not.toBe(initial)
+  })
+
+  test('reports a failed lookup as an error so the caller can retry', async () => {
+    const states: GitContextRefreshState[] = []
+    const cancel = refreshGitContext(
+      {
+        flagEnabled: true,
+        workingDirectory: '/repo',
+        sessionId: 'failed-session',
+        isFocusedPanel: true,
+      },
+      async () => {
+        throw new Error('Git unavailable')
+      },
+      (state) => states.push(state),
+    )
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(states.at(-1)?.status).toBe('error')
+    cancel()
+  })
+
   test('refreshes the same directory for a new session and ignores the old result', async () => {
     const first = deferred<RepositoryContext>()
     const second = deferred<RepositoryContext>()

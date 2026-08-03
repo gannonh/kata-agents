@@ -1287,7 +1287,7 @@ export function FreeFormInput({
       setIsPreparingCheckout(true)
       try {
         const outcome = await checkoutHandle.prepareIfNeeded()
-        if (outcome.status === 'error' || outcome.status === 'waiting') return false
+        if (outcome.status === 'error') return false
       } catch {
         return false
       } finally {

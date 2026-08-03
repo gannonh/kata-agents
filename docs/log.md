@@ -6,7 +6,7 @@
 
 ## 2026-08-02
 
-* **Git branch badge refresh**: fixed the Electron Workspace badge retaining a previous session's branch when sessions share a working directory; Git context requests now include session and panel-focus identity, clear stale state during refresh, and retain persisted managed-worktree semantics. Pending worktree sends wait for context resolution instead of treating a transient refresh as confirmed non-Git. Added focused refresh coverage and a disposable real-Git `@git` regression flow.
+* **Git branch badge refresh**: fixed the Electron Workspace badge retaining a previous session's branch when sessions share a working directory; Git context requests now include session and panel-focus identity, clear stale state during refresh, and retain persisted managed-worktree semantics. Pending worktree sends wait for context resolution instead of treating a transient refresh as confirmed non-Git; failed lookups surface a localized retry message and retry on the next send. Added focused refresh coverage and a disposable real-Git `@git` regression flow.
 
 * **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
 

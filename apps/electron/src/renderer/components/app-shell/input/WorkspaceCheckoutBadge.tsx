@@ -56,7 +56,7 @@ export interface WorkspaceCheckoutBadgeProps {
 
 /** Result of a prepare-before-send attempt. */
 export interface PrepareOutcome {
-  status: 'ready' | 'not-needed' | 'waiting' | 'error'
+  status: 'ready' | 'not-needed' | 'error'
   error?: string
 }
 
@@ -103,11 +103,13 @@ function WorkspaceCheckoutBadgeInner(
   const { t } = useTranslation()
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
   const isFocusedPanel = useOptionalAppShellContext()?.isFocusedPanel ?? true
+  const [contextRefreshToken, setContextRefreshToken] = React.useState(0)
   const contextRequestKey = getGitContextRefreshKey({
     flagEnabled,
     workingDirectory,
     sessionId,
     isFocusedPanel,
+    refreshToken: contextRefreshToken,
   })
   const [contextState, setContextState] = React.useState<GitContextRefreshState>(() => ({
     requestKey: contextRequestKey,
@@ -162,12 +164,13 @@ function WorkspaceCheckoutBadgeInner(
   // ensures an already-mounted panel refreshes when it becomes active again.
   React.useEffect(() => {
     return refreshGitContext(
-      { flagEnabled, workingDirectory, sessionId, isFocusedPanel },
+      { flagEnabled, workingDirectory, sessionId, isFocusedPanel, refreshToken: contextRefreshToken },
       getLiveGitContext,
       (state) => {
         setContextState(state)
         const context = state.context
         if (state.status === 'ready' && context) {
+          setError(null)
           setBaseRef((previous) =>
             modeRef.current === 'managed-worktree' && previous !== null
               ? previous
@@ -176,7 +179,7 @@ function WorkspaceCheckoutBadgeInner(
         }
       },
     )
-  }, [flagEnabled, workingDirectory, sessionId, isFocusedPanel])
+  }, [flagEnabled, workingDirectory, sessionId, isFocusedPanel, contextRefreshToken])
 
   // Clear session-local preparation state when the selected session changes.
   // A working-directory change within the same session must preserve a
@@ -223,7 +226,15 @@ function WorkspaceCheckoutBadgeInner(
     })
 
     if (gate.action === 'send') return { status: 'not-needed' }
-    if (gate.action === 'wait') return { status: 'waiting' }
+    if (gate.action === 'wait') {
+      const msg = t('git.workspace.contextRefreshFailed')
+      setError(msg)
+      setOpen(true)
+      if (contextState.status === 'error') {
+        setContextRefreshToken((token) => token + 1)
+      }
+      return { status: 'error', error: msg }
+    }
     if (gate.action === 'block') {
       const msg = t('git.workspace.baseRefRequired')
       setError(msg)
@@ -274,6 +285,7 @@ function WorkspaceCheckoutBadgeInner(
     persistedCheckout,
     context,
     contextReady,
+    contextState.status,
     sessionId,
     updateSession,
     onWorkingDirectoryChange,
@@ -288,6 +300,23 @@ function WorkspaceCheckoutBadgeInner(
   }, [prepareIfNeeded])
 
   if (!flagEnabled) return null
+
+  // Keep a failed refresh visible so Send can show the retryable error instead
+  // of silently dropping a pending worktree intent while the badge is hidden.
+  if (error && !contextReady && workingDirectory && sessionId) {
+    return (
+      <FreeFormInputContextBadge
+        icon={<AlertTriangle className="h-4 w-4" />}
+        label={error}
+        isExpanded
+        hasSelection
+        showChevron={false}
+        className="text-destructive"
+        tooltip={error}
+        disabled
+      />
+    )
+  }
 
   const identity = resolveCheckoutIdentity({
     isGitRepository: contextReady && !!context?.isGitRepository,

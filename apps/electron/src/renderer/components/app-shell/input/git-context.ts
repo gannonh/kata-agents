@@ -6,6 +6,8 @@ export interface GitContextRefreshRequest {
   sessionId?: string
   /** Refresh when a panel becomes focused without changing session inputs. */
   isFocusedPanel?: boolean
+  /** Increment to retry a failed context lookup with the same inputs. */
+  refreshToken?: number
 }
 
 export type GitContextRefreshStatus = 'loading' | 'ready' | 'error' | 'disabled'
@@ -31,6 +33,7 @@ export function getGitContextRefreshKey(request: GitContextRefreshRequest): stri
     request.workingDirectory ?? null,
     request.sessionId ?? null,
     request.isFocusedPanel ?? null,
+    request.refreshToken ?? null,
   ])
 }
 
