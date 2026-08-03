@@ -2,6 +2,8 @@
 
 ## 2026-08-03
 
+* **Git workspace badge review hardening**: bounded Git-context lookups with a 10s timeout so a hung IPC resolves to a retryable error instead of loading forever; the send gate now distinguishes an in-progress discovery (pending message) from a failed refresh (retry message); the badge label prefers the persisted identity branch while live context is loading; and the `@git` badge-refresh spec scopes its feature flag to the worker and asserts panel focus before the focus-switch regression path.
+
 * **OSS legal distribution compliance**: restored Craft Agents' upstream `LICENSE`/`NOTICE` attribution, added the generated `THIRD-PARTY-NOTICES.md` inventory, packaged the legal files in desktop/server outputs, and added CI/release verification.
 
 ## 2026-08-02

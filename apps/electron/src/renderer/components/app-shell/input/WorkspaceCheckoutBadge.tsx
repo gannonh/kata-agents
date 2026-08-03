@@ -17,7 +17,12 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { cn } from '@/lib/utils'
 
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import { resolveCheckoutIdentity, resolveCheckoutRecovery, resolveSendGate } from './checkout-controls'
+import {
+  resolveCheckoutIdentity,
+  resolveCheckoutRecovery,
+  resolveLiveBranchLabel,
+  resolveSendGate,
+} from './checkout-controls'
 import {
   getGitContextRefreshKey,
   getLiveGitContext,
@@ -227,7 +232,13 @@ function WorkspaceCheckoutBadgeInner(
 
     if (gate.action === 'send') return { status: 'not-needed' }
     if (gate.action === 'wait') {
-      const msg = t('git.workspace.contextRefreshFailed')
+      // Loading and failed refreshes need different messages: a pending
+      // discovery is expected during a session/panel switch, while a failed
+      // refresh is a retryable error. Only the error status re-runs discovery.
+      const msg =
+        contextState.status === 'error'
+          ? t('git.workspace.contextRefreshFailed')
+          : t('git.workspace.contextPending')
       setError(msg)
       setOpen(true)
       if (contextState.status === 'error') {
@@ -412,13 +423,18 @@ function WorkspaceCheckoutBadgeInner(
     )
   }
 
-  const liveBranch = context?.detached
-    ? t('git.workspace.detached')
-    : context?.currentBranch ??
-      context?.defaultRef ??
-      (identity.kind === 'current'
-        ? t('git.workspace.currentCheckout')
-        : identity.branch ?? t('git.workspace.currentCheckout'))
+  const liveBranch = resolveLiveBranchLabel(
+    {
+      detached: !!context?.detached,
+      currentBranch: context?.currentBranch ?? null,
+      defaultRef: context?.defaultRef ?? null,
+      identityBranch: identity.branch ?? null,
+    },
+    {
+      detached: t('git.workspace.detached'),
+      currentCheckout: t('git.workspace.currentCheckout'),
+    },
+  )
 
   // Locked / passive Current checkout identity: either a persisted current
   // checkout, or a session that already has messages.

@@ -20,6 +20,30 @@ export interface GitContextRefreshState {
 
 export type GetGitContext = (workingDirectory: string) => Promise<RepositoryContext>
 
+/** How long a Git-context lookup may take before the refresh reports an error. */
+export const GIT_CONTEXT_TIMEOUT_MS = 10_000
+
+/**
+ * Race a Git-context lookup against a finite timeout so a hung IPC call
+ * rejects into the caller's error path instead of leaving the badge loading
+ * forever with no way to retry.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Git context lookup timed out.')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 /**
  * Identifies the session and checkout inputs used for Git-context discovery.
  * The session ID is intentionally part of the key even when the directory is
@@ -46,6 +70,7 @@ export function refreshGitContext(
   request: GitContextRefreshRequest,
   getContext: GetGitContext,
   onState: (state: GitContextRefreshState) => void,
+  options?: { timeoutMs?: number },
 ): () => void {
   const requestKey = getGitContextRefreshKey(request)
   let cancelled = false
@@ -64,13 +89,17 @@ export function refreshGitContext(
     }
   }
 
-  void getContext(request.workingDirectory)
-    .then((context) => {
+  void withTimeout(
+    getContext(request.workingDirectory),
+    options?.timeoutMs ?? GIT_CONTEXT_TIMEOUT_MS,
+  ).then(
+    (context) => {
       if (!cancelled) onState({ requestKey, context, status: 'ready' })
-    })
-    .catch(() => {
+    },
+    () => {
       if (!cancelled) onState({ requestKey, context: null, status: 'error' })
-    })
+    },
+  )
 
   return () => {
     cancelled = true

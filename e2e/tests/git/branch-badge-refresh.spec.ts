@@ -9,7 +9,23 @@ import { startNewSession } from "../../src/flows/agentChat.ts";
 import { useRepositoryAsWorkspaceDefault } from "../../src/flows/gitWorkspace.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 
-process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = "1";
+// Scope the feature flag to this spec file instead of mutating the
+// worker-global environment at import time, so it cannot leak into specs that
+// load later in the same worker. Preserve and restore any previous value.
+const WORKSPACE_FLAG = "KATA_FEATURE_GIT_WORKSPACE_V1";
+const previousWorkspaceFlag = process.env[WORKSPACE_FLAG];
+
+test.beforeAll(() => {
+  process.env[WORKSPACE_FLAG] = "1";
+});
+
+test.afterAll(() => {
+  if (previousWorkspaceFlag === undefined) {
+    delete process.env[WORKSPACE_FLAG];
+  } else {
+    process.env[WORKSPACE_FLAG] = previousWorkspaceFlag;
+  }
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +109,9 @@ test.describe(`Git branch badge refresh ${E2E_TAGS.git}`, () => {
       await expect(panels).toHaveCount(2);
       const firstPanel = panels.nth(0);
       const secondPanel = panels.nth(1);
+      // Meta+t must move focus to the new panel; without it, clicking
+      // firstBadge below would not exercise the panel-regaining-focus path.
+      await expect(secondPanel).toHaveClass(/shadow-panel-focused/);
       const firstBadge = firstPanel
         .getByTestId("git-workspace-control")
         .locator("button");

@@ -554,6 +554,7 @@
   "git.toast.pushFailed": "Push fehlgeschlagen",
   "git.toast.pushed": "Änderungen gepusht",
   "git.workspace.baseRefRequired": "Wähle eine Basis-Referenz, um einen neuen Worktree zu erstellen.",
+  "git.workspace.contextPending": "Warte auf Git-Status…",
   "git.workspace.contextRefreshFailed": "Der Git-Status ist nicht verfügbar. Sende erneut, um es noch einmal zu versuchen.",
   "git.workspace.createWorktree": "Worktree erstellen",
   "git.workspace.currentCheckout": "Aktueller Checkout",

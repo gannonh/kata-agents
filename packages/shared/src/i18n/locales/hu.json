@@ -554,6 +554,7 @@
   "git.toast.pushFailed": "A push sikertelen",
   "git.toast.pushed": "Változások pusholva",
   "git.workspace.baseRefRequired": "Válassz alap refet egy új worktree létrehozásához.",
+  "git.workspace.contextPending": "Várakozás a Git-állapotra…",
   "git.workspace.contextRefreshFailed": "A Git-állapot nem érhető el. Küldd el újra az újrapróbálkozáshoz.",
   "git.workspace.createWorktree": "Worktree létrehozása",
   "git.workspace.currentCheckout": "Jelenlegi checkout",

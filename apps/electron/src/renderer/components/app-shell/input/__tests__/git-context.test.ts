@@ -83,6 +83,26 @@ describe('Git context refresh', () => {
     expect(retry).not.toBe(initial)
   })
 
+  test('times out a hanging lookup so the caller can retry', async () => {
+    const states: GitContextRefreshState[] = []
+    const cancel = refreshGitContext(
+      {
+        flagEnabled: true,
+        workingDirectory: '/repo',
+        sessionId: 'hung-session',
+        isFocusedPanel: true,
+      },
+      // A lookup that never settles would leave the badge loading forever.
+      () => new Promise<RepositoryContext>(() => {}),
+      (state) => states.push(state),
+      { timeoutMs: 5 },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(states.at(-1)?.status).toBe('error')
+    cancel()
+  })
+
   test('reports a failed lookup as an error so the caller can retry', async () => {
     const states: GitContextRefreshState[] = []
     const cancel = refreshGitContext(
@@ -151,6 +171,7 @@ describe('Git context refresh', () => {
     expect(states.some((state) => state.context?.currentBranch === 'feature')).toBe(false)
 
     second.resolve(contextFor('main'))
+    await Promise.resolve()
     await Promise.resolve()
     expect(states.at(-1)).toEqual({
       requestKey: secondKey,

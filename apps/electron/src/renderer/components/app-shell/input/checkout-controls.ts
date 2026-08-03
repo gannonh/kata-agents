@@ -145,6 +145,37 @@ export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutI
 }
 
 // ---------------------------------------------------------------------------
+// Live branch label (badge display precedence)
+// ---------------------------------------------------------------------------
+
+export interface LiveBranchLabelState {
+  detached: boolean
+  /** Live current branch from Git context, when known. */
+  currentBranch: string | null
+  /** Live default ref from Git context, when known. */
+  defaultRef: string | null
+  /** Persisted branch from the resolved checkout identity, when known. */
+  identityBranch: string | null | undefined
+}
+
+/**
+ * Resolve the branch label shown on the badge.
+ *
+ * Precedence: live detached state, live current branch, live default ref,
+ * the identity's persisted branch, then the generic Current checkout label.
+ * The persisted branch matters while live context is still loading (e.g. a
+ * resumed Current checkout whose branchAtPreparation is already known), so the
+ * badge never degrades to the generic label when it has real identity data.
+ */
+export function resolveLiveBranchLabel(
+  state: LiveBranchLabelState,
+  labels: { detached: string; currentCheckout: string },
+): string {
+  if (state.detached) return labels.detached
+  return state.currentBranch ?? state.defaultRef ?? state.identityBranch ?? labels.currentCheckout
+}
+
+// ---------------------------------------------------------------------------
 // Checkout recovery (AC20 — restart/reconnect/missing/externally changed)
 // ---------------------------------------------------------------------------
 

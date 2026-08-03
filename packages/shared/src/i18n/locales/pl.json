@@ -560,6 +560,7 @@
   "git.toast.pushFailed": "Push nie powiódł się",
   "git.toast.pushed": "Zmiany wypchnięte",
   "git.workspace.baseRefRequired": "Wybierz ref bazowy, aby utworzyć nowy worktree.",
+  "git.workspace.contextPending": "Oczekiwanie na stan Git…",
   "git.workspace.contextRefreshFailed": "Stan Git jest niedostępny. Wyślij ponownie, aby spróbować jeszcze raz.",
   "git.workspace.createWorktree": "Utwórz worktree",
   "git.workspace.currentCheckout": "Bieżący checkout",

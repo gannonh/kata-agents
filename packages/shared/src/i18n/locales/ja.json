@@ -554,6 +554,7 @@
   "git.toast.pushFailed": "プッシュに失敗しました",
   "git.toast.pushed": "変更をプッシュしました",
   "git.workspace.baseRefRequired": "新しいワークツリーを作成するにはベース ref を選択してください。",
+  "git.workspace.contextPending": "Git の状態を待機中…",
   "git.workspace.contextRefreshFailed": "Git の状態を取得できません。もう一度送信して再試行してください。",
   "git.workspace.createWorktree": "ワークツリーを作成",
   "git.workspace.currentCheckout": "現在のチェックアウト",
