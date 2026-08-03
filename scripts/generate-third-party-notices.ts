@@ -45,9 +45,20 @@ type LicenseText = {
 
 type PythonRecord = {
   name: string
-  constraint: string
+  /** Every constraint declared across the bundled tools, sorted and deduplicated. */
+  constraints: string[]
   license: string
   source: string
+}
+
+type PythonSourceFile = {
+  name: string
+  text: string
+}
+
+type PythonDependency = {
+  name: string
+  constraint: string
 }
 
 const ROOT = resolve(import.meta.dir, '..')
@@ -274,40 +285,70 @@ const collectPackages = (): { packages: PackageRecord[]; unresolved: string[] } 
   }
 }
 
+/**
+ * Parse PEP 723 `dependencies` declarations from a bundled Python tool's
+ * script header. Returns every declared package with its constraint string.
+ */
+export const parsePythonDependencies = (text: string): PythonDependency[] => {
+  const markerStart = text.indexOf('# ///')
+  const markerEnd = markerStart < 0 ? -1 : text.indexOf('# ///', markerStart + 6)
+  const header = markerStart >= 0 && markerEnd > markerStart
+    ? text.slice(markerStart, markerEnd)
+    : ''
+  const dependencies: PythonDependency[] = []
+  for (const match of header.matchAll(/["']([^"']+)["']/g)) {
+    const raw = match[1]!.trim()
+    if (raw.startsWith('>') || raw.startsWith('=')) continue
+    const nameMatch = raw.match(/^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[^\]]+\])?(.*)$/)
+    if (!nameMatch) continue
+    dependencies.push({ name: nameMatch[1]!, constraint: nameMatch[2] || '*' })
+  }
+  return dependencies
+}
+
+/**
+ * Merge PEP 723 dependency declarations across bundled Python tools.
+ *
+ * Each tool declares its own constraints, and a package shared by several
+ * tools (e.g. Pillow) can appear with different ranges. Every constraint is
+ * preserved and sorted so the generated inventory never depends on file
+ * discovery order, and a package with no license metadata is skipped.
+ */
+export const mergePythonRecords = (files: PythonSourceFile[]): PythonRecord[] => {
+  const byName = new Map<string, { name: string; constraints: Set<string> }>()
+  for (const file of files) {
+    for (const { name, constraint } of parsePythonDependencies(file.text)) {
+      const metadata = PYTHON_LICENSES[name.toLowerCase()]
+      if (!metadata) continue
+      const key = name.toLowerCase()
+      const record = byName.get(key) ?? { name, constraints: new Set<string>() }
+      record.constraints.add(constraint)
+      byName.set(key, record)
+    }
+  }
+  return [...byName.values()]
+    .map(({ name, constraints }) => ({
+      name,
+      constraints: [...constraints].sort(),
+      ...PYTHON_LICENSES[name.toLowerCase()]!,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 const collectPythonPackages = (): PythonRecord[] => {
   const directory = join(ROOT, 'apps', 'electron', 'resources', 'scripts')
-  const records = new Map<string, PythonRecord>()
   if (!existsSync(directory)) return []
 
-  // readdir order is filesystem-dependent (APFS returns hash order, ext4
-  // returns alphabetical). Later files overwrite shared package constraints
-  // below, so sort first to keep the inventory reproducible in CI.
+  // Sort for stable parse order; the merge itself is order-independent.
   const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
     a.name.localeCompare(b.name),
   )
+  const files: PythonSourceFile[] = []
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.py')) continue
-    const text = readFileSync(join(directory, entry.name), 'utf8')
-    const markerStart = text.indexOf('# ///')
-    const markerEnd = markerStart < 0 ? -1 : text.indexOf('# ///', markerStart + 6)
-    const header = markerStart >= 0 && markerEnd > markerStart
-      ? text.slice(markerStart, markerEnd)
-      : ''
-    const matches = header.matchAll(/["']([^"']+)["']/g)
-    for (const match of matches) {
-      const raw = match[1]!.trim()
-      if (raw.startsWith('>') || raw.startsWith('=')) continue
-      const nameMatch = raw.match(/^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[^\]]+\])?(.*)$/)
-      if (!nameMatch) continue
-      const name = nameMatch[1]!
-      const constraint = nameMatch[2] || '*'
-      const metadata = PYTHON_LICENSES[name.toLowerCase()]
-      if (!metadata) continue
-      records.set(name.toLowerCase(), { name, constraint, ...metadata })
-    }
+    files.push({ name: entry.name, text: readFileSync(join(directory, entry.name), 'utf8') })
   }
-
-  return [...records.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return mergePythonRecords(files)
 }
 
 const collectThemes = (): Array<{ name: string; author: string; license: string; source: string; path: string }> => {
@@ -392,9 +433,9 @@ const render = (): string => {
     lines.push(`| \`${markdownCell(pkg.name)}\` | \`${markdownCell(pkg.version)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} | ${pkg.licenseFiles.length ? pkg.licenseFiles.map((file) => `\`${file.displayPath}\``).join(', ') : 'Not present in package'} |`)
   }
 
-  lines.push('', '## Python/PyPI dependencies used by bundled tools', '', '| Package | Requested range | License | Source |', '| --- | --- | --- | --- |')
+  lines.push('', '## Python/PyPI dependencies used by bundled tools', '', '| Package | Requested ranges | License | Source |', '| --- | --- | --- | --- |')
   for (const pkg of pythonPackages) {
-    lines.push(`| \`${pkg.name}\` | \`${markdownCell(pkg.constraint)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} |`)
+    lines.push(`| \`${pkg.name}\` | \`${markdownCell(pkg.constraints.join(', '))}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} |`)
   }
   lines.push('', 'The Python tools use PEP 723 metadata and resolve these packages through uv at runtime. Their wheel/sdist license files remain authoritative for the resolved version.', '')
 

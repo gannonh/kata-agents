@@ -1075,7 +1075,7 @@
 
 ## Python/PyPI dependencies used by bundled tools
 
-| Package | Requested range | License | Source |
+| Package | Requested ranges | License | Source |
 | --- | --- | --- | --- |
 | `click` | `>=8.3,<9` | BSD-3-Clause | https://github.com/pallets/click |
 | `diff-match-patch` | `>=20241021` | Apache-2.0 | https://github.com/diff-match-patch-python/diff-match-patch |
@@ -1083,11 +1083,11 @@
 | `img2pdf` | `>=0.5,<1` | LGPL-3.0-or-later | https://gitlab.mister-muffin.de/josch/img2pdf |
 | `markitdown` | `>=0.1.5,<0.2` | MIT | https://github.com/microsoft/markitdown |
 | `openpyxl` | `>=3.1,<4` | MIT | https://foss.heptapod.net/openpyxl/openpyxl |
-| `Pillow` | `>=10,<12` | MIT-CMU | https://github.com/python-pillow/Pillow |
+| `Pillow` | `>=10,<12, >=12.1,<13` | MIT-CMU | https://github.com/python-pillow/Pillow |
 | `pypdf` | `>=6.7,<7` | BSD-3-Clause | https://github.com/py-pdf/pypdf |
 | `pypdfium2` | `>=5.5,<6` | BSD-3-Clause | https://github.com/pypdfium2-team/pypdfium2 |
 | `python-dateutil` | `>=2.9,<3` | Apache-2.0 OR BSD-3-Clause | https://github.com/dateutil/dateutil |
-| `python-docx` | `>=1.1,<2` | MIT | https://github.com/python-openxml/python-docx |
+| `python-docx` | `>=1.1,<2, >=1.2,<2` | MIT | https://github.com/python-openxml/python-docx |
 | `python-pptx` | `>=1.0,<2` | MIT | https://github.com/scanny/python-pptx |
 
 The Python tools use PEP 723 metadata and resolve these packages through uv at runtime. Their wheel/sdist license files remain authoritative for the resolved version.
