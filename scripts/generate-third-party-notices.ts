@@ -21,12 +21,19 @@ import { join, relative, resolve } from 'node:path'
 
 type JsonObject = Record<string, unknown>
 
+type LicenseFile = {
+  /** Actual installed path used to read the license text. */
+  actualPath: string
+  /** Stable package-relative path rendered in the generated inventory. */
+  displayPath: string
+}
+
 type PackageRecord = {
   name: string
   version: string
   license: string
   source: string
-  licenseFiles: string[]
+  licenseFiles: LicenseFile[]
   packageRoot: string
 }
 
@@ -178,12 +185,18 @@ const isPlatformPackage = (pkg: JsonObject): boolean =>
   Array.isArray(pkg.os) || Array.isArray(pkg.cpu) ||
   (typeof pkg.name === 'string' && isPlatformPackageName(pkg.name))
 
-const packageLicenseFiles = (packageRoot: string): string[] => {
+const packageLicenseFiles = (packageRoot: string, packageName: string): LicenseFile[] => {
   if (!existsSync(packageRoot)) return []
   return readdirSync(packageRoot, { withFileTypes: true })
     .filter((entry) => entry.isFile() && LICENSE_FILE.test(entry.name))
-    .map((entry) => relative(ROOT, join(packageRoot, entry.name)).replaceAll('\\', '/'))
-    .sort()
+    .map((entry) => ({
+      actualPath: relative(ROOT, join(packageRoot, entry.name)).replaceAll('\\', '/'),
+      // Bun's hoisting layout differs between platforms and versions. Keep the
+      // installed path for reading, but render a stable logical path so the
+      // checked-in inventory is reproducible in CI and release environments.
+      displayPath: join('node_modules', packageName, entry.name).replaceAll('\\', '/'),
+    }))
+    .sort((a, b) => a.displayPath.localeCompare(b.displayPath))
 }
 
 const workspaceManifestPaths = (): string[] => {
@@ -245,7 +258,7 @@ const collectPackages = (): { packages: PackageRecord[]; unresolved: string[] } 
       version,
       license: packageLicense(packageJson),
       source: packageSource(packageJson, name),
-      licenseFiles: packageLicenseFiles(packageRoot),
+      licenseFiles: packageLicenseFiles(packageRoot, name),
       packageRoot,
     }
     packages.set(`${name}@${version}`, record)
@@ -312,8 +325,8 @@ const collectThemes = (): Array<{ name: string; author: string; license: string;
 const collectLicenseTexts = (packages: PackageRecord[]): Map<string, LicenseText> => {
   const texts = new Map<string, LicenseText>()
   for (const pkg of packages) {
-    for (const path of pkg.licenseFiles) {
-      const absolute = join(ROOT, path)
+    for (const licenseFile of pkg.licenseFiles) {
+      const absolute = join(ROOT, licenseFile.actualPath)
       let text: string
       try {
         if (statSync(absolute).size > 64 * 1024) continue
@@ -327,7 +340,7 @@ const collectLicenseTexts = (packages: PackageRecord[]): Map<string, LicenseText
       if (existing) {
         existing.packages.push(`${pkg.name}@${pkg.version}`)
       } else {
-        texts.set(hash, { packages: [`${pkg.name}@${pkg.version}`], path, text })
+        texts.set(hash, { packages: [`${pkg.name}@${pkg.version}`], path: licenseFile.displayPath, text })
       }
     }
   }
@@ -350,6 +363,8 @@ const render = (): string => {
     `> This file is ${generatedAt}. Do not edit it by hand; run \`bun run licenses:generate\` after changing dependencies or bundled assets.`,
     '>',
     '> It is an attribution and license inventory, not a replacement for the license terms of any component. The packaged desktop and server artifacts include this file at their top level. Where a dependency provides a license file, its text is reproduced below when practical; otherwise the source package remains authoritative.',
+    '>',
+    '> License-file paths are normalized to each package\'s logical `node_modules` location so this inventory remains stable across dependency hoisting layouts.',
     '',
     '## Upstream project and fork',
     '',
@@ -368,7 +383,7 @@ const render = (): string => {
   ]
 
   for (const pkg of packages) {
-    lines.push(`| \`${markdownCell(pkg.name)}\` | \`${markdownCell(pkg.version)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} | ${pkg.licenseFiles.length ? pkg.licenseFiles.map((path) => `\`${path}\``).join(', ') : 'Not present in package'} |`)
+    lines.push(`| \`${markdownCell(pkg.name)}\` | \`${markdownCell(pkg.version)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} | ${pkg.licenseFiles.length ? pkg.licenseFiles.map((file) => `\`${file.displayPath}\``).join(', ') : 'Not present in package'} |`)
   }
 
   lines.push('', '## Python/PyPI dependencies used by bundled tools', '', '| Package | Requested range | License | Source |', '| --- | --- | --- | --- |')
