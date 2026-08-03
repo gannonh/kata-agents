@@ -357,7 +357,7 @@
 | `ajv` | `8.17.1` | MIT | ajv-validator/ajv | `node_modules/table/node_modules/ajv/LICENSE` |
 | `ajv-formats` | `3.0.1` | MIT | https://github.com/ajv-validator/ajv-formats | `node_modules/ajv-formats/LICENSE` |
 | `ansi-colors` | `4.1.3` | MIT | doowb/ansi-colors | `node_modules/ansi-colors/LICENSE` |
-| `ansi-regex` | `5.0.1` | MIT | chalk/ansi-regex | `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/node_modules/ansi-regex/license` |
+| `ansi-regex` | `5.0.1` | MIT | chalk/ansi-regex | `node_modules/ansi-regex/license` |
 | `ansi-regex` | `6.2.2` | MIT | chalk/ansi-regex | `node_modules/@isaacs/cliui/node_modules/strip-ansi/node_modules/ansi-regex/license` |
 | `ansi-styles` | `3.2.1` | MIT | chalk/ansi-styles | `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/license` |
 | `ansi-styles` | `4.3.0` | MIT | chalk/ansi-styles | `node_modules/ansi-styles/license` |
@@ -489,7 +489,7 @@
 | `encodeurl` | `2.0.0` | MIT | pillarjs/encodeurl | `node_modules/encodeurl/LICENSE` |
 | `enquirer` | `2.4.1` | MIT | enquirer/enquirer | `node_modules/enquirer/LICENSE` |
 | `entities` | `4.5.0` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/dom-serializer/node_modules/entities/LICENSE` |
-| `entities` | `6.0.1` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/hast-util-from-html/node_modules/parse5/node_modules/entities/LICENSE` |
+| `entities` | `6.0.1` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/parse5/node_modules/entities/LICENSE` |
 | `entities` | `7.0.1` | BSD-2-Clause | https://github.com/fb55/entities | `node_modules/entities/LICENSE` |
 | `es-define-property` | `1.0.1` | MIT | https://github.com/ljharb/es-define-property | `node_modules/es-define-property/LICENSE` |
 | `es-errors` | `1.3.0` | MIT | https://github.com/ljharb/es-errors | `node_modules/es-errors/LICENSE` |
@@ -538,7 +538,7 @@
 | `fetch-blob` | `3.2.0` | MIT | https://github.com/node-fetch/fetch-blob | `node_modules/fetch-blob/LICENSE` |
 | `fflate` | `0.8.2` | MIT | https://github.com/101arrowz/fflate | `node_modules/fflate/LICENSE` |
 | `file-entry-cache` | `6.0.1` | MIT | royriojas/file-entry-cache | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/LICENSE` |
-| `file-type` | `16.5.4` | MIT | sindresorhus/file-type | `node_modules/music-metadata/node_modules/file-type/license` |
+| `file-type` | `16.5.4` | MIT | sindresorhus/file-type | `node_modules/file-type/license` |
 | `filter-iterator` | `0.0.1` | License metadata not declared; see package license files | git://github.com/jb55/filter-iterator | Not present in package |
 | `filter-obj` | `1.1.0` | MIT | sindresorhus/filter-obj | `node_modules/filter-obj/license` |
 | `filtrex` | `3.1.0` | MIT | git@github.com:cshaa/filtrex | `node_modules/filtrex/LICENSE` |
@@ -567,7 +567,7 @@
 | `get-nonce` | `1.0.1` | MIT | git@github.com:theKashey/get-nonce | `node_modules/get-nonce/LICENSE` |
 | `get-proto` | `1.0.1` | MIT | https://github.com/ljharb/get-proto | `node_modules/get-proto/LICENSE` |
 | `glob` | `10.5.0` | ISC | git://github.com/isaacs/node-glob | `node_modules/rimraf/node_modules/glob/LICENSE` |
-| `glob` | `13.0.6` | BlueOak-1.0.0 | git@github.com:isaacs/node-glob | `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/LICENSE.md` |
+| `glob` | `13.0.6` | BlueOak-1.0.0 | git@github.com:isaacs/node-glob | `node_modules/glob/LICENSE.md` |
 | `glob` | `7.2.3` | ISC | git://github.com/isaacs/node-glob | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/node_modules/rimraf/node_modules/glob/LICENSE` |
 | `glob-parent` | `5.1.2` | ISC | gulpjs/glob-parent | `node_modules/eslint_d/node_modules/eslint/node_modules/glob-parent/LICENSE` |
 | `globals` | `13.24.0` | MIT | sindresorhus/globals | `node_modules/eslint_d/node_modules/eslint/node_modules/globals/license` |
@@ -823,13 +823,13 @@
 | `pako` | `1.0.11` | (MIT AND Zlib) | nodeca/pako | `node_modules/pako/LICENSE` |
 | `parent-module` | `1.0.1` | MIT | sindresorhus/parent-module | `node_modules/parent-module/license` |
 | `parse-entities` | `4.0.2` | MIT | wooorm/parse-entities | `node_modules/parse-entities/license` |
-| `parse5` | `7.3.0` | MIT | git://github.com/inikulin/parse5 | `node_modules/hast-util-from-html/node_modules/parse5/LICENSE` |
+| `parse5` | `7.3.0` | MIT | git://github.com/inikulin/parse5 | `node_modules/parse5/LICENSE` |
 | `parseurl` | `1.3.3` | MIT | pillarjs/parseurl | `node_modules/parseurl/LICENSE` |
 | `partial-json` | `0.1.7` | MIT | https://github.com/promplate/partial-json-parser-js | `node_modules/partial-json/LICENSE` |
 | `path-is-absolute` | `1.0.1` | MIT | sindresorhus/path-is-absolute | `node_modules/path-is-absolute/license` |
 | `path-key` | `3.1.1` | MIT | sindresorhus/path-key | `node_modules/path-key/license` |
 | `path-scurry` | `1.11.1` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/rimraf/node_modules/glob/node_modules/path-scurry/LICENSE.md` |
-| `path-scurry` | `2.0.2` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/node_modules/path-scurry/LICENSE.md` |
+| `path-scurry` | `2.0.2` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/path-scurry/LICENSE.md` |
 | `path-to-regexp` | `8.3.0` | MIT | https://github.com/pillarjs/path-to-regexp | `node_modules/path-to-regexp/LICENSE` |
 | `pdf-parse-tt-message-gone` | `1.1.2` | MIT | https://gitlab.com/autokent/pdf-parse | `node_modules/pdf-parse-tt-message-gone/LICENSE` |
 | `pdfjs-dist` | `5.4.296` | Apache-2.0 | https://github.com/mozilla/pdf.js | `node_modules/pdfjs-dist/LICENSE` |
@@ -971,12 +971,12 @@
 | `string-width` | `5.1.2` | MIT | sindresorhus/string-width | `node_modules/@isaacs/cliui/node_modules/string-width/license` |
 | `string.fromcodepoint` | `0.2.1` | License metadata not declared; see package license files | https://github.com/mathiasbynens/String.fromCodePoint | Not present in package |
 | `stringify-entities` | `4.0.4` | MIT | wooorm/stringify-entities | `node_modules/stringify-entities/license` |
-| `strip-ansi` | `6.0.1` | MIT | chalk/strip-ansi | `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/license` |
+| `strip-ansi` | `6.0.1` | MIT | chalk/strip-ansi | `node_modules/strip-ansi-cjs/license` |
 | `strip-ansi` | `7.1.2` | MIT | chalk/strip-ansi | `node_modules/@isaacs/cliui/node_modules/strip-ansi/license` |
 | `strip-bom-string` | `1.0.0` | MIT | jonschlinkert/strip-bom-string | `node_modules/strip-bom-string/LICENSE` |
 | `strip-json-comments` | `3.1.1` | MIT | sindresorhus/strip-json-comments | `node_modules/strip-json-comments/license` |
 | `strip-markdown` | `6.0.0` | MIT | remarkjs/strip-markdown | `node_modules/strip-markdown/license` |
-| `strtok3` | `6.3.0` | MIT | https://github.com/Borewit/strtok3 | `node_modules/music-metadata/node_modules/strtok3/LICENSE` |
+| `strtok3` | `6.3.0` | MIT | https://github.com/Borewit/strtok3 | `node_modules/strtok3/LICENSE` |
 | `style-to-js` | `1.1.21` | MIT | https://github.com/remarkablemark/style-to-js | `node_modules/style-to-js/LICENSE` |
 | `style-to-object` | `1.0.14` | MIT | https://github.com/remarkablemark/style-to-object | `node_modules/style-to-object/LICENSE` |
 | `supports-color` | `5.5.0` | MIT | chalk/supports-color | `node_modules/@babel/highlight/node_modules/chalk/node_modules/supports-color/license` |
@@ -995,7 +995,7 @@
 | `to-pascal-case` | `1.0.0` | MIT | git://github.com/ianstormtaylor/to-pascal-case | Not present in package |
 | `to-space-case` | `1.0.0` | MIT | git://github.com/ianstormtaylor/to-space-case | Not present in package |
 | `toidentifier` | `1.0.1` | MIT | component/toidentifier | `node_modules/toidentifier/LICENSE` |
-| `token-types` | `4.2.1` | MIT | https://github.com/Borewit/token-types | `node_modules/music-metadata/node_modules/token-types/LICENSE` |
+| `token-types` | `4.2.1` | MIT | https://github.com/Borewit/token-types | `node_modules/token-types/LICENSE` |
 | `tr46` | `0.0.3` | MIT | https://github.com/Sebmaster/tr46.js | Not present in package |
 | `transform-spread-iterable` | `1.4.1` | MIT | parro-it/transform-spread-iterable | `node_modules/transform-spread-iterable/license` |
 | `trim-lines` | `3.0.1` | MIT | wooorm/trim-lines | `node_modules/trim-lines/license` |
@@ -4093,7 +4093,7 @@ Source file: `node_modules/@babel/highlight/node_modules/chalk/node_modules/esca
 
 Applies to: `parse5@7.3.0`
 
-Source file: `node_modules/hast-util-from-html/node_modules/parse5/LICENSE`
+Source file: `node_modules/parse5/LICENSE`
 
     Copyright (c) 2013-2019 Ivan Nikulin (ifaaan@gmail.com, https://github.com/inikulin)
     
@@ -13809,7 +13809,7 @@ Source file: `node_modules/ajv/LICENSE`
 
 Applies to: `token-types@4.2.1`
 
-Source file: `node_modules/music-metadata/node_modules/token-types/LICENSE`
+Source file: `node_modules/token-types/LICENSE`
 
     Copyright 2017 Borewit
     
@@ -14914,7 +14914,7 @@ Source file: `node_modules/style-to-js/LICENSE`
 
 Applies to: `strtok3@6.3.0`
 
-Source file: `node_modules/music-metadata/node_modules/strtok3/LICENSE`
+Source file: `node_modules/strtok3/LICENSE`
 
     Copyright (c) 2017, Borewit
     All rights reserved.
@@ -15662,7 +15662,7 @@ Source file: `node_modules/acorn-jsx/LICENSE`
 
 Applies to: `ansi-regex@5.0.1`, `ansi-styles@3.2.1`, `ansi-styles@4.3.0`, `callsites@3.1.0`, `chalk@2.4.2`, `chalk@4.1.2`, `define-lazy-prop@2.0.0`, `has-flag@3.0.0`, `has-flag@4.0.0`, `is-fullwidth-code-point@3.0.0`, `is-wsl@2.2.0`, `p-retry@4.6.2`, `parent-module@1.0.1`, `path-key@3.1.1`, `resolve-from@4.0.0`, `shebang-regex@3.0.0`, `string-width@4.2.3`, `strip-ansi@6.0.1`, `supports-color@5.5.0`, `supports-color@7.2.0`
 
-Source file: `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/node_modules/ansi-regex/license`
+Source file: `node_modules/ansi-regex/license`
 
     MIT License
     
@@ -18685,7 +18685,7 @@ Source file: `node_modules/cache-manager/LICENSE`
 
 Applies to: `glob@13.0.6`, `package-json-from-dist@1.0.1`
 
-Source file: `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/LICENSE.md`
+Source file: `node_modules/glob/LICENSE.md`
 
     All packages under `src/` are licensed according to the terms in
     their respective `LICENSE` or `LICENSE.md` files.
