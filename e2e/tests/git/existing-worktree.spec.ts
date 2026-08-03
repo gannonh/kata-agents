@@ -14,7 +14,23 @@ import {
 } from "../../src/flows/gitWorkspace.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 
-process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = "1";
+// Scope the feature flag to this spec file instead of mutating the
+// worker-global environment at import time, so it cannot leak into specs that
+// load later in the same worker. Preserve and restore any previous value.
+const WORKSPACE_FLAG = "KATA_FEATURE_GIT_WORKSPACE_V1";
+const previousWorkspaceFlag = process.env[WORKSPACE_FLAG];
+
+test.beforeAll(() => {
+  process.env[WORKSPACE_FLAG] = "1";
+});
+
+test.afterAll(() => {
+  if (previousWorkspaceFlag === undefined) {
+    delete process.env[WORKSPACE_FLAG];
+  } else {
+    process.env[WORKSPACE_FLAG] = previousWorkspaceFlag;
+  }
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -175,7 +191,8 @@ test.describe(`Existing managed worktree sharing ${E2E_TAGS.git}`, () => {
       expect(sharer.checkout.checkoutPath).toBe(owner.checkout.checkoutPath);
       expect(sharer.checkout.managedWorktreeId).toBe(owner.checkout.managedWorktreeId);
       expect(sharer.checkout.expectedBranch).toBe(owner.checkout.expectedBranch);
-      // Both sessions are recorded as owners of the same worktree.
+      // `owner` is the pre-binding snapshot (count 1); `sharer` is read after
+      // binding and reports the current count of 2.
       expect(owner.sharedOwnerCount).toBe(1);
       expect(sharer.sharedOwnerCount).toBe(2);
       // Exactly one kata-agent branch exists — binding never recreates.
