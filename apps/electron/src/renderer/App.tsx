@@ -1183,8 +1183,12 @@ export default function App() {
     await window.electronAPI.deleteSession(sessionId)
     // Remove from per-session atom and metadata map (no sessionsAtom)
     removeSession(sessionId)
+    // Deleting a session can release shared managed-worktree ownership. Refresh
+    // the remaining sessions' DTOs so derived shared-owner counts stay accurate
+    // (e.g. a Shared worktree badge reverts once the peer owner is gone).
+    void refreshSessionListMetadataFromServer({ reason: 'post-session-delete' })
     return true
-  }, [store, removeSession])
+  }, [store, removeSession, refreshSessionListMetadataFromServer])
 
   // Resolve the pending delete-session promise and dismiss the dialog. Called
   // with `true` after the dialog completes deletion, `false` on cancel.
@@ -1193,7 +1197,13 @@ export default function App() {
       cur?.resolve(deleted)
       return null
     })
-  }, [])
+    // Deleting a session can release shared managed-worktree ownership. Refresh
+    // the remaining sessions' DTOs so derived shared-owner counts stay accurate
+    // (e.g. a Shared worktree badge reverts once the peer owner is gone).
+    if (deleted) {
+      void refreshSessionListMetadataFromServer({ reason: 'post-session-delete-dialog' })
+    }
+  }, [refreshSessionListMetadataFromServer])
 
   // Auto-delete handler for empty sessions (fire-and-forget, no confirmation).
   //
@@ -1204,14 +1214,26 @@ export default function App() {
   // NOT passed: if the worktree holds uncommitted or unique work, removal is
   // blocked, which also cancels the deletion, so the session stays and remains
   // the way to reach that work. Only a clean provisional checkout is discarded.
+  //
+  // A session that prepared a managed worktree is exempt entirely: its checkout
+  // is shareable state a new session may bind to, so silently destroying it on
+  // navigate-away would defeat the sharing flow and lose a checkout the user
+  // explicitly set up. The session stays visible for explicit deletion, which
+  // offers the worktree-aware confirmation.
   const handleAutoDeleteEmptySession = useCallback((sessionId: string) => {
     void (async () => {
+      const checkout = store.get(sessionAtomFamily(sessionId))?.checkout
+      if (checkout?.mode === 'managed-worktree') return
       const result = await window.electronAPI.deleteSession(sessionId, {
         removeManagedWorktree: true,
       })
-      if (result?.deleted) removeSession(sessionId)
+      if (result?.deleted) {
+        removeSession(sessionId)
+        // Keep derived shared-owner counts accurate for remaining sessions.
+        void refreshSessionListMetadataFromServer({ reason: 'post-auto-delete-session' })
+      }
     })()
-  }, [removeSession])
+  }, [store, removeSession, refreshSessionListMetadataFromServer])
 
   const handleFlagSession = useCallback((sessionId: string) => {
     updateSessionById(sessionId, { isFlagged: true })

@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-03
+
+* **Drafted**: [2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md](2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md) — new sessions can discover ready managed worktrees of the same workspace + repository and bind to one as a shared owner (read-only `git:listManagedWorktrees` RPC, `CheckoutPrepareIntent.managedWorktreeId` with server-side workspace/repo/state validation, Existing worktree picker in the composer Workspace menu). Moved Active in [index.md](index.md). Added to [docs/index.md](../index.md) active-work list.
+
 ## 2026-08-02
 
 * **Git branch badge refresh**: closed a renderer stale-context gap in the implemented Git/GitHub V1 flow; session and panel-focus changes now force live Git rediscovery for shared working directories while persisted managed-worktree identity remains session-scoped. Pending managed-worktree sends wait for unresolved Git context rather than bypassing preparation; failed lookups surface a localized retry message and retry on the next send. Added focused refresh coverage and a disposable real-Git Electron regression.

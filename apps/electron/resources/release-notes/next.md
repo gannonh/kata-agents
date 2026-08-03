@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Share managed worktrees across sessions** — The workspace checkout control now offers **Existing worktree** for a new empty session: any ready managed worktree of the current workspace + repository can be selected, and the session binds to it as a shared owner without recreating or mutating the checkout. Shared worktrees keep the existing ownership model — accurate owner counts, the Shared worktree label, and deletion guards that keep the checkout while any other session owns it ([#33](https://github.com/gannonh/kata-agents/issues/33)).
 ## Improvements
 
 ## Bug Fixes

@@ -21,6 +21,8 @@ export interface SendGateState {
   mode: CheckoutMode
   /** Selected base ref for a New worktree, when chosen. */
   baseRef: string | null
+  /** Selected EXISTING managed worktree to bind to, when chosen. */
+  managedWorktreeId?: string | null
   /** Active working directory used to resolve repository identity. */
   workingDirectory: string | null
   /** True once a managed worktree has been prepared in this composer mount. */
@@ -70,6 +72,16 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
     return { action: 'send' }
   }
   // mode === 'managed-worktree' and nothing prepared yet.
+  if (state.managedWorktreeId) {
+    return {
+      action: 'prepare',
+      intent: {
+        mode: 'managed-worktree',
+        workingDirectory: state.workingDirectory,
+        managedWorktreeId: state.managedWorktreeId,
+      },
+    }
+  }
   if (!state.baseRef) {
     return { action: 'block', reason: 'missing-base-ref' }
   }

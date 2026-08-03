@@ -149,6 +149,7 @@ function makeHarness(
 ) {
   const handlers = new Map<string, HandlerFn>()
   const prepareCalls: Array<[string, unknown]> = []
+  const listWorktreeCalls: Array<[string, string]> = []
   const removeCalls: Array<[string, boolean | undefined]> = []
   const inspectCalls: string[] = []
   let setGitServicesArg: GitServices | null = null
@@ -185,6 +186,19 @@ function makeHarness(
         prepareCalls.push([sessionId, intent])
         return { checkout: {}, workingDirectory: '/wt', sdkCwd: '/wt' }
       },
+      async listManagedWorktrees(sessionId: string, workingDirectory: string) {
+        listWorktreeCalls.push([sessionId, workingDirectory])
+        return [
+          {
+            managedWorktreeId: 'mw1',
+            checkoutPath: '/wt/abcd1234',
+            expectedBranch: 'kata-agent/abcd1234',
+            baseRef: 'main',
+            ownerCount: 2,
+            state: 'ready',
+          },
+        ]
+      },
       async inspectManagedWorktreeRemoval(sessionId: string) {
         inspectCalls.push(sessionId)
         return { managedWorktreeId: 'resolved', exists: true }
@@ -206,6 +220,7 @@ function makeHarness(
     handlers,
     ctx,
     prepareCalls,
+    listWorktreeCalls,
     removeCalls,
     inspectCalls,
     getSetGitServicesArg: () => setGitServicesArg,
@@ -367,6 +382,24 @@ describe('registerGitHandlers', () => {
     await handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', intent)
 
     expect(prepareCalls).toEqual([['s1', intent]])
+  })
+
+  it('serves existing-worktree discovery read-only regardless of the feature flag', async () => {
+    const { git } = makeGitServices()
+    const { handlers, ctx, listWorktreeCalls } = makeHarness(git)
+
+    const result = await handlers.get(RPC_CHANNELS.git.LIST_MANAGED_WORKTREES)!(
+      ctx,
+      's1',
+      '/repo',
+    )
+
+    // Identity is resolved server-side from the session + working directory;
+    // the client never supplies a worktree path or ID.
+    expect(listWorktreeCalls).toEqual([['s1', '/repo']])
+    expect(result).toEqual([
+      expect.objectContaining({ managedWorktreeId: 'mw1', ownerCount: 2, state: 'ready' }),
+    ])
   })
 
   it('resolves worktree removal from the session (never a client path) and gates it on the flag', async () => {

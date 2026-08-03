@@ -30,6 +30,7 @@ import type { HandlerDeps } from '../handler-deps'
 export const GIT_HANDLED_CHANNELS = [
   RPC_CHANNELS.git.GET_CONTEXT,
   RPC_CHANNELS.git.LIST_REFS,
+  RPC_CHANNELS.git.LIST_MANAGED_WORKTREES,
   RPC_CHANNELS.git.PREPARE_CHECKOUT,
   RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL,
   RPC_CHANNELS.git.REMOVE_WORKTREE,
@@ -219,6 +220,18 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
   server.handle(RPC_CHANNELS.git.LIST_REFS, async (_ctx, dir: string) => {
     return git.repository.listRefs(dir)
   })
+
+  // --- Existing managed-worktree discovery (read-only) ---
+
+  // Lists ready worktrees of the session's workspace + repository that a new
+  // session may bind to. Identity is resolved server-side from the working
+  // directory; the client never supplies a worktree path or ID.
+  server.handle(
+    RPC_CHANNELS.git.LIST_MANAGED_WORKTREES,
+    async (_ctx, sessionId: string, workingDirectory: string) => {
+      return deps.sessionManager.listManagedWorktrees(sessionId, workingDirectory)
+    },
+  )
 
   // --- Empty-session checkout preparation (Phase 1, mutation) ---
 

@@ -82,6 +82,39 @@ describe('resolveSendGate', () => {
     expect(decision).toEqual({ action: 'block', reason: 'missing-base-ref' })
   })
 
+  test('prepares by binding when an existing worktree is selected (no base ref needed)', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: 'repo-aabbccdd',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: {
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        managedWorktreeId: 'repo-aabbccdd',
+      },
+    })
+  })
+
+  test('blocks send when Existing worktree is selected but none is chosen yet', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: null,
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-base-ref' })
+  })
+
   test('sends directly once a worktree has already been prepared', () => {
     const decision = resolveSendGate({
       mode: 'managed-worktree',

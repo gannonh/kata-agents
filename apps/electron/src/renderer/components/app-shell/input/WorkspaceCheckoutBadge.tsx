@@ -2,13 +2,14 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Command as CommandPrimitive } from 'cmdk'
-import { AlertTriangle, Check, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
+import { AlertTriangle, Check, FolderGit2, GitBranch, GitFork, Loader2, Users } from 'lucide-react'
 
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import type {
   CheckoutMode,
   CheckoutPrepareResult,
   GitRef,
+  ManagedWorktreeSummary,
 } from '@kata-sh/shared/protocol'
 
 import { sessionAtomFamily, updateSessionAtom } from '@/atoms/sessions'
@@ -35,8 +36,10 @@ import {
  *
  * Feature-flag gated by {@link FEATURE_FLAGS.gitWorkspaceV1}. Before the first
  * message in a Git repository it offers a Workspace menu with **Current
- * checkout** and **New worktree**; selecting New worktree reveals a searchable
- * **From `<ref>`** picker defaulting to the current branch.
+ * checkout**, **New worktree**, and **Existing worktree**; New worktree
+ * reveals a searchable **From `<ref>`** picker defaulting to the current
+ * branch, while Existing worktree lists the workspace's ready managed
+ * worktrees for this repository so a new session can share one.
  *
  * A selected New worktree/ref intent stays renderer state until it is prepared.
  * Preparation happens on the workspace-owning server via `prepareGitCheckout`
@@ -131,7 +134,11 @@ function WorkspaceCheckoutBadgeInner(
   const [mode, setMode] = React.useState<CheckoutMode>('current')
   const modeRef = React.useRef(mode)
   modeRef.current = mode
+  const [intentKind, setIntentKind] = React.useState<'new' | 'existing'>('new')
   const [baseRef, setBaseRef] = React.useState<string | null>(null)
+  const [selectedWorktreeId, setSelectedWorktreeId] = React.useState<string | null>(null)
+  const [worktrees, setWorktrees] = React.useState<ManagedWorktreeSummary[]>([])
+  const [worktreesLoading, setWorktreesLoading] = React.useState(false)
   const [refs, setRefs] = React.useState<GitRef[]>([])
   const [refsLoading, setRefsLoading] = React.useState(false)
   const [open, setOpen] = React.useState(false)
@@ -158,7 +165,11 @@ function WorkspaceCheckoutBadgeInner(
   // intent while still triggering fresh Git discovery below.
   React.useEffect(() => {
     setMode('current')
+    setIntentKind('new')
     setBaseRef(null)
+    setSelectedWorktreeId(null)
+    setWorktrees([])
+    setWorktreesLoading(false)
     setRefs([])
     setRefsLoading(false)
     setError(null)
@@ -208,13 +219,37 @@ function WorkspaceCheckoutBadgeInner(
       .finally(() => setRefsLoading(false))
   }, [workingDirectory])
 
+  // Load the workspace's ready managed worktrees for this repository. Identity
+  // is resolved server-side from the session + working directory; worktrees
+  // from other workspaces or unrelated repositories are never offered.
+  const loadWorktrees = React.useCallback(() => {
+    if (!sessionId || !workingDirectory) return
+    setWorktreesLoading(true)
+    window.electronAPI
+      ?.listManagedWorktrees?.(sessionId, workingDirectory)
+      .then((result) => {
+        setWorktrees(result)
+        // Drop a stale selection if its worktree disappeared concurrently.
+        setSelectedWorktreeId((prev) =>
+          prev !== null && result.some((w) => w.managedWorktreeId === prev) ? prev : null,
+        )
+      })
+      .catch(() => setWorktrees([]))
+      .finally(() => setWorktreesLoading(false))
+  }, [sessionId, workingDirectory])
+
   const handleSelectMode = React.useCallback(
-    (next: CheckoutMode) => {
+    (next: CheckoutMode, kind?: 'new' | 'existing') => {
       setError(null)
       setMode(next)
-      if (next === 'managed-worktree' && refs.length === 0) loadRefs()
+      if (next === 'managed-worktree') {
+        const chosenKind = kind ?? intentKind
+        setIntentKind(chosenKind)
+        if (chosenKind === 'new' && refs.length === 0) loadRefs()
+        if (chosenKind === 'existing' && worktrees.length === 0) loadWorktrees()
+      }
     },
-    [refs.length, loadRefs],
+    [intentKind, refs.length, worktrees.length, loadRefs, loadWorktrees],
   )
 
   // Prepare-before-send gate (AC4). Idempotent: once prepared or already bound
@@ -223,6 +258,7 @@ function WorkspaceCheckoutBadgeInner(
     const gate = resolveSendGate({
       mode,
       baseRef,
+      managedWorktreeId: intentKind === 'existing' ? selectedWorktreeId : null,
       workingDirectory: workingDirectory ?? null,
       prepared: !!prepared,
       hasPersistedCheckout: !!persistedCheckout,
@@ -276,6 +312,21 @@ function WorkspaceCheckoutBadgeInner(
               }
             : current,
         )
+        // The server DTO carries the derived shared-owner count. Refresh it so
+        // a session freshly bound to a shared worktree shows the Shared
+        // worktree label immediately instead of after the next list refresh.
+        window.electronAPI
+          ?.getSessions?.()
+          .then((sessions) => {
+            const fresh = sessions.find((s) => s.id === sessionId)
+            if (!fresh) return
+            updateSession(sessionId, (current) =>
+              current ? { ...fresh, messages: current.messages } : fresh,
+            )
+          })
+          .catch(() => {
+            /* keep the local merge; a later list refresh corrects the count */
+          })
       }
       onWorkingDirectoryChange(result.workingDirectory)
       onCheckoutPrepared?.(result)
@@ -290,7 +341,9 @@ function WorkspaceCheckoutBadgeInner(
     }
   }, [
     mode,
+    intentKind,
     baseRef,
+    selectedWorktreeId,
     workingDirectory,
     prepared,
     persistedCheckout,
@@ -458,9 +511,15 @@ function WorkspaceCheckoutBadgeInner(
   }
 
   // identity.kind === 'menu' — interactive Workspace/ref selection.
+  const selectedWorktree =
+    worktrees.find((w) => w.managedWorktreeId === selectedWorktreeId) ?? null
   const triggerLabel =
     mode === 'managed-worktree'
-      ? t('git.workspace.fromRef', { ref: baseRef ?? liveBranch })
+      ? selectedWorktree
+        ? selectedWorktree.expectedBranch
+        : intentKind === 'existing'
+          ? t('git.workspace.existingWorktree')
+          : t('git.workspace.fromRef', { ref: baseRef ?? liveBranch })
       : liveBranch
 
   return (
@@ -471,6 +530,8 @@ function WorkspaceCheckoutBadgeInner(
             icon={
               preparing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
+              ) : mode === 'managed-worktree' && intentKind === 'existing' ? (
+                <FolderGit2 className="h-4 w-4" />
               ) : mode === 'managed-worktree' ? (
                 <GitFork className="h-4 w-4" />
               ) : (
@@ -504,16 +565,98 @@ function WorkspaceCheckoutBadgeInner(
           <button
             type="button"
             data-testid="git-workspace-new-worktree"
-            onClick={() => handleSelectMode('managed-worktree')}
+            onClick={() => handleSelectMode('managed-worktree', 'new')}
             className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-foreground/5')}
           >
             <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="flex-1 min-w-0 truncate text-left">{t('git.workspace.newWorktree')}</span>
-            {mode === 'managed-worktree' && <Check className="h-4 w-4 shrink-0" />}
+            {mode === 'managed-worktree' && intentKind === 'new' && <Check className="h-4 w-4 shrink-0" />}
+          </button>
+          <button
+            type="button"
+            data-testid="git-workspace-existing-worktree"
+            onClick={() => handleSelectMode('managed-worktree', 'existing')}
+            className={cn(MENU_ITEM_STYLE, 'w-full hover:bg-foreground/5')}
+          >
+            <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 min-w-0 truncate text-left">{t('git.workspace.existingWorktree')}</span>
+            {mode === 'managed-worktree' && intentKind === 'existing' && <Check className="h-4 w-4 shrink-0" />}
           </button>
         </div>
 
-        {mode === 'managed-worktree' && (
+        {mode === 'managed-worktree' && intentKind === 'existing' && (
+          <div className="border-t border-border/50">
+            <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t('git.workspace.existingWorktreesLabel')}
+            </div>
+            <CommandPrimitive>
+              <div className="border-b border-border/50 px-3 py-2">
+                <CommandPrimitive.Input
+                  data-testid="git-workspace-worktree-search"
+                  placeholder={t('git.workspace.searchWorktrees')}
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
+                />
+              </div>
+              <CommandPrimitive.List className={MENU_LIST_STYLE}>
+                {worktreesLoading && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t('common.loading')}
+                  </div>
+                )}
+                {worktrees.map((worktree) => (
+                  <CommandPrimitive.Item
+                    key={worktree.managedWorktreeId}
+                    value={`${worktree.expectedBranch} ${worktree.checkoutPath}`}
+                    onSelect={() => setSelectedWorktreeId(worktree.managedWorktreeId)}
+                    className={cn(MENU_ITEM_STYLE, 'items-start')}
+                  >
+                    <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{worktree.expectedBranch}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {worktree.baseRef && t('git.workspace.fromRef', { ref: worktree.baseRef })}
+                        {worktree.baseRef && worktree.ownerCount > 1 && ' · '}
+                        {worktree.ownerCount > 1 &&
+                          t('git.workspace.sharedWithCount', { count: worktree.ownerCount - 1 })}
+                      </span>
+                    </span>
+                    {selectedWorktreeId === worktree.managedWorktreeId && (
+                      <Check className="h-4 w-4 shrink-0" />
+                    )}
+                  </CommandPrimitive.Item>
+                ))}
+                {!worktreesLoading && worktrees.length === 0 && (
+                  <CommandPrimitive.Empty className="py-3 text-center text-sm text-muted-foreground">
+                    {t('git.workspace.noWorktreesFound')}
+                  </CommandPrimitive.Empty>
+                )}
+              </CommandPrimitive.List>
+            </CommandPrimitive>
+
+            <div className="border-t border-border/50 p-2">
+              <p className="px-1 pb-2 text-[11px] text-muted-foreground">
+                {t('git.workspace.existingWorktreeNote')}
+              </p>
+              {error && <p className="px-1 pb-2 text-[11px] text-destructive">{error}</p>}
+              <button
+                type="button"
+                data-testid="git-workspace-use-worktree"
+                onClick={handlePrepare}
+                disabled={!selectedWorktreeId || preparing}
+                className={cn(
+                  'flex w-full items-center justify-center gap-2 rounded-[6px] bg-foreground px-3 py-1.5 text-[13px] font-medium text-background transition-opacity',
+                  (!selectedWorktreeId || preparing) && 'opacity-50',
+                )}
+              >
+                {preparing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {preparing ? t('git.workspace.preparing') : t('git.workspace.useWorktree')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'managed-worktree' && intentKind === 'new' && (
           <div className="border-t border-border/50">
             <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {t('git.workspace.fromRefLabel')}

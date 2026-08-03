@@ -341,6 +341,8 @@ export const RPC_CHANNELS = {
     // Repository context and ref listing (Phase 1)
     GET_CONTEXT: 'git:getContext',
     LIST_REFS: 'git:listRefs',
+    // Existing managed-worktree discovery for new sessions (Phase 1)
+    LIST_MANAGED_WORKTREES: 'git:listManagedWorktrees',
     // Empty-session checkout preparation (Phase 1)
     PREPARE_CHECKOUT: 'git:prepareCheckout',
     // Managed-worktree risk inspection and removal (Phase 1 inspection; Phase 4 removal UI)

@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
+  ManagedWorktreeSummary,
   SessionCheckoutV1,
   WorktreeRemovalConfirmation,
   WorktreeIncludeResult,
@@ -156,6 +157,52 @@ export class ManagedWorktreeService {
   }
 
   /**
+   * Owning workspace of a registry record. Prefers the persisted field; legacy
+   * records (persisted before `workspaceId` existed) derive it from the
+   * `<worktreeRoot>/<workspace-id>/<repo-key>/<token>` layout.
+   */
+  workspaceIdOf(record: ManagedWorktreeRecord): string | null {
+    if (record.workspaceId) return record.workspaceId
+    const rel = relative(safeRealpath(this.worktreeRoot), safeRealpath(record.checkoutPath))
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
+    const firstSegment = rel.split('/')[0]
+    return firstSegment || null
+  }
+
+  /**
+   * Ready managed worktrees a new session in `workspaceId` may bind to: same
+   * workspace AND same repository (by Git common directory) as the caller's
+   * working directory. Worktrees from other workspaces or unrelated
+   * repositories are never offered, and non-ready records (preparing/missing/
+   * blocked/removing) are excluded so a session cannot attach to a checkout
+   * that is not currently usable.
+   */
+  listManagedWorktrees(
+    workspaceId: string,
+    gitCommonDir: string,
+    excludeWorktreeId?: string,
+  ): ManagedWorktreeSummary[] {
+    const repoKey = computeRepoKey(safeRealpath(gitCommonDir))
+    return this.registry
+      .list()
+      .filter(
+        (rec) =>
+          rec.state === 'ready' &&
+          rec.managedWorktreeId !== excludeWorktreeId &&
+          this.workspaceIdOf(rec) === workspaceId &&
+          computeRepoKey(safeRealpath(rec.gitCommonDir)) === repoKey,
+      )
+      .map((rec) => ({
+        managedWorktreeId: rec.managedWorktreeId,
+        checkoutPath: rec.checkoutPath,
+        expectedBranch: rec.expectedBranch,
+        baseRef: rec.baseRef,
+        ownerCount: rec.ownerSessionIds.length,
+        state: rec.state,
+      }))
+  }
+
+  /**
    * Create a managed worktree and its temporary `kata-agent/<token>` branch.
    * Serializes by Git common directory. On failure, cleans up a still-clean
    * provisional worktree/branch; if cleanup fails the registry record is left
@@ -184,6 +231,7 @@ export class ManagedWorktreeService {
         const managedWorktreeId = `${repoKey}-${token}`
         const provisional: ManagedWorktreeRecord = {
           managedWorktreeId,
+          workspaceId,
           repositoryRoot: resolvePath(repositoryRoot),
           gitCommonDir: realCommonDir,
           checkoutPath: resolvePath(worktreePath),
@@ -855,7 +903,7 @@ export class ManagedWorktreeService {
   }
 }
 
-function safeRealpath(p: string): string {
+export function safeRealpath(p: string): string {
   try {
     return realpathSync(p)
   } catch {

@@ -80,12 +80,24 @@ export interface ISessionManager {
    * agent. For managed-worktree intent, creates a managed worktree + temporary
    * `kata-agent/<token>` branch on the workspace-owning server and binds
    * checkout metadata, `workingDirectory`, and initial `sdkCwd` atomically.
-   * Idempotent only when the intent matches the persisted ready record.
+   * With `intent.managedWorktreeId`, binds to an existing ready worktree of
+   * the same workspace + repository instead, adding this session as a shared
+   * owner without mutating the checkout. Idempotent only when the intent
+   * matches the persisted ready record.
    */
   prepareCheckout(
     sessionId: string,
     intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
   ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult>
+  /**
+   * Ready managed worktrees in the session's workspace + repository that a
+   * new session may bind to (read-only discovery; excludes the session's own
+   * worktree). Identity is resolved server-side from the working directory.
+   */
+  listManagedWorktrees(
+    sessionId: string,
+    workingDirectory: string,
+  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummary[]>
   /**
    * Inject the server-owned Git domain so the checkout gate shares one
    * managed-worktree registry with the git RPC handlers. Optional: falls back

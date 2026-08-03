@@ -106,8 +106,18 @@ export interface CheckoutPrepareIntent {
   mode: CheckoutMode
   /** Currently selected working directory (used to resolve repository identity). */
   workingDirectory: string
-  /** Base ref for a new managed worktree. Required when mode is managed-worktree. */
+  /**
+   * Base ref for a NEW managed worktree. Required when mode is managed-worktree
+   * and no existing worktree is selected.
+   */
   baseRef?: string | null
+  /**
+   * Bind the session to an EXISTING managed worktree instead of creating one.
+   * The server re-validates workspace + repository identity and adds this
+   * session as a shared owner; the checkout is never mutated for the new
+   * session.
+   */
+  managedWorktreeId?: string | null
 }
 
 export interface CheckoutPrepareResult {
@@ -133,6 +143,8 @@ export type ManagedWorktreeState =
 
 export interface ManagedWorktreeRecord {
   managedWorktreeId: string
+  /** Owning workspace ID. Absent on records persisted before this field. */
+  workspaceId?: string
   repositoryRoot: string
   gitCommonDir: string
   checkoutPath: string
@@ -140,6 +152,24 @@ export interface ManagedWorktreeRecord {
   expectedBranch: string
   createdAt: number
   ownerSessionIds: string[]
+  state: ManagedWorktreeState
+}
+
+/**
+ * Read-only summary of a ready managed worktree offered to a new session in
+ * the same workspace + repository. Never carries mutation authority: binding
+ * is a server-side ownership add keyed by `managedWorktreeId`.
+ */
+export interface ManagedWorktreeSummary {
+  managedWorktreeId: string
+  /** Absolute checkout path (display uses its directory name). */
+  checkoutPath: string
+  /** Branch name, e.g. `kata-agent/ab12cd34`. */
+  expectedBranch: string
+  /** Base ref the worktree was created from, or null. */
+  baseRef: string | null
+  /** Number of sessions currently owning this worktree (>= 1). */
+  ownerCount: number
   state: ManagedWorktreeState
 }
 
