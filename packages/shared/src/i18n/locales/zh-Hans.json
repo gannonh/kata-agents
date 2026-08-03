@@ -554,6 +554,8 @@
   "git.toast.pushFailed": "推送失败",
   "git.toast.pushed": "已推送更改",
   "git.workspace.baseRefRequired": "选择一个基准 ref 以创建新的工作树。",
+  "git.workspace.contextPending": "正在等待 Git 状态…",
+  "git.workspace.contextRefreshFailed": "Git 状态不可用。请再次发送以重试。",
   "git.workspace.createWorktree": "创建工作树",
   "git.workspace.currentCheckout": "当前检出",
   "git.workspace.detached": "分离 HEAD",

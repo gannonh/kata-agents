@@ -9,15 +9,26 @@ import type {
   CheckoutMode,
   CheckoutPrepareResult,
   GitRef,
-  RepositoryContext,
 } from '@kata-sh/shared/protocol'
 
 import { sessionAtomFamily, updateSessionAtom } from '@/atoms/sessions'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
-import { resolveCheckoutIdentity, resolveCheckoutRecovery, resolveSendGate } from './checkout-controls'
+import {
+  resolveCheckoutIdentity,
+  resolveCheckoutRecovery,
+  resolveLiveBranchLabel,
+  resolveSendGate,
+} from './checkout-controls'
+import {
+  getGitContextRefreshKey,
+  getLiveGitContext,
+  refreshGitContext,
+  type GitContextRefreshState,
+} from './git-context'
 
 /**
  * WorkspaceCheckoutBadge — composer Workspace control for Git checkouts.
@@ -95,17 +106,44 @@ function WorkspaceCheckoutBadgeInner(
   ref: React.ForwardedRef<WorkspaceCheckoutHandle>,
 ) {
   const { t } = useTranslation()
-  const [context, setContext] = React.useState<RepositoryContext | null>(null)
+  const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
+  const isFocusedPanel = useOptionalAppShellContext()?.isFocusedPanel ?? true
+  const [contextRefreshToken, setContextRefreshToken] = React.useState(0)
+  const contextRequestKey = getGitContextRefreshKey({
+    flagEnabled,
+    workingDirectory,
+    sessionId,
+    isFocusedPanel,
+    refreshToken: contextRefreshToken,
+  })
+  const [contextState, setContextState] = React.useState<GitContextRefreshState>(() => ({
+    requestKey: contextRequestKey,
+    context: null,
+    status: flagEnabled && !!workingDirectory ? 'loading' : 'disabled',
+  }))
+  // A session or panel-focus switch can render once before the refresh effect
+  // runs. Keying the state prevents that render from exposing the previous
+  // session's branch, and the explicit status keeps a pending request distinct
+  // from a confirmed non-Git directory.
+  const contextMatchesRequest = contextState.requestKey === contextRequestKey
+  const contextReady = contextMatchesRequest && contextState.status === 'ready'
+  const context = contextMatchesRequest ? contextState.context : null
   const [mode, setMode] = React.useState<CheckoutMode>('current')
+  const modeRef = React.useRef(mode)
+  modeRef.current = mode
   const [baseRef, setBaseRef] = React.useState<string | null>(null)
   const [refs, setRefs] = React.useState<GitRef[]>([])
   const [refsLoading, setRefsLoading] = React.useState(false)
   const [open, setOpen] = React.useState(false)
   const [preparing, setPreparing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [prepared, setPrepared] = React.useState<CheckoutPrepareResult | null>(null)
-
-  const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
+  const [preparedState, setPreparedState] = React.useState<{
+    sessionId?: string
+    result: CheckoutPrepareResult | null
+  }>(() => ({ sessionId, result: null }))
+  // A prepared checkout belongs to one session. Do not let a reused badge carry
+  // its local identity into a newly selected session before the cleanup effect.
+  const prepared = preparedState.sessionId === sessionId ? preparedState.result : null
 
   // Persisted checkout + shared-owner count from the session DTO. Present after
   // preparation and on resume/restart — this is what keeps a resumed session
@@ -115,33 +153,47 @@ function WorkspaceCheckoutBadgeInner(
   const persistedCheckout = session?.checkout ?? null
   const sharedOwnerCount = session?.sharedOwnerCount
 
-  // Resolve repository identity for the active working directory. Reset any
-  // pending New worktree intent whenever the directory changes (spec: switching
-  // directories reruns discovery and clears an unprepared intent).
+  // Reset transient selection state when the active session or directory
+  // changes. Panel focus changes deliberately preserve a pending New worktree
+  // intent while still triggering fresh Git discovery below.
   React.useEffect(() => {
-    if (!flagEnabled || !workingDirectory) {
-      setContext(null)
-      return
-    }
-    let cancelled = false
     setMode('current')
     setBaseRef(null)
     setRefs([])
+    setRefsLoading(false)
     setError(null)
-    window.electronAPI
-      ?.getGitContext?.(workingDirectory)
-      .then((ctx) => {
-        if (cancelled) return
-        setContext(ctx)
-        setBaseRef(ctx.currentBranch ?? ctx.defaultRef ?? null)
-      })
-      .catch(() => {
-        if (!cancelled) setContext(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [flagEnabled, workingDirectory])
+  }, [flagEnabled, workingDirectory, sessionId])
+
+  // Resolve repository identity for the active session, directory, and panel.
+  // The session ID prevents stale results across session selection; panel focus
+  // ensures an already-mounted panel refreshes when it becomes active again.
+  React.useEffect(() => {
+    return refreshGitContext(
+      { flagEnabled, workingDirectory, sessionId, isFocusedPanel, refreshToken: contextRefreshToken },
+      getLiveGitContext,
+      (state) => {
+        setContextState(state)
+        const context = state.context
+        if (state.status === 'ready' && context) {
+          setError(null)
+          setBaseRef((previous) =>
+            modeRef.current === 'managed-worktree' && previous !== null
+              ? previous
+              : context.currentBranch ?? context.defaultRef ?? null,
+          )
+        }
+      },
+    )
+  }, [flagEnabled, workingDirectory, sessionId, isFocusedPanel, contextRefreshToken])
+
+  // Clear session-local preparation state when the selected session changes.
+  // A working-directory change within the same session must preserve a
+  // just-prepared checkout until its persisted session metadata arrives.
+  React.useEffect(() => {
+    setPreparedState({ sessionId, result: null })
+    setOpen(false)
+    setPreparing(false)
+  }, [sessionId])
 
   const loadRefs = React.useCallback(() => {
     if (!workingDirectory) return
@@ -174,10 +226,26 @@ function WorkspaceCheckoutBadgeInner(
       workingDirectory: workingDirectory ?? null,
       prepared: !!prepared,
       hasPersistedCheckout: !!persistedCheckout,
-      isGitRepository: !!context?.isGitRepository,
+      isGitRepository: contextReady && !!context?.isGitRepository,
+      gitContextResolved: contextReady,
     })
 
     if (gate.action === 'send') return { status: 'not-needed' }
+    if (gate.action === 'wait') {
+      // Loading and failed refreshes need different messages: a pending
+      // discovery is expected during a session/panel switch, while a failed
+      // refresh is a retryable error. Only the error status re-runs discovery.
+      const msg =
+        contextState.status === 'error'
+          ? t('git.workspace.contextRefreshFailed')
+          : t('git.workspace.contextPending')
+      setError(msg)
+      setOpen(true)
+      if (contextState.status === 'error') {
+        setContextRefreshToken((token) => token + 1)
+      }
+      return { status: 'error', error: msg }
+    }
     if (gate.action === 'block') {
       const msg = t('git.workspace.baseRefRequired')
       setError(msg)
@@ -192,7 +260,7 @@ function WorkspaceCheckoutBadgeInner(
     setError(null)
     try {
       const result = await window.electronAPI.prepareGitCheckout(sessionId, gate.intent)
-      setPrepared(result)
+      setPreparedState({ sessionId, result })
       setOpen(false)
       // Keep the authoritative session atom in sync immediately. The server
       // persists the checkout during preparation, but the normal working
@@ -227,6 +295,8 @@ function WorkspaceCheckoutBadgeInner(
     prepared,
     persistedCheckout,
     context,
+    contextReady,
+    contextState.status,
     sessionId,
     updateSession,
     onWorkingDirectoryChange,
@@ -242,8 +312,25 @@ function WorkspaceCheckoutBadgeInner(
 
   if (!flagEnabled) return null
 
+  // Keep a failed refresh visible so Send can show the retryable error instead
+  // of silently dropping a pending worktree intent while the badge is hidden.
+  if (error && !contextReady && workingDirectory && sessionId) {
+    return (
+      <FreeFormInputContextBadge
+        icon={<AlertTriangle className="h-4 w-4" />}
+        label={error}
+        isExpanded
+        hasSelection
+        showChevron={false}
+        className="text-destructive"
+        tooltip={error}
+        disabled
+      />
+    )
+  }
+
   const identity = resolveCheckoutIdentity({
-    isGitRepository: !!context?.isGitRepository,
+    isGitRepository: contextReady && !!context?.isGitRepository,
     isEmptySession,
     hasSessionId: !!sessionId,
     persistedCheckout,
@@ -264,7 +351,7 @@ function WorkspaceCheckoutBadgeInner(
     // directory; the user must restore the branch or delete the session.
     const recovery = resolveCheckoutRecovery({
       checkout: prepared?.checkout ?? persistedCheckout,
-      contextLoaded: context !== null,
+      contextLoaded: contextReady,
       liveBranch: context?.detached ? null : context?.currentBranch ?? null,
       liveDetached: !!context?.detached,
       checkoutExists: !!context?.isGitRepository,
@@ -336,9 +423,18 @@ function WorkspaceCheckoutBadgeInner(
     )
   }
 
-  const liveBranch = context?.detached
-    ? t('git.workspace.detached')
-    : context?.currentBranch ?? context?.defaultRef ?? identity.branch ?? t('git.workspace.currentCheckout')
+  const liveBranch = resolveLiveBranchLabel(
+    {
+      detached: !!context?.detached,
+      currentBranch: context?.currentBranch ?? null,
+      defaultRef: context?.defaultRef ?? null,
+      identityBranch: identity.branch ?? null,
+    },
+    {
+      detached: t('git.workspace.detached'),
+      currentCheckout: t('git.workspace.currentCheckout'),
+    },
+  )
 
   // Locked / passive Current checkout identity: either a persisted current
   // checkout, or a session that already has messages.

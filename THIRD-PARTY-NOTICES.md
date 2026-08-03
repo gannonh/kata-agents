@@ -3,6 +3,8 @@
 > This file is generated from the checked-in manifests and bundled assets. Do not edit it by hand; run `bun run licenses:generate` after changing dependencies or bundled assets.
 >
 > It is an attribution and license inventory, not a replacement for the license terms of any component. The packaged desktop and server artifacts include this file at their top level. Where a dependency provides a license file, its text is reproduced below when practical; otherwise the source package remains authoritative.
+>
+> License-file paths are normalized to each package's logical `node_modules` location so this inventory remains stable across dependency hoisting layouts.
 
 ## Upstream project and fork
 
@@ -21,7 +23,7 @@
 | `@adiwajshing/keyed-db` | `0.2.4` | MIT | git@github.com:adiwajshing/keyed-db | `node_modules/@adiwajshing/keyed-db/LICENSE` |
 | `@anthropic-ai/claude-agent-sdk` | `0.3.220` | SEE LICENSE IN README.md | https://github.com/anthropics/claude-agent-sdk-typescript | `node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md` |
 | `@anthropic-ai/sdk` | `0.100.0` | MIT | github:anthropics/anthropic-sdk-typescript | `node_modules/@anthropic-ai/sdk/LICENSE` |
-| `@anthropic-ai/sdk` | `0.91.1` | MIT | github:anthropics/anthropic-sdk-typescript | `node_modules/@earendil-works/pi-ai/node_modules/@anthropic-ai/sdk/LICENSE` |
+| `@anthropic-ai/sdk` | `0.91.1` | MIT | github:anthropics/anthropic-sdk-typescript | `node_modules/@anthropic-ai/sdk/LICENSE` |
 | `@apm-js-collab/code-transformer` | `0.8.2` | Apache-2.0 | https://github.com/apm-js-collab/orchestrion-js | `node_modules/@apm-js-collab/code-transformer/LICENSE`, `node_modules/@apm-js-collab/code-transformer/NOTICE` |
 | `@apm-js-collab/tracing-hooks` | `0.3.1` | Apache-2.0 | https://github.com/apm-js-collab/tracing-hooks | `node_modules/@apm-js-collab/tracing-hooks/LICENSE` |
 | `@aws-crypto/sha256-browser` | `5.2.0` | Apache-2.0 | git@github.com:aws/aws-sdk-js-crypto-helpers | `node_modules/@aws-crypto/sha256-browser/LICENSE` |
@@ -29,32 +31,32 @@
 | `@aws-crypto/supports-web-crypto` | `5.2.0` | Apache-2.0 | git@github.com:aws/aws-sdk-js-crypto-helpers | `node_modules/@aws-crypto/supports-web-crypto/LICENSE` |
 | `@aws-crypto/util` | `5.2.0` | Apache-2.0 | git@github.com:aws/aws-sdk-js-crypto-helpers | `node_modules/@aws-crypto/util/LICENSE` |
 | `@aws-sdk/client-bedrock-runtime` | `3.1048.0` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/LICENSE` |
-| `@aws-sdk/core` | `3.977.4` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/core/LICENSE` |
-| `@aws-sdk/credential-provider-env` | `3.972.65` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-env/LICENSE` |
+| `@aws-sdk/core` | `3.977.4` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/core/LICENSE` |
+| `@aws-sdk/credential-provider-env` | `3.972.65` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-env/LICENSE` |
 | `@aws-sdk/credential-provider-http` | `3.972.67` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | Not present in package |
-| `@aws-sdk/credential-provider-ini` | `3.973.10` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-ini/LICENSE` |
+| `@aws-sdk/credential-provider-ini` | `3.973.10` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-ini/LICENSE` |
 | `@aws-sdk/credential-provider-login` | `3.972.72` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | Not present in package |
-| `@aws-sdk/credential-provider-node` | `3.972.76` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/LICENSE` |
-| `@aws-sdk/credential-provider-process` | `3.972.65` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-process/LICENSE` |
-| `@aws-sdk/credential-provider-sso` | `3.973.9` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-sso/LICENSE` |
-| `@aws-sdk/credential-provider-web-identity` | `3.972.71` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-web-identity/LICENSE` |
+| `@aws-sdk/credential-provider-node` | `3.972.76` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-node/LICENSE` |
+| `@aws-sdk/credential-provider-process` | `3.972.65` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-process/LICENSE` |
+| `@aws-sdk/credential-provider-sso` | `3.973.9` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-sso/LICENSE` |
+| `@aws-sdk/credential-provider-web-identity` | `3.972.71` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/credential-provider-web-identity/LICENSE` |
 | `@aws-sdk/eventstream-handler-node` | `3.972.31` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/eventstream-handler-node/LICENSE` |
 | `@aws-sdk/middleware-eventstream` | `3.972.26` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/middleware-eventstream/LICENSE` |
 | `@aws-sdk/middleware-websocket` | `3.972.47` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/middleware-websocket/LICENSE` |
 | `@aws-sdk/nested-clients` | `3.997.39` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | Not present in package |
-| `@aws-sdk/signature-v4-multi-region` | `3.996.43` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-web-identity/node_modules/@aws-sdk/nested-clients/node_modules/@aws-sdk/signature-v4-multi-region/LICENSE` |
+| `@aws-sdk/signature-v4-multi-region` | `3.996.43` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/signature-v4-multi-region/LICENSE` |
 | `@aws-sdk/token-providers` | `3.1048.0` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/LICENSE` |
-| `@aws-sdk/token-providers` | `3.1100.0` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-sso/node_modules/@aws-sdk/token-providers/LICENSE` |
+| `@aws-sdk/token-providers` | `3.1100.0` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/LICENSE` |
 | `@aws-sdk/types` | `3.969.0` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/types/LICENSE` |
-| `@aws-sdk/types` | `3.973.8` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/types/LICENSE` |
-| `@aws-sdk/types` | `3.974.2` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/nested-clients/node_modules/@aws-sdk/types/LICENSE` |
+| `@aws-sdk/types` | `3.973.8` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/types/LICENSE` |
+| `@aws-sdk/types` | `3.974.2` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/types/LICENSE` |
 | `@aws-sdk/util-locate-window` | `3.965.2` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/util-locate-window/LICENSE` |
-| `@aws-sdk/xml-builder` | `3.972.37` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/core/node_modules/@aws-sdk/xml-builder/LICENSE` |
-| `@aws/lambda-invoke-store` | `0.3.0` | Apache-2.0 | https://github.com/awslabs/aws-lambda-invoke-store | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/core/node_modules/@aws/lambda-invoke-store/LICENSE` |
+| `@aws-sdk/xml-builder` | `3.972.37` | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3 | `node_modules/@aws-sdk/xml-builder/LICENSE` |
+| `@aws/lambda-invoke-store` | `0.3.0` | Apache-2.0 | https://github.com/awslabs/aws-lambda-invoke-store | `node_modules/@aws/lambda-invoke-store/LICENSE` |
 | `@azure-rest/ai-document-intelligence` | `1.1.0` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure-rest/ai-document-intelligence/LICENSE` |
 | `@azure-rest/core-client` | `2.5.1` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure-rest/core-client/LICENSE` |
 | `@azure/abort-controller` | `1.1.0` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/abort-controller/LICENSE` |
-| `@azure/abort-controller` | `2.1.2` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/core-util/node_modules/@azure/abort-controller/LICENSE` |
+| `@azure/abort-controller` | `2.1.2` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/abort-controller/LICENSE` |
 | `@azure/core-auth` | `1.10.1` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/core-auth/LICENSE` |
 | `@azure/core-client` | `1.10.1` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/core-client/LICENSE` |
 | `@azure/core-lro` | `3.3.1` | MIT | github:Azure/azure-sdk-for-js | `node_modules/@azure/core-lro/LICENSE` |
@@ -66,10 +68,10 @@
 | `@azure/msal-browser` | `3.30.0` | MIT | https://github.com/AzureAD/microsoft-authentication-library-for-js | `node_modules/@azure/msal-browser/LICENSE` |
 | `@azure/msal-common` | `14.16.1` | MIT | https://github.com/AzureAD/microsoft-authentication-library-for-js | `node_modules/@azure/msal-common/LICENSE` |
 | `@azure/msal-node` | `2.16.3` | MIT | https://github.com/AzureAD/microsoft-authentication-library-for-js | `node_modules/@azure/msal-node/LICENSE` |
-| `@babel/code-frame` | `7.12.11` | MIT | https://github.com/babel/babel | `node_modules/eslint_d/node_modules/eslint/node_modules/@babel/code-frame/LICENSE` |
+| `@babel/code-frame` | `7.12.11` | MIT | https://github.com/babel/babel | `node_modules/@babel/code-frame/LICENSE` |
 | `@babel/helper-validator-identifier` | `7.28.5` | MIT | https://github.com/babel/babel | `node_modules/@babel/helper-validator-identifier/LICENSE` |
 | `@babel/highlight` | `7.25.9` | MIT | https://github.com/babel/babel | `node_modules/@babel/highlight/LICENSE` |
-| `@babel/runtime` | `7.28.6` | MIT | https://github.com/babel/babel | `node_modules/json-schema-to-ts/node_modules/@babel/runtime/LICENSE` |
+| `@babel/runtime` | `7.28.6` | MIT | https://github.com/babel/babel | `node_modules/@babel/runtime/LICENSE` |
 | `@babel/runtime` | `7.29.2` | MIT | https://github.com/babel/babel | `node_modules/@babel/runtime/LICENSE` |
 | `@cacheable/memory` | `2.0.8` | MIT | https://github.com/jaredwray/cacheable | `node_modules/@cacheable/memory/LICENSE` |
 | `@cacheable/node-cache` | `1.7.6` | MIT | https://github.com/jaredwray/cacheable | `node_modules/@cacheable/node-cache/LICENSE` |
@@ -92,7 +94,7 @@
 | `@eshaz/web-worker` | `1.2.2` | Apache-2.0 | https://github.com/eshaz/web-worker | `node_modules/@eshaz/web-worker/LICENSE` |
 | `@eslint-community/eslint-utils` | `4.9.1` | MIT | https://github.com/eslint-community/eslint-utils | `node_modules/@eslint-community/eslint-utils/LICENSE` |
 | `@eslint-community/regexpp` | `4.12.2` | MIT | https://github.com/eslint-community/regexpp | `node_modules/@eslint-community/regexpp/LICENSE` |
-| `@eslint/eslintrc` | `0.4.3` | MIT | eslint/eslintrc | `node_modules/eslint_d/node_modules/eslint/node_modules/@eslint/eslintrc/LICENSE` |
+| `@eslint/eslintrc` | `0.4.3` | MIT | eslint/eslintrc | `node_modules/@eslint/eslintrc/LICENSE` |
 | `@floating-ui/core` | `1.7.3` | MIT | https://github.com/floating-ui/floating-ui | `node_modules/@floating-ui/core/LICENSE` |
 | `@floating-ui/dom` | `1.7.4` | MIT | https://github.com/floating-ui/floating-ui | `node_modules/@floating-ui/dom/LICENSE` |
 | `@floating-ui/react-dom` | `2.1.6` | MIT | https://github.com/floating-ui/floating-ui | `node_modules/@floating-ui/react-dom/LICENSE` |
@@ -121,12 +123,12 @@
 | `@modelcontextprotocol/sdk` | `1.29.0` | MIT | https://github.com/modelcontextprotocol/typescript-sdk | `node_modules/@modelcontextprotocol/sdk/LICENSE` |
 | `@napi-rs/canvas` | `0.1.88` | MIT | https://github.com/Brooooooklyn/canvas | `node_modules/@napi-rs/canvas/LICENSE` |
 | `@opentelemetry/api` | `1.9.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/api/LICENSE` |
-| `@opentelemetry/api-logs` | `0.207.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@prisma/instrumentation/node_modules/@opentelemetry/instrumentation/node_modules/@opentelemetry/api-logs/LICENSE` |
+| `@opentelemetry/api-logs` | `0.207.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/api-logs/LICENSE` |
 | `@opentelemetry/api-logs` | `0.210.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/api-logs/LICENSE` |
 | `@opentelemetry/context-async-hooks` | `2.5.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/context-async-hooks/LICENSE` |
-| `@opentelemetry/core` | `2.4.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/instrumentation-http/node_modules/@opentelemetry/core/LICENSE` |
+| `@opentelemetry/core` | `2.4.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/core/LICENSE` |
 | `@opentelemetry/core` | `2.5.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/core/LICENSE` |
-| `@opentelemetry/instrumentation` | `0.207.0` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js | `node_modules/@prisma/instrumentation/node_modules/@opentelemetry/instrumentation/LICENSE` |
+| `@opentelemetry/instrumentation` | `0.207.0` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/instrumentation/LICENSE` |
 | `@opentelemetry/instrumentation` | `0.210.0` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/instrumentation/LICENSE` |
 | `@opentelemetry/instrumentation-amqplib` | `0.57.0` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib | `node_modules/@opentelemetry/instrumentation-amqplib/LICENSE` |
 | `@opentelemetry/instrumentation-connect` | `0.53.0` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib | `node_modules/@opentelemetry/instrumentation-connect/LICENSE` |
@@ -153,7 +155,7 @@
 | `@opentelemetry/redis-common` | `0.38.2` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib | `node_modules/@opentelemetry/redis-common/LICENSE` |
 | `@opentelemetry/resources` | `2.5.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/resources/LICENSE` |
 | `@opentelemetry/sdk-trace-base` | `2.5.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/sdk-trace-base/LICENSE` |
-| `@opentelemetry/semantic-conventions` | `1.39.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/sdk-trace-base/node_modules/@opentelemetry/semantic-conventions/LICENSE` |
+| `@opentelemetry/semantic-conventions` | `1.39.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/semantic-conventions/LICENSE` |
 | `@opentelemetry/semantic-conventions` | `1.43.0` | Apache-2.0 | open-telemetry/opentelemetry-js | `node_modules/@opentelemetry/semantic-conventions/LICENSE` |
 | `@opentelemetry/sql-common` | `0.41.2` | Apache-2.0 | https://github.com/open-telemetry/opentelemetry-js-contrib | `node_modules/@opentelemetry/sql-common/LICENSE` |
 | `@paper-design/shaders` | `0.0.69` | SEE LICENSE IN https://github.com/paper-design/shaders/blob/main/LICENSE | https://www.npmjs.com/package/%40paper-design%2Fshaders | `node_modules/@paper-design/shaders/LICENSE` |
@@ -197,13 +199,13 @@
 | `@radix-ui/react-popper` | `1.2.8` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-popper/LICENSE` |
 | `@radix-ui/react-portal` | `1.1.9` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-portal/LICENSE` |
 | `@radix-ui/react-presence` | `1.1.5` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-presence/LICENSE` |
-| `@radix-ui/react-primitive` | `2.1.3` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-arrow/node_modules/@radix-ui/react-primitive/LICENSE` |
+| `@radix-ui/react-primitive` | `2.1.3` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-primitive/LICENSE` |
 | `@radix-ui/react-primitive` | `2.1.4` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-primitive/LICENSE` |
 | `@radix-ui/react-roving-focus` | `1.1.11` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-roving-focus/LICENSE` |
 | `@radix-ui/react-scroll-area` | `1.2.10` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-scroll-area/LICENSE` |
 | `@radix-ui/react-select` | `2.2.6` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-select/LICENSE` |
 | `@radix-ui/react-separator` | `1.1.8` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-separator/LICENSE` |
-| `@radix-ui/react-slot` | `1.2.3` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-arrow/node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot/LICENSE` |
+| `@radix-ui/react-slot` | `1.2.3` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-slot/LICENSE` |
 | `@radix-ui/react-slot` | `1.2.4` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-slot/LICENSE` |
 | `@radix-ui/react-switch` | `1.2.6` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-switch/LICENSE` |
 | `@radix-ui/react-tabs` | `1.1.13` | MIT | https://github.com/radix-ui/primitives | `node_modules/@radix-ui/react-tabs/LICENSE` |
@@ -242,18 +244,18 @@
 | `@shikijs/vscode-textmate` | `10.0.2` | MIT | https://github.com/shikijs/vscode-textmate | `node_modules/@shikijs/vscode-textmate/LICENSE.md` |
 | `@silvia-odwyer/photon-node` | `0.3.4` | Apache-2.0 | https://github.com/silvia-odwyer/photon | `node_modules/@silvia-odwyer/photon-node/LICENSE.md` |
 | `@sinclair/typebox` | `0.34.48` | MIT | https://github.com/sinclairzx81/typebox-legacy | `node_modules/@sinclair/typebox/license` |
-| `@smithy/core` | `3.31.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/token-providers/node_modules/@smithy/core/LICENSE` |
-| `@smithy/credential-provider-imds` | `4.4.16` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@smithy/credential-provider-imds/LICENSE` |
-| `@smithy/fetch-http-handler` | `5.6.13` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/nested-clients/node_modules/@smithy/fetch-http-handler/LICENSE` |
-| `@smithy/is-array-buffer` | `2.2.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@aws-crypto/util/node_modules/@smithy/util-utf8/node_modules/@smithy/util-buffer-from/node_modules/@smithy/is-array-buffer/LICENSE` |
-| `@smithy/node-http-handler` | `4.7.3` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@smithy/node-http-handler/LICENSE` |
-| `@smithy/node-http-handler` | `4.9.13` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-web-identity/node_modules/@aws-sdk/nested-clients/node_modules/@smithy/node-http-handler/LICENSE` |
-| `@smithy/signature-v4` | `5.6.12` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-web-identity/node_modules/@aws-sdk/nested-clients/node_modules/@aws-sdk/signature-v4-multi-region/node_modules/@smithy/signature-v4/LICENSE` |
+| `@smithy/core` | `3.31.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/core/LICENSE` |
+| `@smithy/credential-provider-imds` | `4.4.16` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/credential-provider-imds/LICENSE` |
+| `@smithy/fetch-http-handler` | `5.6.13` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/fetch-http-handler/LICENSE` |
+| `@smithy/is-array-buffer` | `2.2.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@smithy/is-array-buffer/LICENSE` |
+| `@smithy/node-http-handler` | `4.7.3` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/node-http-handler/LICENSE` |
+| `@smithy/node-http-handler` | `4.9.13` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/node-http-handler/LICENSE` |
+| `@smithy/signature-v4` | `5.6.12` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/signature-v4/LICENSE` |
 | `@smithy/types` | `4.12.0` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/types/LICENSE` |
-| `@smithy/types` | `4.14.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/types/node_modules/@smithy/types/LICENSE` |
-| `@smithy/types` | `4.16.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@aws-sdk/token-providers/node_modules/@smithy/types/LICENSE` |
-| `@smithy/util-buffer-from` | `2.2.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@aws-crypto/util/node_modules/@smithy/util-utf8/node_modules/@smithy/util-buffer-from/LICENSE` |
-| `@smithy/util-utf8` | `2.3.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@aws-crypto/util/node_modules/@smithy/util-utf8/LICENSE` |
+| `@smithy/types` | `4.14.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/types/LICENSE` |
+| `@smithy/types` | `4.16.1` | Apache-2.0 | https://github.com/smithy-lang/smithy-typescript | `node_modules/@smithy/types/LICENSE` |
+| `@smithy/util-buffer-from` | `2.2.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@smithy/util-buffer-from/LICENSE` |
+| `@smithy/util-utf8` | `2.3.0` | Apache-2.0 | https://github.com/awslabs/smithy-typescript | `node_modules/@smithy/util-utf8/LICENSE` |
 | `@stablelib/base64` | `1.0.1` | MIT | https://github.com/StableLib/stablelib | `node_modules/@stablelib/base64/LICENSE` |
 | `@tailwindcss/typography` | `0.5.19` | MIT | https://github.com/tailwindlabs/tailwindcss-typography | `node_modules/@tailwindcss/typography/LICENSE` |
 | `@tanstack/react-table` | `8.21.3` | MIT | https://github.com/TanStack/table | `node_modules/@tanstack/react-table/LICENSE` |
@@ -303,24 +305,24 @@
 | `@types/estree-jsx` | `1.0.5` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/estree-jsx/LICENSE` |
 | `@types/hast` | `3.0.4` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/hast/LICENSE` |
 | `@types/katex` | `0.16.8` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/katex/LICENSE` |
-| `@types/linkify-it` | `3.0.5` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/markdown-it/node_modules/@types/linkify-it/LICENSE` |
+| `@types/linkify-it` | `3.0.5` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/linkify-it/LICENSE` |
 | `@types/linkify-it` | `5.0.0` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/linkify-it/LICENSE` |
 | `@types/long` | `4.0.2` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/long/LICENSE` |
 | `@types/luxon` | `3.7.1` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/luxon/LICENSE` |
 | `@types/markdown-it` | `13.0.9` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/markdown-it/LICENSE` |
-| `@types/markdown-it` | `14.1.2` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/prosemirror-markdown/node_modules/@types/markdown-it/LICENSE` |
+| `@types/markdown-it` | `14.1.2` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/markdown-it/LICENSE` |
 | `@types/mdast` | `4.0.4` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/mdast/LICENSE` |
 | `@types/mdurl` | `1.0.5` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/mdurl/LICENSE` |
-| `@types/mdurl` | `2.0.0` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/prosemirror-markdown/node_modules/@types/markdown-it/node_modules/@types/mdurl/LICENSE` |
+| `@types/mdurl` | `2.0.0` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/mdurl/LICENSE` |
 | `@types/ms` | `2.1.0` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/ms/LICENSE` |
 | `@types/mysql` | `2.15.27` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/mysql/LICENSE` |
-| `@types/node` | `10.17.60` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/libsignal/node_modules/protobufjs/node_modules/@types/node/LICENSE` |
+| `@types/node` | `10.17.60` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/node/LICENSE` |
 | `@types/node` | `25.0.8` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/node/LICENSE` |
 | `@types/pg` | `8.15.6` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/pg/LICENSE` |
 | `@types/pg-pool` | `2.0.7` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/pg-pool/LICENSE` |
 | `@types/retry` | `0.12.0` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/retry/LICENSE` |
 | `@types/tedious` | `4.0.14` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/tedious/LICENSE` |
-| `@types/unist` | `2.0.11` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/parse-entities/node_modules/@types/unist/LICENSE` |
+| `@types/unist` | `2.0.11` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/unist/LICENSE` |
 | `@types/unist` | `3.0.3` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/unist/LICENSE` |
 | `@types/use-sync-external-store` | `0.0.6` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/use-sync-external-store/LICENSE` |
 | `@typescript-eslint/eslint-plugin` | `8.53.0` | MIT | https://github.com/typescript-eslint/typescript-eslint | `node_modules/@typescript-eslint/eslint-plugin/LICENSE` |
@@ -343,27 +345,27 @@
 | `@wasm-audio-decoders/opus-ml` | `0.0.2` | MIT | https://github.com/eshaz/wasm-audio-decoders | Not present in package |
 | `@whiskeysockets/baileys` | `6.17.16` | MIT | git@github.com:WhiskeySockets/Baileys | `node_modules/@whiskeysockets/baileys/LICENSE` |
 | `@whiskeysockets/eslint-config` | `1.0.0` | License metadata not declared; see package license files | https://www.npmjs.com/package/%40whiskeysockets%2Feslint-config | `node_modules/@whiskeysockets/eslint-config/LICENSE` |
-| `@whiskeysockets/libsignal-node` | `2.0.1` | GPL-3.0 | WhiskeySockets/libsignal-node | `node_modules/libsignal/LICENSE` |
+| `@whiskeysockets/libsignal-node` | `2.0.1` | GPL-3.0 | WhiskeySockets/libsignal-node | `node_modules/@whiskeysockets/libsignal-node/LICENSE` |
 | `@xmldom/xmldom` | `0.8.11` | MIT | git://github.com/xmldom/xmldom | `node_modules/@xmldom/xmldom/LICENSE` |
 | `abort-controller` | `3.0.0` | MIT | https://github.com/mysticatea/abort-controller | `node_modules/abort-controller/LICENSE` |
 | `accepts` | `2.0.0` | MIT | jshttp/accepts | `node_modules/accepts/LICENSE` |
-| `acorn` | `7.4.1` | MIT | https://github.com/acornjs/acorn | `node_modules/eslint_d/node_modules/eslint/node_modules/espree/node_modules/acorn/LICENSE` |
+| `acorn` | `7.4.1` | MIT | https://github.com/acornjs/acorn | `node_modules/acorn/LICENSE` |
 | `acorn` | `8.15.0` | MIT | https://github.com/acornjs/acorn | `node_modules/acorn/LICENSE` |
 | `acorn-import-attributes` | `1.9.5` | MIT | https://github.com/xtuc/acorn-import-attributes | `node_modules/acorn-import-attributes/LICENSE` |
 | `acorn-jsx` | `5.3.2` | MIT | https://github.com/acornjs/acorn-jsx | `node_modules/acorn-jsx/LICENSE` |
 | `adler-32` | `1.3.1` | Apache-2.0 | git://github.com/SheetJS/js-adler32 | `node_modules/adler-32/LICENSE` |
 | `agent-base` | `7.1.4` | MIT | https://github.com/TooTallNate/proxy-agents | `node_modules/agent-base/LICENSE` |
 | `ajv` | `6.12.6` | MIT | https://github.com/ajv-validator/ajv | `node_modules/ajv/LICENSE` |
-| `ajv` | `8.17.1` | MIT | ajv-validator/ajv | `node_modules/table/node_modules/ajv/LICENSE` |
+| `ajv` | `8.17.1` | MIT | ajv-validator/ajv | `node_modules/ajv/LICENSE` |
 | `ajv-formats` | `3.0.1` | MIT | https://github.com/ajv-validator/ajv-formats | `node_modules/ajv-formats/LICENSE` |
 | `ansi-colors` | `4.1.3` | MIT | doowb/ansi-colors | `node_modules/ansi-colors/LICENSE` |
-| `ansi-regex` | `5.0.1` | MIT | chalk/ansi-regex | `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/node_modules/ansi-regex/license` |
-| `ansi-regex` | `6.2.2` | MIT | chalk/ansi-regex | `node_modules/@isaacs/cliui/node_modules/strip-ansi/node_modules/ansi-regex/license` |
-| `ansi-styles` | `3.2.1` | MIT | chalk/ansi-styles | `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/license` |
+| `ansi-regex` | `5.0.1` | MIT | chalk/ansi-regex | `node_modules/ansi-regex/license` |
+| `ansi-regex` | `6.2.2` | MIT | chalk/ansi-regex | `node_modules/ansi-regex/license` |
+| `ansi-styles` | `3.2.1` | MIT | chalk/ansi-styles | `node_modules/ansi-styles/license` |
 | `ansi-styles` | `4.3.0` | MIT | chalk/ansi-styles | `node_modules/ansi-styles/license` |
-| `ansi-styles` | `6.2.3` | MIT | chalk/ansi-styles | `node_modules/@isaacs/cliui/node_modules/wrap-ansi/node_modules/ansi-styles/license` |
+| `ansi-styles` | `6.2.3` | MIT | chalk/ansi-styles | `node_modules/ansi-styles/license` |
 | `ansis` | `4.2.0` | ISC | webdiscus/ansis | `node_modules/ansis/LICENSE` |
-| `argparse` | `1.0.10` | MIT | nodeca/argparse | `node_modules/eslint_d/node_modules/eslint/node_modules/js-yaml/node_modules/argparse/LICENSE` |
+| `argparse` | `1.0.10` | MIT | nodeca/argparse | `node_modules/argparse/LICENSE` |
 | `argparse` | `2.0.1` | Python-2.0 | nodeca/argparse | `node_modules/argparse/LICENSE` |
 | `aria-hidden` | `1.2.6` | MIT | https://github.com/theKashey/aria-hidden | `node_modules/aria-hidden/LICENSE` |
 | `arity-n` | `1.0.4` | MIT | http://github.com/stoeffel/arityN | `node_modules/arity-n/LICENSE` |
@@ -377,25 +379,25 @@
 | `audio-decode` | `2.2.3` | MIT | https://github.com/audiojs/audio-decode | `node_modules/audio-decode/LICENSE` |
 | `audio-type` | `2.4.1` | MIT | audiojs/audio-type | `node_modules/audio-type/license` |
 | `axios` | `1.13.2` | MIT | https://github.com/axios/axios | `node_modules/axios/LICENSE` |
-| `axios` | `1.13.6` | MIT | https://github.com/axios/axios | `node_modules/@larksuiteoapi/node-sdk/node_modules/axios/LICENSE` |
+| `axios` | `1.13.6` | MIT | https://github.com/axios/axios | `node_modules/axios/LICENSE` |
 | `babylon` | `6.18.0` | MIT | https://github.com/babel/babylon | `node_modules/babylon/LICENSE` |
 | `bail` | `2.0.2` | MIT | wooorm/bail | `node_modules/bail/license` |
 | `balanced-match` | `1.0.2` | MIT | git://github.com/juliangruber/balanced-match | `node_modules/balanced-match/LICENSE.md` |
-| `balanced-match` | `4.0.3` | MIT | git://github.com/juliangruber/balanced-match | `node_modules/glob/node_modules/minimatch/node_modules/brace-expansion/node_modules/balanced-match/LICENSE.md` |
+| `balanced-match` | `4.0.3` | MIT | git://github.com/juliangruber/balanced-match | `node_modules/balanced-match/LICENSE.md` |
 | `base64-js` | `1.5.1` | MIT | git://github.com/beatgammit/base64-js | `node_modules/base64-js/LICENSE` |
 | `bash-parser` | `0.5.0` | MIT | vorpaljs/bash-parser | `node_modules/bash-parser/license` |
 | `batch-cluster` | `13.0.0` | MIT | https://github.com/photostructure/batch-cluster.js | `node_modules/batch-cluster/LICENSE` |
 | `beautiful-mermaid` | `1.1.3` | MIT | https://github.com/lukilabs/beautiful-mermaid | `node_modules/beautiful-mermaid/LICENSE` |
 | `bignumber.js` | `9.3.1` | MIT | https://github.com/MikeMcl/bignumber.js | `node_modules/bignumber.js/LICENCE.md` |
-| `bluebird` | `3.4.7` | MIT | git://github.com/petkaantonov/bluebird | `node_modules/mammoth/node_modules/bluebird/LICENSE` |
+| `bluebird` | `3.4.7` | MIT | git://github.com/petkaantonov/bluebird | `node_modules/bluebird/LICENSE` |
 | `bluebird` | `3.7.2` | MIT | git://github.com/petkaantonov/bluebird | `node_modules/bluebird/LICENSE` |
 | `body-parser` | `2.2.2` | MIT | expressjs/body-parser | `node_modules/body-parser/LICENSE` |
 | `boolbase` | `1.0.0` | ISC | https://github.com/fb55/boolbase | Not present in package |
 | `bowser` | `2.13.1` | MIT | https://github.com/lancedikson/bowser | `node_modules/bowser/LICENSE` |
 | `brace-expansion` | `1.1.12` | MIT | git://github.com/juliangruber/brace-expansion | `node_modules/brace-expansion/LICENSE` |
-| `brace-expansion` | `2.0.2` | MIT | git://github.com/juliangruber/brace-expansion | `node_modules/rimraf/node_modules/glob/node_modules/minimatch/node_modules/brace-expansion/LICENSE` |
-| `brace-expansion` | `5.0.9` | MIT | https://github.com/juliangruber/brace-expansion | `node_modules/glob/node_modules/minimatch/node_modules/brace-expansion/LICENSE` |
-| `buffer` | `6.0.3` | MIT | git://github.com/feross/buffer | `node_modules/readable-web-to-node-stream/node_modules/readable-stream/node_modules/buffer/LICENSE` |
+| `brace-expansion` | `2.0.2` | MIT | git://github.com/juliangruber/brace-expansion | `node_modules/brace-expansion/LICENSE` |
+| `brace-expansion` | `5.0.9` | MIT | https://github.com/juliangruber/brace-expansion | `node_modules/brace-expansion/LICENSE` |
+| `buffer` | `6.0.3` | MIT | git://github.com/feross/buffer | `node_modules/buffer/LICENSE` |
 | `buffer-crc32` | `0.2.13` | MIT | git://github.com/brianloveswords/buffer-crc32 | `node_modules/buffer-crc32/LICENSE` |
 | `buffer-equal-constant-time` | `1.0.1` | BSD-3-Clause | git@github.com:goinstant/buffer-equal-constant-time | `node_modules/buffer-equal-constant-time/LICENSE.txt` |
 | `builder-util-runtime` | `9.5.1` | MIT | https://github.com/electron-userland/electron-builder | `node_modules/builder-util-runtime/LICENSE` |
@@ -409,9 +411,9 @@
 | `callsites` | `3.1.0` | MIT | sindresorhus/callsites | `node_modules/callsites/license` |
 | `ccount` | `2.0.1` | MIT | wooorm/ccount | `node_modules/ccount/license` |
 | `cfb` | `1.2.2` | Apache-2.0 | git://github.com/SheetJS/js-cfb | `node_modules/cfb/LICENSE` |
-| `chalk` | `2.4.2` | MIT | chalk/chalk | `node_modules/@babel/highlight/node_modules/chalk/license` |
+| `chalk` | `2.4.2` | MIT | chalk/chalk | `node_modules/chalk/license` |
 | `chalk` | `4.1.2` | MIT | chalk/chalk | `node_modules/chalk/license` |
-| `chalk` | `5.6.2` | MIT | chalk/chalk | `node_modules/@earendil-works/pi-coding-agent/node_modules/chalk/license` |
+| `chalk` | `5.6.2` | MIT | chalk/chalk | `node_modules/chalk/license` |
 | `character-entities` | `2.0.2` | MIT | wooorm/character-entities | `node_modules/character-entities/license` |
 | `character-entities-html4` | `2.1.0` | MIT | wooorm/character-entities-html4 | `node_modules/character-entities-html4/license` |
 | `character-entities-legacy` | `3.0.0` | MIT | wooorm/character-entities-legacy | `node_modules/character-entities-legacy/license` |
@@ -423,9 +425,9 @@
 | `cmdk` | `1.1.1` | MIT | https://github.com/pacocoursey/cmdk | `node_modules/cmdk/LICENSE.md` |
 | `codec-parser` | `2.5.0` | LGPL-3.0-or-later | https://github.com/eshaz/codec-parser | `node_modules/codec-parser/LICENSE` |
 | `codepage` | `1.15.0` | Apache-2.0 | git://github.com/SheetJS/js-codepage | `node_modules/codepage/LICENSE` |
-| `color-convert` | `1.9.3` | MIT | Qix-/color-convert | `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/node_modules/color-convert/LICENSE` |
+| `color-convert` | `1.9.3` | MIT | Qix-/color-convert | `node_modules/color-convert/LICENSE` |
 | `color-convert` | `2.0.1` | MIT | Qix-/color-convert | `node_modules/color-convert/LICENSE` |
-| `color-name` | `1.1.3` | MIT | git@github.com:dfcreative/color-name | `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/node_modules/color-convert/node_modules/color-name/LICENSE` |
+| `color-name` | `1.1.3` | MIT | git@github.com:dfcreative/color-name | `node_modules/color-name/LICENSE` |
 | `color-name` | `1.1.4` | MIT | git@github.com:colorjs/color-name | `node_modules/color-name/LICENSE` |
 | `combined-stream` | `1.0.8` | MIT | git://github.com/felixge/node-combined-stream | `node_modules/combined-stream/License` |
 | `comma-separated-tokens` | `2.0.3` | MIT | wooorm/comma-separated-tokens | `node_modules/comma-separated-tokens/license` |
@@ -451,14 +453,14 @@
 | `data-uri-to-buffer` | `4.0.1` | MIT | git://github.com/TooTallNate/node-data-uri-to-buffer | Not present in package |
 | `date-fns` | `4.1.0` | MIT | https://github.com/date-fns/date-fns | `node_modules/date-fns/LICENSE.md` |
 | `date-fns-jalali` | `4.1.0-0` | MIT | https://github.com/date-fns-jalali/date-fns-jalali | `node_modules/date-fns-jalali/LICENSE.md` |
-| `debug` | `3.2.7` | MIT | git://github.com/visionmedia/debug | `node_modules/pdf-parse-tt-message-gone/node_modules/debug/LICENSE` |
+| `debug` | `3.2.7` | MIT | git://github.com/visionmedia/debug | `node_modules/debug/LICENSE` |
 | `debug` | `4.4.3` | MIT | git://github.com/debug-js/debug | `node_modules/debug/LICENSE` |
 | `decode-named-character-reference` | `1.2.0` | MIT | wooorm/decode-named-character-reference | `node_modules/decode-named-character-reference/license` |
 | `deep-freeze` | `0.0.1` | public domain | git://github.com/substack/deep-freeze | `node_modules/deep-freeze/LICENSE` |
 | `deep-is` | `0.1.4` | MIT | http://github.com/thlorenz/deep-is | `node_modules/deep-is/LICENSE` |
 | `default-browser` | `5.4.0` | MIT | sindresorhus/default-browser | `node_modules/default-browser/license` |
 | `default-browser-id` | `5.0.1` | MIT | sindresorhus/default-browser-id | `node_modules/default-browser-id/license` |
-| `define-lazy-prop` | `2.0.0` | MIT | sindresorhus/define-lazy-prop | `node_modules/@azure/identity/node_modules/open/node_modules/define-lazy-prop/license` |
+| `define-lazy-prop` | `2.0.0` | MIT | sindresorhus/define-lazy-prop | `node_modules/define-lazy-prop/license` |
 | `define-lazy-prop` | `3.0.0` | MIT | sindresorhus/define-lazy-prop | `node_modules/define-lazy-prop/license` |
 | `delayed-stream` | `1.0.0` | MIT | git://github.com/felixge/node-delayed-stream | `node_modules/delayed-stream/License` |
 | `depd` | `2.0.0` | MIT | dougwilson/nodejs-depd | `node_modules/depd/LICENSE` |
@@ -466,10 +468,10 @@
 | `detect-libc` | `2.1.2` | Apache-2.0 | git://github.com/lovell/detect-libc | `node_modules/detect-libc/LICENSE` |
 | `detect-node-es` | `1.1.0` | MIT | https://github.com/thekashey/detect-node | `node_modules/detect-node-es/LICENSE` |
 | `devlop` | `1.1.0` | MIT | wooorm/devlop | `node_modules/devlop/license` |
-| `diff` | `8.0.2` | BSD-3-Clause | git://github.com/kpdecker/jsdiff | `node_modules/@pierre/diffs/node_modules/diff/LICENSE` |
+| `diff` | `8.0.2` | BSD-3-Clause | git://github.com/kpdecker/jsdiff | `node_modules/diff/LICENSE` |
 | `diff` | `8.0.4` | BSD-3-Clause | https://github.com/kpdecker/jsdiff | `node_modules/diff/LICENSE` |
 | `dingbat-to-unicode` | `1.0.1` | BSD-2-Clause | https://github.com/mwilliamson/dingbat-to-unicode | Not present in package |
-| `doctrine` | `3.0.0` | Apache-2.0 | eslint/doctrine | `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LICENSE`, `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LICENSE.closure-compiler`, `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LICENSE.esprima` |
+| `doctrine` | `3.0.0` | Apache-2.0 | eslint/doctrine | `node_modules/doctrine/LICENSE`, `node_modules/doctrine/LICENSE.closure-compiler`, `node_modules/doctrine/LICENSE.esprima` |
 | `dom-serializer` | `2.0.0` | MIT | git://github.com/cheeriojs/dom-serializer | `node_modules/dom-serializer/LICENSE` |
 | `domelementtype` | `2.3.0` | BSD-2-Clause | git://github.com/fb55/domelementtype | `node_modules/domelementtype/LICENSE` |
 | `domhandler` | `5.0.3` | BSD-2-Clause | git://github.com/fb55/domhandler | `node_modules/domhandler/LICENSE` |
@@ -488,31 +490,31 @@
 | `emoji-regex` | `9.2.2` | MIT | https://github.com/mathiasbynens/emoji-regex | Not present in package |
 | `encodeurl` | `2.0.0` | MIT | pillarjs/encodeurl | `node_modules/encodeurl/LICENSE` |
 | `enquirer` | `2.4.1` | MIT | enquirer/enquirer | `node_modules/enquirer/LICENSE` |
-| `entities` | `4.5.0` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/dom-serializer/node_modules/entities/LICENSE` |
-| `entities` | `6.0.1` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/hast-util-from-html/node_modules/parse5/node_modules/entities/LICENSE` |
+| `entities` | `4.5.0` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/entities/LICENSE` |
+| `entities` | `6.0.1` | BSD-2-Clause | git://github.com/fb55/entities | `node_modules/entities/LICENSE` |
 | `entities` | `7.0.1` | BSD-2-Clause | https://github.com/fb55/entities | `node_modules/entities/LICENSE` |
 | `es-define-property` | `1.0.1` | MIT | https://github.com/ljharb/es-define-property | `node_modules/es-define-property/LICENSE` |
 | `es-errors` | `1.3.0` | MIT | https://github.com/ljharb/es-errors | `node_modules/es-errors/LICENSE` |
 | `es-object-atoms` | `1.1.1` | MIT | https://github.com/ljharb/es-object-atoms | `node_modules/es-object-atoms/LICENSE` |
 | `es-set-tostringtag` | `2.1.0` | MIT | https://github.com/es-shims/es-set-tostringtag | `node_modules/es-set-tostringtag/LICENSE` |
 | `escape-html` | `1.0.3` | MIT | component/escape-html | `node_modules/escape-html/LICENSE` |
-| `escape-string-regexp` | `1.0.5` | MIT | sindresorhus/escape-string-regexp | `node_modules/@babel/highlight/node_modules/chalk/node_modules/escape-string-regexp/license` |
+| `escape-string-regexp` | `1.0.5` | MIT | sindresorhus/escape-string-regexp | `node_modules/escape-string-regexp/license` |
 | `escape-string-regexp` | `4.0.0` | MIT | sindresorhus/escape-string-regexp | `node_modules/escape-string-regexp/license` |
-| `escape-string-regexp` | `5.0.0` | MIT | sindresorhus/escape-string-regexp | `node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp/license` |
-| `eslint` | `7.32.0` | MIT | eslint/eslint | `node_modules/eslint_d/node_modules/eslint/LICENSE` |
+| `escape-string-regexp` | `5.0.0` | MIT | sindresorhus/escape-string-regexp | `node_modules/escape-string-regexp/license` |
+| `eslint` | `7.32.0` | MIT | eslint/eslint | `node_modules/eslint/LICENSE` |
 | `eslint_d` | `9.1.2` | MIT | https://github.com/mantoni/eslint_d.js | `node_modules/eslint_d/LICENSE` |
 | `eslint-plugin-simple-import-sort` | `12.1.1` | MIT | lydell/eslint-plugin-simple-import-sort | `node_modules/eslint-plugin-simple-import-sort/LICENSE` |
-| `eslint-scope` | `5.1.1` | BSD-2-Clause | eslint/eslint-scope | `node_modules/eslint_d/node_modules/eslint/node_modules/eslint-scope/LICENSE` |
+| `eslint-scope` | `5.1.1` | BSD-2-Clause | eslint/eslint-scope | `node_modules/eslint-scope/LICENSE` |
 | `eslint-utils` | `2.1.0` | MIT | https://github.com/mysticatea/eslint-utils | `node_modules/eslint-utils/LICENSE` |
-| `eslint-visitor-keys` | `1.3.0` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/eslint_d/node_modules/eslint/node_modules/espree/node_modules/eslint-visitor-keys/LICENSE` |
-| `eslint-visitor-keys` | `2.1.0` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/eslint_d/node_modules/eslint/node_modules/eslint-visitor-keys/LICENSE` |
-| `eslint-visitor-keys` | `3.4.3` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/@eslint-community/eslint-utils/node_modules/eslint-visitor-keys/LICENSE` |
+| `eslint-visitor-keys` | `1.3.0` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/eslint-visitor-keys/LICENSE` |
+| `eslint-visitor-keys` | `2.1.0` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/eslint-visitor-keys/LICENSE` |
+| `eslint-visitor-keys` | `3.4.3` | Apache-2.0 | eslint/eslint-visitor-keys | `node_modules/eslint-visitor-keys/LICENSE` |
 | `eslint-visitor-keys` | `4.2.1` | Apache-2.0 | https://github.com/eslint/js | `node_modules/eslint-visitor-keys/LICENSE` |
-| `espree` | `7.3.1` | BSD-2-Clause | eslint/espree | `node_modules/eslint_d/node_modules/eslint/node_modules/espree/LICENSE` |
+| `espree` | `7.3.1` | BSD-2-Clause | eslint/espree | `node_modules/espree/LICENSE` |
 | `esprima` | `4.0.1` | BSD-2-Clause | https://github.com/jquery/esprima | `node_modules/esprima/LICENSE.BSD` |
 | `esquery` | `1.7.0` | BSD-3-Clause | https://github.com/estools/esquery | `node_modules/esquery/license.txt` |
 | `esrecurse` | `4.3.0` | BSD-2-Clause | https://github.com/estools/esrecurse | Not present in package |
-| `estraverse` | `4.3.0` | BSD-2-Clause | http://github.com/estools/estraverse | `node_modules/eslint_d/node_modules/eslint/node_modules/eslint-scope/node_modules/estraverse/LICENSE.BSD` |
+| `estraverse` | `4.3.0` | BSD-2-Clause | http://github.com/estools/estraverse | `node_modules/estraverse/LICENSE.BSD` |
 | `estraverse` | `5.3.0` | BSD-2-Clause | http://github.com/estools/estraverse | `node_modules/estraverse/LICENSE.BSD` |
 | `estree-util-is-identifier-name` | `3.0.0` | MIT | syntax-tree/estree-util-is-identifier-name | `node_modules/estree-util-is-identifier-name/license` |
 | `esutils` | `2.0.3` | BSD-2-Clause | http://github.com/estools/esutils | `node_modules/esutils/LICENSE.BSD` |
@@ -537,13 +539,13 @@
 | `fdir` | `6.5.0` | MIT | https://github.com/thecodrr/fdir | `node_modules/fdir/LICENSE` |
 | `fetch-blob` | `3.2.0` | MIT | https://github.com/node-fetch/fetch-blob | `node_modules/fetch-blob/LICENSE` |
 | `fflate` | `0.8.2` | MIT | https://github.com/101arrowz/fflate | `node_modules/fflate/LICENSE` |
-| `file-entry-cache` | `6.0.1` | MIT | royriojas/file-entry-cache | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/LICENSE` |
-| `file-type` | `16.5.4` | MIT | sindresorhus/file-type | `node_modules/music-metadata/node_modules/file-type/license` |
+| `file-entry-cache` | `6.0.1` | MIT | royriojas/file-entry-cache | `node_modules/file-entry-cache/LICENSE` |
+| `file-type` | `16.5.4` | MIT | sindresorhus/file-type | `node_modules/file-type/license` |
 | `filter-iterator` | `0.0.1` | License metadata not declared; see package license files | git://github.com/jb55/filter-iterator | Not present in package |
 | `filter-obj` | `1.1.0` | MIT | sindresorhus/filter-obj | `node_modules/filter-obj/license` |
 | `filtrex` | `3.1.0` | MIT | git@github.com:cshaa/filtrex | `node_modules/filtrex/LICENSE` |
 | `finalhandler` | `2.1.1` | MIT | pillarjs/finalhandler | `node_modules/finalhandler/LICENSE` |
-| `flat-cache` | `3.2.0` | MIT | jaredwray/flat-cache | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/LICENSE` |
+| `flat-cache` | `3.2.0` | MIT | jaredwray/flat-cache | `node_modules/flat-cache/LICENSE` |
 | `flatted` | `3.3.3` | ISC | https://github.com/WebReflection/flatted | `node_modules/flatted/LICENSE` |
 | `fluent-ffmpeg` | `2.1.3` | MIT | git://github.com/fluent-ffmpeg/node-fluent-ffmpeg | `node_modules/fluent-ffmpeg/LICENSE` |
 | `follow-redirects` | `1.15.11` | MIT | ssh://git@github.com/follow-redirects/follow-redirects | `node_modules/follow-redirects/LICENSE` |
@@ -556,7 +558,7 @@
 | `framer-motion` | `12.26.2` | MIT | https://github.com/motiondivision/motion/ | `node_modules/framer-motion/LICENSE.md` |
 | `fresh` | `2.0.0` | MIT | jshttp/fresh | `node_modules/fresh/LICENSE` |
 | `fs-extra` | `10.1.0` | MIT | https://github.com/jprichardson/node-fs-extra | `node_modules/fs-extra/LICENSE` |
-| `fs-extra` | `11.3.3` | MIT | https://github.com/jprichardson/node-fs-extra | `node_modules/unzipper/node_modules/fs-extra/LICENSE` |
+| `fs-extra` | `11.3.3` | MIT | https://github.com/jprichardson/node-fs-extra | `node_modules/fs-extra/LICENSE` |
 | `fs.realpath` | `1.0.0` | ISC | https://github.com/isaacs/fs.realpath | `node_modules/fs.realpath/LICENSE` |
 | `function-bind` | `1.1.2` | MIT | https://github.com/Raynos/function-bind | `node_modules/function-bind/LICENSE` |
 | `functional-red-black-tree` | `1.0.1` | MIT | git://github.com/mikolalysenko/functional-red-black-tree | `node_modules/functional-red-black-tree/LICENSE` |
@@ -566,11 +568,11 @@
 | `get-intrinsic` | `1.3.0` | MIT | https://github.com/ljharb/get-intrinsic | `node_modules/get-intrinsic/LICENSE` |
 | `get-nonce` | `1.0.1` | MIT | git@github.com:theKashey/get-nonce | `node_modules/get-nonce/LICENSE` |
 | `get-proto` | `1.0.1` | MIT | https://github.com/ljharb/get-proto | `node_modules/get-proto/LICENSE` |
-| `glob` | `10.5.0` | ISC | git://github.com/isaacs/node-glob | `node_modules/rimraf/node_modules/glob/LICENSE` |
-| `glob` | `13.0.6` | BlueOak-1.0.0 | git@github.com:isaacs/node-glob | `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/LICENSE.md` |
-| `glob` | `7.2.3` | ISC | git://github.com/isaacs/node-glob | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/node_modules/rimraf/node_modules/glob/LICENSE` |
-| `glob-parent` | `5.1.2` | ISC | gulpjs/glob-parent | `node_modules/eslint_d/node_modules/eslint/node_modules/glob-parent/LICENSE` |
-| `globals` | `13.24.0` | MIT | sindresorhus/globals | `node_modules/eslint_d/node_modules/eslint/node_modules/globals/license` |
+| `glob` | `10.5.0` | ISC | git://github.com/isaacs/node-glob | `node_modules/glob/LICENSE` |
+| `glob` | `13.0.6` | BlueOak-1.0.0 | git@github.com:isaacs/node-glob | `node_modules/glob/LICENSE.md` |
+| `glob` | `7.2.3` | ISC | git://github.com/isaacs/node-glob | `node_modules/glob/LICENSE` |
+| `glob-parent` | `5.1.2` | ISC | gulpjs/glob-parent | `node_modules/glob-parent/LICENSE` |
+| `globals` | `13.24.0` | MIT | sindresorhus/globals | `node_modules/globals/license` |
 | `google-auth-library` | `10.5.0` | Apache-2.0 | googleapis/google-auth-library-nodejs | `node_modules/google-auth-library/LICENSE` |
 | `google-logging-utils` | `1.1.3` | Apache-2.0 | https://github.com/googleapis/google-cloud-node-core | `node_modules/google-logging-utils/LICENSE` |
 | `gopd` | `1.2.0` | MIT | https://github.com/ljharb/gopd | `node_modules/gopd/LICENSE` |
@@ -578,7 +580,7 @@
 | `grammy` | `1.42.0` | MIT | https://github.com/grammyjs/grammY | `node_modules/grammy/LICENSE` |
 | `gray-matter` | `4.0.3` | MIT | jonschlinkert/gray-matter | `node_modules/gray-matter/LICENSE` |
 | `gtoken` | `8.0.0` | MIT | google/node-gtoken | `node_modules/gtoken/LICENSE` |
-| `has-flag` | `3.0.0` | MIT | sindresorhus/has-flag | `node_modules/@babel/highlight/node_modules/chalk/node_modules/supports-color/node_modules/has-flag/license` |
+| `has-flag` | `3.0.0` | MIT | sindresorhus/has-flag | `node_modules/has-flag/license` |
 | `has-flag` | `4.0.0` | MIT | sindresorhus/has-flag | `node_modules/has-flag/license` |
 | `has-own-property` | `0.1.0` | MIT | LinusU/has-own-property | Not present in package |
 | `has-symbols` | `1.1.0` | MIT | git://github.com/inspect-js/has-symbols | `node_modules/has-symbols/LICENSE` |
@@ -602,7 +604,7 @@
 | `highlight.js` | `10.7.3` | BSD-3-Clause | git://github.com/highlightjs/highlight.js | `node_modules/highlight.js/LICENSE` |
 | `hono` | `4.11.4` | MIT | https://github.com/honojs/hono | `node_modules/hono/LICENSE` |
 | `hookified` | `1.15.1` | MIT | https://github.com/jaredwray/hookified | `node_modules/hookified/LICENSE` |
-| `hookified` | `2.1.1` | MIT | https://github.com/jaredwray/hookified | `node_modules/qified/node_modules/hookified/LICENSE` |
+| `hookified` | `2.1.1` | MIT | https://github.com/jaredwray/hookified | `node_modules/hookified/LICENSE` |
 | `hosted-git-info` | `9.0.3` | ISC | https://github.com/npm/hosted-git-info | `node_modules/hosted-git-info/LICENSE` |
 | `html-entities` | `2.6.0` | MIT | https://github.com/mdevils/html-entities | `node_modules/html-entities/LICENSE` |
 | `html-parse-stringify` | `3.0.1` | MIT | https://github.com/henrikjoreteg/html-parse-stringify | Not present in package |
@@ -614,7 +616,7 @@
 | `i18next` | `26.0.4` | MIT | https://github.com/i18next/i18next | `node_modules/i18next/LICENSE` |
 | `i18next-browser-languagedetector` | `8.2.1` | MIT | https://github.com/i18next/i18next-browser-languageDetector | `node_modules/i18next-browser-languagedetector/LICENSE` |
 | `iconv-lite` | `0.6.3` | MIT | git://github.com/ashtuchkin/iconv-lite | `node_modules/iconv-lite/LICENSE` |
-| `iconv-lite` | `0.7.2` | MIT | https://github.com/pillarjs/iconv-lite | `node_modules/body-parser/node_modules/iconv-lite/LICENSE` |
+| `iconv-lite` | `0.7.2` | MIT | https://github.com/pillarjs/iconv-lite | `node_modules/iconv-lite/LICENSE` |
 | `identity-function` | `1.0.0` | public domain | https://github.com/substack/identity-function | Not present in package |
 | `ieee754` | `1.2.1` | BSD-3-Clause | git://github.com/feross/ieee754 | `node_modules/ieee754/LICENSE` |
 | `ignore` | `4.0.6` | MIT | git@github.com:kaelzhang/node-ignore | Not present in package |
@@ -632,7 +634,7 @@
 | `is-alphabetical` | `2.0.1` | MIT | wooorm/is-alphabetical | `node_modules/is-alphabetical/license` |
 | `is-alphanumerical` | `2.0.1` | MIT | wooorm/is-alphanumerical | `node_modules/is-alphanumerical/license` |
 | `is-decimal` | `2.0.1` | MIT | wooorm/is-decimal | `node_modules/is-decimal/license` |
-| `is-docker` | `2.2.1` | MIT | sindresorhus/is-docker | `node_modules/@azure/identity/node_modules/open/node_modules/is-docker/license` |
+| `is-docker` | `2.2.1` | MIT | sindresorhus/is-docker | `node_modules/is-docker/license` |
 | `is-docker` | `3.0.0` | MIT | sindresorhus/is-docker | `node_modules/is-docker/license` |
 | `is-extendable` | `0.1.1` | MIT | jonschlinkert/is-extendable | `node_modules/is-extendable/LICENSE` |
 | `is-extglob` | `2.1.1` | MIT | jonschlinkert/is-extglob | `node_modules/is-extglob/LICENSE` |
@@ -645,25 +647,25 @@
 | `is-number` | `4.0.0` | MIT | jonschlinkert/is-number | `node_modules/is-number/LICENSE` |
 | `is-plain-obj` | `4.1.0` | MIT | sindresorhus/is-plain-obj | `node_modules/is-plain-obj/license` |
 | `is-promise` | `4.0.0` | MIT | https://github.com/then/is-promise | `node_modules/is-promise/LICENSE` |
-| `is-wsl` | `2.2.0` | MIT | sindresorhus/is-wsl | `node_modules/@azure/identity/node_modules/open/node_modules/is-wsl/license` |
+| `is-wsl` | `2.2.0` | MIT | sindresorhus/is-wsl | `node_modules/is-wsl/license` |
 | `is-wsl` | `3.1.0` | MIT | sindresorhus/is-wsl | `node_modules/is-wsl/license` |
 | `isarray` | `1.0.0` | MIT | git://github.com/juliangruber/isarray | Not present in package |
-| `isexe` | `2.0.0` | ISC | https://github.com/isaacs/isexe | `node_modules/fluent-ffmpeg/node_modules/which/node_modules/isexe/LICENSE` |
+| `isexe` | `2.0.0` | ISC | https://github.com/isaacs/isexe | `node_modules/isexe/LICENSE` |
 | `iterable-lookahead` | `1.0.0` | MIT | parro-it/iterable-lookahead | `node_modules/iterable-lookahead/license` |
 | `iterable-transform-replace` | `1.2.0` | MIT | parro-it/iterable-transform-replace | `node_modules/iterable-transform-replace/license` |
-| `jackspeak` | `3.4.3` | BlueOak-1.0.0 | https://github.com/isaacs/jackspeak | `node_modules/rimraf/node_modules/glob/node_modules/jackspeak/LICENSE.md` |
-| `jiti` | `2.7.0` | MIT | unjs/jiti | `node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/LICENSE` |
+| `jackspeak` | `3.4.3` | BlueOak-1.0.0 | https://github.com/isaacs/jackspeak | `node_modules/jackspeak/LICENSE.md` |
+| `jiti` | `2.7.0` | MIT | unjs/jiti | `node_modules/jiti/LICENSE` |
 | `jose` | `6.1.3` | MIT | panva/jose | `node_modules/jose/LICENSE.md` |
 | `jotai` | `2.16.2` | MIT | https://github.com/pmndrs/jotai | `node_modules/jotai/LICENSE` |
 | `jotai-family` | `1.0.1` | MIT | https://github.com/jotaijs/jotai-family | `node_modules/jotai-family/LICENSE` |
 | `js-tokens` | `4.0.0` | MIT | lydell/js-tokens | `node_modules/js-tokens/LICENSE` |
-| `js-yaml` | `3.14.2` | MIT | nodeca/js-yaml | `node_modules/eslint_d/node_modules/eslint/node_modules/js-yaml/LICENSE` |
+| `js-yaml` | `3.14.2` | MIT | nodeca/js-yaml | `node_modules/js-yaml/LICENSE` |
 | `js-yaml` | `4.1.1` | MIT | nodeca/js-yaml | `node_modules/js-yaml/LICENSE` |
 | `json-bigint` | `1.0.0` | MIT | git@github.com:sidorares/json-bigint | `node_modules/json-bigint/LICENSE` |
 | `json-buffer` | `3.0.1` | MIT | git://github.com/dominictarr/json-buffer | `node_modules/json-buffer/LICENSE` |
 | `json-schema-to-ts` | `3.1.1` | MIT | https://github.com/ThomasAribart/json-schema-to-ts | `node_modules/json-schema-to-ts/LICENSE` |
 | `json-schema-traverse` | `0.4.1` | MIT | https://github.com/epoberezkin/json-schema-traverse | `node_modules/json-schema-traverse/LICENSE` |
-| `json-schema-traverse` | `1.0.0` | MIT | https://github.com/epoberezkin/json-schema-traverse | `node_modules/table/node_modules/ajv/node_modules/json-schema-traverse/LICENSE` |
+| `json-schema-traverse` | `1.0.0` | MIT | https://github.com/epoberezkin/json-schema-traverse | `node_modules/json-schema-traverse/LICENSE` |
 | `json-schema-typed` | `8.0.2` | BSD-2-Clause | https://github.com/RemyRylan/json-schema-typed | `node_modules/json-schema-typed/LICENSE.md` |
 | `json-stable-stringify-without-jsonify` | `1.0.1` | MIT | git://github.com/samn/json-stable-stringify | `node_modules/json-stable-stringify-without-jsonify/LICENSE` |
 | `jsonfile` | `6.2.0` | MIT | git@github.com:jprichardson/node-jsonfile | `node_modules/jsonfile/LICENSE` |
@@ -674,7 +676,7 @@
 | `katex` | `0.16.33` | MIT | https://github.com/KaTeX/KaTeX | `node_modules/katex/LICENSE` |
 | `keyv` | `4.5.4` | MIT | https://github.com/jaredwray/keyv | Not present in package |
 | `keyv` | `5.5.5` | MIT | https://github.com/jaredwray/keyv | `node_modules/keyv/LICENSE` |
-| `keyv` | `5.6.0` | MIT | https://github.com/jaredwray/keyv | `node_modules/@cacheable/utils/node_modules/keyv/LICENSE` |
+| `keyv` | `5.6.0` | MIT | https://github.com/jaredwray/keyv | `node_modules/keyv/LICENSE` |
 | `kind-of` | `6.0.3` | MIT | jonschlinkert/kind-of | `node_modules/kind-of/LICENSE` |
 | `lazy-val` | `1.0.5` | MIT | develar/lazy-val | Not present in package |
 | `levn` | `0.4.1` | MIT | git://github.com/gkz/levn | `node_modules/levn/LICENSE` |
@@ -697,13 +699,13 @@
 | `lodash.once` | `4.1.1` | MIT | lodash/lodash | `node_modules/lodash.once/LICENSE` |
 | `lodash.pickby` | `4.6.0` | MIT | lodash/lodash | `node_modules/lodash.pickby/LICENSE` |
 | `lodash.truncate` | `4.4.2` | MIT | lodash/lodash | `node_modules/lodash.truncate/LICENSE` |
-| `long` | `4.0.0` | Apache-2.0 | https://github.com/dcodeIO/long.js | `node_modules/libsignal/node_modules/protobufjs/node_modules/long/LICENSE` |
+| `long` | `4.0.0` | Apache-2.0 | https://github.com/dcodeIO/long.js | `node_modules/long/LICENSE` |
 | `long` | `5.3.2` | Apache-2.0 | https://github.com/dcodeIO/long.js | `node_modules/long/LICENSE` |
 | `longest-streak` | `3.1.0` | MIT | wooorm/longest-streak | `node_modules/longest-streak/license` |
 | `loose-envify` | `1.4.0` | MIT | git://github.com/zertosh/loose-envify | `node_modules/loose-envify/LICENSE` |
 | `lop` | `0.4.2` | BSD-2-Clause | https://github.com/mwilliamson/lop | `node_modules/lop/LICENSE` |
 | `lru_map` | `0.4.1` | MIT | https://github.com/rsms/js-lru | Not present in package |
-| `lru-cache` | `10.4.3` | ISC | git://github.com/isaacs/node-lru-cache | `node_modules/rimraf/node_modules/glob/node_modules/path-scurry/node_modules/lru-cache/LICENSE` |
+| `lru-cache` | `10.4.3` | ISC | git://github.com/isaacs/node-lru-cache | `node_modules/lru-cache/LICENSE` |
 | `lru-cache` | `11.2.4` | BlueOak-1.0.0 | git://github.com/isaacs/node-lru-cache | `node_modules/lru-cache/LICENSE.md` |
 | `lucide-react` | `0.561.0` | ISC | https://github.com/lucide-icons/lucide | `node_modules/lucide-react/LICENSE` |
 | `luxon` | `3.7.2` | MIT | https://github.com/moment/luxon | `node_modules/luxon/LICENSE.md` |
@@ -717,7 +719,7 @@
 | `markdown-it-task-lists` | `2.1.1` | ISC | git@github.com:revin/markdown-it-task-lists | `node_modules/markdown-it-task-lists/LICENSE` |
 | `markdown-table` | `3.0.4` | MIT | wooorm/markdown-table | `node_modules/markdown-table/license` |
 | `marked` | `17.0.1` | MIT | git://github.com/markedjs/marked | `node_modules/marked/LICENSE.md` |
-| `marked` | `18.0.5` | MIT | git://github.com/markedjs/marked | `node_modules/@earendil-works/pi-tui/node_modules/marked/LICENSE` |
+| `marked` | `18.0.5` | MIT | git://github.com/markedjs/marked | `node_modules/marked/LICENSE` |
 | `markitdown-js` | `0.0.14` | MIT | https://github.com/Mirza-Glitch/markitdown-js | `node_modules/markitdown-js/LICENSE` |
 | `math-intrinsics` | `1.1.0` | MIT | https://github.com/es-shims/math-intrinsics | `node_modules/math-intrinsics/LICENSE` |
 | `mdast-util-find-and-replace` | `3.0.2` | MIT | syntax-tree/mdast-util-find-and-replace | `node_modules/mdast-util-find-and-replace/license` |
@@ -770,14 +772,14 @@
 | `micromark-util-symbol` | `2.0.1` | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-util-symbol | `node_modules/micromark-util-symbol/license` |
 | `micromark-util-types` | `2.0.2` | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-util-types | `node_modules/micromark-util-types/license` |
 | `mime-db` | `1.52.0` | MIT | jshttp/mime-db | `node_modules/mime-db/LICENSE` |
-| `mime-db` | `1.54.0` | MIT | jshttp/mime-db | `node_modules/type-is/node_modules/mime-types/node_modules/mime-db/LICENSE` |
+| `mime-db` | `1.54.0` | MIT | jshttp/mime-db | `node_modules/mime-db/LICENSE` |
 | `mime-types` | `2.1.35` | MIT | jshttp/mime-types | `node_modules/mime-types/LICENSE` |
-| `mime-types` | `3.0.2` | MIT | jshttp/mime-types | `node_modules/type-is/node_modules/mime-types/LICENSE` |
-| `minimatch` | `10.2.5` | BlueOak-1.0.0 | git@github.com:isaacs/minimatch | `node_modules/glob/node_modules/minimatch/LICENSE.md` |
+| `mime-types` | `3.0.2` | MIT | jshttp/mime-types | `node_modules/mime-types/LICENSE` |
+| `minimatch` | `10.2.5` | BlueOak-1.0.0 | git@github.com:isaacs/minimatch | `node_modules/minimatch/LICENSE.md` |
 | `minimatch` | `3.1.2` | ISC | git://github.com/isaacs/minimatch | `node_modules/minimatch/LICENSE` |
-| `minimatch` | `9.0.5` | ISC | git://github.com/isaacs/minimatch | `node_modules/rimraf/node_modules/glob/node_modules/minimatch/LICENSE` |
+| `minimatch` | `9.0.5` | ISC | git://github.com/isaacs/minimatch | `node_modules/minimatch/LICENSE` |
 | `minipass` | `7.1.2` | ISC | https://github.com/isaacs/minipass | `node_modules/minipass/LICENSE` |
-| `minipass` | `7.1.3` | BlueOak-1.0.0 | https://github.com/isaacs/minipass | `node_modules/path-scurry/node_modules/minipass/LICENSE.md` |
+| `minipass` | `7.1.3` | BlueOak-1.0.0 | https://github.com/isaacs/minipass | `node_modules/minipass/LICENSE.md` |
 | `module-details-from-path` | `1.0.4` | MIT | https://github.com/watson/module-details-from-path | `node_modules/module-details-from-path/LICENSE` |
 | `motion` | `12.26.2` | MIT | https://github.com/motiondivision/motion | `node_modules/motion/LICENSE.md` |
 | `motion-dom` | `12.26.2` | MIT | https://github.com/motiondivision/motion | `node_modules/motion-dom/LICENSE.md` |
@@ -794,7 +796,7 @@
 | `node-domexception` | `1.0.0` | MIT | https://github.com/jimmywarting/node-domexception | `node_modules/node-domexception/LICENSE` |
 | `node-ensure` | `0.0.0` | MIT | https://github.com/bauerca/node-ensure | Not present in package |
 | `node-fetch` | `2.7.0` | MIT | https://github.com/bitinn/node-fetch | `node_modules/node-fetch/LICENSE.md` |
-| `node-fetch` | `3.3.2` | MIT | https://github.com/node-fetch/node-fetch | `node_modules/gaxios/node_modules/node-fetch/LICENSE.md` |
+| `node-fetch` | `3.3.2` | MIT | https://github.com/node-fetch/node-fetch | `node_modules/node-fetch/LICENSE.md` |
 | `node-html-parser` | `6.1.13` | MIT | https://github.com/taoqf/node-fast-html-parser | `node_modules/node-html-parser/LICENSE` |
 | `node-int64` | `0.4.0` | MIT | https://github.com/broofa/node-int64 | `node_modules/node-int64/LICENSE` |
 | `node-pptx-parser` | `1.0.01` | MIT | https://github.com/Mirza-Glitch/node-pptx-parser | `node_modules/node-pptx-parser/LICENSE` |
@@ -812,8 +814,8 @@
 | `oniguruma-parser` | `0.12.1` | MIT | https://github.com/slevithan/oniguruma-parser | `node_modules/oniguruma-parser/LICENSE` |
 | `oniguruma-to-es` | `4.3.4` | MIT | https://github.com/slevithan/oniguruma-to-es | `node_modules/oniguruma-to-es/LICENSE` |
 | `open` | `11.0.0` | MIT | sindresorhus/open | `node_modules/open/license` |
-| `open` | `8.4.2` | MIT | sindresorhus/open | `node_modules/@azure/identity/node_modules/open/license` |
-| `openai` | `6.26.0` | Apache-2.0 | github:openai/openai-node | `node_modules/@earendil-works/pi-ai/node_modules/openai/LICENSE` |
+| `open` | `8.4.2` | MIT | sindresorhus/open | `node_modules/open/license` |
+| `openai` | `6.26.0` | Apache-2.0 | github:openai/openai-node | `node_modules/openai/LICENSE` |
 | `option` | `0.2.4` | BSD-2-Clause | https://github.com/mwilliamson/node-options | `node_modules/option/LICENSE` |
 | `optionator` | `0.9.4` | MIT | git://github.com/gkz/optionator | `node_modules/optionator/LICENSE` |
 | `opus-decoder` | `0.7.11` | MIT | https://github.com/eshaz/wasm-audio-decoders | Not present in package |
@@ -823,13 +825,13 @@
 | `pako` | `1.0.11` | (MIT AND Zlib) | nodeca/pako | `node_modules/pako/LICENSE` |
 | `parent-module` | `1.0.1` | MIT | sindresorhus/parent-module | `node_modules/parent-module/license` |
 | `parse-entities` | `4.0.2` | MIT | wooorm/parse-entities | `node_modules/parse-entities/license` |
-| `parse5` | `7.3.0` | MIT | git://github.com/inikulin/parse5 | `node_modules/hast-util-from-html/node_modules/parse5/LICENSE` |
+| `parse5` | `7.3.0` | MIT | git://github.com/inikulin/parse5 | `node_modules/parse5/LICENSE` |
 | `parseurl` | `1.3.3` | MIT | pillarjs/parseurl | `node_modules/parseurl/LICENSE` |
 | `partial-json` | `0.1.7` | MIT | https://github.com/promplate/partial-json-parser-js | `node_modules/partial-json/LICENSE` |
 | `path-is-absolute` | `1.0.1` | MIT | sindresorhus/path-is-absolute | `node_modules/path-is-absolute/license` |
 | `path-key` | `3.1.1` | MIT | sindresorhus/path-key | `node_modules/path-key/license` |
-| `path-scurry` | `1.11.1` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/rimraf/node_modules/glob/node_modules/path-scurry/LICENSE.md` |
-| `path-scurry` | `2.0.2` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/node_modules/path-scurry/LICENSE.md` |
+| `path-scurry` | `1.11.1` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/path-scurry/LICENSE.md` |
+| `path-scurry` | `2.0.2` | BlueOak-1.0.0 | https://github.com/isaacs/path-scurry | `node_modules/path-scurry/LICENSE.md` |
 | `path-to-regexp` | `8.3.0` | MIT | https://github.com/pillarjs/path-to-regexp | `node_modules/path-to-regexp/LICENSE` |
 | `pdf-parse-tt-message-gone` | `1.1.2` | MIT | https://gitlab.com/autokent/pdf-parse | `node_modules/pdf-parse-tt-message-gone/LICENSE` |
 | `pdfjs-dist` | `5.4.296` | Apache-2.0 | https://github.com/mozilla/pdf.js | `node_modules/pdfjs-dist/LICENSE` |
@@ -877,7 +879,7 @@
 | `prosemirror-trailing-node` | `3.0.0` | MIT | https://github.com/remirror/remirror | `node_modules/prosemirror-trailing-node/LICENSE` |
 | `prosemirror-transform` | `1.11.0` | MIT | git://github.com/prosemirror/prosemirror-transform | `node_modules/prosemirror-transform/LICENSE` |
 | `prosemirror-view` | `1.41.6` | MIT | git://github.com/prosemirror/prosemirror-view | `node_modules/prosemirror-view/LICENSE` |
-| `protobufjs` | `6.8.8` | BSD-3-Clause | https://github.com/dcodeIO/protobuf.js | `node_modules/libsignal/node_modules/protobufjs/LICENSE` |
+| `protobufjs` | `6.8.8` | BSD-3-Clause | https://github.com/dcodeIO/protobuf.js | `node_modules/protobufjs/LICENSE` |
 | `protobufjs` | `7.5.4` | BSD-3-Clause | protobufjs/protobuf.js | `node_modules/protobufjs/LICENSE` |
 | `proxy-addr` | `2.0.7` | MIT | jshttp/proxy-addr | `node_modules/proxy-addr/LICENSE` |
 | `proxy-from-env` | `1.1.0` | MIT | https://github.com/Rob--W/proxy-from-env | `node_modules/proxy-from-env/LICENSE` |
@@ -886,7 +888,7 @@
 | `qified` | `0.9.1` | MIT | https://github.com/jaredwray/qified | `node_modules/qified/LICENSE` |
 | `qoa-format` | `1.0.1` | MIT | git://github.com/mattdesl/qoa-format | `node_modules/qoa-format/LICENSE.md` |
 | `qrcode.react` | `4.2.0` | ISC | https://github.com/zpao/qrcode.react | `node_modules/qrcode.react/LICENSE` |
-| `qs` | `6.14.1` | BSD-3-Clause | https://github.com/ljharb/qs | `node_modules/body-parser/node_modules/qs/LICENSE.md` |
+| `qs` | `6.14.1` | BSD-3-Clause | https://github.com/ljharb/qs | `node_modules/qs/LICENSE.md` |
 | `qs` | `6.15.1` | BSD-3-Clause | https://github.com/ljharb/qs | `node_modules/qs/LICENSE.md` |
 | `quick-format-unescaped` | `4.0.4` | MIT | https://github.com/davidmarkclements/quick-format | `node_modules/quick-format-unescaped/LICENSE` |
 | `range-parser` | `1.2.1` | MIT | jshttp/range-parser | `node_modules/range-parser/LICENSE` |
@@ -903,7 +905,7 @@
 | `react-simple-code-editor` | `0.14.1` | MIT | https://github.com/react-simple-code-editor/react-simple-code-editor | `node_modules/react-simple-code-editor/LICENSE.md` |
 | `react-style-singleton` | `2.2.3` | MIT | https://github.com/theKashey/react-style-singleton | `node_modules/react-style-singleton/LICENSE` |
 | `readable-stream` | `2.3.8` | MIT | git://github.com/nodejs/readable-stream | `node_modules/readable-stream/LICENSE` |
-| `readable-stream` | `4.7.0` | MIT | git://github.com/nodejs/readable-stream | `node_modules/readable-web-to-node-stream/node_modules/readable-stream/LICENSE` |
+| `readable-stream` | `4.7.0` | MIT | git://github.com/nodejs/readable-stream | `node_modules/readable-stream/LICENSE` |
 | `readable-web-to-node-stream` | `3.0.4` | MIT | https://github.com/Borewit/readable-web-to-node-stream | Not present in package |
 | `real-require` | `0.2.0` | MIT | https://github.com/pinojs/real-require | `node_modules/real-require/LICENSE.md` |
 | `regex` | `6.1.0` | MIT | https://github.com/slevithan/regex | `node_modules/regex/LICENSE` |
@@ -922,14 +924,14 @@
 | `require-in-the-middle` | `8.0.1` | MIT | https://github.com/nodejs/require-in-the-middle | `node_modules/require-in-the-middle/LICENSE` |
 | `resolve-from` | `4.0.0` | MIT | sindresorhus/resolve-from | `node_modules/resolve-from/license` |
 | `retry` | `0.12.0` | MIT | git://github.com/tim-kos/node-retry | `node_modules/retry/License` |
-| `retry` | `0.13.1` | MIT | git://github.com/tim-kos/node-retry | `node_modules/p-retry/node_modules/retry/License` |
+| `retry` | `0.13.1` | MIT | git://github.com/tim-kos/node-retry | `node_modules/retry/License` |
 | `reverse-arguments` | `1.0.0` | MIT | http://github.com/stoeffel/reverse-arguments | Not present in package |
-| `rimraf` | `3.0.2` | ISC | git://github.com/isaacs/rimraf | `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/node_modules/rimraf/LICENSE` |
+| `rimraf` | `3.0.2` | ISC | git://github.com/isaacs/rimraf | `node_modules/rimraf/LICENSE` |
 | `rimraf` | `5.0.10` | ISC | git://github.com/isaacs/rimraf | `node_modules/rimraf/LICENSE` |
 | `rope-sequence` | `1.3.4` | MIT | https://github.com/marijnh/rope-sequence | `node_modules/rope-sequence/LICENSE` |
 | `router` | `2.2.0` | MIT | pillarjs/router | `node_modules/router/LICENSE` |
 | `run-applescript` | `7.1.0` | MIT | sindresorhus/run-applescript | `node_modules/run-applescript/license` |
-| `safe-buffer` | `5.1.2` | MIT | git://github.com/feross/safe-buffer | `node_modules/string_decoder/node_modules/safe-buffer/LICENSE` |
+| `safe-buffer` | `5.1.2` | MIT | git://github.com/feross/safe-buffer | `node_modules/safe-buffer/LICENSE` |
 | `safe-buffer` | `5.2.1` | MIT | git://github.com/feross/safe-buffer | `node_modules/safe-buffer/LICENSE` |
 | `safe-stable-stringify` | `2.5.0` | MIT | https://github.com/BridgeAR/safe-stable-stringify | `node_modules/safe-stable-stringify/LICENSE` |
 | `safer-buffer` | `2.1.2` | MIT | https://github.com/ChALkeR/safer-buffer | `node_modules/safer-buffer/LICENSE` |
@@ -937,7 +939,7 @@
 | `scheduler` | `0.23.2` | MIT | https://github.com/facebook/react | `node_modules/scheduler/LICENSE` |
 | `section-matter` | `1.0.0` | MIT | jonschlinkert/section-matter | `node_modules/section-matter/LICENSE` |
 | `semver` | `7.7.3` | ISC | https://github.com/npm/node-semver | `node_modules/semver/LICENSE` |
-| `semver` | `7.8.0` | ISC | https://github.com/npm/node-semver | `node_modules/@earendil-works/pi-coding-agent/node_modules/semver/LICENSE` |
+| `semver` | `7.8.0` | ISC | https://github.com/npm/node-semver | `node_modules/semver/LICENSE` |
 | `send` | `1.2.1` | MIT | pillarjs/send | `node_modules/send/LICENSE` |
 | `serve-static` | `2.2.1` | MIT | expressjs/serve-static | `node_modules/serve-static/LICENSE` |
 | `setimmediate` | `1.0.5` | MIT | YuzuJS/setImmediate | `node_modules/setimmediate/LICENSE.txt` |
@@ -953,7 +955,7 @@
 | `side-channel-map` | `1.0.1` | MIT | https://github.com/ljharb/side-channel-map | `node_modules/side-channel-map/LICENSE` |
 | `side-channel-weakmap` | `1.0.2` | MIT | https://github.com/ljharb/side-channel-weakmap | `node_modules/side-channel-weakmap/LICENSE` |
 | `signal-exit` | `3.0.7` | ISC | https://github.com/tapjs/signal-exit | `node_modules/signal-exit/LICENSE.txt` |
-| `signal-exit` | `4.1.0` | ISC | https://github.com/tapjs/signal-exit | `node_modules/foreground-child/node_modules/signal-exit/LICENSE.txt` |
+| `signal-exit` | `4.1.0` | ISC | https://github.com/tapjs/signal-exit | `node_modules/signal-exit/LICENSE.txt` |
 | `simple-yenc` | `1.0.4` | MIT | https://github.com/eshaz/simple-yenc | `node_modules/simple-yenc/LICENSE` |
 | `slice-ansi` | `4.0.0` | MIT | chalk/slice-ansi | `node_modules/slice-ansi/license` |
 | `sonic-boom` | `4.2.1` | MIT | https://github.com/pinojs/sonic-boom | `node_modules/sonic-boom/LICENSE` |
@@ -966,21 +968,21 @@
 | `statuses` | `2.0.2` | MIT | jshttp/statuses | `node_modules/statuses/LICENSE` |
 | `stoppable` | `1.1.0` | MIT | https://github.com/hunterloftis/stoppable | `node_modules/stoppable/LICENSE` |
 | `string_decoder` | `1.1.1` | MIT | git://github.com/nodejs/string_decoder | `node_modules/string_decoder/LICENSE` |
-| `string_decoder` | `1.3.0` | MIT | git://github.com/nodejs/string_decoder | `node_modules/readable-web-to-node-stream/node_modules/readable-stream/node_modules/string_decoder/LICENSE` |
-| `string-width` | `4.2.3` | MIT | sindresorhus/string-width | `node_modules/string-width-cjs/license` |
-| `string-width` | `5.1.2` | MIT | sindresorhus/string-width | `node_modules/@isaacs/cliui/node_modules/string-width/license` |
+| `string_decoder` | `1.3.0` | MIT | git://github.com/nodejs/string_decoder | `node_modules/string_decoder/LICENSE` |
+| `string-width` | `4.2.3` | MIT | sindresorhus/string-width | `node_modules/string-width/license` |
+| `string-width` | `5.1.2` | MIT | sindresorhus/string-width | `node_modules/string-width/license` |
 | `string.fromcodepoint` | `0.2.1` | License metadata not declared; see package license files | https://github.com/mathiasbynens/String.fromCodePoint | Not present in package |
 | `stringify-entities` | `4.0.4` | MIT | wooorm/stringify-entities | `node_modules/stringify-entities/license` |
-| `strip-ansi` | `6.0.1` | MIT | chalk/strip-ansi | `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/license` |
-| `strip-ansi` | `7.1.2` | MIT | chalk/strip-ansi | `node_modules/@isaacs/cliui/node_modules/strip-ansi/license` |
+| `strip-ansi` | `6.0.1` | MIT | chalk/strip-ansi | `node_modules/strip-ansi/license` |
+| `strip-ansi` | `7.1.2` | MIT | chalk/strip-ansi | `node_modules/strip-ansi/license` |
 | `strip-bom-string` | `1.0.0` | MIT | jonschlinkert/strip-bom-string | `node_modules/strip-bom-string/LICENSE` |
 | `strip-json-comments` | `3.1.1` | MIT | sindresorhus/strip-json-comments | `node_modules/strip-json-comments/license` |
 | `strip-markdown` | `6.0.0` | MIT | remarkjs/strip-markdown | `node_modules/strip-markdown/license` |
-| `strtok3` | `6.3.0` | MIT | https://github.com/Borewit/strtok3 | `node_modules/music-metadata/node_modules/strtok3/LICENSE` |
+| `strtok3` | `6.3.0` | MIT | https://github.com/Borewit/strtok3 | `node_modules/strtok3/LICENSE` |
 | `style-to-js` | `1.1.21` | MIT | https://github.com/remarkablemark/style-to-js | `node_modules/style-to-js/LICENSE` |
 | `style-to-object` | `1.0.14` | MIT | https://github.com/remarkablemark/style-to-object | `node_modules/style-to-object/LICENSE` |
-| `supports-color` | `5.5.0` | MIT | chalk/supports-color | `node_modules/@babel/highlight/node_modules/chalk/node_modules/supports-color/license` |
-| `supports-color` | `7.2.0` | MIT | chalk/supports-color | `node_modules/chalk/node_modules/supports-color/license` |
+| `supports-color` | `5.5.0` | MIT | chalk/supports-color | `node_modules/supports-color/license` |
+| `supports-color` | `7.2.0` | MIT | chalk/supports-color | `node_modules/supports-color/license` |
 | `table` | `6.9.0` | BSD-3-Clause | https://github.com/gajus/table | `node_modules/table/LICENSE` |
 | `tailwind-merge` | `3.4.0` | MIT | https://github.com/dcastil/tailwind-merge | `node_modules/tailwind-merge/LICENSE.md` |
 | `text-table` | `0.2.0` | MIT | git://github.com/substack/text-table | `node_modules/text-table/LICENSE` |
@@ -995,7 +997,7 @@
 | `to-pascal-case` | `1.0.0` | MIT | git://github.com/ianstormtaylor/to-pascal-case | Not present in package |
 | `to-space-case` | `1.0.0` | MIT | git://github.com/ianstormtaylor/to-space-case | Not present in package |
 | `toidentifier` | `1.0.1` | MIT | component/toidentifier | `node_modules/toidentifier/LICENSE` |
-| `token-types` | `4.2.1` | MIT | https://github.com/Borewit/token-types | `node_modules/music-metadata/node_modules/token-types/LICENSE` |
+| `token-types` | `4.2.1` | MIT | https://github.com/Borewit/token-types | `node_modules/token-types/LICENSE` |
 | `tr46` | `0.0.3` | MIT | https://github.com/Sebmaster/tr46.js | Not present in package |
 | `transform-spread-iterable` | `1.4.1` | MIT | parro-it/transform-spread-iterable | `node_modules/transform-spread-iterable/license` |
 | `trim-lines` | `3.0.1` | MIT | wooorm/trim-lines | `node_modules/trim-lines/license` |
@@ -1005,13 +1007,13 @@
 | `tslib` | `2.8.1` | 0BSD | https://github.com/Microsoft/tslib | `node_modules/tslib/LICENSE.txt` |
 | `turndown` | `7.2.2` | MIT | https://github.com/mixmark-io/turndown | `node_modules/turndown/LICENSE` |
 | `type-check` | `0.4.0` | MIT | git://github.com/gkz/type-check | `node_modules/type-check/LICENSE` |
-| `type-fest` | `0.20.2` | (MIT OR CC0-1.0) | sindresorhus/type-fest | `node_modules/eslint_d/node_modules/eslint/node_modules/globals/node_modules/type-fest/license` |
+| `type-fest` | `0.20.2` | (MIT OR CC0-1.0) | sindresorhus/type-fest | `node_modules/type-fest/license` |
 | `type-is` | `2.0.1` | MIT | jshttp/type-is | `node_modules/type-is/LICENSE` |
 | `typebox` | `1.3.7` | MIT | https://github.com/sinclairzx81/typebox | `node_modules/typebox/license` |
 | `uc.micro` | `2.1.0` | MIT | markdown-it/uc.micro | `node_modules/uc.micro/LICENSE.txt` |
 | `underscore` | `1.13.7` | MIT | git://github.com/jashkenas/underscore | `node_modules/underscore/LICENSE` |
 | `undici` | `7.22.0` | MIT | https://github.com/nodejs/undici | `node_modules/undici/LICENSE` |
-| `undici` | `8.5.0` | MIT | https://github.com/nodejs/undici | `node_modules/@earendil-works/pi-coding-agent/node_modules/undici/LICENSE` |
+| `undici` | `8.5.0` | MIT | https://github.com/nodejs/undici | `node_modules/undici/LICENSE` |
 | `undici-types` | `7.16.0` | MIT | https://github.com/nodejs/undici | `node_modules/undici-types/LICENSE` |
 | `unescape-js` | `1.1.4` | MIT | https://github.com/iamakulov/unescape-js | `node_modules/unescape-js/LICENSE` |
 | `unified` | `11.0.5` | MIT | unifiedjs/unified | `node_modules/unified/license` |
@@ -1030,8 +1032,8 @@
 | `use-sidecar` | `1.1.3` | MIT | https://github.com/theKashey/use-sidecar | `node_modules/use-sidecar/LICENSE` |
 | `use-sync-external-store` | `1.6.0` | MIT | https://github.com/facebook/react | `node_modules/use-sync-external-store/LICENSE` |
 | `util-deprecate` | `1.0.2` | MIT | git://github.com/TooTallNate/util-deprecate | `node_modules/util-deprecate/LICENSE` |
-| `uuid` | `10.0.0` | MIT | https://github.com/uuidjs/uuid | `node_modules/@whiskeysockets/baileys/node_modules/uuid/LICENSE.md` |
-| `uuid` | `8.3.2` | MIT | https://github.com/uuidjs/uuid | `node_modules/@azure/msal-node/node_modules/uuid/LICENSE.md` |
+| `uuid` | `10.0.0` | MIT | https://github.com/uuidjs/uuid | `node_modules/uuid/LICENSE.md` |
+| `uuid` | `8.3.2` | MIT | https://github.com/uuidjs/uuid | `node_modules/uuid/LICENSE.md` |
 | `v8-compile-cache` | `2.4.0` | MIT | https://github.com/zertosh/v8-compile-cache | `node_modules/v8-compile-cache/LICENSE` |
 | `vary` | `1.1.2` | MIT | jshttp/vary | `node_modules/vary/LICENSE` |
 | `vaul` | `1.1.2` | MIT | https://github.com/emilkowalski/vaul | `node_modules/vaul/LICENSE.md` |
@@ -1047,33 +1049,33 @@
 | `web-streams-polyfill` | `3.3.3` | MIT | https://github.com/MattiasBuelens/web-streams-polyfill | `node_modules/web-streams-polyfill/LICENSE` |
 | `webidl-conversions` | `3.0.1` | BSD-2-Clause | jsdom/webidl-conversions | `node_modules/webidl-conversions/LICENSE.md` |
 | `whatwg-url` | `5.0.0` | MIT | jsdom/whatwg-url | `node_modules/whatwg-url/LICENSE.txt` |
-| `which` | `1.3.1` | ISC | git://github.com/isaacs/node-which | `node_modules/fluent-ffmpeg/node_modules/which/LICENSE` |
-| `which` | `2.0.2` | ISC | git://github.com/isaacs/node-which | `node_modules/cross-spawn/node_modules/which/LICENSE` |
+| `which` | `1.3.1` | ISC | git://github.com/isaacs/node-which | `node_modules/which/LICENSE` |
+| `which` | `2.0.2` | ISC | git://github.com/isaacs/node-which | `node_modules/which/LICENSE` |
 | `wmf` | `1.0.2` | Apache-2.0 | git://github.com/SheetJS/js-wmf | `node_modules/wmf/LICENSE` |
 | `word` | `0.3.0` | Apache-2.0 | git://github.com/SheetJS/js-word | `node_modules/word/LICENSE` |
 | `word-wrap` | `1.2.5` | MIT | jonschlinkert/word-wrap | `node_modules/word-wrap/LICENSE` |
-| `wrap-ansi` | `7.0.0` | MIT | chalk/wrap-ansi | `node_modules/wrap-ansi-cjs/license` |
-| `wrap-ansi` | `8.1.0` | MIT | chalk/wrap-ansi | `node_modules/@isaacs/cliui/node_modules/wrap-ansi/license` |
+| `wrap-ansi` | `7.0.0` | MIT | chalk/wrap-ansi | `node_modules/wrap-ansi/license` |
+| `wrap-ansi` | `8.1.0` | MIT | chalk/wrap-ansi | `node_modules/wrap-ansi/license` |
 | `wrappy` | `1.0.2` | ISC | https://github.com/npm/wrappy | `node_modules/wrappy/LICENSE` |
 | `ws` | `8.19.0` | MIT | https://github.com/websockets/ws | `node_modules/ws/LICENSE` |
 | `wsl-utils` | `0.3.1` | MIT | sindresorhus/wsl-utils | `node_modules/wsl-utils/license` |
 | `xlsx` | `0.18.5` | Apache-2.0 | git://github.com/SheetJS/sheetjs | `node_modules/xlsx/LICENSE` |
 | `xml2js` | `0.6.2` | MIT | https://github.com/Leonidas-from-XIV/node-xml2js | `node_modules/xml2js/LICENSE` |
-| `xmlbuilder` | `10.1.1` | MIT | git://github.com/oozcitak/xmlbuilder-js | `node_modules/mammoth/node_modules/xmlbuilder/LICENSE` |
-| `xmlbuilder` | `11.0.1` | MIT | git://github.com/oozcitak/xmlbuilder-js | `node_modules/xml2js/node_modules/xmlbuilder/LICENSE` |
+| `xmlbuilder` | `10.1.1` | MIT | git://github.com/oozcitak/xmlbuilder-js | `node_modules/xmlbuilder/LICENSE` |
+| `xmlbuilder` | `11.0.1` | MIT | git://github.com/oozcitak/xmlbuilder-js | `node_modules/xmlbuilder/LICENSE` |
 | `xmldom` | `0.6.0` | MIT | git://github.com/xmldom/xmldom | `node_modules/xmldom/LICENSE` |
 | `xtend` | `4.0.2` | MIT | git://github.com/Raynos/xtend | `node_modules/xtend/LICENSE` |
-| `yaml` | `2.9.0` | ISC | github:eemeli/yaml | `node_modules/@earendil-works/pi-agent-core/node_modules/yaml/LICENSE` |
+| `yaml` | `2.9.0` | ISC | github:eemeli/yaml | `node_modules/yaml/LICENSE` |
 | `yauzl` | `2.10.0` | MIT | https://github.com/thejoshwolfe/yauzl | `node_modules/yauzl/LICENSE` |
-| `zod` | `3.25.76` | MIT | https://github.com/colinhacks/zod | `packages/session-tools-core/node_modules/zod/LICENSE` |
+| `zod` | `3.25.76` | MIT | https://github.com/colinhacks/zod | `node_modules/zod/LICENSE` |
 | `zod` | `4.3.5` | MIT | https://github.com/colinhacks/zod | `node_modules/zod/LICENSE` |
-| `zod` | `4.3.6` | MIT | https://github.com/colinhacks/zod | `node_modules/@mistralai/mistralai/node_modules/zod/LICENSE` |
+| `zod` | `4.3.6` | MIT | https://github.com/colinhacks/zod | `node_modules/zod/LICENSE` |
 | `zod-to-json-schema` | `3.25.1` | ISC | https://github.com/StefanTerdell/zod-to-json-schema | `node_modules/zod-to-json-schema/LICENSE` |
 | `zwitch` | `2.0.4` | MIT | wooorm/zwitch | `node_modules/zwitch/license` |
 
 ## Python/PyPI dependencies used by bundled tools
 
-| Package | Requested range | License | Source |
+| Package | Requested ranges | License | Source |
 | --- | --- | --- | --- |
 | `click` | `>=8.3,<9` | BSD-3-Clause | https://github.com/pallets/click |
 | `diff-match-patch` | `>=20241021` | Apache-2.0 | https://github.com/diff-match-patch-python/diff-match-patch |
@@ -1081,11 +1083,11 @@
 | `img2pdf` | `>=0.5,<1` | LGPL-3.0-or-later | https://gitlab.mister-muffin.de/josch/img2pdf |
 | `markitdown` | `>=0.1.5,<0.2` | MIT | https://github.com/microsoft/markitdown |
 | `openpyxl` | `>=3.1,<4` | MIT | https://foss.heptapod.net/openpyxl/openpyxl |
-| `Pillow` | `>=12.1,<13` | MIT-CMU | https://github.com/python-pillow/Pillow |
+| `Pillow` | `>=10,<12, >=12.1,<13` | MIT-CMU | https://github.com/python-pillow/Pillow |
 | `pypdf` | `>=6.7,<7` | BSD-3-Clause | https://github.com/py-pdf/pypdf |
 | `pypdfium2` | `>=5.5,<6` | BSD-3-Clause | https://github.com/pypdfium2-team/pypdfium2 |
 | `python-dateutil` | `>=2.9,<3` | Apache-2.0 OR BSD-3-Clause | https://github.com/dateutil/dateutil |
-| `python-docx` | `>=1.1,<2` | MIT | https://github.com/python-openxml/python-docx |
+| `python-docx` | `>=1.1,<2, >=1.2,<2` | MIT | https://github.com/python-openxml/python-docx |
 | `python-pptx` | `>=1.0,<2` | MIT | https://github.com/scanny/python-pptx |
 
 The Python tools use PEP 723 metadata and resolve these packages through uv at runtime. Their wheel/sdist license files remain authoritative for the resolved version.
@@ -1396,7 +1398,7 @@ Source file: `node_modules/make-cancellable-promise/LICENSE`
 
 Applies to: `espree@7.3.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/espree/LICENSE`
+Source file: `node_modules/espree/LICENSE`
 
     BSD 2-Clause License
     
@@ -1615,7 +1617,7 @@ Source file: `node_modules/cjs-module-lexer/LICENSE`
 
 Applies to: `eslint-scope@5.1.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/eslint-scope/LICENSE`
+Source file: `node_modules/eslint-scope/LICENSE`
 
     Copyright JS Foundation and other contributors, https://js.foundation
     Copyright (C) 2012-2013 Yusuke Suzuki (twitter: @Constellation) and other contributors.
@@ -1644,7 +1646,7 @@ Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/eslint-scop
 
 Applies to: `isexe@2.0.0`, `minimatch@3.1.2`, `once@1.4.0`, `rimraf@3.0.2`, `semver@7.7.3`, `semver@7.8.0`, `which@1.3.1`, `which@2.0.2`, `wrappy@1.0.2`
 
-Source file: `node_modules/fluent-ffmpeg/node_modules/which/node_modules/isexe/LICENSE`
+Source file: `node_modules/isexe/LICENSE`
 
     The ISC License
     
@@ -1720,7 +1722,7 @@ Source file: `node_modules/async/LICENSE`
 
 Applies to: `doctrine@3.0.0`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LICENSE`
+Source file: `node_modules/doctrine/LICENSE`
 
     Apache License
                            Version 2.0, January 2004
@@ -2232,7 +2234,7 @@ Source file: `node_modules/lodash.isboolean/LICENSE`
 
 Applies to: `eslint@7.32.0`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/LICENSE`
+Source file: `node_modules/eslint/LICENSE`
 
     Copyright JS Foundation and other contributors, https://js.foundation
     
@@ -2359,7 +2361,7 @@ Source file: `node_modules/retry/License`
 
 Applies to: `qs@6.14.1`, `qs@6.15.1`
 
-Source file: `node_modules/body-parser/node_modules/qs/LICENSE.md`
+Source file: `node_modules/qs/LICENSE.md`
 
     BSD 3-Clause License
     
@@ -2395,7 +2397,7 @@ Source file: `node_modules/body-parser/node_modules/qs/LICENSE.md`
 
 Applies to: `ansi-regex@6.2.2`, `ansi-styles@6.2.3`, `bundle-name@4.1.0`, `chalk@5.6.2`, `default-browser-id@5.0.1`, `default-browser@5.4.0`, `define-lazy-prop@3.0.0`, `escape-string-regexp@4.0.0`, `escape-string-regexp@5.0.0`, `file-type@16.5.4`, `get-east-asian-width@1.6.0`, `globals@13.24.0`, `import-fresh@3.3.1`, `is-docker@2.2.1`, `is-docker@3.0.0`, `is-in-ssh@1.0.0`, `is-inside-container@1.0.0`, `is-plain-obj@4.1.0`, `is-wsl@3.1.0`, `open@11.0.0`, `open@8.4.2`, `powershell-utils@0.1.0`, `run-applescript@7.1.0`, `string-width@5.1.2`, `strip-ansi@7.1.2`, `strip-json-comments@3.1.1`, `wrap-ansi@7.0.0`, `wrap-ansi@8.1.0`, `wsl-utils@0.3.1`
 
-Source file: `node_modules/@isaacs/cliui/node_modules/strip-ansi/node_modules/ansi-regex/license`
+Source file: `node_modules/ansi-regex/license`
 
     MIT License
     
@@ -2781,7 +2783,7 @@ Source file: `node_modules/fast-uri/LICENSE`
 
 Applies to: `xmlbuilder@11.0.1`
 
-Source file: `node_modules/xml2js/node_modules/xmlbuilder/LICENSE`
+Source file: `node_modules/xmlbuilder/LICENSE`
 
     The MIT License (MIT)
     
@@ -2866,7 +2868,7 @@ Source file: `node_modules/@azure/msal-node/LICENSE`
 
 Applies to: `uuid@10.0.0`, `uuid@8.3.2`
 
-Source file: `node_modules/@whiskeysockets/baileys/node_modules/uuid/LICENSE.md`
+Source file: `node_modules/uuid/LICENSE.md`
 
     The MIT License (MIT)
     
@@ -3437,7 +3439,7 @@ Source file: `node_modules/acorn-import-attributes/LICENSE`
 
 Applies to: `balanced-match@4.0.3`
 
-Source file: `node_modules/glob/node_modules/minimatch/node_modules/brace-expansion/node_modules/balanced-match/LICENSE.md`
+Source file: `node_modules/balanced-match/LICENSE.md`
 
     (MIT)
     
@@ -4065,7 +4067,7 @@ Source file: `node_modules/@mistralai/mistralai/LICENSE`
 
 Applies to: `escape-string-regexp@1.0.5`, `filter-obj@1.1.0`, `map-obj@2.0.0`, `object-assign@4.1.1`, `path-is-absolute@1.0.1`
 
-Source file: `node_modules/@babel/highlight/node_modules/chalk/node_modules/escape-string-regexp/license`
+Source file: `node_modules/escape-string-regexp/license`
 
     The MIT License (MIT)
     
@@ -4093,7 +4095,7 @@ Source file: `node_modules/@babel/highlight/node_modules/chalk/node_modules/esca
 
 Applies to: `parse5@7.3.0`
 
-Source file: `node_modules/hast-util-from-html/node_modules/parse5/LICENSE`
+Source file: `node_modules/parse5/LICENSE`
 
     Copyright (c) 2013-2019 Ivan Nikulin (ifaaan@gmail.com, https://github.com/inikulin)
     
@@ -4299,7 +4301,7 @@ Source file: `node_modules/hono/LICENSE`
 
 Applies to: `@aws-sdk/credential-provider-process@3.972.65`, `@aws-sdk/credential-provider-sso@3.973.9`, `@aws-sdk/credential-provider-web-identity@3.972.71`, `@aws-sdk/eventstream-handler-node@3.972.31`, `@aws-sdk/middleware-websocket@3.972.47`, `@aws-sdk/signature-v4-multi-region@3.996.43`, `@smithy/core@3.31.1`, `@smithy/types@4.12.0`, `@smithy/types@4.14.1`, `@smithy/types@4.16.1`
 
-Source file: `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-process/LICENSE`
+Source file: `node_modules/@aws-sdk/credential-provider-process/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -4725,7 +4727,7 @@ Source file: `node_modules/inflight/LICENSE`
 
 Applies to: `glob@10.5.0`
 
-Source file: `node_modules/rimraf/node_modules/glob/LICENSE`
+Source file: `node_modules/glob/LICENSE`
 
     The ISC License
     
@@ -4853,7 +4855,7 @@ Source file: `node_modules/@cacheable/memory/LICENSE`
 
 Applies to: `acorn@7.4.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/espree/node_modules/acorn/LICENSE`
+Source file: `node_modules/acorn/LICENSE`
 
     MIT License
     
@@ -4881,7 +4883,7 @@ Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/espree/node
 
 Applies to: `node-fetch@3.3.2`
 
-Source file: `node_modules/gaxios/node_modules/node-fetch/LICENSE.md`
+Source file: `node_modules/node-fetch/LICENSE.md`
 
     The MIT License (MIT)
     
@@ -5536,7 +5538,7 @@ Source file: `node_modules/tinyglobby/LICENSE`
 
 Applies to: `eslint-visitor-keys@1.3.0`, `eslint-visitor-keys@2.1.0`, `eslint-visitor-keys@3.4.3`, `eslint-visitor-keys@4.2.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/espree/node_modules/eslint-visitor-keys/LICENSE`
+Source file: `node_modules/eslint-visitor-keys/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -6124,7 +6126,7 @@ Source file: `node_modules/commander/LICENSE`
 
 Applies to: `color-convert@1.9.3`, `color-convert@2.0.1`
 
-Source file: `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/node_modules/color-convert/LICENSE`
+Source file: `node_modules/color-convert/LICENSE`
 
     Copyright (c) 2011-2016 Heather Arthur <fayearthur@gmail.com>
     
@@ -6507,7 +6509,7 @@ Source file: `node_modules/@typescript-eslint/project-service/LICENSE`
 
 Applies to: `protobufjs@6.8.8`
 
-Source file: `node_modules/libsignal/node_modules/protobufjs/LICENSE`
+Source file: `node_modules/protobufjs/LICENSE`
 
     This license applies to all parts of protobuf.js except those files
     either explicitly including or referencing a different license or
@@ -6984,7 +6986,7 @@ Source file: `node_modules/xtend/LICENSE`
 
 Applies to: `minimatch@9.0.5`, `rimraf@5.0.10`
 
-Source file: `node_modules/rimraf/node_modules/glob/node_modules/minimatch/LICENSE`
+Source file: `node_modules/minimatch/LICENSE`
 
     The ISC License
     
@@ -8043,7 +8045,7 @@ Source file: `node_modules/@vscode/ripgrep/LICENSE`
 
 Applies to: `argparse@1.0.10`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/js-yaml/node_modules/argparse/LICENSE`
+Source file: `node_modules/argparse/LICENSE`
 
     (The MIT License)
     
@@ -8257,7 +8259,7 @@ Source file: `node_modules/linkifyjs/LICENSE`
 
 Applies to: `xmlbuilder@10.1.1`
 
-Source file: `node_modules/mammoth/node_modules/xmlbuilder/LICENSE`
+Source file: `node_modules/xmlbuilder/LICENSE`
 
     The MIT License (MIT)
     
@@ -9203,7 +9205,7 @@ Source file: `node_modules/postgres-array/license`
 
 Applies to: `glob-parent@5.1.2`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/glob-parent/LICENSE`
+Source file: `node_modules/glob-parent/LICENSE`
 
     The ISC License
     
@@ -9740,7 +9742,7 @@ Source file: `node_modules/body-parser/LICENSE`
 
 Applies to: `openai@6.26.0`
 
-Source file: `node_modules/@earendil-works/pi-ai/node_modules/openai/LICENSE`
+Source file: `node_modules/openai/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -9976,7 +9978,7 @@ Source file: `node_modules/js-tokens/LICENSE`
 
 Applies to: `fs-extra@11.3.3`
 
-Source file: `node_modules/unzipper/node_modules/fs-extra/LICENSE`
+Source file: `node_modules/fs-extra/LICENSE`
 
     (The MIT License)
     
@@ -9998,7 +10000,7 @@ Source file: `node_modules/unzipper/node_modules/fs-extra/LICENSE`
 
 Applies to: `@aws/lambda-invoke-store@0.3.0`
 
-Source file: `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/core/node_modules/@aws/lambda-invoke-store/LICENSE`
+Source file: `node_modules/@aws/lambda-invoke-store/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -11358,7 +11360,7 @@ Source file: `node_modules/agent-base/LICENSE`
 
 Applies to: `@babel/code-frame@7.12.11`, `@babel/helper-validator-identifier@7.28.5`, `@babel/highlight@7.25.9`, `@babel/runtime@7.28.6`, `@babel/runtime@7.29.2`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/@babel/code-frame/LICENSE`
+Source file: `node_modules/@babel/code-frame/LICENSE`
 
     MIT License
     
@@ -12218,7 +12220,7 @@ Source file: `node_modules/rope-sequence/LICENSE`
 
 Applies to: `lru-cache@10.4.3`
 
-Source file: `node_modules/rimraf/node_modules/glob/node_modules/path-scurry/node_modules/lru-cache/LICENSE`
+Source file: `node_modules/lru-cache/LICENSE`
 
     The ISC License
     
@@ -12268,7 +12270,7 @@ Source file: `node_modules/arity-n/LICENSE`
 
 Applies to: `long@4.0.0`
 
-Source file: `node_modules/libsignal/node_modules/protobufjs/node_modules/long/LICENSE`
+Source file: `node_modules/long/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -12711,7 +12713,7 @@ Source file: `node_modules/ieee754/LICENSE`
 
 Applies to: `signal-exit@4.1.0`
 
-Source file: `node_modules/foreground-child/node_modules/signal-exit/LICENSE.txt`
+Source file: `node_modules/signal-exit/LICENSE.txt`
 
     The ISC License
     
@@ -13144,7 +13146,7 @@ Source file: `node_modules/unist-util-is/license`
 
 Applies to: `glob@7.2.3`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/node_modules/rimraf/node_modules/glob/LICENSE`
+Source file: `node_modules/glob/LICENSE`
 
     The ISC License
     
@@ -13510,7 +13512,7 @@ Source file: `node_modules/object-pairs/LICENSE`
 
 Applies to: `jackspeak@3.4.3`, `minimatch@10.2.5`
 
-Source file: `node_modules/rimraf/node_modules/glob/node_modules/jackspeak/LICENSE.md`
+Source file: `node_modules/jackspeak/LICENSE.md`
 
     # Blue Oak Model License
     
@@ -13809,7 +13811,7 @@ Source file: `node_modules/ajv/LICENSE`
 
 Applies to: `token-types@4.2.1`
 
-Source file: `node_modules/music-metadata/node_modules/token-types/LICENSE`
+Source file: `node_modules/token-types/LICENSE`
 
     Copyright 2017 Borewit
     
@@ -14828,7 +14830,7 @@ Source file: `node_modules/void-elements/LICENSE`
 
 Applies to: `js-yaml@3.14.2`, `js-yaml@4.1.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/js-yaml/LICENSE`
+Source file: `node_modules/js-yaml/LICENSE`
 
     (The MIT License)
     
@@ -14914,7 +14916,7 @@ Source file: `node_modules/style-to-js/LICENSE`
 
 Applies to: `strtok3@6.3.0`
 
-Source file: `node_modules/music-metadata/node_modules/strtok3/LICENSE`
+Source file: `node_modules/strtok3/LICENSE`
 
     Copyright (c) 2017, Borewit
     All rights reserved.
@@ -15203,7 +15205,7 @@ Source file: `node_modules/es-set-tostringtag/LICENSE`
 
 Applies to: `color-name@1.1.3`, `color-name@1.1.4`
 
-Source file: `node_modules/@babel/highlight/node_modules/chalk/node_modules/ansi-styles/node_modules/color-convert/node_modules/color-name/LICENSE`
+Source file: `node_modules/color-name/LICENSE`
 
     The MIT License (MIT)
     Copyright (c) 2015 Dmitry Ivanov
@@ -15361,7 +15363,7 @@ Source file: `node_modules/fast-equals/LICENSE`
 
 Applies to: `type-fest@0.20.2`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/globals/node_modules/type-fest/license`
+Source file: `node_modules/type-fest/license`
 
     MIT License
     
@@ -15662,7 +15664,7 @@ Source file: `node_modules/acorn-jsx/LICENSE`
 
 Applies to: `ansi-regex@5.0.1`, `ansi-styles@3.2.1`, `ansi-styles@4.3.0`, `callsites@3.1.0`, `chalk@2.4.2`, `chalk@4.1.2`, `define-lazy-prop@2.0.0`, `has-flag@3.0.0`, `has-flag@4.0.0`, `is-fullwidth-code-point@3.0.0`, `is-wsl@2.2.0`, `p-retry@4.6.2`, `parent-module@1.0.1`, `path-key@3.1.1`, `resolve-from@4.0.0`, `shebang-regex@3.0.0`, `string-width@4.2.3`, `strip-ansi@6.0.1`, `supports-color@5.5.0`, `supports-color@7.2.0`
 
-Source file: `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/node_modules/ansi-regex/license`
+Source file: `node_modules/ansi-regex/license`
 
     MIT License
     
@@ -15678,7 +15680,7 @@ Source file: `node_modules/wrap-ansi-cjs/node_modules/strip-ansi/node_modules/an
 
 Applies to: `buffer@6.0.3`
 
-Source file: `node_modules/readable-web-to-node-stream/node_modules/readable-stream/node_modules/buffer/LICENSE`
+Source file: `node_modules/buffer/LICENSE`
 
     The MIT License (MIT)
     
@@ -16117,7 +16119,7 @@ Source file: `node_modules/@hapi/boom/LICENSE.md`
 
 Applies to: `yaml@2.9.0`
 
-Source file: `node_modules/@earendil-works/pi-agent-core/node_modules/yaml/LICENSE`
+Source file: `node_modules/yaml/LICENSE`
 
     Copyright Eemeli Aro <eemeli@gmail.com>
     
@@ -16421,7 +16423,7 @@ Source file: `node_modules/@sentry-internal/replay/LICENSE`
 
 Applies to: `doctrine@3.0.0`, `estraverse@4.3.0`, `estraverse@5.3.0`, `esutils@2.0.3`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LICENSE.esprima`
+Source file: `node_modules/doctrine/LICENSE.esprima`
 
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -16447,7 +16449,7 @@ Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/doctrine/LI
 
 Applies to: `@whiskeysockets/libsignal-node@2.0.1`
 
-Source file: `node_modules/libsignal/LICENSE`
+Source file: `node_modules/@whiskeysockets/libsignal-node/LICENSE`
 
     GNU GENERAL PUBLIC LICENSE
                            Version 3, 29 June 2007
@@ -17589,7 +17591,7 @@ Source file: `node_modules/serve-static/LICENSE`
 
 Applies to: `@aws-sdk/credential-provider-env@3.972.65`, `@aws-sdk/credential-provider-ini@3.973.10`, `@aws-sdk/credential-provider-node@3.972.76`, `@aws-sdk/middleware-eventstream@3.972.26`, `@aws-sdk/token-providers@3.1048.0`, `@aws-sdk/token-providers@3.1100.0`, `@aws-sdk/types@3.969.0`, `@aws-sdk/types@3.973.8`, `@aws-sdk/types@3.974.2`, `@aws-sdk/util-locate-window@3.965.2`, `@aws-sdk/xml-builder@3.972.37`, `@smithy/credential-provider-imds@4.4.16`, `@smithy/fetch-http-handler@5.6.13`, `@smithy/is-array-buffer@2.2.0`, `@smithy/node-http-handler@4.7.3`, `@smithy/node-http-handler@4.9.13`, `@smithy/signature-v4@5.6.12`, `@smithy/util-buffer-from@2.2.0`, `@smithy/util-utf8@2.3.0`
 
-Source file: `node_modules/@aws-sdk/client-bedrock-runtime/node_modules/@aws-sdk/credential-provider-node/node_modules/@aws-sdk/credential-provider-env/LICENSE`
+Source file: `node_modules/@aws-sdk/credential-provider-env/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -18045,7 +18047,7 @@ Source file: `node_modules/setprototypeof/LICENSE`
 
 Applies to: `file-entry-cache@6.0.1`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/LICENSE`
+Source file: `node_modules/file-entry-cache/LICENSE`
 
     The MIT License (MIT)
     
@@ -18101,7 +18103,7 @@ Source file: `node_modules/object-inspect/LICENSE`
 
 Applies to: `bluebird@3.4.7`
 
-Source file: `node_modules/mammoth/node_modules/bluebird/LICENSE`
+Source file: `node_modules/bluebird/LICENSE`
 
     The MIT License (MIT)
     
@@ -18236,7 +18238,7 @@ Source file: `node_modules/fd-slicer/LICENSE`
 
 Applies to: `@eslint/eslintrc@0.4.3`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/@eslint/eslintrc/LICENSE`
+Source file: `node_modules/@eslint/eslintrc/LICENSE`
 
     MIT License
     
@@ -18264,7 +18266,7 @@ Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/@eslint/esl
 
 Applies to: `safe-buffer@5.1.2`, `safe-buffer@5.2.1`
 
-Source file: `node_modules/string_decoder/node_modules/safe-buffer/LICENSE`
+Source file: `node_modules/safe-buffer/LICENSE`
 
     The MIT License (MIT)
     
@@ -18551,7 +18553,7 @@ Source file: `node_modules/eventsource-parser/LICENSE`
 
 Applies to: `debug@3.2.7`
 
-Source file: `node_modules/pdf-parse-tt-message-gone/node_modules/debug/LICENSE`
+Source file: `node_modules/debug/LICENSE`
 
     (The MIT License)
     
@@ -18685,7 +18687,7 @@ Source file: `node_modules/cache-manager/LICENSE`
 
 Applies to: `glob@13.0.6`, `package-json-from-dist@1.0.1`
 
-Source file: `node_modules/@earendil-works/pi-coding-agent/node_modules/glob/LICENSE.md`
+Source file: `node_modules/glob/LICENSE.md`
 
     All packages under `src/` are licensed according to the terms in
     their respective `LICENSE` or `LICENSE.md` files.
@@ -19061,7 +19063,7 @@ Source file: `node_modules/extend-shallow/LICENSE`
 
 Applies to: `@aws-sdk/core@3.977.4`
 
-Source file: `node_modules/@aws-sdk/token-providers/node_modules/@aws-sdk/core/LICENSE`
+Source file: `node_modules/@aws-sdk/core/LICENSE`
 
     Apache License
                                Version 2.0, January 2004
@@ -19311,7 +19313,7 @@ Source file: `node_modules/@sentry/node-core/LICENSE`
 
 Applies to: `diff@8.0.2`, `diff@8.0.4`
 
-Source file: `node_modules/@pierre/diffs/node_modules/diff/LICENSE`
+Source file: `node_modules/diff/LICENSE`
 
     BSD 3-Clause License
     
@@ -19456,7 +19458,7 @@ Source file: `node_modules/process-nextick-args/license.md`
 
 Applies to: `ajv@8.17.1`
 
-Source file: `node_modules/table/node_modules/ajv/LICENSE`
+Source file: `node_modules/ajv/LICENSE`
 
     The MIT License (MIT)
     
@@ -19484,7 +19486,7 @@ Source file: `node_modules/table/node_modules/ajv/LICENSE`
 
 Applies to: `brace-expansion@5.0.9`
 
-Source file: `node_modules/glob/node_modules/minimatch/node_modules/brace-expansion/LICENSE`
+Source file: `node_modules/brace-expansion/LICENSE`
 
     MIT License
     
@@ -19705,7 +19707,7 @@ Source file: `node_modules/oniguruma-parser/LICENSE`
 
 Applies to: `zod@3.25.76`, `zod@4.3.5`, `zod@4.3.6`
 
-Source file: `packages/session-tools-core/node_modules/zod/LICENSE`
+Source file: `node_modules/zod/LICENSE`
 
     MIT License
     
@@ -19733,7 +19735,7 @@ Source file: `packages/session-tools-core/node_modules/zod/LICENSE`
 
 Applies to: `jiti@2.7.0`
 
-Source file: `node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/LICENSE`
+Source file: `node_modules/jiti/LICENSE`
 
     MIT License
     
@@ -19846,7 +19848,7 @@ Source file: `node_modules/depd/LICENSE`
 
 Applies to: `flat-cache@3.2.0`
 
-Source file: `node_modules/eslint_d/node_modules/eslint/node_modules/file-entry-cache/node_modules/flat-cache/LICENSE`
+Source file: `node_modules/flat-cache/LICENSE`
 
     The MIT License (MIT)
     

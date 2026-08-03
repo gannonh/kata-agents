@@ -13,6 +13,7 @@ import {
   resolveSendGate,
   resolveCheckoutIdentity,
   resolveCheckoutRecovery,
+  resolveLiveBranchLabel,
 } from '../checkout-controls'
 
 const worktreeCheckout: SessionCheckoutV1 = {
@@ -105,7 +106,20 @@ describe('resolveSendGate', () => {
     expect(decision.action).toBe('send')
   })
 
-  test('sends directly for non-Git directories', () => {
+  test('waits for Git context before sending an unprepared worktree intent', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: false,
+      gitContextResolved: false,
+    })
+    expect(decision).toEqual({ action: 'wait' })
+  })
+
+  test('sends directly for a confirmed non-Git directory', () => {
     const decision = resolveSendGate({
       mode: 'managed-worktree',
       baseRef: null,
@@ -113,6 +127,7 @@ describe('resolveSendGate', () => {
       prepared: false,
       hasPersistedCheckout: false,
       isGitRepository: false,
+      gitContextResolved: true,
     })
     expect(decision.action).toBe('send')
   })
@@ -326,5 +341,56 @@ describe('resolveCheckoutRecovery', () => {
       checkoutExists: false,
     })
     expect(r.kind).toBe('missing')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolveLiveBranchLabel (badge label precedence)
+// ---------------------------------------------------------------------------
+
+describe('resolveLiveBranchLabel', () => {
+  const labels = { detached: 'Detached HEAD', currentCheckout: 'Current checkout' }
+
+  test('reports the detached label when HEAD is detached', () => {
+    const label = resolveLiveBranchLabel(
+      { detached: true, currentBranch: null, defaultRef: 'main', identityBranch: 'feature/x' },
+      labels,
+    )
+    expect(label).toBe('Detached HEAD')
+  })
+
+  test('prefers the live current branch over a persisted identity branch', () => {
+    const label = resolveLiveBranchLabel(
+      { detached: false, currentBranch: 'main', defaultRef: 'main', identityBranch: 'feature/x' },
+      labels,
+    )
+    expect(label).toBe('main')
+  })
+
+  test('prefers the default ref over a persisted identity branch when the branch is unknown', () => {
+    const label = resolveLiveBranchLabel(
+      { detached: false, currentBranch: null, defaultRef: 'develop', identityBranch: 'feature/x' },
+      labels,
+    )
+    expect(label).toBe('develop')
+  })
+
+  test('shows the persisted identity branch while live context is not ready', () => {
+    // A resumed Current checkout carries branchAtPreparation. While the live
+    // lookup is still loading, the badge must show that persisted branch
+    // instead of the generic label.
+    const label = resolveLiveBranchLabel(
+      { detached: false, currentBranch: null, defaultRef: null, identityBranch: 'main' },
+      labels,
+    )
+    expect(label).toBe('main')
+  })
+
+  test('falls back to the generic label when nothing is known', () => {
+    const label = resolveLiveBranchLabel(
+      { detached: false, currentBranch: null, defaultRef: null, identityBranch: null },
+      labels,
+    )
+    expect(label).toBe('Current checkout')
   })
 })

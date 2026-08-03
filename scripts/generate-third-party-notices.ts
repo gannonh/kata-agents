@@ -21,12 +21,19 @@ import { join, relative, resolve } from 'node:path'
 
 type JsonObject = Record<string, unknown>
 
+type LicenseFile = {
+  /** Actual installed path used to read the license text. */
+  actualPath: string
+  /** Stable package-relative path rendered in the generated inventory. */
+  displayPath: string
+}
+
 type PackageRecord = {
   name: string
   version: string
   license: string
   source: string
-  licenseFiles: string[]
+  licenseFiles: LicenseFile[]
   packageRoot: string
 }
 
@@ -38,9 +45,20 @@ type LicenseText = {
 
 type PythonRecord = {
   name: string
-  constraint: string
+  /** Every constraint declared across the bundled tools, sorted and deduplicated. */
+  constraints: string[]
   license: string
   source: string
+}
+
+type PythonSourceFile = {
+  name: string
+  text: string
+}
+
+type PythonDependency = {
+  name: string
+  constraint: string
 }
 
 const ROOT = resolve(import.meta.dir, '..')
@@ -178,12 +196,18 @@ const isPlatformPackage = (pkg: JsonObject): boolean =>
   Array.isArray(pkg.os) || Array.isArray(pkg.cpu) ||
   (typeof pkg.name === 'string' && isPlatformPackageName(pkg.name))
 
-const packageLicenseFiles = (packageRoot: string): string[] => {
+const packageLicenseFiles = (packageRoot: string, packageName: string): LicenseFile[] => {
   if (!existsSync(packageRoot)) return []
   return readdirSync(packageRoot, { withFileTypes: true })
     .filter((entry) => entry.isFile() && LICENSE_FILE.test(entry.name))
-    .map((entry) => relative(ROOT, join(packageRoot, entry.name)).replaceAll('\\', '/'))
-    .sort()
+    .map((entry) => ({
+      actualPath: relative(ROOT, join(packageRoot, entry.name)).replaceAll('\\', '/'),
+      // Bun's hoisting layout differs between platforms and versions. Keep the
+      // installed path for reading, but render a stable logical path so the
+      // checked-in inventory is reproducible in CI and release environments.
+      displayPath: join('node_modules', packageName, entry.name).replaceAll('\\', '/'),
+    }))
+    .sort((a, b) => a.displayPath.localeCompare(b.displayPath))
 }
 
 const workspaceManifestPaths = (): string[] => {
@@ -245,7 +269,7 @@ const collectPackages = (): { packages: PackageRecord[]; unresolved: string[] } 
       version,
       license: packageLicense(packageJson),
       source: packageSource(packageJson, name),
-      licenseFiles: packageLicenseFiles(packageRoot),
+      licenseFiles: packageLicenseFiles(packageRoot, name),
       packageRoot,
     }
     packages.set(`${name}@${version}`, record)
@@ -261,34 +285,70 @@ const collectPackages = (): { packages: PackageRecord[]; unresolved: string[] } 
   }
 }
 
-const collectPythonPackages = (): PythonRecord[] => {
-  const directory = join(ROOT, 'apps', 'electron', 'resources', 'scripts')
-  const records = new Map<string, PythonRecord>()
-  if (!existsSync(directory)) return []
+/**
+ * Parse PEP 723 `dependencies` declarations from a bundled Python tool's
+ * script header. Returns every declared package with its constraint string.
+ */
+export const parsePythonDependencies = (text: string): PythonDependency[] => {
+  const markerStart = text.indexOf('# ///')
+  const markerEnd = markerStart < 0 ? -1 : text.indexOf('# ///', markerStart + 6)
+  const header = markerStart >= 0 && markerEnd > markerStart
+    ? text.slice(markerStart, markerEnd)
+    : ''
+  const dependencies: PythonDependency[] = []
+  for (const match of header.matchAll(/["']([^"']+)["']/g)) {
+    const raw = match[1]!.trim()
+    if (raw.startsWith('>') || raw.startsWith('=')) continue
+    const nameMatch = raw.match(/^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[^\]]+\])?(.*)$/)
+    if (!nameMatch) continue
+    dependencies.push({ name: nameMatch[1]!, constraint: nameMatch[2] || '*' })
+  }
+  return dependencies
+}
 
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.py')) continue
-    const text = readFileSync(join(directory, entry.name), 'utf8')
-    const markerStart = text.indexOf('# ///')
-    const markerEnd = markerStart < 0 ? -1 : text.indexOf('# ///', markerStart + 6)
-    const header = markerStart >= 0 && markerEnd > markerStart
-      ? text.slice(markerStart, markerEnd)
-      : ''
-    const matches = header.matchAll(/["']([^"']+)["']/g)
-    for (const match of matches) {
-      const raw = match[1]!.trim()
-      if (raw.startsWith('>') || raw.startsWith('=')) continue
-      const nameMatch = raw.match(/^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[^\]]+\])?(.*)$/)
-      if (!nameMatch) continue
-      const name = nameMatch[1]!
-      const constraint = nameMatch[2] || '*'
+/**
+ * Merge PEP 723 dependency declarations across bundled Python tools.
+ *
+ * Each tool declares its own constraints, and a package shared by several
+ * tools (e.g. Pillow) can appear with different ranges. Every constraint is
+ * preserved and sorted so the generated inventory never depends on file
+ * discovery order, and a package with no license metadata is skipped.
+ */
+export const mergePythonRecords = (files: PythonSourceFile[]): PythonRecord[] => {
+  const byName = new Map<string, { name: string; constraints: Set<string> }>()
+  for (const file of files) {
+    for (const { name, constraint } of parsePythonDependencies(file.text)) {
       const metadata = PYTHON_LICENSES[name.toLowerCase()]
       if (!metadata) continue
-      records.set(name.toLowerCase(), { name, constraint, ...metadata })
+      const key = name.toLowerCase()
+      const record = byName.get(key) ?? { name, constraints: new Set<string>() }
+      record.constraints.add(constraint)
+      byName.set(key, record)
     }
   }
+  return [...byName.values()]
+    .map(({ name, constraints }) => ({
+      name,
+      constraints: [...constraints].sort(),
+      ...PYTHON_LICENSES[name.toLowerCase()]!,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
 
-  return [...records.values()].sort((a, b) => a.name.localeCompare(b.name))
+const collectPythonPackages = (): PythonRecord[] => {
+  const directory = join(ROOT, 'apps', 'electron', 'resources', 'scripts')
+  if (!existsSync(directory)) return []
+
+  // Sort for stable parse order; the merge itself is order-independent.
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
+  const files: PythonSourceFile[] = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.py')) continue
+    files.push({ name: entry.name, text: readFileSync(join(directory, entry.name), 'utf8') })
+  }
+  return mergePythonRecords(files)
 }
 
 const collectThemes = (): Array<{ name: string; author: string; license: string; source: string; path: string }> => {
@@ -312,8 +372,8 @@ const collectThemes = (): Array<{ name: string; author: string; license: string;
 const collectLicenseTexts = (packages: PackageRecord[]): Map<string, LicenseText> => {
   const texts = new Map<string, LicenseText>()
   for (const pkg of packages) {
-    for (const path of pkg.licenseFiles) {
-      const absolute = join(ROOT, path)
+    for (const licenseFile of pkg.licenseFiles) {
+      const absolute = join(ROOT, licenseFile.actualPath)
       let text: string
       try {
         if (statSync(absolute).size > 64 * 1024) continue
@@ -327,7 +387,7 @@ const collectLicenseTexts = (packages: PackageRecord[]): Map<string, LicenseText
       if (existing) {
         existing.packages.push(`${pkg.name}@${pkg.version}`)
       } else {
-        texts.set(hash, { packages: [`${pkg.name}@${pkg.version}`], path, text })
+        texts.set(hash, { packages: [`${pkg.name}@${pkg.version}`], path: licenseFile.displayPath, text })
       }
     }
   }
@@ -350,6 +410,8 @@ const render = (): string => {
     `> This file is ${generatedAt}. Do not edit it by hand; run \`bun run licenses:generate\` after changing dependencies or bundled assets.`,
     '>',
     '> It is an attribution and license inventory, not a replacement for the license terms of any component. The packaged desktop and server artifacts include this file at their top level. Where a dependency provides a license file, its text is reproduced below when practical; otherwise the source package remains authoritative.',
+    '>',
+    '> License-file paths are normalized to each package\'s logical `node_modules` location so this inventory remains stable across dependency hoisting layouts.',
     '',
     '## Upstream project and fork',
     '',
@@ -368,12 +430,12 @@ const render = (): string => {
   ]
 
   for (const pkg of packages) {
-    lines.push(`| \`${markdownCell(pkg.name)}\` | \`${markdownCell(pkg.version)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} | ${pkg.licenseFiles.length ? pkg.licenseFiles.map((path) => `\`${path}\``).join(', ') : 'Not present in package'} |`)
+    lines.push(`| \`${markdownCell(pkg.name)}\` | \`${markdownCell(pkg.version)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} | ${pkg.licenseFiles.length ? pkg.licenseFiles.map((file) => `\`${file.displayPath}\``).join(', ') : 'Not present in package'} |`)
   }
 
-  lines.push('', '## Python/PyPI dependencies used by bundled tools', '', '| Package | Requested range | License | Source |', '| --- | --- | --- | --- |')
+  lines.push('', '## Python/PyPI dependencies used by bundled tools', '', '| Package | Requested ranges | License | Source |', '| --- | --- | --- | --- |')
   for (const pkg of pythonPackages) {
-    lines.push(`| \`${pkg.name}\` | \`${markdownCell(pkg.constraint)}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} |`)
+    lines.push(`| \`${pkg.name}\` | \`${markdownCell(pkg.constraints.join(', '))}\` | ${markdownCell(pkg.license)} | ${markdownCell(pkg.source)} |`)
   }
   lines.push('', 'The Python tools use PEP 723 metadata and resolve these packages through uv at runtime. Their wheel/sdist license files remain authoritative for the resolved version.', '')
 

@@ -29,11 +29,14 @@ export interface SendGateState {
   hasPersistedCheckout: boolean
   /** Whether the active directory is inside a Git repository. */
   isGitRepository: boolean
+  /** False while Git context is still being rediscovered for this session/panel. */
+  gitContextResolved?: boolean
 }
 
 export type SendGateDecision =
   | { action: 'send' }
   | { action: 'prepare'; intent: CheckoutPrepareIntent }
+  | { action: 'wait' }
   | { action: 'block'; reason: 'missing-base-ref' }
 
 /**
@@ -41,10 +44,22 @@ export type SendGateDecision =
  *
  * A pending New worktree intent must be prepared on the workspace-owning server
  * BEFORE the message is accepted — otherwise the message would silently land in
- * the Current checkout. Current checkout, already-prepared worktrees, resumed
- * sessions, and non-Git directories send directly.
+ * the Current checkout. While Git context is unresolved, a pending worktree
+ * intent waits rather than being treated as a confirmed non-Git directory.
+ * Current checkout, already-prepared worktrees, resumed sessions, and confirmed
+ * non-Git directories send directly.
  */
 export function resolveSendGate(state: SendGateState): SendGateDecision {
+  if (
+    state.mode === 'managed-worktree' &&
+    !!state.workingDirectory &&
+    state.gitContextResolved === false &&
+    !state.prepared &&
+    !state.hasPersistedCheckout
+  ) {
+    return { action: 'wait' }
+  }
+
   if (
     !state.isGitRepository ||
     state.prepared ||
@@ -127,6 +142,37 @@ export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutI
     return { kind: 'menu' }
   }
   return { kind: 'current' }
+}
+
+// ---------------------------------------------------------------------------
+// Live branch label (badge display precedence)
+// ---------------------------------------------------------------------------
+
+export interface LiveBranchLabelState {
+  detached: boolean
+  /** Live current branch from Git context, when known. */
+  currentBranch: string | null
+  /** Live default ref from Git context, when known. */
+  defaultRef: string | null
+  /** Persisted branch from the resolved checkout identity, when known. */
+  identityBranch: string | null | undefined
+}
+
+/**
+ * Resolve the branch label shown on the badge.
+ *
+ * Precedence: live detached state, live current branch, live default ref,
+ * the identity's persisted branch, then the generic Current checkout label.
+ * The persisted branch matters while live context is still loading (e.g. a
+ * resumed Current checkout whose branchAtPreparation is already known), so the
+ * badge never degrades to the generic label when it has real identity data.
+ */
+export function resolveLiveBranchLabel(
+  state: LiveBranchLabelState,
+  labels: { detached: string; currentCheckout: string },
+): string {
+  if (state.detached) return labels.detached
+  return state.currentBranch ?? state.defaultRef ?? state.identityBranch ?? labels.currentCheckout
 }
 
 // ---------------------------------------------------------------------------

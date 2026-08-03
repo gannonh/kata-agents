@@ -2,6 +2,8 @@
 
 ## 2026-08-02
 
+* **Git branch badge refresh**: closed a renderer stale-context gap in the implemented Git/GitHub V1 flow; session and panel-focus changes now force live Git rediscovery for shared working directories while persisted managed-worktree identity remains session-scoped. Pending managed-worktree sends wait for unresolved Git context rather than bypassing preparation; failed lookups surface a localized retry message and retry on the next send. Added focused refresh coverage and a disposable real-Git Electron regression.
+
 * **Expanded tool activity preference**: added an Appearance → Interface setting persisted in `preferences.json`; chat turns now follow the app default while explicit per-turn expansion and collapse overrides remain persisted independently.
 
 * **Claude model picker catalog**: direct Anthropic connections now use the requested Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5, Sonnet 4.6, and Haiku 4.5 order, remove retired Opus 4.1, and retain active provider entries when a persisted catalog is stale; user-owned model lists remain unchanged.
