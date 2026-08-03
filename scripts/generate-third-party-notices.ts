@@ -279,7 +279,13 @@ const collectPythonPackages = (): PythonRecord[] => {
   const records = new Map<string, PythonRecord>()
   if (!existsSync(directory)) return []
 
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  // readdir order is filesystem-dependent (APFS returns hash order, ext4
+  // returns alphabetical). Later files overwrite shared package constraints
+  // below, so sort first to keep the inventory reproducible in CI.
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
+  for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.py')) continue
     const text = readFileSync(join(directory, entry.name), 'utf8')
     const markerStart = text.indexOf('# ///')

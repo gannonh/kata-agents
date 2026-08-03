@@ -1083,7 +1083,7 @@
 | `img2pdf` | `>=0.5,<1` | LGPL-3.0-or-later | https://gitlab.mister-muffin.de/josch/img2pdf |
 | `markitdown` | `>=0.1.5,<0.2` | MIT | https://github.com/microsoft/markitdown |
 | `openpyxl` | `>=3.1,<4` | MIT | https://foss.heptapod.net/openpyxl/openpyxl |
-| `Pillow` | `>=12.1,<13` | MIT-CMU | https://github.com/python-pillow/Pillow |
+| `Pillow` | `>=10,<12` | MIT-CMU | https://github.com/python-pillow/Pillow |
 | `pypdf` | `>=6.7,<7` | BSD-3-Clause | https://github.com/py-pdf/pypdf |
 | `pypdfium2` | `>=5.5,<6` | BSD-3-Clause | https://github.com/pypdfium2-team/pypdfium2 |
 | `python-dateutil` | `>=2.9,<3` | Apache-2.0 OR BSD-3-Clause | https://github.com/dateutil/dateutil |
