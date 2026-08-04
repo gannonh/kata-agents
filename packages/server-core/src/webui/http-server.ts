@@ -182,7 +182,8 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
   const loginPassword = password || secret
   const trustedProxySet = new Set(trustedProxies ?? [])
 
-  // Hash the login password at startup (async, but resolves before first auth attempt in practice)
+  // Hash the login password at startup (async, but resolves before first auth attempt in practice).
+  // Keep the hash promise local so concurrent handlers never share verifier state.
   const passwordReady = initPasswordHash(loginPassword)
 
   /** Extract client IP — only trusts proxy headers when trustedProxies is configured. */
@@ -232,7 +233,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
 
     // ── Auth endpoint ──
     if (path === '/api/auth' && req.method === 'POST') {
-      await passwordReady
+      const hashedPassword = await passwordReady
       const ip = getClientIp(req)
 
       if (!rateLimiter.check(ip)) {
@@ -254,7 +255,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
         return Response.json({ error: 'Password is required' }, { status: 400 })
       }
 
-      if (!await verifyPassword(body.password)) {
+      if (!await verifyPassword(body.password, hashedPassword)) {
         logger.warn(`[webui] Failed auth attempt from ${ip}`)
         return Response.json({ error: 'Invalid credentials' }, { status: 401 })
       }
@@ -275,7 +276,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
     // same verifyPassword path as the login form, sets the session cookie, and
     // redirects to "/". Lets dev launchers open an authenticated URL in one step.
     if (path === '/api/auth/token' && req.method === 'GET') {
-      await passwordReady
+      const hashedPassword = await passwordReady
       const ip = getClientIp(req)
       const requestHost = url.hostname
       const isLoopback = requestHost === '127.0.0.1' || requestHost === 'localhost' || requestHost === '::1'
@@ -293,7 +294,7 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
         return new Response('Token is required', { status: 400 })
       }
 
-      if (!await verifyPassword(token)) {
+      if (!await verifyPassword(token, hashedPassword)) {
         logger.warn(`[webui] Failed token auth attempt from ${ip}`)
         return Response.redirect('/login', 302)
       }

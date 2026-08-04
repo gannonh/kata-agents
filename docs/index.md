@@ -17,7 +17,7 @@ Kata Agents is an open-source Electron desktop app, headless server, and CLI cli
 ## Roadmap
 
 * **Next planned initiative: integrated browser** — parent issue [#28](https://github.com/gannonh/kata-agents/issues/28) tracks a panel-by-default browser, secure Chrome cookie import, persistent page annotations, and agent handoff. The issue's implementation breakdown starts with [#29](https://github.com/gannonh/kata-agents/issues/29) for the embedded panel and detachable surface, allows [#30](https://github.com/gannonh/kata-agents/issues/30) to proceed after the profile/session contract is established, and places [#31](https://github.com/gannonh/kata-agents/issues/31) after the panel and annotation overlay model.
-* **Supporting deferred work** — [#34](https://github.com/gannonh/kata-agents/issues/34) covers running development and production builds together; [#25](https://github.com/gannonh/kata-agents/issues/25) tracks the pre-existing root test failures.
+* **Supporting test work** — [#25](https://github.com/gannonh/kata-agents/issues/25) is implemented and awaiting Verify; [#34](https://github.com/gannonh/kata-agents/issues/34) covers running development and production builds together.
 * **Deferred product backlog** — Git V2 ([#16](https://github.com/gannonh/kata-agents/issues/16)), Worktree V2 ([#17](https://github.com/gannonh/kata-agents/issues/17)), Forge V2 ([#18](https://github.com/gannonh/kata-agents/issues/18)), Git V1 WebUI/CLI parity ([#19](https://github.com/gannonh/kata-agents/issues/19)), and the standalone server/remote client/TUI story ([#6](https://github.com/gannonh/kata-agents/issues/6)) remain tracked for later planning.
 
 ## Recently implemented
