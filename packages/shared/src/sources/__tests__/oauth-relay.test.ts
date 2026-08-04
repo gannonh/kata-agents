@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import { OAUTH_RELAY_CALLBACK_URL, decodeOAuthRelayState, isOAuthRelayState } from '../../auth/oauth-relay.ts';
 import { SourceCredentialManager } from '../credential-manager.ts';
@@ -28,6 +28,12 @@ function createApiSource(overrides: Partial<FolderSourceConfig> = {}): LoadedSou
     workspaceId: 'test-workspace',
   };
 }
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function createMcpSource(overrides: Partial<FolderSourceConfig> = {}): LoadedSource {
   return {

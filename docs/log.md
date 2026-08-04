@@ -2,6 +2,8 @@
 
 ## 2026-08-04
 
+* **Root Bun test sweep stabilized (#25)**: corrected BrowserPaneManager test contracts and cleanup containment, covered Git and RTK RPC registrations, isolated WebUI password hashes, restored test-level global fetch state, and excluded Playwright `.spec.ts` files from Bun discovery. The root `bun test` sweep passes with 5,223 tests and 12 skips.
+
 * **Specs migration**: moved 26 completed file-based specs and reports into `docs/specs/archive/`, made GitHub Issues the canonical roadmap source, and updated cross-links and agent instructions.
 * **Roadmap refresh**: moved implemented work out of the active roadmap, recorded the integrated browser initiative ([#28](https://github.com/gannonh/kata-agents/issues/28), with [#29](https://github.com/gannonh/kata-agents/issues/29), [#30](https://github.com/gannonh/kata-agents/issues/30), and [#31](https://github.com/gannonh/kata-agents/issues/31)) as the next planned work, and indexed the supporting deferred backlog. Updated [index.md](index.md) and [specs/index.md](specs/index.md).
 * **OKF log normalization**: corrected the malformed `2026-06-28b` heading in [reference/log.md](reference/log.md) so all update-log dates use ISO format.

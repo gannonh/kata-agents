@@ -149,27 +149,24 @@ async function verifyWithNode(input: string, encodedHash: string): Promise<boole
   return actualKey.length === expectedKey.length && timingSafeEqual(actualKey, expectedKey)
 }
 
-let hashedPassword: string | null = null
-
 /**
  * Hash the login password at startup. Must be called before any auth requests.
- * The hash is stored in memory — the raw password is not retained.
+ * The returned hash is kept by the caller — the raw password is not retained.
  * Bun uses its native Argon2id implementation. Node uses an in-memory scrypt
  * hash for the Node-based WebUI E2E harness.
  */
-export async function initPasswordHash(plaintext: string): Promise<void> {
+export async function initPasswordHash(plaintext: string): Promise<string> {
   const bunPassword = getBunPasswordApi()
-  hashedPassword = bunPassword
+  return bunPassword
     ? await bunPassword.hash(plaintext, { algorithm: 'argon2id' })
     : await hashWithNode(plaintext)
 }
 
 /**
- * Verify a user-supplied password against the pre-hashed password.
+ * Verify a user-supplied password against a pre-hashed password.
  * Both runtime paths use constant-time verification.
  */
-export async function verifyPassword(input: string): Promise<boolean> {
-  if (!hashedPassword) return false
+export async function verifyPassword(input: string, hashedPassword: string): Promise<boolean> {
   if (hashedPassword.startsWith(`${NODE_SCRYPT_PREFIX}$`)) {
     return verifyWithNode(input, hashedPassword)
   }

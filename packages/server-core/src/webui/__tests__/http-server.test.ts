@@ -26,6 +26,7 @@ function createTestWebuiDir(): string {
 
 async function createServer(overrides?: {
   secureCookies?: boolean
+  password?: string
   publicWsUrl?: string
   wsProtocol?: 'ws' | 'wss'
   wsPort?: number
@@ -34,7 +35,7 @@ async function createServer(overrides?: {
     port: 0,
     webuiDir: createTestWebuiDir(),
     secret: SECRET,
-    password: PASSWORD,
+    password: overrides?.password ?? PASSWORD,
     secureCookies: overrides?.secureCookies,
     publicWsUrl: overrides?.publicWsUrl,
     wsProtocol: overrides?.wsProtocol ?? 'wss',
@@ -187,5 +188,34 @@ describe('startWebuiHttpServer', () => {
     expect(await configRes.json()).toEqual({
       wsUrl: 'wss://craft.example.com/ws',
     })
+  })
+
+  it('isolates password verification between concurrent server instances', async () => {
+    const first = await createServer({ password: 'first-password' })
+    const second = await createServer({ password: 'second-password' })
+
+    const login = (baseUrl: string, password: string) => fetch(`${baseUrl}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+
+    // Resolve each handler's startup hash before exercising the shared server
+    // instances. This leaves the second handler's hash as the last global value
+    // in the pre-isolation implementation.
+    await login(first.baseUrl, 'wrong-password')
+    await login(second.baseUrl, 'wrong-password')
+
+    const [firstOwn, firstOther, secondOwn, secondOther] = await Promise.all([
+      login(first.baseUrl, 'first-password'),
+      login(first.baseUrl, 'second-password'),
+      login(second.baseUrl, 'second-password'),
+      login(second.baseUrl, 'first-password'),
+    ])
+
+    expect(firstOwn.status).toBe(200)
+    expect(firstOther.status).toBe(401)
+    expect(secondOwn.status).toBe(200)
+    expect(secondOther.status).toBe(401)
   })
 })
