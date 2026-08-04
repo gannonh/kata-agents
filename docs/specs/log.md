@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-04
+
+* **Roadmap refresh**: moved implemented specs into Completed, added the integrated browser issue cluster as the active initiative, and grouped the remaining GitHub issues under deferred testing, product, CLI, and security work. Updated [index.md](index.md) and the root [documentation index](../index.md).
+
 ## 2026-08-03
 
 * **Drafted**: [2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md](2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md) — new sessions can discover ready managed worktrees of the same workspace + repository and bind to one as a shared owner (read-only `git:listManagedWorktrees` RPC, `CheckoutPrepareIntent.managedWorktreeId` with server-side workspace/repo/state validation, Existing worktree picker in the composer Workspace menu). Moved Active in [index.md](index.md). Added to [docs/index.md](../index.md) active-work list.

@@ -1,5 +1,10 @@
 # Documentation Bundle Update Log
 
+## 2026-08-04
+
+* **Roadmap refresh**: moved implemented work out of the active roadmap, recorded the integrated browser initiative ([#28](https://github.com/gannonh/kata-agents/issues/28), with [#29](https://github.com/gannonh/kata-agents/issues/29), [#30](https://github.com/gannonh/kata-agents/issues/30), and [#31](https://github.com/gannonh/kata-agents/issues/31)) as the next planned work, and indexed the supporting deferred backlog. Updated [index.md](index.md) and [specs/index.md](specs/index.md).
+* **OKF log normalization**: corrected the malformed `2026-06-28b` heading in [reference/log.md](reference/log.md) so all update-log dates use ISO format.
+
 ## 2026-08-03
 
 * **Git workspace badge review hardening**: bounded Git-context lookups with a 10s timeout so a hung IPC resolves to a retryable error instead of loading forever; the send gate now distinguishes an in-progress discovery (pending message) from a failed refresh (retry message); the badge label prefers the persisted identity branch while live context is loading; and the `@git` badge-refresh spec scopes its feature flag to the worker and asserts panel focus before the focus-switch regression path.

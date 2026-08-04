@@ -4,36 +4,40 @@ okf_version: "0.1"
 
 # Kata Agents — Documentation
 
-Kata Agents is an open-source Electron desktop app, headless server, and CLI client for AI agent sessions. It is a fork of Kata Agents being rebranded to Kata Agents.
+Kata Agents is an open-source Electron desktop app, headless server, and CLI client for AI agent sessions.
 
 ## Sections
 
-* [specs/](specs/) — Product specs, rebrand plans, and active work roadmap
+* [specs/](specs/) — Product specs and the active, planned, deferred, and completed roadmap
 * [architecture/](architecture/) — System maps, package responsibilities, agent backends
 * [reference/](reference/) — CLI reference, APIs, config schemas
 * [operations/](operations/) — CI and release pipelines, required secrets
 * [../apps/online-docs/](../apps/online-docs/) — Mintlify source for the hosted product documentation
 
-## Active work
+## Roadmap
+
+* **Next planned initiative: integrated browser** — parent issue [#28](https://github.com/gannonh/kata-agents/issues/28) tracks a panel-by-default browser, secure Chrome cookie import, persistent page annotations, and agent handoff. The issue's implementation breakdown starts with [#29](https://github.com/gannonh/kata-agents/issues/29) for the embedded panel and detachable surface, allows [#30](https://github.com/gannonh/kata-agents/issues/30) to proceed after the profile/session contract is established, and places [#31](https://github.com/gannonh/kata-agents/issues/31) after the panel and annotation overlay model.
+* **Supporting deferred work** — [#34](https://github.com/gannonh/kata-agents/issues/34) covers running development and production builds together; [#25](https://github.com/gannonh/kata-agents/issues/25) tracks the pre-existing root test failures.
+* **Deferred product backlog** — Git V2 ([#16](https://github.com/gannonh/kata-agents/issues/16)), Worktree V2 ([#17](https://github.com/gannonh/kata-agents/issues/17)), Forge V2 ([#18](https://github.com/gannonh/kata-agents/issues/18)), Git V1 WebUI/CLI parity ([#19](https://github.com/gannonh/kata-agents/issues/19)), and the standalone server/remote client/TUI story ([#6](https://github.com/gannonh/kata-agents/issues/6)) remain tracked for later planning.
+
+## Recently implemented
 
 * **Share managed worktrees across sessions** — [specs/2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md](specs/2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md) — **Implemented.** A new empty session can pick an existing managed worktree from the composer Workspace control and bind to it as a shared owner; discovery is scoped to the workspace + repository and cleanup guards keep shared checkouts intact. Tracks [#33](https://github.com/gannonh/kata-agents/issues/33).
-
-* **Pi SDK 0.83 migration** — [specs/2026-08-01-pi-sdk-0.83-migration-design.md](specs/2026-08-01-pi-sdk-0.83-migration-design.md) — **Implemented.** Migrated the embedded Pi runtime from retired `@mariozechner` packages to the current Pi CLI-aligned `@earendil-works` packages and adopted native model reasoning metadata. [Build report](specs/2026-08-01-pi-sdk-0.83-migration-build-report.md).
-* **Provider-aware reasoning levels** — [specs/2026-08-01-provider-aware-reasoning-levels-design.md](specs/2026-08-01-provider-aware-reasoning-levels-design.md) — **Implemented.** OpenAI API, ChatGPT/Codex, Copilot, and Pi-managed model controls now expose reported reasoning capabilities, including `minimal`. [Build report](specs/2026-08-01-provider-aware-reasoning-levels-build-report.md).
-* **Awaitable agent teardown quiescence** — [specs/2026-07-30-agent-quiescence-contract-design.md](specs/2026-07-30-agent-quiescence-contract-design.md) — **Implemented.** The required backend contract from [#21](https://github.com/gannonh/kata-agents/issues/21) makes destructive managed-worktree operations wait for nested turn completion and provider child-process exit rather than processing-flag polling and a fixed grace delay.
-* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — **Implemented and verified**, enabled by default. Set `KATA_FEATURE_GIT_WORKSPACE_V1=0` to disable. All four slices built: checkout-aware sessions + server-owned managed worktrees, a Changes review panel with line feedback, safe commit/push/GitHub-PR actions (never force-push/reset/rebase/merge), and lifecycle management (archive preserves worktrees; delete offers separate force-confirmed worktree removal; recovery/blocked states; local/remote parity). The macOS `@git` suite covers both disposable local Git lifecycle behavior and authenticated GitHub commit/push/PR cleanup. Build report: [specs/2026-07-26-git-github-worktrees-v1-build-report.md](specs/2026-07-26-git-github-worktrees-v1-build-report.md).
+* **Pi SDK 0.83 migration** — [specs/2026-08-01-pi-sdk-0.83-migration-design.md](specs/2026-08-01-pi-sdk-0.83-migration-design.md) — **Implemented.** Migrated the embedded Pi runtime to the current Pi CLI-aligned `@earendil-works` packages and adopted native model reasoning metadata. [Build report](specs/2026-08-01-pi-sdk-0.83-migration-build-report.md).
+* **Provider-aware reasoning levels** — [specs/2026-08-01-provider-aware-reasoning-levels-design.md](specs/2026-08-01-provider-aware-reasoning-levels-design.md) — **Implemented.** OpenAI API, ChatGPT/Codex, Copilot, and Pi-managed model controls expose reported reasoning capabilities, including `minimal`. [Build report](specs/2026-08-01-provider-aware-reasoning-levels-build-report.md).
+* **Awaitable agent teardown quiescence** — [specs/2026-07-30-agent-quiescence-contract-design.md](specs/2026-07-30-agent-quiescence-contract-design.md) — **Implemented.** The backend contract from [#21](https://github.com/gannonh/kata-agents/issues/21) makes destructive managed-worktree operations wait for nested turn completion and provider child-process exit.
+* **Git and GitHub V1 with managed worktrees** — [specs/2026-07-26-git-github-worktrees-v1-design.md](specs/2026-07-26-git-github-worktrees-v1-design.md) — **Implemented and verified**, enabled by default. Build report: [specs/2026-07-26-git-github-worktrees-v1-build-report.md](specs/2026-07-26-git-github-worktrees-v1-build-report.md).
 * **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — completed. Build report: [specs/2026-06-22-complete-kata-brand-transition-build-report.md](specs/2026-06-22-complete-kata-brand-transition-build-report.md). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
-* **ADRs** — [adrs/](adrs/) — one accepted (kata-identity hard-cutover); seed is in place for future decisions
+* **ADRs** — [adrs/](adrs/) — accepted decisions cover the Kata identity hard cutover and server-owned managed worktrees.
 
-## Recent work
+## Earlier completed work
 
 * **Online docs site** — [apps/online-docs/](../apps/online-docs/) — Mintlify documentation site seeded from the upstream introduction, rewritten for Kata Agents, and linked to the existing product-doc routes used by the app.
 * **MCP OAuth callback support** — [specs/2026-06-26-mcp-oauth-callback-support-plan.md](specs/2026-06-26-mcp-oauth-callback-support-plan.md) — Cloudflare Worker callback relay plus MCP OAuth `resource` handling. Build report: [specs/2026-06-26-mcp-oauth-callback-support-build-report.md](specs/2026-06-26-mcp-oauth-callback-support-build-report.md).
-* **CLI rename and phantom removal** — [specs/2026-06-24-cli-rename-and-phantom-removal-design.md](specs/2026-06-24-cli-rename-and-phantom-removal-design.md) — renamed terminal client to `kata-agents-cli`, removed phantom `kata-agent` commands-CLI references and feature flag. Build report: [specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md](specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md).
-* **Complete Kata brand transition** — [specs/2026-06-22-complete-kata-brand-transition-design.md](specs/2026-06-22-complete-kata-brand-transition-design.md) — hard-cutover Kata identity across packages, runtime, desktop, CLI/server, resources, docs. Verify passed 2026-06-23 (all 12 ACs). Verify report: [specs/2026-06-23-complete-kata-brand-transition-verify-report.md](specs/2026-06-23-complete-kata-brand-transition-verify-report.md).
-* **Update UX parity** — [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md) — Kata Code-style desktop update UX. Status: implemented. Build report: [specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md](specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md)
-* **Project B — CI/release pipeline** — [specs/2026-06-19-ci-release-pipeline.md](specs/2026-06-19-ci-release-pipeline.md) — GitHub Actions CI + nightly/stable desktop release pipeline (Bun) publishing to GitHub Releases. Status: implemented. Ops docs: [operations/ci.md](operations/ci.md), [operations/release.md](operations/release.md)
-* **Rebrand Phase 1** — [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md) — rename all user-facing "Craft" surfaces to "Kata" while preserving identity infrastructure. Status: completed. Build report: [specs/rebrand-kata-agents-phase-1-build-report.md](specs/rebrand-kata-agents-phase-1-build-report.md)
+* **CLI rename and phantom removal** — [specs/2026-06-24-cli-rename-and-phantom-removal-design.md](specs/2026-06-24-cli-rename-and-phantom-removal-design.md) — renamed terminal client to `kata-agents-cli`, removed phantom `kata-agent` CLI references and feature flag. Build report: [specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md](specs/2026-06-24-cli-rename-and-phantom-removal-build-report.md).
+* **Update UX parity** — [specs/2026-06-20-update-ux-parity-with-kata-code-design.md](specs/2026-06-20-update-ux-parity-with-kata-code-design.md) — Kata Code-style desktop update UX. Status: implemented. Build report: [specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md](specs/2026-06-20-update-ux-parity-with-kata-code-build-report.md).
+* **Project B — CI/release pipeline** — [specs/2026-06-19-ci-release-pipeline.md](specs/2026-06-19-ci-release-pipeline.md) — GitHub Actions CI + nightly/stable desktop release pipeline publishing to GitHub Releases. Status: implemented. See [operations/ci.md](operations/ci.md) and [operations/release.md](operations/release.md).
+* **Rebrand Phase 1** — [specs/rebrand-kata-agents-phase-1.md](specs/rebrand-kata-agents-phase-1.md) — renamed user-facing Craft surfaces to Kata while preserving identity infrastructure. Status: completed. Build report: [specs/rebrand-kata-agents-phase-1-build-report.md](specs/rebrand-kata-agents-phase-1-build-report.md).
 
 ## Root project files
 

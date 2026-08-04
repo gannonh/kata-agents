@@ -1,6 +1,6 @@
 # Reference Update Log
 
-## 2026-06-28b
+## 2026-06-28
 
 * **devbox git + GitHub auth**: documented in [devbox.md](devbox.md). Worktrees are created with `--relative-paths` and the main `.git` is mounted into the box so `git` works inside (commits, diffs, push). A GitHub token is forwarded from the host `gh` (or `GH_TOKEN`/`GITHUB_TOKEN`) and persisted to `/etc/profile.d/gh-token.sh` (node:node 600) so `gh` and HTTPS `git push` are authed in every shell. Electron launches with `--no-sandbox` in-container (gated by `KATA_ELECTRON_NO_SANDBOX`).
 
