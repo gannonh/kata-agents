@@ -2,10 +2,14 @@
 type: Spec
 title: Allow new sessions to use existing managed worktrees
 description: Expose ready Kata-managed worktrees of the current workspace + repository in the composer workspace controls so a new session can bind to one as a shared owner, preserving the existing ownership and cleanup safety model.
-status: Implemented
+status: Completed
 tags: [git, worktrees, sessions, electron, server, shared-ownership]
 timestamp: 2026-08-03T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Allow new sessions to use existing managed worktrees
 

@@ -2,8 +2,12 @@
 type: Report
 title: Provider-aware reasoning levels build report
 description: Build evidence for provider-aware reasoning settings across OpenAI, ChatGPT/Codex, Copilot, and Pi-managed models.
-status: Implemented
+status: Completed
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Provider-aware reasoning levels build report
 

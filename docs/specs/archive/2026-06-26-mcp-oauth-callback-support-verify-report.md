@@ -4,7 +4,12 @@ title: MCP OAuth callback support — verify report
 description: UAT and acceptance evidence for MCP OAuth callback relay and MCP resource parameter work.
 tags: [mcp, oauth, cloudflare, verify, uat]
 timestamp: 2026-06-28T21:30:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # MCP OAuth callback support — verify report
 

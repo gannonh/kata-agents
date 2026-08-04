@@ -1,12 +1,23 @@
 # Agent Instructions — Kata Agents
 
+## Specs live in GitHub Issues
+
+Specs for this repository are GitHub Issues, not files. `docs/specs/` holds only an index pointer and an archive of pre-migration specs.
+
+- Read the roadmap with `gh issue list --label kind:spec --state open`.
+- Read a spec with `gh issue view <N>`; read an epic's phases with `gh sub-issue list <N>`.
+- Do not create spec files under `docs/specs/`. Use the `plan-build-verify-github` skill, which publishes specs as issues.
+- Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
+- Post build reports and acceptance evidence as comments on the spec issue.
+- ADRs remain files under `docs/adrs/`. Cross-link them with the issues they constrain.
+
 ## Open Knowledge Format docs
 
 This repository maintains an OKF v0.1 bundle at `./docs`.
 
 - Read `./docs/index.md` before substantial work to understand the documentation map.
 - Follow cross-links into relevant specs, ADRs, architecture notes, and reference docs before changing related code.
-- Keep `./docs/specs/index.md` current as the roadmap for active, planned, and completed work.
+- Keep `./docs/specs/index.md` current as the roadmap pointer for GitHub Issues and the pre-migration archive.
 - Add or update ADRs in `./docs/adrs/` for durable architecture decisions.
 - After substantial work, PRs, behavior changes, architecture decisions, or documentation moves, update the OKF bundle and add entries to the relevant `log.md` files.
 - Every non-reserved Markdown file under `./docs` must have OKF frontmatter with at least a non-empty `type` field. `index.md` and `log.md` are reserved navigation/history files.
@@ -42,8 +53,8 @@ Each package has its own agent context file — read it before modifying that pa
 
 ## Active context
 
-- **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.
-- **Rebrand Phase 1** (user-facing copy only) is complete. See `./docs/specs/rebrand-kata-agents-phase-1.md`.
+- **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/archive/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/archive/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.
+- **Rebrand Phase 1** (user-facing copy only) is complete. See `./docs/specs/archive/rebrand-kata-agents-phase-1.md`.
 
 <!-- BEGIN @agent-native/skills -->
 When using a high-cost frontier model for codebase-heavy work, use the /efficient-frontier skill always.

@@ -14,7 +14,7 @@ Accepted
 
 ## Context
 
-Git/GitHub V1 (see [design spec](../specs/2026-07-26-git-github-worktrees-v1-design.md)) lets a
+Git/GitHub V1 (see [design spec](../specs/archive/2026-07-26-git-github-worktrees-v1-design.md)) lets a
 session run against an isolated **managed worktree** instead of the Current checkout. A managed
 worktree is a real `git worktree` plus a temporary `kata-agent/<8-hex>` working branch. This raises
 questions the fork must answer once: who creates and owns worktrees, where they live, how ownership
@@ -176,6 +176,6 @@ delta".
 
 ## References
 
-- [Git and GitHub worktrees V1 design](../specs/2026-07-26-git-github-worktrees-v1-design.md)
+- [Git and GitHub worktrees V1 design](../specs/archive/2026-07-26-git-github-worktrees-v1-design.md)
 - Server Git domain: `packages/server-core/src/git/`
 - Checkout gate: `packages/server-core/src/sessions/SessionManager.ts` (`prepareCheckout`)

@@ -4,7 +4,12 @@ title: CI/Release Pipeline (Project B) — Build Report
 description: Build completion report for the Project B CI/release pipeline spec — what was implemented, verification results, acceptance-criteria evidence, deviations, and follow-ups.
 tags: [ci, release, github-actions, build-report, project-b]
 timestamp: 2026-06-19T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Build Report — CI/Release Pipeline (Project B)
 

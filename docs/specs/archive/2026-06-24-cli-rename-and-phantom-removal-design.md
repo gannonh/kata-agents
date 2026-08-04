@@ -4,7 +4,12 @@ title: Rename CLI and remove phantom kata-agent commands references
 description: Rename apps/cli to @kata-sh/agents-cli / bin kata-agents-cli and remove all references to the never-implemented kata-agent workspace-commands binary across the system prompt, permission policies, bundled docs, and orphaned env vars. Defer the commands-CLI build to a backlog issue.
 tags: [cli, rename, branding, system-prompt, release]
 timestamp: 2026-06-24T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Rename CLI and remove phantom kata-agent commands references
 

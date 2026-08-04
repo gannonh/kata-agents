@@ -4,7 +4,12 @@ title: Update UX Parity with Kata Code
 description: Plan to port Kata Code's desktop update UX to Kata Agents while preserving the existing GitHub Releases feed and identity infrastructure.
 tags: [desktop, electron-updater, update-ux, settings, nightly, stable, kata-code-parity]
 timestamp: 2026-06-20T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Update UX Parity with Kata Code
 

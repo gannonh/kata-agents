@@ -4,7 +4,12 @@ title: "Build report — Adopt the local Electron E2E foundation"
 description: "Implementation, verification, deviations, and follow-ups for the Kata Agents local Playwright + real-Electron E2E foundation."
 tags: [testing, e2e, electron, playwright, kata-agents, build-report]
 timestamp: 2026-06-25T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Build report — Adopt the local Electron E2E foundation
 

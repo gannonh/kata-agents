@@ -41,4 +41,4 @@ Craft references remain only for upstream LICENSE attribution, historical comple
 
 ## References
 
-- [Complete Kata brand transition spec](../specs/2026-06-22-complete-kata-brand-transition-design.md)
+- [Complete Kata brand transition spec](../specs/archive/2026-06-22-complete-kata-brand-transition-design.md)

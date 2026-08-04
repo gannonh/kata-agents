@@ -4,7 +4,12 @@ title: Complete Kata Brand Transition — Build Report
 description: Build completion evidence for the hard-cutover brand transition
 tags: [rebrand, kata, build-report]
 timestamp: 2026-06-22T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Complete Kata Brand Transition — Build Report
 
@@ -26,7 +31,7 @@ timestamp: 2026-06-22T00:00:00Z
 2. **Phase 2 — Runtime identity**: Renamed `CRAFT_*` → `KATA_*`, config paths to `~/.kata-agents` / `.kata-agents`, removed backward-compat env/path reads.
 3. **Phase 3 — Desktop identity**: `sh.kata.agents`, `kataagents://`, release/update metadata toward `agents.kata.sh`.
 4. **Phase 4 — Apps/resources**: `kata-cli` / `kata-server` binaries, bundled `kata-agent` resource binary, `kata-logos/`, docs MCP ids, server/viewer/webui labels.
-5. **Phase 5 — i18n/docs/OKF**: Renamed i18n keys (`menu.*KataAgents`, `onboarding.apiSetup.kataAgentsBackend`), updated `AGENTS.md`, `docs/index.md`, added [ADR](../adrs/2026-06-22-kata-identity-hard-cutover.md), release-notes breaking-change entry.
+5. **Phase 5 — i18n/docs/OKF**: Renamed i18n keys (`menu.*KataAgents`, `onboarding.apiSetup.kataAgentsBackend`), updated `AGENTS.md`, `docs/index.md`, added [ADR](../../adrs/2026-06-22-kata-identity-hard-cutover.md), release-notes breaking-change entry.
 6. **Phase 6 — Verification**: Package typechecks, i18n parity/sort, CLI help smoke, package metadata scan, residual Craft scan.
 
 ## Verification results

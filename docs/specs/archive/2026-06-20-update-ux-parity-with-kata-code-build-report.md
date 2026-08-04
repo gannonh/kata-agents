@@ -4,7 +4,12 @@ title: Update UX Parity with Kata Code — Build Report
 description: Build completion report for the update-UX parity spec. Phases 1-5, files changed, verification evidence, and approved deviations.
 tags: [desktop, electron-updater, update-ux, build-report]
 timestamp: 2026-06-20T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Update UX Parity with Kata Code — Build Report
 

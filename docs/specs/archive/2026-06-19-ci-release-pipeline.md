@@ -4,7 +4,12 @@ title: CI/Release Pipeline (Project B)
 description: GitHub Actions CI plus a nightly/stable desktop release pipeline modeled on kata-code, retargeted to the Bun toolchain, with GitHub Releases auto-update preserved.
 tags: [ci, release, github-actions, electron-updater, nightly, stable, project-b]
 timestamp: 2026-06-19T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # CI/Release Pipeline — Project B
 
@@ -24,7 +29,7 @@ GitHub Actions, matching the channel/auto-update shape of the kata-code project
 auto-updater continues to work, pulling per-channel updates from those releases.
 
 This is the second project in the post-fork roadmap (A brand tail → **B CI** → C safe code rename →
-D identity infra). See [index.md](index.md) for the roadmap and
+D identity infra). See [index.md](../index.md) for the roadmap and
 [rebrand-kata-agents-phase-1.md](rebrand-kata-agents-phase-1.md) for prior context.
 
 ## Source of truth (reference implementation)

@@ -3,9 +3,13 @@ type: Spec
 title: "Local Electron E2E testing foundation (design + decision record)"
 description: "V1 constraints, environment contract, and verification matrix for the local-only macOS-first Playwright + real-Electron E2E foundation in Kata Agents."
 tags: [testing, e2e, electron, playwright, kata-agents, decision-record]
-status: Approved
+status: Completed
 timestamp: 2026-06-24T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Local Electron E2E testing foundation
 

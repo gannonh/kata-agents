@@ -4,14 +4,19 @@ title: Git and GitHub V1 with managed worktrees — build report
 description: Build completion report mapping AC1–AC21 to implementation and tests for the flag-gated Git/GitHub worktrees feature, covering Phase 3 blocker fixes and Phase 4 lifecycle management.
 tags: [git, github, worktrees, electron, server, sessions, build]
 timestamp: 2026-07-29T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Git and GitHub V1 with managed worktrees — build report
 
 ## Spec
 
 - [2026-07-26-git-github-worktrees-v1-design.md](./2026-07-26-git-github-worktrees-v1-design.md) (Status: Implemented)
-- ADR: [2026-07-29-server-owned-managed-worktrees.md](../adrs/2026-07-29-server-owned-managed-worktrees.md)
+- ADR: [2026-07-29-server-owned-managed-worktrees.md](../../adrs/2026-07-29-server-owned-managed-worktrees.md)
 
 Feature is gated behind `KATA_FEATURE_GIT_WORKSPACE_V1` and **enabled by default**.
 Set `KATA_FEATURE_GIT_WORKSPACE_V1=0` to disable it. This rollout changes the
@@ -140,7 +145,7 @@ Commit: `d3b56b6`.
    pull-request creation, and cleanup of the test PR and remote branch. Stable
    test selectors were added only at feature boundaries. A production-component
    playground fixture and checked-in screenshots cover the four vertical
-   slices; see [`docs/validation/git-github-worktrees-v1/`](../validation/git-github-worktrees-v1/README.md).
+   slices; see [`docs/validation/git-github-worktrees-v1/`](../../validation/git-github-worktrees-v1/README.md).
 7. **Tests** for delete-time cleanup safety, shared-owner block, archive
    preservation, and recovery badges as listed above.
 

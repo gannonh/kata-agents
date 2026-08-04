@@ -4,7 +4,12 @@ title: Complete Kata Brand Transition
 description: Hard-cutover plan to finish the Kata Agents brand transition across package identity, runtime identity, app surfaces, bundled resources, docs, and release infrastructure with zero legacy Craft compatibility.
 tags: [rebrand, kata, package-rename, identity, cli, electron, server, hard-cutover]
 timestamp: 2026-06-22T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Complete Kata Brand Transition
 

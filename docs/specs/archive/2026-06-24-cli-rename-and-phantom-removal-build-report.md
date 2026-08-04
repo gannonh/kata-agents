@@ -4,7 +4,12 @@ title: CLI Rename and Phantom Removal — Build Report
 description: Build completion evidence for renaming apps/cli to kata-agents-cli and removing phantom kata-agent commands-CLI infrastructure
 tags: [cli, rename, branding, build-report]
 timestamp: 2026-06-24T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # CLI Rename and Phantom Removal — Build Report
 

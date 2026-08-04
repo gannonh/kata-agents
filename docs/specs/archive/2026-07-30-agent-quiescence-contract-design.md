@@ -2,12 +2,16 @@
 type: Spec
 title: Awaitable agent teardown quiescence contract
 description: Replace inferred agent-idle polling with a backend-owned teardown contract before destructive managed-worktree operations.
-status: Implemented
+status: Completed
 approved_at: 2026-07-31T01:35:49Z
 implemented_at: 2026-07-31T01:48:17Z
 tags: [agents, backends, git, worktrees, sessions, safety]
 timestamp: 2026-07-30T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Awaitable agent teardown quiescence contract
 
@@ -34,7 +38,7 @@ change the feature flag, the removal fingerprint, or the deletion transaction.
 
 - [Issue #21](https://github.com/gannonh/kata-agents/issues/21)
 - [Git/GitHub V1 design](2026-07-26-git-github-worktrees-v1-design.md)
-- [Server-owned managed-worktree ADR](../adrs/2026-07-29-server-owned-managed-worktrees.md)
+- [Server-owned managed-worktree ADR](../../adrs/2026-07-29-server-owned-managed-worktrees.md)
 - `packages/shared/src/agent/backend/types.ts`
 - `packages/shared/src/agent/base-agent.ts`
 - `packages/shared/src/agent/claude-agent.ts`

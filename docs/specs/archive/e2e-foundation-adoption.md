@@ -4,7 +4,12 @@ title: "Adopting the local Electron E2E foundation"
 description: "Implementation guide for Kata Agents and Skillr App (and future Electron repos) to adopt the Kata Code Playwright E2E pattern."
 tags: [testing, e2e, electron, playwright, adoption, kata-agents, skiller]
 timestamp: 2026-06-22T12:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Adopting the local Electron E2E foundation
 
@@ -14,11 +19,11 @@ This guide helps **Kata Agents** (`/Volumes/EVO/dev/kata-agents`) and **Skillr A
 
 | Artifact                          | Path in Kata Code                                                                                                |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Operator README                   | [`e2e/README.md`](../../e2e/README.md)                                                                           |
-| Design spec + acceptance criteria | [`docs/specs/2026-06-21-e2e-testing-foundation-design.md`](../specs/2026-06-21-e2e-testing-foundation-design.md) |
-| Agent authoring skill             | [`.agents/skills/e2e-test-author/SKILL.md`](../../.agents/skills/e2e-test-author/SKILL.md)                       |
-| Shared port contract              | [`scripts/lib/dev-ports.ts`](../../scripts/lib/dev-ports.ts)                                                     |
-| Harness + flows + starter specs   | [`e2e/`](../../e2e/)                                                                                             |
+| Operator README                   | [`e2e/README.md`](../../../e2e/README.md)                                                                           |
+| Design spec + acceptance criteria | [`docs/specs/2026-06-21-e2e-testing-foundation-design.md`](e2e-foundation-adoption-plan.md) |
+| Agent authoring skill             | [`.agents/skills/e2e-test-author/SKILL.md`](../../../.agents/skills/e2e-test-author/SKILL.md)                       |
+| Shared port contract              | [`scripts/lib/dev-ports.ts`](../../../scripts/lib/dev-ports.ts)                                                     |
+| Harness + flows + starter specs   | [`e2e/`](../../../e2e/)                                                                                             |
 
 ---
 
@@ -98,7 +103,7 @@ devEnv.KATACODE_PORT_OFFSET = String(startOffset);
 
 **Symptom:** `Port 5733 is already in use` while logs show `web=5736`.
 
-**Fix:** Reuse one port module shared with your dev runner ([`scripts/lib/dev-ports.ts`](../../scripts/lib/dev-ports.ts)) so E2E and dev scripts agree on probe hosts and offset semantics.
+**Fix:** Reuse one port module shared with your dev runner ([`scripts/lib/dev-ports.ts`](../../../scripts/lib/dev-ports.ts)) so E2E and dev scripts agree on probe hosts and offset semantics.
 
 ### 2. One owner for dev-stack env vars
 
@@ -110,7 +115,7 @@ Spawning your normal desktop dev script often **also** launches Electron. E2E sh
 
 ### 4. Release launches must strip dev-only env
 
-Packaged apps load from an **embedded server**, not Vite. Strip `VITE_DEV_SERVER_URL`, dev `PORT`, etc. for the `desktop-release` project (see [`launchEnv.ts`](../../e2e/src/harness/launchEnv.ts)).
+Packaged apps load from an **embedded server**, not Vite. Strip `VITE_DEV_SERVER_URL`, dev `PORT`, etc. for the `desktop-release` project (see [`launchEnv.ts`](../../../e2e/src/harness/launchEnv.ts)).
 
 ### 5. Use raw Electron binary in dev, not the macOS `.app` shim
 
@@ -381,7 +386,7 @@ Copy and rename prefixes/constants. Adjust import paths to your monorepo layout.
 2. **One authenticated or data-mutating flow** (if applicable) — prove fixtures + `workers: 1`.
 3. **One real-service integration** (LLM, GitHub install, library scan) — prove env prerequisites.
 4. **Release target** — validate packaged `.app` before promotion.
-5. Document nightly commands in release runbook (mirror Kata Code [`e2e/README.md` — Nightly release validation](../../e2e/README.md)).
+5. Document nightly commands in release runbook (mirror Kata Code [`e2e/README.md` — Nightly release validation](../../../e2e/README.md)).
 
 ---
 
@@ -393,6 +398,6 @@ Stay copy-adapt until **three** repos share identical harness code with only con
 
 ## Related docs
 
-- [E2E foundation design spec](../specs/2026-06-21-e2e-testing-foundation-design.md)
-- [e2e/README.md](../../e2e/README.md)
-- [e2e-test-author skill](../../.agents/skills/e2e-test-author/SKILL.md)
+- [E2E foundation design spec](e2e-foundation-adoption-plan.md)
+- [e2e/README.md](../../../e2e/README.md)
+- [e2e-test-author skill](../../../.agents/skills/e2e-test-author/SKILL.md)

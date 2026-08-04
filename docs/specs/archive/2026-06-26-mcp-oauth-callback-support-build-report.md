@@ -4,7 +4,12 @@ title: MCP OAuth callback support — build report
 description: Build completion report for the MCP OAuth callback relay and MCP resource parameter work.
 tags: [mcp, oauth, cloudflare, build]
 timestamp: 2026-06-28T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # MCP OAuth callback support — build report
 

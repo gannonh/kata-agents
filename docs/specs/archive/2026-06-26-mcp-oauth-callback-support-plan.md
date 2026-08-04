@@ -3,9 +3,13 @@ type: Spec
 title: MCP OAuth callback support
 description: Add a free-tier Cloudflare Worker relay and complete MCP OAuth callback/token handling for remote HTTP MCP sources.
 tags: [mcp, oauth, cloudflare, sources, webui, electron]
-status: Implemented
+status: Completed
 timestamp: 2026-06-26T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # MCP OAuth callback support
 

@@ -4,7 +4,12 @@ title: Rebrand Kata Agents — Phase 1 (user-facing)
 description: Scope, decisions, change set, and verification plan for renaming Craft Agents to Kata Agents in all user-visible surfaces while preserving identity infrastructure.
 tags: [rebrand, kata, phase-1, implemented]
 timestamp: 2026-06-19T00:00:00Z
+migrated: false
+archived_at: 2026-08-04T16:24:02Z
+status: Completed
 ---
+
+> **Completed before migration** (status: Completed). Retained as history. Not tracked in GitHub Issues.
 
 # Rebrand fork to "Kata Agents" — Phase 1 (user-facing)
 
