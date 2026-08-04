@@ -2,6 +2,8 @@
 
 ## 2026-08-04
 
+* **Full backlog triage**: read 20 open issues and 3 recently closed issues; added roadmap kind labels for feature specs and the #28 hierarchy; applied `needs:triage` and `needs:acceptance-criteria` to every open issue. No status transitions or closure changes were made. The ready-to-build list remains empty pending status, acceptance, and handoff decisions.
+
 Migrated file-based specs to GitHub Issues. The issue is now the canonical spec.
 
 Archived without an issue (already complete):
