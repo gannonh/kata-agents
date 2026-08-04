@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadSession as loadStoredSession } from '@kata-sh/shared/sessions'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
@@ -31,8 +31,8 @@ function makeManager() {
   return { sm, services }
 }
 
-function injectSession(sm: SessionManager, id: string, workspaceRootPath: string) {
-  const workspace = { id: 'ws_test', name: 'WS', rootPath: workspaceRootPath, createdAt: Date.now() }
+function injectSession(sm: SessionManager, id: string, workspaceRootPath: string, workspaceId = 'ws_test') {
+  const workspace = { id: workspaceId, name: 'WS', rootPath: workspaceRootPath, createdAt: Date.now() }
   // Pre-create the session dir so debounced persistence has somewhere to write.
   mkdirSync(join(workspaceRootPath, 'sessions', id), { recursive: true })
   const managed = createManagedSession(
@@ -184,6 +184,356 @@ describe('SessionManager.prepareCheckout — managed worktree', () => {
     await expect(
       sm.prepareCheckout('sess6', { mode: 'managed-worktree', workingDirectory: repo, baseRef: 'main' }),
     ).rejects.toThrow(/not enabled/i)
+  })
+})
+
+describe('SessionManager.prepareCheckout — existing managed worktree (shared ownership)', () => {
+  test('binds a new session to an existing worktree without recreating it', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    injectSession(sm, 'sessSharer', wsRoot)
+    const result = await sm.prepareCheckout('sessSharer', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      managedWorktreeId: first.checkout.managedWorktreeId!,
+    })
+
+    // Persisted checkout identity points at the SAME worktree.
+    expect(result.checkout.mode).toBe('managed-worktree')
+    expect(result.checkout.checkoutPath).toBe(first.checkout.checkoutPath)
+    expect(result.checkout.managedWorktreeId).toBe(first.checkout.managedWorktreeId)
+    expect(result.checkout.expectedBranch).toBe(first.checkout.expectedBranch)
+    expect(result.checkout.baseRef).toBe('main')
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
+    // The checkout itself was not recreated: same path, and no second branch.
+    expect(existsSync(result.checkout.checkoutPath)).toBe(true)
+    const branches = await git(repo, ['branch', '--list', 'kata-agent/*'])
+    expect(branches.trim().split('\n')).toHaveLength(1)
+  })
+
+  test('is idempotent for a repeated existing-worktree intent', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner2', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner2', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    injectSession(sm, 'sessSharer2', wsRoot)
+    const intent = {
+      mode: 'managed-worktree' as const,
+      workingDirectory: repo,
+      managedWorktreeId: first.checkout.managedWorktreeId,
+    }
+    const second = await sm.prepareCheckout('sessSharer2', intent)
+    const repeated = await sm.prepareCheckout('sessSharer2', intent)
+    expect(repeated.checkout.checkoutPath).toBe(second.checkout.checkoutPath)
+    // The owner reference was added exactly once.
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
+  })
+
+  test('rejects an unknown managedWorktreeId', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessUnknown', wsRoot)
+
+    await expect(
+      sm.prepareCheckout('sessUnknown', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: 'does-not-exist',
+      }),
+    ).rejects.toThrow(/not found/i)
+  })
+
+  test('rejects a worktree owned by a different workspace', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm } = makeManager()
+    const wsRootA = tmp()
+    const wsRootB = tmp()
+    injectSession(sm, 'sessWsA', wsRootA, 'ws_a')
+    injectSession(sm, 'sessWsB', wsRootB, 'ws_b')
+
+    const inA = await sm.prepareCheckout('sessWsA', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    await expect(
+      sm.prepareCheckout('sessWsB', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: inA.checkout.managedWorktreeId,
+      }),
+    ).rejects.toThrow(/does not belong to the session's workspace/i)
+  })
+
+  test('rejects a worktree from an unrelated repository', async () => {
+    const repoA = tmp()
+    const repoB = tmp()
+    await initRepo(repoA)
+    await initRepo(repoB)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessRepoA', wsRoot)
+    injectSession(sm, 'sessRepoB', wsRoot)
+
+    const inA = await sm.prepareCheckout('sessRepoA', {
+      mode: 'managed-worktree',
+      workingDirectory: repoA,
+      baseRef: 'main',
+    })
+    await expect(
+      sm.prepareCheckout('sessRepoB', {
+        mode: 'managed-worktree',
+        workingDirectory: repoB,
+        managedWorktreeId: inA.checkout.managedWorktreeId,
+      }),
+    ).rejects.toThrow(/different repository/i)
+  })
+
+  test('rejects binding to a worktree that is not ready', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner3', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner3', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    services.registry.setState(first.checkout.managedWorktreeId!, 'blocked')
+
+    injectSession(sm, 'sessBlocked', wsRoot)
+    await expect(
+      sm.prepareCheckout('sessBlocked', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId,
+      }),
+    ).rejects.toThrow(/cannot be shared/i)
+  })
+
+  test('rejects binding when the live checkout was deleted after the record became ready', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner5', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner5', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Registry still says `ready`, but the checkout is gone from disk (moved
+    // or deleted outside Kata). Binding must not persist a dead path.
+    rmSync(first.checkout.checkoutPath, { recursive: true, force: true })
+
+    injectSession(sm, 'sessStale', wsRoot)
+    await expect(
+      sm.prepareCheckout('sessStale', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId!,
+      }),
+    ).rejects.toThrow(/no longer exists/i)
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+  })
+
+  test('rejects binding when the live checkout switched branches after the record became ready', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner6', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner6', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Registry still says `ready`, but the checkout is now on another branch.
+    await git(first.checkout.checkoutPath, ['checkout', '-b', 'someone-else'])
+
+    injectSession(sm, 'sessSwitched', wsRoot)
+    await expect(
+      sm.prepareCheckout('sessSwitched', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId!,
+      }),
+    ).rejects.toThrow(/unexpected branch/i)
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+  })
+
+  test('re-checks the empty-session gate after context resolution (concurrent first-message race)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner7', wsRoot)
+
+    const first = await sm.prepareCheckout('sessOwner7', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    const sharer = injectSession(sm, 'sessRace', wsRoot)
+    // Simulate another client sending the session's first message while
+    // repository discovery is still pending: the message lands before the
+    // existing-worktree branch adds ownership and binds the checkout.
+    const originalGetContext = services.repository.getContext.bind(services.repository)
+    let injected = false
+    ;(services.repository as any).getContext = async (dir: string, options?: { strict?: boolean }) => {
+      const result = await originalGetContext(dir, options)
+      if (!injected) {
+        injected = true
+        sharer.messages.push({ id: 'm1', role: 'user', content: 'hi' } as any)
+      }
+      return result
+    }
+
+    try {
+      await expect(
+        sm.prepareCheckout('sessRace', {
+          mode: 'managed-worktree',
+          workingDirectory: repo,
+          managedWorktreeId: first.checkout.managedWorktreeId!,
+        }),
+      ).rejects.toThrow(/empty session/i)
+    } finally {
+      ;(services.repository as any).getContext = originalGetContext
+    }
+    // Ownership was never added and the checkout was never rebound.
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(sharer.checkout).toBeUndefined()
+  })
+
+  test('releases the owner reference when binding the session fails', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessOwner4', wsRoot)
+    const first = await sm.prepareCheckout('sessOwner4', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    injectSession(sm, 'sessBroken', wsRoot)
+    // Force the binding step to fail; the owner reference must be rolled back.
+    const original = (sm as any).bindCheckout
+    ;(sm as any).bindCheckout = () => {
+      throw new Error('persist failed')
+    }
+    try {
+      await expect(
+        sm.prepareCheckout('sessBroken', {
+          mode: 'managed-worktree',
+          workingDirectory: repo,
+          managedWorktreeId: first.checkout.managedWorktreeId,
+        }),
+      ).rejects.toThrow(/persist failed/)
+    } finally {
+      ;(sm as any).bindCheckout = original
+    }
+    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+  })
+})
+
+describe('SessionManager.listManagedWorktrees — discovery for new sessions', () => {
+  test('lists ready worktrees of the same workspace + repository only', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const otherRepo = tmp()
+    await initRepo(otherRepo)
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessA', wsRoot)
+    injectSession(sm, 'sessB', wsRoot)
+    injectSession(sm, 'sessC', wsRoot, 'ws_other')
+    injectSession(sm, 'sessOtherRepo', wsRoot)
+    injectSession(sm, 'sessNew', wsRoot)
+
+    await sm.prepareCheckout('sessA', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Same workspace, different repo — must NOT be offered.
+    await sm.prepareCheckout('sessOtherRepo', {
+      mode: 'managed-worktree',
+      workingDirectory: otherRepo,
+      baseRef: 'main',
+    })
+    // Different workspace, same repo — must NOT be offered.
+    await sm.prepareCheckout('sessC', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+
+    const offered = await sm.listManagedWorktrees('sessNew', repo)
+    expect(offered).toHaveLength(1)
+    expect(offered[0]!.expectedBranch).toMatch(/^kata-agent\/[0-9a-f]{8}$/)
+    expect(offered[0]!.ownerCount).toBe(1)
+  })
+
+  test('excludes the requesting session own worktree and non-ready records', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessA', wsRoot)
+    injectSession(sm, 'sessB', wsRoot)
+
+    const inA = await sm.prepareCheckout('sessA', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    const inB = await sm.prepareCheckout('sessB', {
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+    })
+    // Own worktree is excluded.
+    const forA = await sm.listManagedWorktrees('sessA', repo)
+    expect(forA.map((w) => w.managedWorktreeId)).toEqual([inB.checkout.managedWorktreeId!])
+    // A blocked worktree is not offered.
+    services.registry.setState(inB.checkout.managedWorktreeId!, 'blocked')
+    const forA2 = await sm.listManagedWorktrees('sessA', repo)
+    expect(forA2).toHaveLength(0)
+  })
+
+  test('returns an empty list for a non-Git directory', async () => {
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'sessPlain', wsRoot)
+    const plain = tmp()
+    const offered = await sm.listManagedWorktrees('sessPlain', plain)
+    expect(offered).toEqual([])
   })
 })
 

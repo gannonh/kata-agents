@@ -82,6 +82,58 @@ describe('resolveSendGate', () => {
     expect(decision).toEqual({ action: 'block', reason: 'missing-base-ref' })
   })
 
+  test('prepares by binding when an existing worktree is selected (no base ref needed)', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: 'repo-aabbccdd',
+      worktreeIntent: 'existing',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: {
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        managedWorktreeId: 'repo-aabbccdd',
+      },
+    })
+  })
+
+  test('blocks an Existing intent without a selection even when a base ref is present', () => {
+    // The badge retains the Git-context base ref; without an explicit
+    // New-vs-Existing intent this would fall through to New-worktree
+    // preparation and create a worktree the user never chose.
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      managedWorktreeId: null,
+      worktreeIntent: 'existing',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-existing-selection' })
+  })
+
+  test('blocks send when Existing worktree is selected but none is chosen yet', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: null,
+      worktreeIntent: 'existing',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-existing-selection' })
+  })
+
   test('sends directly once a worktree has already been prepared', () => {
     const decision = resolveSendGate({
       mode: 'managed-worktree',

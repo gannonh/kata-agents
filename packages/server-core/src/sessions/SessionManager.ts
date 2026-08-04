@@ -31,7 +31,7 @@ import {
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@kata-sh/shared/config'
 import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
-import { getDefaultGitServices, type GitServices } from '../git'
+import { getDefaultGitServices, type GitServices, safeRealpath } from '../git'
 import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import { InitGate } from '@kata-sh/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
@@ -5346,9 +5346,34 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Managed worktrees a new session may bind to: ready worktrees owned by the
+   * session's workspace AND repository (resolved server-side from the given
+   * working directory). The session's own worktree (if any) is excluded.
+   * Read-only; binding happens through {@link prepareCheckout} with
+   * `intent.managedWorktreeId`.
+   */
+  async listManagedWorktrees(
+    sessionId: string,
+    workingDirectory: string,
+  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummary[]> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found`)
+    }
+    const git = this.getGitServices()
+    const ctx = await git.repository.getContext(workingDirectory)
+    if (!ctx.isGitRepository || !ctx.gitCommonDir) return []
+    return git.worktrees.listManagedWorktrees(
+      managed.workspace.id,
+      ctx.gitCommonDir,
+      managed.checkout?.managedWorktreeId ?? undefined,
+    )
+  }
+
+  /**
    * Empty-session checkout preparation gate. See ISessionManager.prepareCheckout.
    *
-   * Ordering (managed worktree):
+   * Ordering (new managed worktree):
    * 1. Verify the session is empty (no messages, no SDK session ID, no agent).
    * 2. Resolve repository + base-ref identity from the intent directory.
    * 3. Create a provisional worktree + `kata-agent/<token>` branch.
@@ -5356,6 +5381,11 @@ export class SessionManager implements ISessionManager {
    * 5. Re-verify the empty gate, then bind checkout metadata + workingDirectory
    *    + sdkCwd atomically and persist.
    * If binding fails, the still-clean provisional worktree/branch is removed.
+   *
+   * Binding to an EXISTING worktree (`intent.managedWorktreeId`) skips
+   * creation: the server re-validates workspace + repository identity, adds
+   * this session as a shared owner, and binds checkout metadata to the
+   * worktree's existing identity. The checkout itself is never mutated.
    */
   async prepareCheckout(
     sessionId: string,
@@ -5379,10 +5409,11 @@ export class SessionManager implements ISessionManager {
     }
 
     // Idempotence: a repeated request only succeeds when its full intent
-    // (mode + repository + base ref) matches the persisted ready record; any
-    // different intent is rejected. `ctx.repositoryRoot` is compared against
-    // both the recorded repository root and checkout path so a re-request made
-    // from inside a prepared worktree still resolves as the same intent.
+    // (mode + repository + base ref / worktree id) matches the persisted ready
+    // record; any different intent is rejected. `ctx.repositoryRoot` is
+    // compared against both the recorded repository root and checkout path so
+    // a re-request made from inside a prepared worktree still resolves as the
+    // same intent.
     const existing = managed.checkout
     if (existing) {
       const sameMode = existing.mode === intent.mode
@@ -5392,6 +5423,9 @@ export class SessionManager implements ISessionManager {
       let sameIntent = false
       if (intent.mode === 'current') {
         sameIntent = sameMode && sameRepo
+      } else if (intent.managedWorktreeId) {
+        sameIntent =
+          sameMode && sameRepo && existing.managedWorktreeId === intent.managedWorktreeId
       } else {
         const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
         sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
@@ -5425,7 +5459,73 @@ export class SessionManager implements ISessionManager {
       return { checkout, workingDirectory, sdkCwd: managed.sdkCwd ?? workingDirectory }
     }
 
-    // managed-worktree
+    // Bind to an existing managed worktree (shared ownership). The new session
+    // never mutates the checkout: it only gains an owner reference so cleanup
+    // guards and shared-owner counts stay accurate.
+    if (intent.managedWorktreeId) {
+      const record = git.registry.get(intent.managedWorktreeId)
+      if (!record) {
+        throw new Error('Managed worktree not found.')
+      }
+      if (record.state !== 'ready') {
+        throw new Error(`Managed worktree is ${record.state} and cannot be shared.`)
+      }
+      if (git.worktrees.workspaceIdOf(record) !== managed.workspace.id) {
+        throw new Error('This managed worktree does not belong to the session\'s workspace.')
+      }
+      if (safeRealpath(record.gitCommonDir) !== safeRealpath(ctx.gitCommonDir)) {
+        throw new Error('This managed worktree belongs to a different repository.')
+      }
+
+      // The registry may be stale (`ready` recorded before the checkout was
+      // deleted, moved, switched to another branch, or replaced at the same
+      // path): never persist a new session with a path that fails on its first
+      // prompt. Verify the live checkout is still the recorded repository's
+      // worktree on the expected branch.
+      const revalidated = await git.worktrees.revalidateShareable(record)
+      if (!revalidated.ok) {
+        throw new Error(revalidated.reason)
+      }
+
+      // Re-verify the empty gate after the awaits above: a concurrent send
+      // could have advanced the session while repository context was being
+      // discovered (the new-worktree path applies the same re-check after
+      // creation). Bind only while the checkout is still safe to change.
+      this.assertEmptySessionGate(managed)
+
+      // `addOwner` is idempotent and throws while the record is not ready
+      // (re-checked here under the same registry the list was derived from).
+      git.worktrees.addOwner(record.managedWorktreeId, sessionId)
+
+      const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
+        schemaVersion: 1,
+        mode: 'managed-worktree',
+        repositoryRoot: record.repositoryRoot,
+        checkoutPath: record.checkoutPath,
+        branchAtPreparation: record.expectedBranch,
+        baseRef: record.baseRef,
+        managedWorktreeId: record.managedWorktreeId,
+        expectedBranch: record.expectedBranch,
+      }
+      try {
+        this.bindCheckout(managed, checkout, record.checkoutPath)
+      } catch (bindErr) {
+        // Session update failed — release the owner reference so shared-owner
+        // counts and cleanup guards stay accurate.
+        git.worktrees.removeOwner(record.managedWorktreeId, sessionId)
+        throw bindErr
+      }
+      // Durable persist so restart/resume immediately after preparation returns
+      // to the same managed worktree (AC5).
+      await this.flushSession(sessionId)
+      return {
+        checkout,
+        workingDirectory: record.checkoutPath,
+        sdkCwd: managed.sdkCwd ?? record.checkoutPath,
+      }
+    }
+
+    // managed-worktree (new)
     const baseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
     if (!baseRef) {
       throw new Error('A base ref is required to create a new worktree.')

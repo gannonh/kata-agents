@@ -21,6 +21,12 @@ export interface SendGateState {
   mode: CheckoutMode
   /** Selected base ref for a New worktree, when chosen. */
   baseRef: string | null
+  /** Selected EXISTING managed worktree to bind to, when chosen. */
+  managedWorktreeId?: string | null
+  /** New-vs-Existing intent for a managed-worktree mode. Explicit so an
+   *  Existing intent without a selection can never fall through to New-worktree
+   *  preparation, even when a base ref from the Git context is present. */
+  worktreeIntent?: 'new' | 'existing'
   /** Active working directory used to resolve repository identity. */
   workingDirectory: string | null
   /** True once a managed worktree has been prepared in this composer mount. */
@@ -37,7 +43,7 @@ export type SendGateDecision =
   | { action: 'send' }
   | { action: 'prepare'; intent: CheckoutPrepareIntent }
   | { action: 'wait' }
-  | { action: 'block'; reason: 'missing-base-ref' }
+  | { action: 'block'; reason: 'missing-base-ref' | 'missing-existing-selection' }
 
 /**
  * Decide what must happen when the user hits Send.
@@ -70,6 +76,22 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
     return { action: 'send' }
   }
   // mode === 'managed-worktree' and nothing prepared yet.
+  if (state.managedWorktreeId) {
+    return {
+      action: 'prepare',
+      intent: {
+        mode: 'managed-worktree',
+        workingDirectory: state.workingDirectory,
+        managedWorktreeId: state.managedWorktreeId,
+      },
+    }
+  }
+  // Explicit Existing intent without a selection must block, never fall
+  // through to New-worktree preparation: a base ref retained from the Git
+  // context does not authorize creating a worktree the user did not choose.
+  if (state.worktreeIntent === 'existing') {
+    return { action: 'block', reason: 'missing-existing-selection' }
+  }
   if (!state.baseRef) {
     return { action: 'block', reason: 'missing-base-ref' }
   }

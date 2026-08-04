@@ -1,7 +1,8 @@
 import { describe, test, expect, afterEach } from 'bun:test'
-import { readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices } from '../index'
+import type { ManagedWorktreeRecord } from '@kata-sh/shared/protocol'
 import { RepositoryService } from '../repository-service'
 import { initRepo, makeTmpDir, cleanup, git, writeFile, GIT_ENV } from './test-helpers'
 import { runGit } from '../command-runner'
@@ -244,5 +245,50 @@ describe('shared ownership and removal', () => {
     expect(svc.registry.get(record.managedWorktreeId)).toBeUndefined()
     const branches = await git(repo, ['branch', '--list', record.expectedBranch])
     expect(branches.trim()).toBe('')
+  })
+})
+
+describe('workspaceIdOf legacy fallback', () => {
+  test('derives the workspace id from a backslash-delimited relative path (Windows layout)', () => {
+    const worktreeRoot = tmp()
+    const svc = createGitServices({
+      worktreeRoot,
+      registryPath: join(worktreeRoot, 'registry.json'),
+    })
+    // Legacy records predate `workspaceId`; the id is derived from the first
+    // segment of the checkout path relative to the worktree root. On Windows
+    // `relative()` is backslash-delimited, so both separators must split.
+    const record: ManagedWorktreeRecord = {
+      managedWorktreeId: 'm1',
+      repositoryRoot: join(worktreeRoot, 'repo'),
+      gitCommonDir: join(worktreeRoot, 'repo', '.git'),
+      checkoutPath: join(realpathSync(worktreeRoot), 'ws_123\\repo-key\\token'),
+      baseRef: 'main',
+      expectedBranch: 'kata-agent/aabbccdd',
+      createdAt: 0,
+      ownerSessionIds: [],
+      state: 'ready',
+    }
+    expect(svc.worktrees.workspaceIdOf(record)).toBe('ws_123')
+  })
+
+  test('returns null when the checkout path escapes the worktree root', () => {
+    const worktreeRoot = tmp()
+    const svc = createGitServices({
+      worktreeRoot,
+      registryPath: join(worktreeRoot, 'registry.json'),
+    })
+    const record: ManagedWorktreeRecord = {
+      managedWorktreeId: 'm2',
+      repositoryRoot: '/elsewhere/repo',
+      gitCommonDir: '/elsewhere/repo/.git',
+      checkoutPath: '/elsewhere/ws_9/repo-key/token',
+      baseRef: null,
+      expectedBranch: 'kata-agent/aabbccdd',
+      createdAt: 0,
+      ownerSessionIds: [],
+      state: 'ready',
+    }
+    expect(svc.worktrees.workspaceIdOf(record)).toBeNull()
   })
 })

@@ -331,6 +331,7 @@ export const CHANNEL_MAP = {
   // Git / GitHub V1 — workspace checkout controls (feature-flagged)
   getGitContext: invoke(RPC_CHANNELS.git.GET_CONTEXT),
   listGitRefs: invoke(RPC_CHANNELS.git.LIST_REFS),
+  listManagedWorktrees: invoke(RPC_CHANNELS.git.LIST_MANAGED_WORKTREES),
   prepareGitCheckout: invoke(RPC_CHANNELS.git.PREPARE_CHECKOUT),
   getGitStatus: invoke(RPC_CHANNELS.git.GET_STATUS),
   getGitDiff: invoke(RPC_CHANNELS.git.GET_DIFF),

@@ -4,6 +4,8 @@ The remaining rebrand work is consolidated into one complete brand-transition pl
 
 ## Active
 
+* [2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md](2026-08-03-allow-new-sessions-to-use-existing-managed-worktrees-design.md): New sessions can discover and bind to ready managed worktrees of the same workspace + repository as shared owners, preserving the existing ownership and cleanup safety model. Tracks [#33](https://github.com/gannonh/kata-agents/issues/33). **Status: Implemented.**
+
 * [2026-08-01-provider-aware-reasoning-levels-design.md](2026-08-01-provider-aware-reasoning-levels-design.md): Provider-aware reasoning controls for OpenAI API, ChatGPT/Codex, and other Pi-managed models, including model capability metadata and the `minimal` level. **Status: Implemented.** See the [build report](2026-08-01-provider-aware-reasoning-levels-build-report.md).
 
 * [2026-07-30-agent-quiescence-contract-design.md](2026-07-30-agent-quiescence-contract-design.md): Required backend teardown contract for destructive checkout operations. Tracks [#21](https://github.com/gannonh/kata-agents/issues/21) and replaces processing-flag polling plus the 100 ms grace delay with nested-turn completion and provider child-process exit. **Status: Implemented.**

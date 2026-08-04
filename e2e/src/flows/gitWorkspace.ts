@@ -2,10 +2,12 @@ import type { Page } from "@playwright/test";
 
 export interface PreparedManagedWorktreeSession {
   readonly id: string;
+  readonly sharedOwnerCount?: number;
   readonly checkout: {
     readonly checkoutPath: string;
     readonly expectedBranch: string | null;
     readonly mode: "managed-worktree";
+    readonly managedWorktreeId: string | null;
   };
 }
 
@@ -43,6 +45,18 @@ export async function useRepositoryAsWorkspaceDefault(
 export async function readManagedWorktreeSession(
   page: Page,
 ): Promise<PreparedManagedWorktreeSession | null> {
+  const sessions = await readManagedWorktreeSessions(page);
+  return sessions[0] ?? null;
+}
+
+/**
+ * All persisted sessions bound to a managed-worktree checkout. Used by the
+ * existing-worktree flow to assert that two sessions share ONE worktree
+ * identity (same checkout path + managed worktree ID).
+ */
+export async function readManagedWorktreeSessions(
+  page: Page,
+): Promise<PreparedManagedWorktreeSession[]> {
   return await page.evaluate(async () => {
     const api = (
       window as unknown as {
@@ -50,10 +64,12 @@ export async function readManagedWorktreeSession(
           getSessions(): Promise<
             Array<{
               id: string;
+              sharedOwnerCount?: number;
               checkout?: {
                 checkoutPath: string;
                 expectedBranch: string | null;
                 mode: string;
+                managedWorktreeId: string | null;
               };
             }>
           >;
@@ -61,15 +77,12 @@ export async function readManagedWorktreeSession(
       }
     ).electronAPI;
     const sessions = await api.getSessions();
-    const session = sessions.find(
-      (candidate) => candidate.checkout?.mode === "managed-worktree",
-    );
-    return session
-      ? {
-          id: session.id,
-          checkout:
-            session.checkout as PreparedManagedWorktreeSession["checkout"],
-        }
-      : null;
+    return sessions
+      .filter((candidate) => candidate.checkout?.mode === "managed-worktree")
+      .map((session) => ({
+        id: session.id,
+        sharedOwnerCount: session.sharedOwnerCount,
+        checkout: session.checkout as PreparedManagedWorktreeSession["checkout"],
+      }));
   });
 }

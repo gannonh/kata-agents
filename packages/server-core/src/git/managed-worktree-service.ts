@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
+  ManagedWorktreeSummary,
   SessionCheckoutV1,
   WorktreeRemovalConfirmation,
   WorktreeIncludeResult,
@@ -156,6 +157,54 @@ export class ManagedWorktreeService {
   }
 
   /**
+   * Owning workspace of a registry record. Prefers the persisted field; legacy
+   * records (persisted before `workspaceId` existed) derive it from the
+   * `<worktreeRoot>/<workspace-id>/<repo-key>/<token>` layout.
+   */
+  workspaceIdOf(record: ManagedWorktreeRecord): string | null {
+    if (record.workspaceId) return record.workspaceId
+    const rel = relative(safeRealpath(this.worktreeRoot), safeRealpath(record.checkoutPath))
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
+    // `relative()` uses the platform separator: backslash-delimited paths on
+    // Windows must split the same way or the whole relative path is returned.
+    const firstSegment = rel.split(/[\\/]/)[0]
+    return firstSegment || null
+  }
+
+  /**
+   * Ready managed worktrees a new session in `workspaceId` may bind to: same
+   * workspace AND same repository (by Git common directory) as the caller's
+   * working directory. Worktrees from other workspaces or unrelated
+   * repositories are never offered, and non-ready records (preparing/missing/
+   * blocked/removing) are excluded so a session cannot attach to a checkout
+   * that is not currently usable.
+   */
+  listManagedWorktrees(
+    workspaceId: string,
+    gitCommonDir: string,
+    excludeWorktreeId?: string,
+  ): ManagedWorktreeSummary[] {
+    const repoKey = computeRepoKey(safeRealpath(gitCommonDir))
+    return this.registry
+      .list()
+      .filter(
+        (rec) =>
+          rec.state === 'ready' &&
+          rec.managedWorktreeId !== excludeWorktreeId &&
+          this.workspaceIdOf(rec) === workspaceId &&
+          computeRepoKey(safeRealpath(rec.gitCommonDir)) === repoKey,
+      )
+      .map((rec) => ({
+        managedWorktreeId: rec.managedWorktreeId,
+        checkoutPath: rec.checkoutPath,
+        expectedBranch: rec.expectedBranch,
+        baseRef: rec.baseRef,
+        ownerCount: rec.ownerSessionIds.length,
+        state: rec.state,
+      }))
+  }
+
+  /**
    * Create a managed worktree and its temporary `kata-agent/<token>` branch.
    * Serializes by Git common directory. On failure, cleans up a still-clean
    * provisional worktree/branch; if cleanup fails the registry record is left
@@ -184,6 +233,7 @@ export class ManagedWorktreeService {
         const managedWorktreeId = `${repoKey}-${token}`
         const provisional: ManagedWorktreeRecord = {
           managedWorktreeId,
+          workspaceId,
           repositoryRoot: resolvePath(repositoryRoot),
           gitCommonDir: realCommonDir,
           checkoutPath: resolvePath(worktreePath),
@@ -793,6 +843,45 @@ export class ManagedWorktreeService {
     return { ok: true }
   }
 
+  /**
+   * Revalidate a managed-worktree record before a NEW session binds to it.
+   * Registry state is cached: a record last marked `ready` may have had its
+   * checkout deleted, moved, switched to another branch, or replaced at the
+   * same path since. Verify the live checkout is still a Git worktree of the
+   * recorded common directory and still on the expected branch, so a new
+   * session is never persisted with a stale path that fails on its first
+   * prompt or points at a checkout other than the selected one.
+   */
+  async revalidateShareable(
+    rec: ManagedWorktreeRecord,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!existsSync(rec.checkoutPath)) {
+      return { ok: false, reason: 'Managed worktree checkout no longer exists on disk.' }
+    }
+    let ctx
+    try {
+      ctx = await this.repositoryService.getContext(rec.checkoutPath)
+    } catch {
+      return { ok: false, reason: 'Unable to verify the managed worktree identity before sharing.' }
+    }
+    if (!ctx.isGitRepository || !ctx.gitCommonDir) {
+      return { ok: false, reason: 'Checkout path is not a Git worktree; refusing to share it.' }
+    }
+    if (safeRealpath(ctx.gitCommonDir) !== safeRealpath(rec.gitCommonDir)) {
+      return {
+        ok: false,
+        reason: 'Managed worktree Git common directory does not match the recorded repository.',
+      }
+    }
+    if (ctx.currentBranch !== rec.expectedBranch) {
+      return {
+        ok: false,
+        reason: `Managed worktree is on an unexpected branch (${ctx.currentBranch ?? 'detached'} != ${rec.expectedBranch}); refusing to share it.`,
+      }
+    }
+    return { ok: true }
+  }
+
   private async cleanupProvisional(
     repositoryRoot: string,
     worktreePath: string,
@@ -855,7 +944,7 @@ export class ManagedWorktreeService {
   }
 }
 
-function safeRealpath(p: string): string {
+export function safeRealpath(p: string): string {
   try {
     return realpathSync(p)
   } catch {

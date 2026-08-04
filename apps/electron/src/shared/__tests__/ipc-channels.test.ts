@@ -105,6 +105,7 @@ const EXPECTED_CHANNELS: string[] = [
   'git:getStatus',
   'git:githubStatus',
   'git:inspectWorktreeRemoval',
+  'git:listManagedWorktrees',
   'git:listRefs',
   'git:prepareCheckout',
   'git:pull',

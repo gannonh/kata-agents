@@ -218,6 +218,7 @@ import type {
   ListRefsResult,
   CheckoutPrepareIntent,
   CheckoutPrepareResult,
+  ManagedWorktreeSummary,
   GitStatusSnapshot,
   GitFileDiff,
   GitStatusChangedEvent,
@@ -617,6 +618,8 @@ export interface ElectronAPI {
   // Git / GitHub V1 — workspace checkout controls (feature-flagged)
   getGitContext(dirPath: string): Promise<RepositoryContext>
   listGitRefs(dirPath: string): Promise<ListRefsResult>
+  /** Ready managed worktrees in the session's workspace + repository (read-only). */
+  listManagedWorktrees(sessionId: string, workingDirectory: string): Promise<ManagedWorktreeSummary[]>
   prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
   getGitStatus(dirPath: string): Promise<GitStatusSnapshot>
   /** Bounded diff for a repository-relative path; identity resolved server-side by session ID. */
