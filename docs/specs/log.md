@@ -2,7 +2,7 @@
 
 ## 2026-08-04
 
-* **Root Bun test sweep stabilized (#25)**: corrected BrowserPaneManager test contracts and cleanup containment, covered Git and RTK RPC registrations, isolated WebUI password hashes, restored test-level global fetch state, and excluded Playwright `.spec.ts` files from Bun discovery. The root `bun test` sweep passes with 5,223 tests and 12 skips.
+* **Root Bun test sweep stabilized (#25)**: corrected BrowserPaneManager test contracts and cleanup containment, covered Git and RTK RPC registrations, isolated WebUI password hashes, repaired global fetch and isolated-suite fixtures, and excluded Playwright `.spec.ts` files from Bun discovery. `bun run test` now passes; the root sweep covers 5,223 passing tests and 12 skips.
 
 * **Status and backlog normalization**: normalized all 13 open spec issues with `Draft`/`Implemented` status sections, exact acceptance headings, Build handoffs, and cleared needs flags; marked #21 and #22 `Verified` with acceptance evidence; marked #33 `Implemented` and ready for Verify; retained #4 and #7–#12 open as deferred work with explicit triage decisions.
 
