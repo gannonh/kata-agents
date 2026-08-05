@@ -501,7 +501,7 @@ export class WorktreeSnapshotService {
    * release; a changed fingerprint means an external writer raced and removal
    * must not proceed.
    */
-  async recomputeFingerprint(record: ManagedWorktreeRecordV2): Promise<string> {
+  async recomputeFingerprint(record: ManagedWorktreeRecordV2, policyVersion?: number): Promise<string> {
     return computeWorktreeFingerprint({
       managedWorktreeId: record.managedWorktreeId,
       checkoutPath: record.checkoutPath,
@@ -509,7 +509,7 @@ export class WorktreeSnapshotService {
       expectedBranch: record.expectedBranch,
       baseRef: record.baseRef,
       ownerSessionIds: record.ownerSessionIds,
-      policyVersion: record.policyVersion ?? 0,
+      policyVersion: policyVersion ?? record.policyVersion ?? 0,
       archivedOwnerSessionIds: record.archivedOwnerSessionIds ?? [],
     })
   }

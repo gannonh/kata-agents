@@ -418,6 +418,7 @@ export class ManagedWorktreeService {
               materializationRoot,
               createdAt,
               lastUsedAt: createdAt,
+              policyVersion: rootSnapshot.version,
               ownerSessionIds: [sessionId],
               state: 'preparing',
             }

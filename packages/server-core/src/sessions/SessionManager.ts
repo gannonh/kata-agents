@@ -5362,16 +5362,20 @@ export class SessionManager implements ISessionManager {
         for (const sessionId of sessionIds) {
           const managed = this.sessions.get(sessionId)
           if (!managed) continue
-          // Persist the recovery state on the session's checkout so the UI can
-          // render recovery status even before the next inventory fetch.
+          // Persist the recovery state (and the restored checkout path) on the
+          // session's checkout so the UI and runtime use the live path even
+          // before the next inventory fetch.
           const checkout = managed.checkout
           if (checkout?.mode !== 'managed-worktree') continue
           const recoveryState =
             record.state === 'ready' ? undefined : (record.state as import('@kata-sh/shared/protocol').WorktreeRecoveryState)
           managed.checkout = {
             ...checkout,
+            checkoutPath: record.checkoutPath ?? checkout.checkoutPath,
             recoveryState,
           }
+          managed.workingDirectory = record.checkoutPath ?? managed.workingDirectory
+          managed.sdkCwd = record.checkoutPath ?? managed.sdkCwd
           await this.flushSession(sessionId)
         }
       },

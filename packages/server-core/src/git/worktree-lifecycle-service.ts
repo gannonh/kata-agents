@@ -114,7 +114,7 @@ export interface WorktreeLifecycleDeps {
   /** Persist owner-session recovery state before the journal commit marker. */
   applyOwnerSessionState?: (
     sessionIds: string[],
-    record: { managedWorktreeId: string; state: ManagedWorktreeState },
+    record: { managedWorktreeId: string; state: ManagedWorktreeState; checkoutPath?: string },
   ) => Promise<void> | void
   /** Persist a lastUsedAt touch for a session's checkout (accepted message). */
   touchSessionCheckout?: (sessionId: string) => Promise<void> | void
@@ -548,7 +548,14 @@ export class WorktreeLifecycleService {
         await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
           managedWorktreeId: record.managedWorktreeId,
           state: 'ready',
+          checkoutPath: restored.checkoutPath,
         })
+        // Re-lease every owner to the restored path so lifecycle decisions see
+        // the full fence set at the live checkout.
+        for (const owner of record.ownerSessionIds) {
+          this.deps.leases.releaseSession(owner)
+          this.deps.leases.lease(owner, restored.checkoutPath)
+        }
         this.deps.journal.commit(journalEntry.journalId, 'registry-sessions-committed')
 
         // Only after the commit: remove the payload and CAS-delete the ref.
@@ -1000,7 +1007,7 @@ export class WorktreeLifecycleService {
 
       // Revalidate the fingerprint immediately before capture.
       if (options.expectedFingerprint) {
-        const fresh = await this.deps.snapshots.recomputeFingerprint(record)
+        const fresh = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         if (fresh !== options.expectedFingerprint) {
           return fail('LIFECYCLE_PREVIEW_STALE', 'The worktree changed after the confirmation; inspect it again.')
         }
@@ -1033,7 +1040,7 @@ export class WorktreeLifecycleService {
         }
       }
       if (!meta) {
-        const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record)
+        const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         const captured = await this.deps.snapshots.capture({
           record: { ...record, state: 'snapshotting' },
           finalFingerprint,
@@ -1060,7 +1067,7 @@ export class WorktreeLifecycleService {
 
       // Final post-quiescence fingerprint immediately before source release.
       if (options.expectedFingerprint) {
-        const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record)
+        const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         if (finalFingerprint !== options.expectedFingerprint) {
           throw new WorktreeLifecycleError('LIFECYCLE_PREVIEW_STALE', 'The worktree changed during capture; nothing was removed.')
         }
