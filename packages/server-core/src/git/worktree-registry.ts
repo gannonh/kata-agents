@@ -1282,6 +1282,16 @@ export class WorktreeRegistry {
     })
   }
 
+  /** Server-authored activity update (creation, restore, attach, unarchive, message). */
+  updateLastUsedAt(id: string, at: number): void {
+    this.mutate((records) => {
+      const rec = records.get(id)
+      if (!rec || rec.lastUsedAt === at) return false
+      rec.lastUsedAt = at
+      return true
+    })
+  }
+
   remove(id: string): void {
     this.mutate((records) => records.delete(id))
   }
@@ -1394,5 +1404,4 @@ export function removeDir(path: string): boolean {
     return false
   }
 }
-
 export { join as joinPath }

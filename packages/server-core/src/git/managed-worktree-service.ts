@@ -910,35 +910,12 @@ export class ManagedWorktreeService {
         }
       }
 
-      // Remove the worktree registration + directory.
-      try {
-        await runGit(['worktree', 'remove', '--force', rec.checkoutPath], {
-          cwd: rec.repositoryRoot,
-          okExitCodes: [128],
-        })
-      } catch {
-        /* fall through to manual cleanup */
-      }
-      removeDir(rec.checkoutPath)
-      try {
-        await runGit(['worktree', 'prune'], { cwd: rec.repositoryRoot, okExitCodes: [128] })
-      } catch {
-        /* ignore */
-      }
-
-      // Removal is only complete when the checkout is actually gone. Both the
-      // git command and the manual fallback can fail — a locked worktree, a
-      // permission problem, a process holding the directory — and neither
-      // surfaces as a throw here.
-      //
-      // Dropping the registry record in that case would be the worst outcome
-      // available: reconciliation reclaims leaked checkouts *from registry
-      // records*, so a directory with no record is invisible to every recovery
-      // path and leaks permanently. Keep the record, mark it for attention, and
-      // report the failure honestly instead of claiming a removal that did not
-      // happen. The temporary branch is left alone too — it is still checked out
-      // in the surviving worktree.
-      if (existsSync(rec.checkoutPath)) {
+      // Remove the worktree registration + directory. V2 lifecycle callers use
+      // the exported low-level `removeCheckoutFiles` (which always preserves
+      // the branch); this V1 path prunes the branch afterwards when it has no
+      // unique work.
+      const released = await removeCheckoutFiles(rec.repositoryRoot, rec.checkoutPath)
+      if (!released) {
         this.registry.setState(managedWorktreeId, 'blocked')
         return {
           removed: false,
@@ -1473,4 +1450,33 @@ export function safeRealpath(p: string): string {
   } catch {
     return resolvePath(p)
   }
+}
+
+/**
+ * Low-level checkout release used by V1 removal and every V2 lifecycle
+ * transaction. Removes the Git worktree registration and directory, then
+ * prunes stale registrations. The branch is always preserved. Returns true
+ * only when the checkout is provably gone.
+ */
+export async function removeCheckoutFiles(repositoryRoot: string, checkoutPath: string): Promise<boolean> {
+  try {
+    await runGit(['worktree', 'remove', '--force', checkoutPath], {
+      cwd: repositoryRoot,
+      okExitCodes: [128],
+    })
+  } catch {
+    /* fall through to manual cleanup */
+  }
+  removeDir(checkoutPath)
+  try {
+    await runGit(['worktree', 'prune'], { cwd: repositoryRoot, okExitCodes: [128] })
+  } catch {
+    /* ignore */
+  }
+  // Removal is only complete when the checkout is actually gone. Both the git
+  // command and the manual fallback can fail — a locked worktree, a permission
+  // problem, a process holding the directory — and neither surfaces as a
+  // throw. Callers keep the registry record and report honestly instead of
+  // claiming a removal that did not happen.
+  return !existsSync(checkoutPath)
 }
