@@ -1,5 +1,9 @@
 # ADR Update Log
 
+## 2026-08-04
+
+* **ADR extended for Worktree V2 Phase 1**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) records exact named branch identity, default-false capability gating, server-owned canonical roots, fixed-registry authority, immutable creation snapshots, and compare-and-swap compensation.
+
 ## 2026-07-31
 
 * **ADR implemented quiescence guarantee**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) now records the required `quiesceForTeardown(reason)` contract, Claude query completion boundary, strict Pi child exit, SessionManager's bounded await, and the plain-deletion fallback when teardown cannot be confirmed.

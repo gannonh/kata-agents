@@ -2,6 +2,8 @@
 
 ## 2026-08-04
 
+* **Worktree V2 Phase 1 implemented**: [#40](https://github.com/gannonh/kata-agents/issues/40) now covers named managed-worktree identity, server-owned configurable roots, fixed-registry authority, capability-aware Electron controls, and local/headless parity. Updated the roadmap, architecture overview, online Git/worktree documentation, ADR, release notes, and OKF logs; the issue's Verify matrix records the Electron build prerequisite that still blocks the local GUI run.
+
 * **Worktree V2 plan approved**: approved epic [#17](https://github.com/gannonh/kata-agents/issues/17) with phased sub-specs [#40](https://github.com/gannonh/kata-agents/issues/40) through [#43](https://github.com/gannonh/kata-agents/issues/43). Updated the roadmap to show the initiative as approved and awaiting Build; no Build work started.
 
 * **Root Bun test sweep stabilized (#25)**: corrected BrowserPaneManager test contracts and cleanup containment, covered Git and RTK RPC registrations, isolated WebUI password hashes, repaired global fetch and isolated-suite fixtures, and excluded Playwright `.spec.ts` files from Bun discovery. `bun run test` now passes; the root sweep covers 5,223 passing tests and 12 skips.

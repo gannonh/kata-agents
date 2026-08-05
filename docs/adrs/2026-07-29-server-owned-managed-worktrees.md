@@ -55,6 +55,45 @@ The **workspace-owning server owns all managed-worktree lifecycle and Git behavi
   Read-only repository/ref discovery is always available; mutation handlers reject while the flag
   is off.
 
+### Worktree V2 identity and roots
+
+Phase 1 extends the server-owned V1 domain without changing V1 behavior:
+
+- `KATA_FEATURE_WORKTREE_V2` is default-false and effective only when
+  `KATA_FEATURE_GIT_WORKSPACE_V1` is enabled. Capabilities advertise the effective
+  combination, and clients send the versioned V2 name intent only when the selected
+  owning server supports it. Disabled or incapable V2 requests fail with a typed
+  capability error rather than being interpreted as V1.
+- A V2 name is an exact branch suffix. The server validates `kata-agent/<name>`
+  under the common-directory mutation lock, keeps nested valid suffixes, and
+  rejects empty, padded, Git-invalid, occupied, exact-colliding, and
+  case-colliding names without sanitizing or changing the requested identity.
+  The checkout leaf is derived from a safe display fragment plus a cryptographically
+  random internal ID; the client never supplies the path.
+- The materialization root is a per-server setting. The default remains
+  `<CONFIG_DIR>/worktrees`; a saved root is expanded, canonicalized, writability-
+  checked, and rejected when it overlaps protected server storage, a registered
+  repository, or a managed checkout. An immutable versioned snapshot is captured
+  and revalidated for each creation, so a root update affects only new checkouts.
+  Existing records retain their recorded canonical `materializationRoot`.
+- The registry remains authoritative at the fixed
+  `<CONFIG_DIR>/worktrees/registry.json` path, independent of the configurable
+  materialization root. Its versioned in-place upgrade is atomic and fail-closed
+  under the cross-process lock; unreadable, unsupported, or conflicting data is
+  preserved and blocks V2 mutation rather than being replaced with an empty file.
+  V1 records retain their IDs, paths, branches, base refs, owners, and state while
+  deriving a display name from the existing branch suffix.
+- Creation compensation records whether the request created the branch and its
+  original OID. Cleanup can delete that branch only after compare-and-swap proof
+  that the ref is still unchanged and request-owned; pre-existing or externally
+  changed refs remain intact.
+
+The Settings page selects a local or connected capable server and labels the
+selected server's root. A directory picker is local-only; remote roots are never
+sent to or resolved by the Electron filesystem. This preserves the same typed
+settings, preparation, session metadata, and Git-action contracts for embedded
+and headless clients.
+
 ### Deletion and removal are one ordered server operation
 
 Session deletion and managed-worktree removal are **two irreversible steps that the client may not
