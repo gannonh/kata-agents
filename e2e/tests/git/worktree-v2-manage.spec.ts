@@ -108,6 +108,14 @@ test.describe(`Worktree V2 management ${E2E_TAGS.worktreeV2}`, () => {
       // Inventory exposes a compact row with the worktree name, branch, and one
       // destructive action.
       await openWorktreesSettings(page);
+      await expect(page.getByTestId("worktrees-root-input")).toContainText("Worktree root");
+      await expect(page.getByTestId("worktrees-root-input")).toContainText(
+        "Directory where Kata Agents creates managed worktrees",
+      );
+      await expect(page.getByTestId("worktrees-retention-limit")).toContainText("Auto-delete limit");
+      await expect(page.getByTestId("worktrees-retention-limit")).toContainText(
+        "Number of managed worktrees to keep before older ones are pruned automatically.",
+      );
       const row = page.getByTestId(`worktree-row-${worktreeId}`);
       await expect(row).toBeVisible();
       await expect(row).toContainText("manage-me");
