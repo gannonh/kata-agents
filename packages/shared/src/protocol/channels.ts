@@ -352,6 +352,15 @@ export const RPC_CHANNELS = {
     // Managed-worktree risk inspection and removal (Phase 1 inspection; Phase 4 removal UI)
     INSPECT_WORKTREE_REMOVAL: 'git:inspectWorktreeRemoval',
     REMOVE_WORKTREE: 'git:removeWorktree',
+    // Phase 2: snapshot-backed management and automatic cleanup
+    WORKTREE_INVENTORY: 'git:worktreeInventory',
+    WORKTREE_PREVIEW: 'git:worktreePreview',
+    WORKTREE_DELETE: 'git:worktreeDelete',
+    WORKTREE_RESTORE: 'git:worktreeRestore',
+    WORKTREE_RETRY: 'git:worktreeRetry',
+    WORKTREE_PERMANENT_DELETE: 'git:worktreePermanentDelete',
+    WORKTREE_ARCHIVE: 'git:worktreeArchive',
+    WORKTREE_UNARCHIVE: 'git:worktreeUnarchive',
     // Checkout status and bounded diff retrieval (Phase 2)
     GET_STATUS: 'git:getStatus',
     GET_DIFF: 'git:getDiff',

@@ -129,11 +129,15 @@ describe('Git Worktree V2 protocol contracts', () => {
       version: 3,
       materializationRoot: '/srv/kata/worktrees',
       capturedAt: 123,
+      autoDeleteEnabled: true,
+      retentionLimit: 15,
     }
 
     expect(snapshot.serverId).toBe('server-a')
     expect(snapshot.version).toBe(3)
     expect(snapshot.materializationRoot).toBe('/srv/kata/worktrees')
+    expect(snapshot.autoDeleteEnabled).toBe(true)
+    expect(snapshot.retentionLimit).toBe(15)
   })
 
   it('exposes a typed server capability and typed V2-unavailable error', () => {

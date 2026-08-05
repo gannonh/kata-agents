@@ -200,6 +200,13 @@ export type ManagedWorktreeState =
   | 'missing'
   | 'removing'
   | 'blocked'
+  // Phase 2 (snapshot-backed management) lifecycle states.
+  | 'snapshotting'
+  | 'snapshotted'
+  | 'restoring'
+  | 'cleanup-failed'
+  | 'restore-failed'
+  | 'unowned'
 
 export interface ManagedWorktreeRecord {
   /** Legacy records may omit the discriminator; V2 records require 2. */
@@ -232,6 +239,18 @@ export interface ManagedWorktreeRecordV2
   expectedBranch: string
   materializationRoot: string
   lastUsedAt: number
+  /** Phase 2: snapshot metadata, present while the record is snapshot-backed. */
+  snapshot?: ManagedWorktreeSnapshotMeta
+  /** Phase 2: settings policy version at the last policy-sensitive decision. */
+  policyVersion?: number
+  /** Phase 2: owners that archived their session for this worktree. */
+  archivedOwnerSessionIds?: string[]
+  /** Phase 2: last retention sweep outcome that touched this server. */
+  lastCleanupResult?: WorktreeCleanupResult
+  /** Phase 2: sanitized failure text for the current non-ready state. */
+  lastError?: string
+  /** Phase 2: timestamp of the last state transition. */
+  stateChangedAt?: number
 }
 
 /** A registry record from either the V1 or V2 wire schema. */
@@ -357,6 +376,194 @@ export interface WorktreeIncludeResult {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2: snapshot-backed management and automatic cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Versioned server-local snapshot payload metadata. The payload itself lives
+ * under server-owned snapshot storage, is readable only by the server OS
+ * account, and its bytes never cross into a renderer.
+ */
+export interface ManagedWorktreeSnapshotMeta {
+  /** Opaque snapshot identity, also the hidden-ref leaf and payload dir name. */
+  snapshotId: string
+  /** Payload manifest schema version. */
+  schemaVersion: number
+  /** Hidden ref that pins the captured HEAD, e.g. refs/kata/worktree-snapshots/<id>. */
+  hiddenRef: string
+  /** Exact OID captured as HEAD. */
+  headOid: string
+  /** Branch captured (always retained after removal). */
+  branch: string
+  /** SHA-256 of the published manifest (payload verification anchor). */
+  manifestHash: string
+  /** Absolute server-local payload directory. */
+  payloadPath: string
+  /** Server timestamp of the verified publication. */
+  createdAt: number
+  /** Payload file count (patches, files, metadata). */
+  fileCount: number
+  /** Payload total bytes. */
+  totalBytes: number
+  /** Final post-quiescence fingerprint captured immediately before release. */
+  fingerprint: string
+  /** Settings policy version in effect at capture time. */
+  policyVersion: number
+  /** Server-issued preview fingerprint the removal was confirmed against. */
+  previewFingerprint: string
+}
+
+/** Outcome of one retention/archive sweep, persisted server-side. */
+export interface WorktreeCleanupResult {
+  at: number
+  outcome: 'succeeded' | 'blocked' | 'failed' | 'skipped'
+  /** Policy version the sweep ran under. */
+  policyVersion: number
+  /** Candidate removed by this sweep, when one was removed. */
+  removedWorktreeId?: string
+  /** Why no eligible candidate could satisfy the limit. */
+  reason?: string
+}
+
+/** Owner protection state shown per inventory row. */
+export interface WorktreeInventoryOwner {
+  sessionId: string
+  /** Owner archived their session for this worktree. */
+  archived: boolean
+  /** An agent turn is running for this session. */
+  active: boolean
+  /** Owner flagged for attention (blocks lifecycle decisions). */
+  flagged: boolean
+}
+
+/**
+ * Renderer-safe inventory row. Never carries snapshot payload bytes or paths
+ * into renderers beyond the server-owned checkout path.
+ */
+export interface WorktreeInventoryRow {
+  managedWorktreeId: string
+  workspaceId: string
+  displayName: string
+  expectedBranch: string
+  repositoryRoot: string
+  gitCommonDir: string
+  checkoutPath: string
+  materializationRoot: string
+  state: ManagedWorktreeState
+  createdAt: number
+  lastUsedAt: number
+  owners: WorktreeInventoryOwner[]
+  snapshot?: Pick<
+    ManagedWorktreeSnapshotMeta,
+    'snapshotId' | 'createdAt' | 'headOid' | 'branch' | 'manifestHash' | 'fileCount' | 'totalBytes'
+  >
+  lastCleanupResult?: WorktreeCleanupResult
+  /** Sanitized failure text for the current non-ready state. */
+  lastError?: string
+  stateChangedAt?: number
+}
+
+/** Per-server worktree inventory (aggregates every workspace/repo/root). */
+export interface WorktreeInventory {
+  serverId: string
+  policy: {
+    autoDeleteEnabled: boolean
+    retentionLimit: number
+    policyVersion: number
+  }
+  lastCleanupResult?: WorktreeCleanupResult
+  counts: {
+    total: number
+    materialized: number
+    missing: number
+    cleanupFailed: number
+    snapshotted: number
+    restoreFailed: number
+    unowned: number
+  }
+  rows: WorktreeInventoryRow[]
+}
+
+/** Fresh risk preview for one worktree, named by an opaque server-issued ID. */
+export interface WorktreePreviewResult {
+  managedWorktreeId: string
+  exists: boolean
+  state: ManagedWorktreeState
+  owners: WorktreeInventoryOwner[]
+  uncommittedFileCount: number
+  unpushedCommitCount: number
+  branchHasUniqueWork: boolean
+  /** Fresh server-issued fingerprint binding owner/path/Git/content/policy. */
+  previewFingerprint: string
+  /** A verified snapshot already exists; removal can proceed snapshot-first. */
+  hasSnapshot: boolean
+  /** Ignored-file exclusion policy shown beside destructive actions. */
+  ignoredPolicy: {
+    includeOnly: true
+    includeFileCount: number
+  }
+  blocked: boolean
+  blockedReason?: string
+}
+
+export interface WorktreeDeleteInput {
+  managedWorktreeId: string
+  previewFingerprint: string
+}
+
+export interface WorktreeDeleteResult {
+  deleted: boolean
+  state: ManagedWorktreeState
+  snapshotId?: string
+  error?: string
+}
+
+export interface WorktreeRestoreInput {
+  managedWorktreeId: string
+}
+
+export interface WorktreeRestoreResult {
+  restored: boolean
+  state: ManagedWorktreeState
+  checkoutPath?: string
+  error?: string
+}
+
+export interface WorktreeRetryInput {
+  managedWorktreeId: string
+}
+
+export interface WorktreeRetryResult {
+  retried: boolean
+  state: ManagedWorktreeState
+  error?: string
+}
+
+export interface WorktreePermanentDeleteInput {
+  managedWorktreeId: string
+  /** Second irreversibility confirmation (required; owner-bound refs refuse). */
+  confirmIrreversible: boolean
+}
+
+export interface WorktreePermanentDeleteResult {
+  deleted: boolean
+  error?: string
+}
+
+export interface WorktreeArchiveInput {
+  managedWorktreeId: string
+  sessionId: string
+  archived: boolean
+}
+
+export interface WorktreeArchiveResult {
+  archived: boolean
+  state: ManagedWorktreeState
+  /** True when this archive edge enqueued an archive cleanup sweep. */
+  cleanupEnqueued: boolean
+}
+
+// ---------------------------------------------------------------------------
 // V2 server capability and settings contracts
 // ---------------------------------------------------------------------------
 
@@ -380,11 +587,19 @@ export interface WorktreeSettingsSnapshot {
   materializationRoot: string
   /** Server timestamp at which this snapshot was captured. */
   capturedAt: number
+  /** Automatic archive/retention cleanup enabled (default true). */
+  autoDeleteEnabled: boolean
+  /** Materialized-worktree retention limit, 1..1000 (default 15). */
+  retentionLimit: number
 }
 
-/** User-authored change to the selected server's root policy. */
+/** User-authored change to the selected server's root/policy. */
 export interface WorktreeSettingsUpdateInput {
   materializationRoot: string
+  /** When provided, enable/disable automatic archive/retention cleanup. */
+  autoDeleteEnabled?: boolean
+  /** When provided, set the materialized-worktree retention limit (1..1000). */
+  retentionLimit?: number
 }
 
 /** Fixed registry file schemas; the path remains server-owned and stable. */
