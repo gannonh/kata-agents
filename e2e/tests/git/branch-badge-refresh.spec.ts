@@ -9,14 +9,18 @@ import { startNewSession } from "../../src/flows/agentChat.ts";
 import { useRepositoryAsWorkspaceDefault } from "../../src/flows/gitWorkspace.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 
-// Scope the feature flag to this spec file instead of mutating the
+// Scope the feature flags to this spec file instead of mutating the
 // worker-global environment at import time, so it cannot leak into specs that
 // load later in the same worker. Preserve and restore any previous value.
+// V2 stays pinned off: this flow covers the V1 managed-worktree experience.
 const WORKSPACE_FLAG = "KATA_FEATURE_GIT_WORKSPACE_V1";
+const V2_FLAG = "KATA_FEATURE_WORKTREE_V2";
 const previousWorkspaceFlag = process.env[WORKSPACE_FLAG];
+const previousV2Flag = process.env[V2_FLAG];
 
 test.beforeAll(() => {
   process.env[WORKSPACE_FLAG] = "1";
+  process.env[V2_FLAG] = "0";
 });
 
 test.afterAll(() => {
@@ -24,6 +28,11 @@ test.afterAll(() => {
     delete process.env[WORKSPACE_FLAG];
   } else {
     process.env[WORKSPACE_FLAG] = previousWorkspaceFlag;
+  }
+  if (previousV2Flag === undefined) {
+    delete process.env[V2_FLAG];
+  } else {
+    process.env[V2_FLAG] = previousV2Flag;
   }
 });
 
@@ -59,6 +68,12 @@ test.describe(`Git branch badge refresh ${E2E_TAGS.git}`, () => {
       const badge = page.getByTestId("git-workspace-control").locator("button");
       await expect(badge).toHaveAttribute("aria-label", "feature/badge-refresh");
 
+      // The app auto-deletes empty sessions when navigation leaves them.
+      // Keep a draft in the first session's composer so it survives the
+      // navigate-away below and both sessions coexist for the assertion.
+      await page.locator('[data-tutorial="chat-input"]').click();
+      await page.keyboard.insertText("draft for badge-refresh");
+
       // Change Git outside the app while the first session remains selected.
       await git(repositoryPath, "switch", "main");
       await startNewSession(page);
@@ -79,7 +94,12 @@ test.describe(`Git branch badge refresh ${E2E_TAGS.git}`, () => {
             };
           }
         ).electronAPI;
-        const sessions = await api.getSessions();
+        // Creation + metadata refresh are async; wait for the second session.
+        let sessions = await api.getSessions();
+        for (let i = 0; i < 100 && sessions.length < 2; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          sessions = await api.getSessions();
+        }
         return sessions
           .filter((session) => session.workingDirectory === workingDirectory)
           .map((session) => ({

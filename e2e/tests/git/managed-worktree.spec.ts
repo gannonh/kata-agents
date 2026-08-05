@@ -21,7 +21,10 @@ import {
 } from "../../src/flows/gitWorkspace.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 
+// V1 managed-worktree flow: keep V2 pinned off even when the local repo .env
+// or a previous spec in the worker enables it.
 process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = "1";
+process.env.KATA_FEATURE_WORKTREE_V2 = "0";
 
 const execFileAsync = promisify(execFile);
 
