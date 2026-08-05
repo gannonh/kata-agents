@@ -1,6 +1,6 @@
 import { access, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 
 import { E2E_TAGS } from "../../src/config/tags.ts";
@@ -118,6 +118,10 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       expect(first.checkout.expectedBranch).toBe("kata-agent/auth-refresh");
       expect(first.checkout.materializationRoot).toBeDefined();
       await access(first.checkout.checkoutPath);
+      // The live checkout must be on the exact named branch, not just persisted metadata.
+      expect(await git(first.checkout.checkoutPath, "branch", "--show-current")).toBe(
+        "kata-agent/auth-refresh",
+      );
 
       await page.evaluate(() => {
         window.dispatchEvent(
@@ -148,8 +152,16 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       if (!second) throw new Error("Worktree V2 E2E: custom-root session was not persisted.");
       expect(second.checkout.expectedBranch).toBe("kata-agent/custom-root");
       expect(second.checkout.materializationRoot).toBe(canonicalRoot);
-      expect(second.checkout.checkoutPath.startsWith(canonicalRoot)).toBe(true);
+      // Path-aware containment: the checkout must be a direct descendant of the
+      // configured root, never a sibling or an escaped path.
+      const rootRelative = relative(canonicalRoot, second.checkout.checkoutPath);
+      expect(rootRelative).not.toBe("");
+      expect(isAbsolute(rootRelative)).toBe(false);
+      expect(rootRelative.startsWith(`..${sep}`) || rootRelative === "..").toBe(false);
       await access(second.checkout.checkoutPath);
+      expect(await git(second.checkout.checkoutPath, "branch", "--show-current")).toBe(
+        "kata-agent/custom-root",
+      );
 
       const restarted = await restartElectron(launchedApp.electronApp, runContext);
       restartedApp = restarted.app;
@@ -173,6 +185,14 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
           }),
         ]),
       );
+
+      // After restart both live checkouts must still sit on their exact branches.
+      for (const session of recovered) {
+        await access(session.checkout.checkoutPath);
+        expect(await git(session.checkout.checkoutPath, "branch", "--show-current")).toBe(
+          session.checkout.expectedBranch,
+        );
+      }
 
       const statusPaths = await page.evaluate(async (paths) => {
         const api = (window as unknown as {
