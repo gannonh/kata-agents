@@ -75,7 +75,19 @@ interface StoredWorktreeSettings {
   schemaVersion: 1
   version: number
   materializationRoot: string
+  /** Automatic archive/retention cleanup (default true). */
+  autoDeleteEnabled?: boolean
+  /** Materialized-worktree retention limit (default 15, accepted 1..1000). */
+  retentionLimit?: number
 }
+
+/** Default automatic archive/retention cleanup state. */
+export const DEFAULT_AUTO_DELETE_ENABLED = true
+/** Default materialized-worktree retention limit. */
+export const DEFAULT_RETENTION_LIMIT = 15
+/** Accepted retention limit bounds (inclusive). */
+export const RETENTION_LIMIT_MIN = 1
+export const RETENTION_LIMIT_MAX = 1000
 
 function pathContains(parent: string, child: string): boolean {
   const rel = relative(parent, child)
@@ -214,6 +226,8 @@ export class WorktreeSettingsService {
           version: stored.version,
           materializationRoot: stored.materializationRoot,
           capturedAt: Date.now(),
+          autoDeleteEnabled: stored.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED,
+          retentionLimit: stored.retentionLimit ?? DEFAULT_RETENTION_LIMIT,
         })
       })
       return snapshot
@@ -265,13 +279,27 @@ export class WorktreeSettingsService {
       this.lock.runSync(() => {
         const current = this.readStoredSettings()
         const requested = this.validateRequestedRoot(input.materializationRoot, current.materializationRoot)
-        if (requested === current.materializationRoot) {
+        const autoDeleteEnabled = this.validateAutoDeletePolicy(
+          input.autoDeleteEnabled,
+          current.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED,
+        )
+        const retentionLimit = this.validateRetentionLimit(
+          input.retentionLimit,
+          current.retentionLimit ?? DEFAULT_RETENTION_LIMIT,
+        )
+        if (
+          requested === current.materializationRoot &&
+          autoDeleteEnabled === (current.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED) &&
+          retentionLimit === (current.retentionLimit ?? DEFAULT_RETENTION_LIMIT)
+        ) {
           snapshot = freezeSnapshot({
             schemaVersion: SETTINGS_SCHEMA_VERSION,
             serverId,
             version: current.version,
             materializationRoot: current.materializationRoot,
             capturedAt: Date.now(),
+            autoDeleteEnabled,
+            retentionLimit,
           })
           return
         }
@@ -284,6 +312,8 @@ export class WorktreeSettingsService {
           schemaVersion: SETTINGS_SCHEMA_VERSION,
           version: current.version + 1,
           materializationRoot: requested,
+          autoDeleteEnabled,
+          retentionLimit,
         }
         try {
           writeAtomically(this.settingsPath, JSON.stringify(next, null, 2) + '\n')
@@ -301,6 +331,8 @@ export class WorktreeSettingsService {
           version: next.version,
           materializationRoot: next.materializationRoot,
           capturedAt: Date.now(),
+          autoDeleteEnabled,
+          retentionLimit,
         })
       })
       return snapshot
@@ -349,7 +381,44 @@ export class WorktreeSettingsService {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
       version: parsed.version,
       materializationRoot: root,
+      autoDeleteEnabled: parsed.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED,
+      retentionLimit: parsed.retentionLimit ?? DEFAULT_RETENTION_LIMIT,
     }
+  }
+
+  private validateAutoDeletePolicy(
+    input: boolean | undefined,
+    current: boolean,
+  ): boolean {
+    if (input === undefined) return current
+    if (typeof input !== 'boolean') {
+      throw new WorktreeSettingsError(
+        'WORKTREE_SETTINGS_INVALID',
+        'Automatic worktree cleanup policy must be a boolean.',
+        this.settingsPath,
+      )
+    }
+    return input
+  }
+
+  private validateRetentionLimit(
+    input: number | undefined,
+    current: number,
+  ): number {
+    if (input === undefined) return current
+    if (
+      typeof input !== 'number' ||
+      !Number.isInteger(input) ||
+      input < RETENTION_LIMIT_MIN ||
+      input > RETENTION_LIMIT_MAX
+    ) {
+      throw new WorktreeSettingsError(
+        'WORKTREE_SETTINGS_INVALID',
+        `Retention limit must be an integer between ${RETENTION_LIMIT_MIN} and ${RETENTION_LIMIT_MAX}.`,
+        this.settingsPath,
+      )
+    }
+    return input
   }
 
   private isStoredSettings(value: unknown): value is StoredWorktreeSettings {
@@ -360,7 +429,14 @@ export class WorktreeSettingsService {
       Number.isInteger(candidate.version) &&
       (candidate.version as number) >= 0 &&
       typeof candidate.materializationRoot === 'string' &&
-      candidate.materializationRoot.length > 0
+      candidate.materializationRoot.length > 0 &&
+      (candidate.autoDeleteEnabled === undefined ||
+        typeof candidate.autoDeleteEnabled === 'boolean') &&
+      (candidate.retentionLimit === undefined ||
+        (typeof candidate.retentionLimit === 'number' &&
+          Number.isInteger(candidate.retentionLimit) &&
+          (candidate.retentionLimit as number) >= RETENTION_LIMIT_MIN &&
+          (candidate.retentionLimit as number) <= RETENTION_LIMIT_MAX))
     )
   }
 

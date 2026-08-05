@@ -195,6 +195,8 @@ export class ManagedWorktreeService {
             version: 0,
             materializationRoot: resolvePath(worktreeRoot),
             capturedAt: Date.now(),
+            autoDeleteEnabled: true,
+            retentionLimit: 15,
           }),
           getDefaultRoot: () => resolvePath(worktreeRoot),
         }
@@ -215,6 +217,8 @@ export class ManagedWorktreeService {
         version: 0,
         materializationRoot: resolvePath(defaultRoot),
         capturedAt: Date.now(),
+        autoDeleteEnabled: true,
+        retentionLimit: 15,
       }
     }
     return this.worktreeRootProvider.getSnapshot()
