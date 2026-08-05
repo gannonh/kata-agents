@@ -284,6 +284,9 @@ function WorkspaceCheckoutBadgeInner(
       .finally(() => setWorktreesLoading(false))
   }, [sessionId, workingDirectory])
 
+  // Capability arrives asynchronously after mount, so `worktreeV2Enabled`
+  // must be a dependency here: without it the callback captures the initial
+  // false forever and would clear a seeded default name on every menu open.
   const handleSelectMode = React.useCallback(
     (next: CheckoutMode, kind?: 'new' | 'existing') => {
       setError(null)
@@ -300,7 +303,7 @@ function WorkspaceCheckoutBadgeInner(
         if (chosenKind === 'existing' && worktrees.length === 0) loadWorktrees()
       }
     },
-    [intentKind, refs.length, worktrees.length, loadRefs, loadWorktrees],
+    [intentKind, refs.length, worktrees.length, loadRefs, loadWorktrees, worktreeV2Enabled],
   )
 
   // Prepare-before-send gate (AC4). Idempotent: once prepared or already bound
