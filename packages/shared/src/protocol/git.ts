@@ -140,11 +140,6 @@ export interface CheckoutPrepareIntent {
    */
   baseRef?: string | null
   /**
-   * V2-only editable suffix for a NEW managed worktree. When omitted, the
-   * server keeps the V1 generated eight-hex suffix behavior.
-   */
-  worktreeNameSuffix?: string | null
-  /**
    * Bind the session to an EXISTING managed worktree instead of creating one.
    * The server re-validates workspace + repository identity and adds this
    * session as a shared owner; the checkout is never mutated for the new
@@ -154,9 +149,14 @@ export interface CheckoutPrepareIntent {
 }
 
 /** New-worktree intent with the V2 name suffix explicitly present. */
-export interface CheckoutPrepareIntentV2 extends Omit<CheckoutPrepareIntent, 'worktreeNameSuffix'> {
+export interface CheckoutPrepareIntentV2 extends Omit<CheckoutPrepareIntent, 'mode'> {
+  mode: 'managed-worktree'
+  /** Editable suffix that becomes the display name and branch suffix. */
   worktreeNameSuffix: string
 }
+
+/** Preparation intent from either protocol version. */
+export type CheckoutPrepareIntentVersioned = CheckoutPrepareIntent | CheckoutPrepareIntentV2
 
 export interface CheckoutPrepareResult {
   checkout: SessionCheckoutV1

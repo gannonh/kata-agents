@@ -15,8 +15,8 @@ import { createHash } from 'node:crypto'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
-  ManagedWorktreeSummary,
-  SessionCheckoutV1,
+  ManagedWorktreeSummaryVersioned,
+  SessionCheckout,
   WorktreeRemovalConfirmation,
   WorktreeIncludeResult,
   WorktreeRemovalRisk,
@@ -80,7 +80,7 @@ export interface ReconcileParams {
    * references (a session whose checkout points at a worktree it no longer
    * owns in the registry).
    */
-  sessionCheckouts?: Map<string, SessionCheckoutV1>
+  sessionCheckouts?: Map<string, SessionCheckout>
 }
 
 export interface ReconcileReport {
@@ -183,7 +183,7 @@ export class ManagedWorktreeService {
     workspaceId: string,
     gitCommonDir: string,
     excludeWorktreeId?: string,
-  ): ManagedWorktreeSummary[] {
+  ): ManagedWorktreeSummaryVersioned[] {
     const repoKey = computeRepoKey(safeRealpath(gitCommonDir))
     return this.registry
       .list()

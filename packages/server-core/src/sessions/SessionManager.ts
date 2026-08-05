@@ -841,7 +841,7 @@ interface ManagedSession {
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
   // Git checkout metadata (managed worktree / current checkout), when bound.
-  checkout?: import('@kata-sh/shared/protocol').SessionCheckoutV1
+  checkout?: import('@kata-sh/shared/protocol').SessionCheckout
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -5355,7 +5355,7 @@ export class SessionManager implements ISessionManager {
   async listManagedWorktrees(
     sessionId: string,
     workingDirectory: string,
-  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummary[]> {
+  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummaryVersioned[]> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
@@ -5390,7 +5390,7 @@ export class SessionManager implements ISessionManager {
   async prepareCheckout(
     sessionId: string,
     intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
-  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult> {
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResultVersioned> {
     if (!isGitWorkspaceV1Enabled()) {
       throw new Error('Git workspace feature is not enabled.')
     }
@@ -5431,6 +5431,15 @@ export class SessionManager implements ISessionManager {
         sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
       }
       if (sameIntent) {
+        // Preserve the schema discriminator when a versioned checkout is
+        // re-used; never coerce a V2 session record back to the V1 result.
+        if (existing.schemaVersion === 2) {
+          return {
+            checkout: existing,
+            workingDirectory: existing.checkoutPath,
+            sdkCwd: managed.sdkCwd ?? existing.checkoutPath,
+          }
+        }
         return {
           checkout: existing,
           workingDirectory: existing.checkoutPath,

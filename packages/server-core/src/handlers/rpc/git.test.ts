@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import { RPC_CHANNELS, WORKTREE_V2_CAPABILITY_ERROR_CODE } from '@kata-sh/shared/protocol'
 import type {
   GitActionResult,
   GitHubCapabilityStatus,
@@ -382,6 +382,22 @@ describe('registerGitHandlers', () => {
     await handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', intent)
 
     expect(prepareCalls).toEqual([['s1', intent]])
+  })
+
+  it('rejects V2 named intent before it reaches the V1 SessionManager', async () => {
+    process.env[FLAG] = 'true'
+    const { git } = makeGitServices()
+    const { handlers, ctx, prepareCalls } = makeHarness(git)
+
+    await expect(
+      handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', {
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    expect(prepareCalls).toHaveLength(0)
   })
 
   it('serves existing-worktree discovery read-only regardless of the feature flag', async () => {

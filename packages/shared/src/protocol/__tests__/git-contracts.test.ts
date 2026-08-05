@@ -4,15 +4,21 @@ import {
   WorktreeV2CapabilityError,
   type CheckoutPrepareIntent,
   type CheckoutPrepareIntentV2,
+  type CheckoutPrepareIntentVersioned,
+  type CheckoutPrepareResultVersioned,
   type ManagedWorktreeRecord,
   type ManagedWorktreeRecordV2,
   type ManagedWorktreeSummaryV2,
+  type ManagedWorktreeSummaryVersioned,
   type ServerCapabilityDto,
+  type SessionCheckout,
   type SessionCheckoutV1,
   type SessionCheckoutV2,
   type WorktreeSettingsSnapshot,
 } from '../git'
 import { isErrorCode } from '../types'
+
+type AssertFalse<T extends false> = T
 
 describe('Git Worktree V2 protocol contracts', () => {
   it('keeps V1 checkout intents and records free of fabricated V2 values', () => {
@@ -44,7 +50,10 @@ describe('Git Worktree V2 protocol contracts', () => {
       state: 'ready',
     }
 
-    expect(intent.worktreeNameSuffix).toBeUndefined()
+    const v1IntentHasNoSuffix: AssertFalse<'worktreeNameSuffix' extends keyof CheckoutPrepareIntent ? true : false> = false
+
+    expect(v1IntentHasNoSuffix).toBe(false)
+    expect('worktreeNameSuffix' in intent).toBe(false)
     expect('displayName' in checkout).toBe(false)
     expect('materializationRoot' in checkout).toBe(false)
     expect('displayName' in record).toBe(false)
@@ -97,7 +106,19 @@ describe('Git Worktree V2 protocol contracts', () => {
       ownerCount: 1,
       state: 'ready',
     }
+    const versionedIntent: CheckoutPrepareIntentVersioned = intent
+    const versionedCheckout: SessionCheckout = checkout
+    const versionedResult: CheckoutPrepareResultVersioned = {
+      checkout,
+      workingDirectory: checkout.checkoutPath,
+      sdkCwd: checkout.checkoutPath,
+    }
+    const versionedSummary: ManagedWorktreeSummaryVersioned = summary
 
+    expect(versionedIntent).toBe(intent)
+    expect(versionedCheckout.schemaVersion).toBe(2)
+    expect(versionedResult.checkout.displayName).toBe('team/auth-refresh')
+    expect(versionedSummary).toBe(summary)
     expect(intent.worktreeNameSuffix).toBe('team/auth-refresh')
     expect(checkout.displayName).toBe('team/auth-refresh')
     expect(checkout.expectedBranch).toBe('kata-agent/team/auth-refresh')

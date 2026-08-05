@@ -102,7 +102,7 @@ export interface Session {
   archivedAt?: number
   supportsBranching?: boolean
   /** Git checkout metadata (managed worktree / current checkout), when bound. */
-  checkout?: import('./git').SessionCheckoutV1
+  checkout?: import('./git').SessionCheckout
   /** Number of sessions sharing this session's managed worktree (derived, >=1). */
   sharedOwnerCount?: number
 }

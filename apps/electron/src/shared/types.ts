@@ -216,9 +216,9 @@ import type {
   ImportRemoteSessionTransferResult,
   RepositoryContext,
   ListRefsResult,
-  CheckoutPrepareIntent,
-  CheckoutPrepareResult,
-  ManagedWorktreeSummary,
+  CheckoutPrepareIntentVersioned,
+  CheckoutPrepareResultVersioned,
+  ManagedWorktreeSummaryVersioned,
   ServerCapabilityDto,
   WorktreeSettingsSnapshot,
   WorktreeSettingsUpdateInput,
@@ -622,8 +622,8 @@ export interface ElectronAPI {
   getGitContext(dirPath: string): Promise<RepositoryContext>
   listGitRefs(dirPath: string): Promise<ListRefsResult>
   /** Ready managed worktrees in the session's workspace + repository (read-only). */
-  listManagedWorktrees(sessionId: string, workingDirectory: string): Promise<ManagedWorktreeSummary[]>
-  prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntent): Promise<CheckoutPrepareResult>
+  listManagedWorktrees(sessionId: string, workingDirectory: string): Promise<ManagedWorktreeSummaryVersioned[]>
+  prepareGitCheckout(sessionId: string, intent: CheckoutPrepareIntentVersioned): Promise<CheckoutPrepareResultVersioned>
   /** Effective Git/worktree capabilities reported by the workspace-owning server. */
   getGitCapabilities(): Promise<ServerCapabilityDto>
   /** Current server-owned Worktree V2 root policy snapshot. */

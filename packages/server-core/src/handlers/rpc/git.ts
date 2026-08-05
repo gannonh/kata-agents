@@ -8,9 +8,9 @@
  * and stub with a feature/not-implemented rejection until their slice lands.
  */
 
-import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import { RPC_CHANNELS, WorktreeV2CapabilityError } from '@kata-sh/shared/protocol'
 import type {
-  CheckoutPrepareIntent,
+  CheckoutPrepareIntentVersioned,
   CreatePullRequestInput,
   GitActionResult,
   GitCommitInput,
@@ -18,7 +18,7 @@ import type {
   GitStatusChangedEvent,
   ManagedWorktreeRecord,
   RepositoryContext,
-  SessionCheckoutV1,
+  SessionCheckout,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
@@ -58,7 +58,7 @@ interface ResolvedSession {
   /** Managed worktree base ref (PR-delta base), when persisted. */
   baseRef: string | null
   /** Persisted checkout metadata (null for legacy sessions). */
-  checkout: SessionCheckoutV1 | null
+  checkout: SessionCheckout | null
 }
 
 /**
@@ -71,7 +71,7 @@ interface ResolvedSession {
  * Current checkout sessions do not assume the branch remains unchanged.
  */
 export function checkManagedCheckoutIdentity(input: {
-  checkout: SessionCheckoutV1 | null | undefined
+  checkout: SessionCheckout | null | undefined
   liveContext: Pick<RepositoryContext, 'repositoryRoot' | 'gitCommonDir' | 'currentBranch' | 'detached'>
   record: ManagedWorktreeRecord | null | undefined
 }): string | null {
@@ -237,7 +237,16 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
 
   server.handle(
     RPC_CHANNELS.git.PREPARE_CHECKOUT,
-    async (_ctx, sessionId: string, intent: CheckoutPrepareIntent) => {
+    async (_ctx, sessionId: string, intent: CheckoutPrepareIntentVersioned) => {
+      // The current SessionManager is intentionally V1-only. Keep V2-looking
+      // input out of it until named creation and settings are implemented; a
+      // direct V2 RPC must fail with the typed wire error rather than silently
+      // falling back to generated V1 identity.
+      if ('worktreeNameSuffix' in intent) {
+        throw new WorktreeV2CapabilityError(
+          'Git worktree V2 named creation is not available on this server.',
+        )
+      }
       assertFeatureEnabled()
       return deps.sessionManager.prepareCheckout(sessionId, intent)
     },

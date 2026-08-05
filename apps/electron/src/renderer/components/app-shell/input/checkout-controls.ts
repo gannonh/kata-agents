@@ -9,7 +9,7 @@
 import type {
   CheckoutMode,
   CheckoutPrepareIntent,
-  SessionCheckoutV1,
+  SessionCheckout,
 } from '@kata-sh/shared/protocol'
 
 // ---------------------------------------------------------------------------
@@ -121,9 +121,9 @@ export interface CheckoutIdentityState {
   isEmptySession: boolean
   hasSessionId: boolean
   /** Persisted checkout from the session DTO (present after preparation/resume). */
-  persistedCheckout: SessionCheckoutV1 | null
+  persistedCheckout: SessionCheckout | null
   /** Checkout produced by a just-completed local preparation, before the DTO round-trips. */
-  locallyPrepared: SessionCheckoutV1 | null
+  locallyPrepared: SessionCheckout | null
   /** Shared-owner count derived on the server; > 1 means a shared worktree. */
   sharedOwnerCount: number | undefined
 }
@@ -206,7 +206,7 @@ export type WorktreeLifecycleStatus = 'active' | 'missing' | 'blocked'
 
 export interface CheckoutRecoveryState {
   /** Persisted managed-worktree checkout; recovery only applies to these. */
-  checkout: SessionCheckoutV1 | null
+  checkout: SessionCheckout | null
   /**
    * Whether repository context finished loading. Recovery is suppressed while
    * loading so a resumed/restarted session keeps its locked identity and does

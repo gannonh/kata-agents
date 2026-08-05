@@ -7,9 +7,9 @@ import { AlertTriangle, Check, FolderGit2, GitBranch, GitFork, Loader2, Users } 
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import type {
   CheckoutMode,
-  CheckoutPrepareResult,
+  CheckoutPrepareResultVersioned,
   GitRef,
-  ManagedWorktreeSummary,
+  ManagedWorktreeSummaryVersioned,
 } from '@kata-sh/shared/protocol'
 
 import { sessionAtomFamily, updateSessionAtom } from '@/atoms/sessions'
@@ -59,7 +59,7 @@ export interface WorkspaceCheckoutBadgeProps {
   isEmptySession?: boolean
   onWorkingDirectoryChange: (path: string) => void
   /** Notified once a checkout is prepared and the controls lock. */
-  onCheckoutPrepared?: (result: CheckoutPrepareResult) => void
+  onCheckoutPrepared?: (result: CheckoutPrepareResultVersioned) => void
 }
 
 /** Result of a prepare-before-send attempt. */
@@ -137,7 +137,7 @@ function WorkspaceCheckoutBadgeInner(
   const [intentKind, setIntentKind] = React.useState<'new' | 'existing'>('new')
   const [baseRef, setBaseRef] = React.useState<string | null>(null)
   const [selectedWorktreeId, setSelectedWorktreeId] = React.useState<string | null>(null)
-  const [worktrees, setWorktrees] = React.useState<ManagedWorktreeSummary[]>([])
+  const [worktrees, setWorktrees] = React.useState<ManagedWorktreeSummaryVersioned[]>([])
   const [worktreesLoading, setWorktreesLoading] = React.useState(false)
   const [refs, setRefs] = React.useState<GitRef[]>([])
   const [refsLoading, setRefsLoading] = React.useState(false)
@@ -146,7 +146,7 @@ function WorkspaceCheckoutBadgeInner(
   const [error, setError] = React.useState<string | null>(null)
   const [preparedState, setPreparedState] = React.useState<{
     sessionId?: string
-    result: CheckoutPrepareResult | null
+    result: CheckoutPrepareResultVersioned | null
   }>(() => ({ sessionId, result: null }))
   // A prepared checkout belongs to one session. Do not let a reused badge carry
   // its local identity into a newly selected session before the cleanup effect.
