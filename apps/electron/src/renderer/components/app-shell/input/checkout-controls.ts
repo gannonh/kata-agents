@@ -8,13 +8,25 @@
 
 import type {
   CheckoutMode,
-  CheckoutPrepareIntent,
+  CheckoutPrepareIntentVersioned,
   SessionCheckout,
 } from '@kata-sh/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Prepare-before-send gate (AC4)
 // ---------------------------------------------------------------------------
+
+/** Generate the editable default V2 suffix shown for a new worktree. */
+export function generateDefaultWorktreeName(): string {
+  const bytes = new Uint8Array(4)
+  globalThis.crypto?.getRandomValues(bytes)
+  if (bytes.every((byte) => byte === 0) && !globalThis.crypto) {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
 
 export interface SendGateState {
   /** Currently selected Workspace mode in the composer. */
@@ -27,6 +39,10 @@ export interface SendGateState {
    *  Existing intent without a selection can never fall through to New-worktree
    *  preparation, even when a base ref from the Git context is present. */
   worktreeIntent?: 'new' | 'existing'
+  /** Effective V2 capability of the selected workspace-owning server. */
+  worktreeV2Enabled?: boolean
+  /** Exact V2 branch suffix/display name for a new worktree. */
+  worktreeNameSuffix?: string | null
   /** Active working directory used to resolve repository identity. */
   workingDirectory: string | null
   /** True once a managed worktree has been prepared in this composer mount. */
@@ -41,9 +57,9 @@ export interface SendGateState {
 
 export type SendGateDecision =
   | { action: 'send' }
-  | { action: 'prepare'; intent: CheckoutPrepareIntent }
+  | { action: 'prepare'; intent: CheckoutPrepareIntentVersioned }
   | { action: 'wait' }
-  | { action: 'block'; reason: 'missing-base-ref' | 'missing-existing-selection' }
+  | { action: 'block'; reason: 'missing-base-ref' | 'missing-existing-selection' | 'missing-worktree-name' }
 
 /**
  * Decide what must happen when the user hits Send.
@@ -95,6 +111,21 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
   if (!state.baseRef) {
     return { action: 'block', reason: 'missing-base-ref' }
   }
+  if (state.worktreeV2Enabled) {
+    if (!state.worktreeNameSuffix?.trim()) {
+      return { action: 'block', reason: 'missing-worktree-name' }
+    }
+    return {
+      action: 'prepare',
+      intent: {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: state.workingDirectory,
+        baseRef: state.baseRef,
+        worktreeNameSuffix: state.worktreeNameSuffix,
+      },
+    }
+  }
   return {
     action: 'prepare',
     intent: {
@@ -130,8 +161,10 @@ export interface CheckoutIdentityState {
 
 export interface CheckoutIdentity {
   kind: CheckoutIdentityKind
-  /** Branch/identity label to display, when applicable. */
+  /** Exact branch identity, when applicable. */
   branch?: string | null
+  /** V2 display name, when the server supplied one. */
+  displayName?: string | null
 }
 
 /**
@@ -154,7 +187,8 @@ export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutI
     if (checkout.mode === 'managed-worktree') {
       const branch = checkout.expectedBranch ?? checkout.branchAtPreparation ?? null
       const shared = (state.sharedOwnerCount ?? 0) > 1
-      return { kind: shared ? 'shared-worktree' : 'worktree', branch }
+      const displayName = 'displayName' in checkout ? checkout.displayName : null
+      return { kind: shared ? 'shared-worktree' : 'worktree', branch, displayName }
     }
     return { kind: 'current', branch: checkout.branchAtPreparation ?? null }
   }

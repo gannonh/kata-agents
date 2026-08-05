@@ -8,10 +8,11 @@
  */
 
 import { describe, test, expect } from 'bun:test'
-import type { SessionCheckoutV1 } from '@kata-sh/shared/protocol'
+import type { SessionCheckoutV1, SessionCheckoutV2 } from '@kata-sh/shared/protocol'
 import {
   resolveSendGate,
   resolveCheckoutIdentity,
+  generateDefaultWorktreeName,
   resolveCheckoutRecovery,
   resolveLiveBranchLabel,
 } from '../checkout-controls'
@@ -25,6 +26,19 @@ const worktreeCheckout: SessionCheckoutV1 = {
   baseRef: 'main',
   managedWorktreeId: 'repo-aabbccdd',
   expectedBranch: 'kata-agent/aabbccdd',
+}
+
+const namedWorktreeCheckout: SessionCheckoutV2 = {
+  schemaVersion: 2,
+  mode: 'managed-worktree',
+  repositoryRoot: '/repo',
+  checkoutPath: '/wt/auth-refresh-aabbccdd',
+  branchAtPreparation: 'kata-agent/auth-refresh',
+  baseRef: 'main',
+  managedWorktreeId: 'repo-aabbccdd',
+  displayName: 'auth-refresh',
+  expectedBranch: 'kata-agent/auth-refresh',
+  materializationRoot: '/worktrees',
 }
 
 const currentCheckout: SessionCheckoutV1 = {
@@ -59,6 +73,60 @@ describe('resolveSendGate', () => {
     const decision = resolveSendGate({
       mode: 'managed-worktree',
       baseRef: 'main',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: { mode: 'managed-worktree', workingDirectory: '/repo', baseRef: 'main' },
+    })
+  })
+
+  test('prepares an explicit V2 named intent when the server capability is effective', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      worktreeV2Enabled: true,
+      worktreeNameSuffix: 'auth-refresh',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      },
+    })
+  })
+
+  test('blocks a V2 new-worktree send without a name', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      worktreeV2Enabled: true,
+      worktreeNameSuffix: '   ',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'block', reason: 'missing-worktree-name' })
+  })
+
+  test('keeps the V1 intent shape when the selected server is not V2-capable', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      worktreeV2Enabled: false,
+      worktreeNameSuffix: 'auth-refresh',
       workingDirectory: '/repo',
       prepared: false,
       hasPersistedCheckout: false,
@@ -200,6 +268,24 @@ describe('resolveCheckoutIdentity', () => {
       sharedOwnerCount: undefined,
     })
     expect(id.kind).toBe('menu')
+  })
+
+  test('generates an editable lowercase eight-hex default name', () => {
+    expect(generateDefaultWorktreeName()).toMatch(/^[0-9a-f]{8}$/)
+  })
+
+  test('uses the V2 display name while retaining the exact branch identity', () => {
+    const id = resolveCheckoutIdentity({
+      isGitRepository: true,
+      isEmptySession: false,
+      hasSessionId: true,
+      persistedCheckout: namedWorktreeCheckout,
+      locallyPrepared: null,
+      sharedOwnerCount: 1,
+    })
+    expect(id.kind).toBe('worktree')
+    expect(id.displayName).toBe('auth-refresh')
+    expect(id.branch).toBe('kata-agent/auth-refresh')
   })
 
   test('locks to the worktree identity from a persisted managed-worktree checkout (resume)', () => {
