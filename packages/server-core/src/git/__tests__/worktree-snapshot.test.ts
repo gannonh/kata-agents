@@ -187,6 +187,31 @@ describe('WorktreeSnapshotService.capture', () => {
     expect(patch).toContain('deleted file mode')
   })
 
+  test('captures exact untracked permission bits including zero permissions', async () => {
+    const root = tmp()
+    const repo = join(root, 'repo')
+    await initRepo(repo)
+    const { record, worktreePath } = await makeRecord(root, repo)
+
+    writeFile(worktreePath, 'locked.txt', 'no perms\n')
+    chmodSync(join(worktreePath, 'locked.txt'), 0o600)
+
+    const svc = snapshotServiceFor(root)
+    const { manifest } = await capture(svc, record)
+    expect(manifest.files[0]).toMatchObject({ path: 'locked.txt', mode: '100600' })
+
+    // Restore preserves the exact mode.
+    const { meta } = await capture(svc, record)
+    const repoRoot = record.repositoryRoot
+    await git(repoRoot, ['worktree', 'remove', '--force', worktreePath])
+    const { rmSync } = await import('node:fs')
+    rmSync(worktreePath, { recursive: true, force: true })
+    await git(repoRoot, ['worktree', 'prune'])
+    const destination = join(root, 'worktrees', 'ws1', 'repo', 'restored-token')
+    await svc.restore({ record, meta, checkoutPath: destination })
+    expect(lstatSync(join(destination, 'locked.txt')).mode & 0o777).toBe(0o600)
+  })
+
   test('captures untracked executable files and symlink nodes without dereferencing', async () => {
     const root = tmp()
     const repo = join(root, 'repo')

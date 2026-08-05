@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices, WorktreeLifecycleError } from '../index'
 import type { GitServices } from '../index'
@@ -813,5 +813,80 @@ describe('review-fix regressions', () => {
 
     await svc.lifecycle.deleteWorktree(record.managedWorktreeId, 'irrelevant')
     expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
+  })
+})
+
+describe('orphan and pending-restore cleanup', () => {
+  test('gc removes unreferenced payloads and stale staging dirs', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    // A referenced payload survives GC.
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const referencedPath = snapshotted.snapshot!.payloadPath
+    // Orphans: an unreferenced payload dir + a stale staging dir.
+    const orphanPath = join(harness.root, 'snapshots', 'deadbeefdeadbeef')
+    mkdirSync(orphanPath, { recursive: true })
+    writeFileSync(join(orphanPath, 'manifest.json'), JSON.stringify({ snapshotId: 'deadbeefdeadbeef' }))
+    const stagingPath = join(harness.root, 'snapshots', '.tmp-deadbeef')
+    mkdirSync(stagingPath, { recursive: true })
+
+    await svc.lifecycle.reconcileJournal()
+
+    expect(existsSync(orphanPath)).toBe(false)
+    expect(existsSync(stagingPath)).toBe(false)
+    // Referenced payload untouched; the record still restorable.
+    expect(existsSync(join(referencedPath, 'manifest.json'))).toBe(true)
+    const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
+    expect(restored.restored).toBe(true)
+  })
+
+  test('pending restore cleanup removes payload and ref of a ready record', async () => {
+    const { repo, svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    // Simulate the crash window: restore committed (ready) but the payload and
+    // hidden ref were never removed. Restore does this itself; simulate by
+    // moving the record back to ready with snapshot metadata intact.
+    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const meta = snapshotted.snapshot!
+    const readyWithSnapshot: ManagedWorktreeRecordV2 = {
+      ...snapshotted,
+      state: 'ready',
+      snapshot: meta,
+    }
+    svc.registry.upsert(readyWithSnapshot)
+
+    await svc.lifecycle.reconcileJournal()
+
+    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(after.state).toBe('ready')
+    expect(after.snapshot).toBeUndefined()
+    expect(existsSync(join(meta.payloadPath, 'manifest.json'))).toBe(false)
+    const ref = await git(repo, ['rev-parse', '--verify', '--quiet', meta.hiddenRef]).catch(() => '')
+    expect(ref.trim()).toBe('')
+  })
+
+  test('each enqueue runs a fresh sweep', async () => {
+    const { svc } = harness
+    await makeManagedWorktree('feature-x')
+    let sweeps = 0
+    const original = svc.lifecycle.runCleanupSweep.bind(svc.lifecycle)
+    svc.lifecycle.runCleanupSweep = (async () => {
+      sweeps += 1
+      return original()
+    }) as typeof original
+
+    await svc.lifecycle.enqueueCleanup()
+    await svc.lifecycle.enqueueCleanup()
+    await svc.lifecycle.enqueueCleanup()
+
+    expect(sweeps).toBe(3)
   })
 })

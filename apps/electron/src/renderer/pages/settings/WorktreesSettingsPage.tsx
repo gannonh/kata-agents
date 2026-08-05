@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   FolderOpen,
@@ -133,6 +133,8 @@ function stateBadgeVariant(state: ManagedWorktreeState): 'default' | 'secondary'
 interface ConfirmDeleteState {
   row: WorktreeInventoryRow
   preview: WorktreePreviewResult
+  /** Target the preview was fetched from; the delete must still be current. */
+  targetKey: string
 }
 
 interface ConfirmPermanentState {
@@ -163,6 +165,15 @@ export default function WorktreesSettingsPage() {
     () => targets.find(({ target }) => target.key === selectedTargetKey)?.target ?? null,
     [selectedTargetKey, targets],
   )
+  // Live target identity for in-flight request guards: the render-time closure
+  // of selectedTargetKey is stale while a request is awaited, so stale
+  // responses must be compared against the CURRENT selection, not the captured
+  // one.
+  const selectedTargetKeyRef = useRef(selectedTargetKey)
+  selectedTargetKeyRef.current = selectedTargetKey
+  const isCurrentTarget = useCallback((key: string | null): boolean => {
+    return selectedTargetKeyRef.current === key
+  }, [])
   const isDirty = root !== savedRoot
 
   const loadTargets = useCallback(async () => {
@@ -283,17 +294,17 @@ export default function WorktreesSettingsPage() {
       ) as WorktreeInventory
       // A target switch while the request was in flight must not apply this
       // server's inventory to another server's page state.
-      if (selectedTargetKey !== targetKey) return
+      if (!isCurrentTarget(targetKey)) return
       setInventory(next)
     } catch (err) {
-      if (selectedTargetKey !== targetKey) return
+      if (!isCurrentTarget(targetKey)) return
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
       toast.error(t('settings.worktrees.inventoryFailed'), { description: message })
     } finally {
-      if (selectedTargetKey === targetKey) setIsLoadingInventory(false)
+      if (isCurrentTarget(targetKey)) setIsLoadingInventory(false)
     }
-  }, [selectedTarget, selectedTargetKey, t])
+  }, [isCurrentTarget, selectedTarget, t])
 
   useEffect(() => {
     if (!selectedTarget) return
@@ -383,22 +394,28 @@ export default function WorktreesSettingsPage() {
         ) as WorktreePreviewResult
         // The preview belongs to the target it was fetched from; never present
         // it as a confirmation for a different server.
-        if (selectedTargetKey !== targetKey) return
-        setConfirmDelete({ row, preview })
+        if (!isCurrentTarget(targetKey)) return
+        setConfirmDelete({ row, preview, targetKey })
       } catch (err) {
-        if (selectedTargetKey !== targetKey) return
+        if (!isCurrentTarget(targetKey)) return
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         toast.error(t('settings.worktrees.previewFailed'), { description: message })
       } finally {
-        if (selectedTargetKey === targetKey) setBusyRowId(null)
+        if (isCurrentTarget(targetKey)) setBusyRowId(null)
       }
     },
-    [selectedTarget, selectedTargetKey, t],
+    [isCurrentTarget, selectedTarget, t],
   )
 
   const confirmDeleteAction = useCallback(async () => {
     if (!selectedTarget || !confirmDelete) return
+    // A target switch after the preview invalidates the confirmation entirely:
+    // server A's fingerprint must never authorize a delete on server B.
+    if (!isCurrentTarget(confirmDelete.targetKey)) {
+      setConfirmDelete(null)
+      return
+    }
     setBusyRowId(confirmDelete.row.managedWorktreeId)
     try {
       const result = await invokeTarget(
@@ -424,7 +441,7 @@ export default function WorktreesSettingsPage() {
     } finally {
       setBusyRowId(null)
     }
-  }, [confirmDelete, loadInventory, selectedTarget, t])
+  }, [confirmDelete, isCurrentTarget, loadInventory, selectedTarget, t])
 
   const handleRestore = useCallback(
     (row: WorktreeInventoryRow) =>

@@ -157,7 +157,7 @@ function isContained(parent: string, child: string): boolean {
 function modePermissions(mode: string): number {
   const match = /^(\d{6})$/.exec(mode)
   if (!match) return 0o644
-  return parseInt(mode.slice(-3), 8) || 0o644
+  return parseInt(mode.slice(-3), 8)
 }
 
 export interface SnapshotLimits {
@@ -649,6 +649,12 @@ export class WorktreeSnapshotService {
     this.removeDir(meta.payloadPath)
   }
 
+  /** Remove an unreferenced capture staging directory (startup GC). */
+  removeStagingDir(name: string): void {
+    if (!name.startsWith('.tmp-')) return
+    this.removeDir(join(this.snapshotsRoot, name))
+  }
+
   // -------------------------------------------------------------------------
   // Restore
   // -------------------------------------------------------------------------
@@ -904,6 +910,11 @@ export class WorktreeSnapshotService {
     const rel = relative(root, checkoutPath)
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
       throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', 'Restore destination escapes the materialization root.')
+    }
+    // The recorded root itself must never be a symlink: a swapped root must
+    // fail closed rather than redirect extraction outside server storage.
+    if (lstatSafe(root) === 'symlink') {
+      throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', 'Restore materialization root must not be a symlink.')
     }
     let current = root
     for (const component of rel.split(/[\\/]+/).filter(Boolean).slice(0, -1)) {

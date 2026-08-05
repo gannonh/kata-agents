@@ -489,11 +489,16 @@ export class WorktreeLifecycleService {
       })
       this.deps.journal.step(journalEntry.journalId, 'missing-verified')
       this.deps.registry.remove(record.managedWorktreeId)
-      // The confirmed removal releases every owner lease; their sessions are
-      // now unfenced (the record is gone) and can rebind or delete.
+      // The confirmed removal releases every owner lease and stamps their
+      // sessions with the missing recovery state so the UI keeps showing the
+      // stale checkout as unrecoverable instead of silently ready.
       for (const owner of record.ownerSessionIds) {
         this.deps.leases.releaseSession(owner)
       }
+      await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
+        managedWorktreeId: record.managedWorktreeId,
+        state: 'missing',
+      })
       this.deps.journal.commit(journalEntry.journalId, 'record-removed')
       return { deleted: true, state: 'missing' }
     })
@@ -533,6 +538,7 @@ export class WorktreeLifecycleService {
           sessionIds: record.ownerSessionIds,
           policyVersion: policy.version,
         })
+        let committed = false
         try {
           this.deps.journal.step(journalEntry.journalId, 'locks-acquired')
           // Durable in-flight marker before any checkout mutation, so a crash
@@ -557,19 +563,19 @@ export class WorktreeLifecycleService {
           // snapshot metadata is retained until the payload and hidden ref are
           // provably gone, so a post-commit failure can never orphan a
           // restorable payload behind a record that no longer references it.
-          const readyRecord: ManagedWorktreeRecordV2 = {
-            ...record,
-            state: 'ready',
-            checkoutPath: restored.checkoutPath,
-            lastUsedAt: Date.now(),
-            lastError: undefined,
-            stateChangedAt: Date.now(),
-          }
+          // Commit #1 applies only the fields this transaction owns; the owner
+          // set and archive state come from the CURRENT registry record so a
+          // concurrent owner change is never clobbered by a stale snapshot.
           await this.deps.registry.runExclusive(async (tx) => {
             const current = tx.get(record.managedWorktreeId)
             if (!current) throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record disappeared during restore.')
-            Object.assign(current, readyRecord)
+            current.state = 'ready'
+            current.checkoutPath = restored.checkoutPath
+            current.lastUsedAt = Date.now()
+            current.lastError = undefined
+            current.stateChangedAt = Date.now()
             tx.commit()
+            committed = true
           })
           await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
             managedWorktreeId: record.managedWorktreeId,
@@ -585,6 +591,9 @@ export class WorktreeLifecycleService {
           this.deps.journal.commit(journalEntry.journalId, 'registry-sessions-committed')
 
           // Only after the commit: remove the payload and CAS-delete the ref.
+          // A crash in this window is invisible to the journal (already
+          // committed), so startup reconciliation also sweeps ready records
+          // that still carry snapshot metadata.
           this.deps.snapshots.removePayload(meta)
           await this.deps.snapshots.casDeleteRef(record.repositoryRoot, meta)
           // Commit #2: drop the snapshot reference now that the payload and
@@ -604,11 +613,8 @@ export class WorktreeLifecycleService {
         } catch (error) {
           const sanitized = sanitizeError(error)
           this.deps.journal.fail(journalEntry.journalId, sanitized)
-          const current = this.getRecord(record.managedWorktreeId)
-          // A post-commit failure leaves the record ready (restore succeeded;
-          // only snapshot cleanup is pending). Pre-commit failures keep the
-          // snapshot metadata so retry can restore again.
-          const committed = current?.state === 'ready'
+          // Only THIS transaction's commit counts: a concurrent restore that
+          // observed another restore's `ready` state must not claim success.
           if (!committed) {
             await this.recordFailure(record.managedWorktreeId, 'restore-failed', sanitized)
           }
@@ -630,41 +636,10 @@ export class WorktreeLifecycleService {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
     if (record.state === 'cleanup-failed') {
-      if (record.snapshot) {
-        // The snapshot exists; complete the source release.
-        const policy = this.deps.settings.getSnapshot()
-        return this.hostLock.run(async () => {
-          const journalEntry = this.deps.journal.begin({
-            op: 'delete',
-            recordId: record.managedWorktreeId,
-            sessionIds: record.ownerSessionIds,
-            policyVersion: policy.version,
-          })
-          try {
-            this.deps.journal.step(journalEntry.journalId, 'retry-cleanup')
-            const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
-            if (!released) {
-              throw new WorktreeLifecycleError('LIFECYCLE_FAILED', 'The checkout could not be removed; retry again.')
-            }
-            this.deps.journal.step(journalEntry.journalId, 'checkout-removed')
-            const snapshotted: ManagedWorktreeRecordV2 = { ...record, state: 'snapshotted', lastError: undefined, stateChangedAt: Date.now() }
-            await this.deps.registry.runExclusive(async (tx) => {
-              const current = tx.get(record.managedWorktreeId)
-              if (!current) return
-              Object.assign(current, snapshotted)
-              tx.commit()
-            })
-            this.deps.journal.commit(journalEntry.journalId, 'snapshotted')
-            return { retried: true, state: 'snapshotted' }
-          } catch (error) {
-            const sanitized = sanitizeError(error)
-            this.deps.journal.fail(journalEntry.journalId, sanitized)
-            await this.recordFailure(record.managedWorktreeId, 'cleanup-failed', sanitized)
-            return { retried: false, state: 'cleanup-failed', error: sanitized }
-          }
-        })
-      }
-      // No snapshot yet: re-run the full snapshot-first removal.
+      // The snapshot exists (or not): the retry re-enters the FULL locked
+      // transaction — host + common-directory mutation locks, path fences,
+      // quiescence, and the stability fingerprint — so a checkout that changed
+      // since the failed attempt is never released against stale evidence.
       const policy = this.deps.settings.getSnapshot()
       const outcome = await this.runRemovalTransaction(record, {
         expectedFingerprint: null,
@@ -843,9 +818,14 @@ export class WorktreeLifecycleService {
   enqueueCleanup(): Promise<WorktreeCleanupResult> {
     if (!this.sweepRunning) {
       const sweep = this.runCleanupSweep()
-      this.sweepRunning = sweep.finally(() => {
-        if (this.sweepRunning === sweep) this.sweepRunning = null
-      })
+      // The slot holds the raw sweep promise; a side-chain clears the slot when
+      // THAT sweep settles, so the comparison can never miss.
+      this.sweepRunning = sweep
+      void sweep
+        .finally(() => {
+          if (this.sweepRunning === sweep) this.sweepRunning = null
+        })
+        .catch(() => undefined)
     }
     return this.sweepRunning
   }
@@ -1201,6 +1181,8 @@ export class WorktreeLifecycleService {
    */
   async reconcileJournal(): Promise<{ recovered: number; resumed: number }> {
     const report = { recovered: 0, resumed: 0 }
+    await this.cleanupPendingRestores(report)
+    await this.gcOrphanedSnapshots(report)
     const inProgress = this.deps.journal.inProgress()
     for (const entry of inProgress) {
       const record = this.getRecord(entry.recordId)
@@ -1326,6 +1308,74 @@ export class WorktreeLifecycleService {
       }
     }
     return report
+  }
+
+  /**
+   * Finish restore payload cleanup for records that committed as `ready` but
+   * still carry snapshot metadata (a crash between the journal commit and the
+   * payload/ref removal). Idempotent: verification precedes every deletion.
+   */
+  private async cleanupPendingRestores(report: { recovered: number; resumed: number }): Promise<void> {
+    await this.hostLock.run(async () => {
+      for (const record of this.listRecords()) {
+        if (record.state !== 'ready' || !record.snapshot) continue
+        try {
+          this.deps.snapshots.verifyPayload(record.snapshot)
+          this.deps.snapshots.removePayload(record.snapshot)
+          await this.deps.snapshots.casDeleteRef(record.repositoryRoot, record.snapshot)
+          const current = this.getRecord(record.managedWorktreeId)
+          if (current?.snapshot) {
+            const next: ManagedWorktreeRecordV2 = { ...current, snapshot: undefined }
+            this.deps.registry.upsert(next)
+          }
+          report.resumed += 1
+        } catch {
+          // Unverifiable payloads are retained for explicit recovery.
+        }
+      }
+    })
+  }
+
+  /**
+   * Remove snapshot payloads no record references and stale capture staging
+   * directories. A crash between atomic publish and the journal/registry
+   * evidence leaves such an orphan; the hidden ref (if any) is CAS-deleted with
+   * the captured OID from the manifest. Never touches referenced payloads.
+   */
+  private async gcOrphanedSnapshots(report: { recovered: number; resumed: number }): Promise<void> {
+    // Cross-process: another server process may be mid-transaction on the same
+    // snapshot root, so the host lifecycle lock fences the sweep.
+    await this.hostLock.run(async () => {
+      let entries: string[]
+      try {
+        const { readdirSync } = await import('node:fs')
+        entries = readdirSync(this.deps.snapshots.getSnapshotsRoot())
+      } catch {
+        return
+      }
+      const referenced = new Set(
+        this.listRecords()
+          .map((record) => record.snapshot?.snapshotId)
+          .filter((id): id is string => !!id),
+      )
+      for (const name of entries) {
+        if (name.startsWith('.tmp-')) {
+          // Owner-only capture staging; never referenced by any record. Hidden
+          // refs created before a crash stay until their repository is known;
+          // they are inert in the refs/kata namespace.
+          this.deps.snapshots.removeStagingDir(name)
+          report.recovered += 1
+          continue
+        }
+        if (referenced.has(name)) continue
+        // No record references this payload: it can never be restored and no
+        // rollback can resurrect it. Removing it is safe server-local cleanup.
+        this.deps.snapshots.removePayload({
+          payloadPath: join(this.deps.snapshots.getSnapshotsRoot(), name),
+        } as ManagedWorktreeSnapshotMeta)
+        report.recovered += 1
+      }
+    })
   }
 
   private async refExists(repositoryRoot: string, ref: string): Promise<boolean> {

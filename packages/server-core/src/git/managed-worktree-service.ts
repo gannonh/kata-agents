@@ -1016,7 +1016,9 @@ export class ManagedWorktreeService {
       // transaction (a removed checkout of a snapshotted record is evidence of
       // a completed removal, not a `missing` path). The lifecycle service
       // classifies those records from the journal. These states exist only in
-      // V2, so no feature-flag gate is needed.
+      // V2, so no feature-flag gate is needed. Owner references are still
+      // repaired in place: a dead owner would otherwise fence the snapshot
+      // from permanent deletion forever.
       if (
         rec.state === 'snapshotting' ||
         rec.state === 'snapshotted' ||
@@ -1024,6 +1026,13 @@ export class ManagedWorktreeService {
         rec.state === 'cleanup-failed' ||
         rec.state === 'restore-failed'
       ) {
+        const beforeOwners = rec.ownerSessionIds.length
+        const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
+        report.droppedOwnerRefs += beforeOwners - liveOwners.length
+        if (liveOwners.length !== beforeOwners) {
+          rec.ownerSessionIds = liveOwners
+          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+        }
         continue
       }
       // V2 unowned records are owned by the lifecycle service (automatic

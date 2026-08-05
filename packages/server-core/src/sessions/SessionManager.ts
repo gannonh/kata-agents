@@ -5796,6 +5796,18 @@ export class SessionManager implements ISessionManager {
     // snapshot-first and the branch is always retained.
     if (isWorktreeV2Enabled()) {
       const git = this.getGitServices()
+      const record = git.registry.get(managedWorktreeId)
+      // Shared-owner blocking is per-requesting-session (the lifecycle preview
+      // is per-record): another owner still blocks removal, exactly like V1.
+      const otherOwners = (record?.ownerSessionIds ?? []).filter((owner) => owner !== sessionId)
+      if (otherOwners.length > 0) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: 'Another session still owns this worktree.',
+        }
+      }
       const preview = await git.lifecycle.preview(managedWorktreeId)
       if (preview.blocked) {
         return {
