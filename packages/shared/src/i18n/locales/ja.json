@@ -1267,8 +1267,6 @@
   "settings.worktrees.deleteFailed": "Deletion failed",
   "settings.worktrees.deleted": "Worktree deleted",
   "settings.worktrees.description": "名前とサーバー管理のチェックアウトルート",
-  "settings.worktrees.existingWorktrees": "既存のWorktree",
-  "settings.worktrees.existingWorktreesDesc": "この設定を変更しても既存のWorktreeは移動しません。",
   "settings.worktrees.flaggedBadge": "flagged",
   "settings.worktrees.inventoryCount": "{{count}} managed worktree(s)",
   "settings.worktrees.inventoryCounts": "{{total}} record(s) · {{materialized}} materialized · {{missing}} missing · {{snapshotted}} snapshotted · {{cleanupFailed}} cleanup failed · {{restoreFailed}} restore failed",

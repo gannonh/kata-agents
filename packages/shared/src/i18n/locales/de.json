@@ -1267,8 +1267,6 @@
   "settings.worktrees.deleteFailed": "Deletion failed",
   "settings.worktrees.deleted": "Worktree deleted",
   "settings.worktrees.description": "Namen und serververwaltete Checkout-Stammordner",
-  "settings.worktrees.existingWorktrees": "Bestehende Worktrees",
-  "settings.worktrees.existingWorktreesDesc": "Diese Einstellung verschiebt bestehende Worktrees nicht.",
   "settings.worktrees.flaggedBadge": "flagged",
   "settings.worktrees.inventoryCount": "{{count}} managed worktree(s)",
   "settings.worktrees.inventoryCounts": "{{total}} record(s) · {{materialized}} materialized · {{missing}} missing · {{snapshotted}} snapshotted · {{cleanupFailed}} cleanup failed · {{restoreFailed}} restore failed",

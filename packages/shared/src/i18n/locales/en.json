@@ -1267,8 +1267,6 @@
   "settings.worktrees.deleteFailed": "Deletion failed",
   "settings.worktrees.deleted": "Worktree deleted",
   "settings.worktrees.description": "Names and server-owned checkout roots",
-  "settings.worktrees.existingWorktrees": "Existing worktrees",
-  "settings.worktrees.existingWorktreesDesc": "Changing this setting does not move existing worktrees.",
   "settings.worktrees.flaggedBadge": "flagged",
   "settings.worktrees.inventoryCount": "{{count}} managed worktree(s)",
   "settings.worktrees.inventoryCounts": "{{total}} record(s) · {{materialized}} materialized · {{missing}} missing · {{snapshotted}} snapshotted · {{cleanupFailed}} cleanup failed · {{restoreFailed}} restore failed",

@@ -1267,8 +1267,6 @@
   "settings.worktrees.deleteFailed": "Deletion failed",
   "settings.worktrees.deleted": "Worktree deleted",
   "settings.worktrees.description": "名称和服务器管理的检出根目录",
-  "settings.worktrees.existingWorktrees": "现有 Worktree",
-  "settings.worktrees.existingWorktreesDesc": "更改此设置不会移动现有 Worktree。",
   "settings.worktrees.flaggedBadge": "flagged",
   "settings.worktrees.inventoryCount": "{{count}} managed worktree(s)",
   "settings.worktrees.inventoryCounts": "{{total}} record(s) · {{materialized}} materialized · {{missing}} missing · {{snapshotted}} snapshotted · {{cleanupFailed}} cleanup failed · {{restoreFailed}} restore failed",

@@ -1277,8 +1277,6 @@
   "settings.worktrees.deleteFailed": "Deletion failed",
   "settings.worktrees.deleted": "Worktree deleted",
   "settings.worktrees.description": "Nazwy i serwerowe katalogi główne checkoutów",
-  "settings.worktrees.existingWorktrees": "Istniejące worktree",
-  "settings.worktrees.existingWorktreesDesc": "Zmiana tego ustawienia nie przenosi istniejących worktree.",
   "settings.worktrees.flaggedBadge": "flagged",
   "settings.worktrees.inventoryCount": "{{count}} managed worktree(s)",
   "settings.worktrees.inventoryCounts": "{{total}} record(s) · {{materialized}} materialized · {{missing}} missing · {{snapshotted}} snapshotted · {{cleanupFailed}} cleanup failed · {{restoreFailed}} restore failed",

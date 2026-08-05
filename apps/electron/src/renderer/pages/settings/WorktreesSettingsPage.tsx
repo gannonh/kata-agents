@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   FolderOpen,
-  GitBranch,
   RefreshCw,
   Server as ServerIcon,
   Trash2,
@@ -465,12 +464,6 @@ export default function WorktreesSettingsPage() {
                     ) : undefined}
                     />
                   </div>
-                  <SettingsRow
-                    label={t('settings.worktrees.existingWorktrees')}
-                    description={t('settings.worktrees.existingWorktreesDesc')}
-                  >
-                    <GitBranch className="h-4 w-4 text-muted-foreground" />
-                  </SettingsRow>
                 </SettingsCard>
               </SettingsSection>
 
