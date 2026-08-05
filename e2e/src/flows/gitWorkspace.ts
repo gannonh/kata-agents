@@ -6,6 +6,8 @@ export interface PreparedManagedWorktreeSession {
   readonly checkout: {
     readonly checkoutPath: string;
     readonly expectedBranch: string | null;
+    readonly displayName?: string;
+    readonly materializationRoot?: string;
     readonly mode: "managed-worktree";
     readonly managedWorktreeId: string | null;
   };
@@ -68,6 +70,8 @@ export async function readManagedWorktreeSessions(
               checkout?: {
                 checkoutPath: string;
                 expectedBranch: string | null;
+                displayName?: string;
+                materializationRoot?: string;
                 mode: string;
                 managedWorktreeId: string | null;
               };

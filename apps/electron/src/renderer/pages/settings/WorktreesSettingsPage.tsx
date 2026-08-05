@@ -248,7 +248,7 @@ export default function WorktreesSettingsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div data-testid="worktrees-settings-page" className="flex h-full flex-col">
       <PanelHeader title={t('settings.worktrees.title')} />
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-5 px-5 py-7">
@@ -291,7 +291,8 @@ export default function WorktreesSettingsPage() {
               description={t('settings.worktrees.rootSectionDesc')}
             >
               <SettingsCard>
-                <SettingsInput
+                <div data-testid="worktrees-root-input">
+                  <SettingsInput
                   label={t('settings.worktrees.root')}
                   description={t('settings.worktrees.rootDesc')}
                   value={root}
@@ -312,7 +313,8 @@ export default function WorktreesSettingsPage() {
                       {t('settings.worktrees.browse')}
                     </Button>
                   ) : undefined}
-                />
+                  />
+                </div>
                 <SettingsRow
                   label={t('settings.worktrees.existingWorktrees')}
                   description={t('settings.worktrees.existingWorktreesDesc')}
@@ -329,7 +331,7 @@ export default function WorktreesSettingsPage() {
               <Button variant="outline" size="sm" onClick={handleReset} disabled={isSaving}>
                 {t('common.reset')}
               </Button>
-              <Button size="sm" onClick={handleSave} disabled={isSaving || isLoadingSettings || !snapshot}>
+              <Button data-testid="worktrees-save" size="sm" onClick={handleSave} disabled={isSaving || isLoadingSettings || !snapshot}>
                 {isSaving ? <Spinner className="mr-1.5" /> : null}
                 {t('common.save')}
               </Button>

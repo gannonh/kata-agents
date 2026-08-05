@@ -16,7 +16,7 @@
  * "serial headless-server flow" requirement.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import type { GitActionResult, RepositoryContext } from '@kata-sh/shared/protocol'
@@ -28,7 +28,9 @@ import { registerGitHandlers } from './git'
 import { initRepo, git as gitCmd, makeTmpDir, cleanup } from '../../git/__tests__/test-helpers'
 
 const FLAG = 'KATA_FEATURE_GIT_WORKSPACE_V1'
+const V2_FLAG = 'KATA_FEATURE_WORKTREE_V2'
 const ORIGINAL = process.env[FLAG]
+const ORIGINAL_V2 = process.env[V2_FLAG]
 
 const cleanups: string[] = []
 function tmp(): string {
@@ -39,10 +41,13 @@ function tmp(): string {
 
 beforeEach(() => {
   process.env[FLAG] = '1'
+  delete process.env[V2_FLAG]
 })
 afterEach(() => {
   if (ORIGINAL === undefined) delete process.env[FLAG]
   else process.env[FLAG] = ORIGINAL
+  if (ORIGINAL_V2 === undefined) delete process.env[V2_FLAG]
+  else process.env[V2_FLAG] = ORIGINAL_V2
   while (cleanups.length) cleanup(cleanups.pop()!)
 })
 
@@ -110,6 +115,74 @@ function injectSession(sm: SessionManager, id: string, workspaceRootPath: string
 }
 
 describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
+  test('keeps V2 settings, named preparation, session metadata, and Git actions server-owned', async () => {
+    process.env[V2_FLAG] = '1'
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services, handlers, ctx } = makeServer()
+    const customRoot = tmp()
+    const canonicalRoot = realpathSync(customRoot)
+    injectSession(sm, 'remote-v2', tmp())
+
+    const capability = await handlers.get(RPC_CHANNELS.git.GET_CAPABILITIES)!(ctx) as {
+      serverId: string
+      worktreeV2: boolean
+    }
+    expect(capability).toEqual({ serverId: 'local', worktreeV2: true })
+
+    const updated = await handlers.get(RPC_CHANNELS.git.UPDATE_WORKTREE_SETTINGS)!(
+      ctx,
+      { materializationRoot: customRoot },
+    ) as { materializationRoot: string; version: number }
+    expect(updated.materializationRoot).toBe(canonicalRoot)
+    expect(updated.version).toBe(1)
+
+    const prep = await handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 'remote-v2', {
+      schemaVersion: 2,
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+      worktreeNameSuffix: 'auth-refresh',
+    }) as {
+      checkout: {
+        schemaVersion: number
+        checkoutPath: string
+        displayName: string
+        expectedBranch: string
+        materializationRoot: string
+        managedWorktreeId: string
+      }
+    }
+    expect(prep.checkout).toMatchObject({
+      schemaVersion: 2,
+      displayName: 'auth-refresh',
+      expectedBranch: 'kata-agent/auth-refresh',
+      materializationRoot: canonicalRoot,
+    })
+    expect(prep.checkout.checkoutPath.startsWith(canonicalRoot)).toBe(true)
+    expect(services.registry.get(prep.checkout.managedWorktreeId)).toMatchObject({
+      displayName: 'auth-refresh',
+      materializationRoot: canonicalRoot,
+    })
+    expect(sm.getSessions().find((session) => session.id === 'remote-v2')?.checkout).toMatchObject({
+      schemaVersion: 2,
+      displayName: 'auth-refresh',
+      expectedBranch: 'kata-agent/auth-refresh',
+      materializationRoot: canonicalRoot,
+    })
+
+    writeFileSync(join(prep.checkout.checkoutPath, 'work.txt'), 'named headless change\n')
+    const commit = await handlers.get(RPC_CHANNELS.git.COMMIT)!(ctx, {
+      sessionId: 'remote-v2',
+      message: 'headless: named worktree',
+      paths: ['work.txt'],
+    }) as GitActionResult
+    expect(commit.stages.every((stage) => stage.status === 'succeeded')).toBe(true)
+    expect((await gitCmd(prep.checkout.checkoutPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe(
+      'kata-agent/auth-refresh',
+    )
+  })
+
   test('discovers, prepares a worktree, commits, and enforces identity — all server-side by session ID', async () => {
     const repo = tmp()
     await initRepo(repo)
