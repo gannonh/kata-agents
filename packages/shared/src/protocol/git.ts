@@ -8,6 +8,9 @@
  * mutation path (see the spec's ownership boundary).
  */
 
+import { CodedError, WORKTREE_V2_CAPABILITY_ERROR_CODE } from './types'
+export { WORKTREE_V2_CAPABILITY_ERROR_CODE } from './types'
+
 // ---------------------------------------------------------------------------
 // Repository context and refs
 // ---------------------------------------------------------------------------
@@ -93,6 +96,31 @@ export interface SessionCheckoutV1 {
   expectedBranch: string | null
 }
 
+/**
+ * V2 checkout metadata returned for a named managed worktree.
+ *
+ * V1 callers continue to use {@link SessionCheckoutV1}; they must not invent
+ * display names or materialization roots when those fields were not supplied
+ * by the server.
+ */
+export interface SessionCheckoutV2
+  extends Omit<SessionCheckoutV1, 'schemaVersion' | 'mode' | 'branchAtPreparation' | 'managedWorktreeId' | 'expectedBranch'> {
+  schemaVersion: 2
+  mode: 'managed-worktree'
+  branchAtPreparation: string
+  managedWorktreeId: string
+  /** User-provided suffix, also used as the display name. */
+  displayName: string
+  /** Exact branch ref returned by the server. */
+  expectedBranch: string
+  /** Canonical server-local root captured for this checkout. */
+  materializationRoot: string
+}
+
+/** A checkout record from either the V1 or V2 wire schema. */
+export type SessionCheckout = SessionCheckoutV1 | SessionCheckoutV2
+export type SessionCheckoutVersioned = SessionCheckout
+
 // ---------------------------------------------------------------------------
 // Checkout preparation (empty-session gate)
 // ---------------------------------------------------------------------------
@@ -112,12 +140,22 @@ export interface CheckoutPrepareIntent {
    */
   baseRef?: string | null
   /**
+   * V2-only editable suffix for a NEW managed worktree. When omitted, the
+   * server keeps the V1 generated eight-hex suffix behavior.
+   */
+  worktreeNameSuffix?: string | null
+  /**
    * Bind the session to an EXISTING managed worktree instead of creating one.
    * The server re-validates workspace + repository identity and adds this
    * session as a shared owner; the checkout is never mutated for the new
    * session.
    */
   managedWorktreeId?: string | null
+}
+
+/** New-worktree intent with the V2 name suffix explicitly present. */
+export interface CheckoutPrepareIntentV2 extends Omit<CheckoutPrepareIntent, 'worktreeNameSuffix'> {
+  worktreeNameSuffix: string
 }
 
 export interface CheckoutPrepareResult {
@@ -129,6 +167,20 @@ export interface CheckoutPrepareResult {
   /** Non-fatal warnings, e.g. from `.worktreeinclude` application. */
   warnings?: string[]
 }
+
+/** V2 preparation result carrying the server-issued named checkout metadata. */
+export interface CheckoutPrepareResultV2 {
+  checkout: SessionCheckoutV2
+  /** Resolved working directory (the V2 worktree). */
+  workingDirectory: string
+  /** Resolved initial SDK cwd (bound atomically with workingDirectory). */
+  sdkCwd: string
+  /** Non-fatal warnings, e.g. from `.worktreeinclude` application. */
+  warnings?: string[]
+}
+
+/** Preparation result from either protocol version. */
+export type CheckoutPrepareResultVersioned = CheckoutPrepareResult | CheckoutPrepareResultV2
 
 // ---------------------------------------------------------------------------
 // Managed worktree lifecycle
@@ -155,6 +207,26 @@ export interface ManagedWorktreeRecord {
   state: ManagedWorktreeState
 }
 
+/** The existing unversioned record shape, named for use in versioned unions. */
+export type ManagedWorktreeRecordV1 = ManagedWorktreeRecord
+
+/**
+ * V2 registry record. The materialization root is persisted per record so a
+ * later settings change never authorizes or relocates an existing checkout.
+ */
+export interface ManagedWorktreeRecordV2
+  extends Omit<ManagedWorktreeRecord, 'workspaceId' | 'expectedBranch'> {
+  schemaVersion: 2
+  workspaceId: string
+  displayName: string
+  expectedBranch: string
+  materializationRoot: string
+  lastUsedAt: number
+}
+
+/** A registry record from either the V1 or V2 wire schema. */
+export type ManagedWorktreeRecordVersioned = ManagedWorktreeRecord | ManagedWorktreeRecordV2
+
 /**
  * Read-only summary of a ready managed worktree offered to a new session in
  * the same workspace + repository. Never carries mutation authority: binding
@@ -172,6 +244,17 @@ export interface ManagedWorktreeSummary {
   ownerCount: number
   state: ManagedWorktreeState
 }
+
+/** Server-issued summary for a V2 named worktree. */
+export interface ManagedWorktreeSummaryV2
+  extends Omit<ManagedWorktreeSummary, 'expectedBranch'> {
+  schemaVersion: 2
+  displayName: string
+  expectedBranch: string
+  materializationRoot: string
+}
+
+export type ManagedWorktreeSummaryVersioned = ManagedWorktreeSummary | ManagedWorktreeSummaryV2
 
 /**
  * Removal-risk inspection for a managed worktree. `blocked` is true while
@@ -260,6 +343,50 @@ export interface WorktreeIncludeResult {
   skippedSymlinks: number
   totalBytes: number
 }
+
+// ---------------------------------------------------------------------------
+// V2 server capability and settings contracts
+// ---------------------------------------------------------------------------
+
+/**
+ * Effective Git capability reported by the workspace-owning server.
+ * `worktreeV2` is effective capability, not merely the local feature flag:
+ * clients must not expose V2 controls when this is false.
+ */
+export interface ServerCapabilityDto {
+  serverId: string
+  worktreeV2: boolean
+}
+
+/** Immutable per-server root policy captured for a materialization operation. */
+export interface WorktreeSettingsSnapshot {
+  schemaVersion: 1
+  serverId: string
+  /** Monotonic settings revision used to fence creation against root updates. */
+  version: number
+  /** Canonical absolute server-local materialization root. */
+  materializationRoot: string
+  /** Server timestamp at which this snapshot was captured. */
+  capturedAt: number
+}
+
+/** User-authored change to the selected server's root policy. */
+export interface WorktreeSettingsUpdateInput {
+  materializationRoot: string
+}
+
+/** Fixed registry file schemas; the path remains server-owned and stable. */
+export interface WorktreeRegistryV1 {
+  version: 1
+  records: ManagedWorktreeRecordV1[]
+}
+
+export interface WorktreeRegistryV2 {
+  version: 2
+  records: ManagedWorktreeRecordV2[]
+}
+
+export type WorktreeRegistryVersioned = WorktreeRegistryV1 | WorktreeRegistryV2
 
 // ---------------------------------------------------------------------------
 // Status model (foundational; consumed fully in Phase 2)
@@ -496,4 +623,12 @@ export interface GitOperationError {
   code: string
   message: string
   detail?: string
+}
+
+/** Typed rejection used when a V2 RPC is sent to an incapable server. */
+export class WorktreeV2CapabilityError extends CodedError {
+  constructor(message = 'Git worktree V2 capability is unavailable on this server.') {
+    super(WORKTREE_V2_CAPABILITY_ERROR_CODE, message)
+    this.name = 'WorktreeV2CapabilityError'
+  }
 }

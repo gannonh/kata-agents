@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { FEATURE_FLAGS, getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled, isShareOnlineEnabled } from '../feature-flags.ts';
+import { FEATURE_FLAGS, getFeatureFlagEnv, isDevRuntime, isDeveloperFeedbackEnabled, isEmbeddedServerEnabled, isGitWorkspaceV1Enabled, isShareOnlineEnabled, isWorktreeV2Enabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -8,6 +8,7 @@ const ORIGINAL_ENV = {
   KATA_FEATURE_DEVELOPER_FEEDBACK: process.env.KATA_FEATURE_DEVELOPER_FEEDBACK,
   KATA_FEATURE_EMBEDDED_SERVER: process.env.KATA_FEATURE_EMBEDDED_SERVER,
   KATA_FEATURE_GIT_WORKSPACE_V1: process.env.KATA_FEATURE_GIT_WORKSPACE_V1,
+  KATA_FEATURE_WORKTREE_V2: process.env.KATA_FEATURE_WORKTREE_V2,
   KATA_FEATURE_SHARE_ONLINE: process.env.KATA_FEATURE_SHARE_ONLINE,
 };
 
@@ -29,6 +30,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
   else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = ORIGINAL_ENV.KATA_FEATURE_GIT_WORKSPACE_V1;
+
+  if (ORIGINAL_ENV.KATA_FEATURE_WORKTREE_V2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2;
+  else process.env.KATA_FEATURE_WORKTREE_V2 = ORIGINAL_ENV.KATA_FEATURE_WORKTREE_V2;
 
   if (ORIGINAL_ENV.KATA_FEATURE_SHARE_ONLINE === undefined) delete process.env.KATA_FEATURE_SHARE_ONLINE;
   else process.env.KATA_FEATURE_SHARE_ONLINE = ORIGINAL_ENV.KATA_FEATURE_SHARE_ONLINE;
@@ -148,6 +152,31 @@ describe('feature-flags runtime helpers', () => {
     };
 
     expect(isGitWorkspaceV1Enabled()).toBe(true);
+  });
+
+  it('isWorktreeV2Enabled defaults to false when no override is set', () => {
+    delete process.env.KATA_FEATURE_WORKTREE_V2;
+    delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
+
+    expect(FEATURE_FLAGS.worktreeV2).toBe(false);
+    expect(isWorktreeV2Enabled()).toBe(false);
+  });
+
+  it('isWorktreeV2Enabled requires both V1 and V2 flags', () => {
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1';
+
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1';
+    expect(isWorktreeV2Enabled()).toBe(true);
+
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '0';
+    expect(isWorktreeV2Enabled()).toBe(false);
+  });
+
+  it('isWorktreeV2Enabled honors an explicit V2 disable while V1 is enabled', () => {
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1';
+    process.env.KATA_FEATURE_WORKTREE_V2 = '0';
+
+    expect(isWorktreeV2Enabled()).toBe(false);
   });
 
   it('isShareOnlineEnabled defaults to false when no override is set', () => {

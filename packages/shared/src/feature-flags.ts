@@ -85,6 +85,10 @@ export const FEATURE_FLAG_CONFIG = {
     env: 'KATA_FEATURE_GIT_WORKSPACE_V1',
     default: true,
   },
+  worktreeV2: {
+    env: 'KATA_FEATURE_WORKTREE_V2',
+    default: false,
+  },
   shareOnline: {
     env: 'KATA_FEATURE_SHARE_ONLINE',
     default: false,
@@ -115,6 +119,17 @@ export function isGitWorkspaceV1Enabled(): boolean {
   return resolveFeatureFlag('gitWorkspaceV1');
 }
 
+/**
+ * Runtime-evaluated check for the Git worktree V2 feature.
+ *
+ * V2 is deliberately dependent on V1 so disabling the existing managed-worktree
+ * feature also disables every V2 control and route, regardless of the V2
+ * override. This keeps the V1 gate as the single ownership boundary.
+ */
+export function isWorktreeV2Enabled(): boolean {
+  return isGitWorkspaceV1Enabled() && resolveFeatureFlag('worktreeV2')
+}
+
 /** Runtime-evaluated check for online session sharing. */
 export function isShareOnlineEnabled(): boolean {
   return resolveFeatureFlag('shareOnline');
@@ -133,6 +148,9 @@ export const FEATURE_FLAGS = {
   },
   get gitWorkspaceV1(): boolean {
     return isGitWorkspaceV1Enabled();
+  },
+  get worktreeV2(): boolean {
+    return isWorktreeV2Enabled();
   },
   get shareOnline(): boolean {
     return isShareOnlineEnabled();
