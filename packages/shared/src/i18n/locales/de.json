@@ -588,7 +588,7 @@
   "git.workspace.worktree": "Worktree",
   "git.workspace.worktreeCommittedNote": "Der Worktree startet vom committeten Stand. Nicht committete Änderungen werden nicht kopiert.",
   "git.workspace.worktreeName": "Worktree-Name",
-  "git.workspace.worktreeNameDesc": "Wird als Anzeigename und als Suffix des kata-agent-Branches verwendet.",
+  "git.workspace.worktreeNameDesc": "Wird als Anzeigename und als Suffix des kata-agent-Branches verwendet. Großbuchstaben und Leerzeichen werden in kleingeschriebenes Kebab-Case umgewandelt.",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "Gib einen Namen für den neuen Worktree ein.",
   "git.workspace.worktreeReady": "Worktree bereit",

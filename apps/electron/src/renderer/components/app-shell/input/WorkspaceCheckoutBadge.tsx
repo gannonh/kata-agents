@@ -21,6 +21,8 @@ import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import {
   resolveCheckoutIdentity,
   generateDefaultWorktreeName,
+  normalizeWorktreeName,
+  normalizeWorktreeNameInput,
   resolveCheckoutRecovery,
   resolveLiveBranchLabel,
   resolveSendGate,
@@ -727,7 +729,12 @@ function WorkspaceCheckoutBadgeInner(
                   id="git-workspace-name"
                   data-testid="git-workspace-name"
                   value={worktreeNameSuffix ?? ''}
-                  onChange={(event) => setWorktreeNameSuffix(event.target.value)}
+                  onChange={(event) =>
+                    setWorktreeNameSuffix(normalizeWorktreeNameInput(event.target.value))
+                  }
+                  onBlur={() =>
+                    setWorktreeNameSuffix((current) => normalizeWorktreeName(current ?? ''))
+                  }
                   placeholder={t('git.workspace.worktreeNamePlaceholder')}
                   className="w-full rounded-[6px] bg-muted/50 px-2.5 py-1.5 text-[13px] outline-none ring-0 placeholder:text-muted-foreground/50 focus:bg-background"
                 />

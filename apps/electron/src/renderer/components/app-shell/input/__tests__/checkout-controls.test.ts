@@ -13,6 +13,8 @@ import {
   resolveSendGate,
   resolveCheckoutIdentity,
   generateDefaultWorktreeName,
+  normalizeWorktreeName,
+  normalizeWorktreeNameInput,
   resolveCheckoutRecovery,
   resolveLiveBranchLabel,
 } from '../checkout-controls'
@@ -53,6 +55,21 @@ const currentCheckout: SessionCheckoutV1 = {
 }
 
 // ---------------------------------------------------------------------------
+// Worktree name normalization
+// ---------------------------------------------------------------------------
+
+describe('normalizeWorktreeName', () => {
+  test('converts human-readable names to lowercase kebab-case', () => {
+    expect(normalizeWorktreeNameInput('My New Feature')).toBe('my-new-feature')
+    expect(normalizeWorktreeName('My New Feature')).toBe('my-new-feature')
+  })
+
+  test('preserves nested refs while normalizing each name segment', () => {
+    expect(normalizeWorktreeName(' Team / Auth_Refresh ')).toBe('team/auth-refresh')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // resolveSendGate (AC4)
 // ---------------------------------------------------------------------------
 
@@ -89,7 +106,7 @@ describe('resolveSendGate', () => {
       mode: 'managed-worktree',
       baseRef: 'main',
       worktreeV2Enabled: true,
-      worktreeNameSuffix: 'auth-refresh',
+      worktreeNameSuffix: 'Auth Refresh',
       workingDirectory: '/repo',
       prepared: false,
       hasPersistedCheckout: false,

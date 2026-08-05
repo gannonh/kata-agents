@@ -588,7 +588,7 @@
   "git.workspace.worktree": "ワークツリー",
   "git.workspace.worktreeCommittedNote": "ワークツリーはコミット済みの状態から開始します。未コミットの変更はコピーされません。",
   "git.workspace.worktreeName": "Worktree名",
-  "git.workspace.worktreeNameDesc": "表示名とkata-agentブランチのサフィックスに使われます。",
+  "git.workspace.worktreeNameDesc": "表示名とkata-agentブランチのサフィックスに使われます。大文字と空白は小文字のkebab-caseに変換されます。",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "新しいWorktreeの名前を入力してください。",
   "git.workspace.worktreeReady": "ワークツリーの準備完了",

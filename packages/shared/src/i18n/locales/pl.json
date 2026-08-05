@@ -598,7 +598,7 @@
   "git.workspace.worktree": "Worktree",
   "git.workspace.worktreeCommittedNote": "Worktree zaczyna od stanu zatwierdzonego. Niezatwierdzone zmiany nie są kopiowane.",
   "git.workspace.worktreeName": "Nazwa worktree",
-  "git.workspace.worktreeNameDesc": "Używana jako nazwa wyświetlana i przyrostek gałęzi kata-agent.",
+  "git.workspace.worktreeNameDesc": "Używana jako nazwa wyświetlana i przyrostek gałęzi kata-agent. Wielkie litery i spacje są zamieniane na kebab-case pisany małymi literami.",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "Wpisz nazwę nowego worktree.",
   "git.workspace.worktreeReady": "Worktree gotowy",

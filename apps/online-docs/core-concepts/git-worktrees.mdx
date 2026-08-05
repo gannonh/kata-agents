@@ -78,11 +78,14 @@ was created. The fixed registry remains at
 `<CONFIG_DIR>/worktrees/registry.json`, independently of the selected
 materialization root.
 
-Names are branch suffixes, not filesystem paths. Empty, whitespace-padded, Git-
-invalid, occupied, and case-colliding names are rejected without changing the
-repository. Nested valid names such as `team/auth-refresh` are allowed. If a
-request fails after creating a branch, the server removes it only when it can
-prove that the failed transaction still owns the original branch OID.
+Names are branch suffixes, not filesystem paths. In the composer, uppercase
+letters, spaces, and underscores are normalized to lowercase kebab-case before
+the request is sent—for example, `My New Feature` becomes
+`my-new-feature`. Empty names and names that remain Git-invalid, occupied, or
+case-colliding are rejected without changing the repository. Nested valid names
+such as `team/auth-refresh` are allowed. If a request fails after creating a
+branch, the server removes it only when it can prove that the failed transaction
+still owns the original branch OID.
 
 ## Reviewing and sharing work
 

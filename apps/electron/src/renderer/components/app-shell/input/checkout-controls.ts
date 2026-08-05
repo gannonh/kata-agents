@@ -16,6 +16,32 @@ import type {
 // Prepare-before-send gate (AC4)
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalize the editable V2 name as it is typed.
+ *
+ * Keep a trailing separator while the user is typing the next word; the
+ * finalized helper below trims it before creating the branch. Slashes remain
+ * nested Git-ref separators, while spaces/underscores become kebab separators.
+ */
+export function normalizeWorktreeNameInput(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s*\/\s*/gu, '/')
+    .split('/')
+    .map((segment) => segment.replace(/[\s_]+/gu, '-').replace(/-+/gu, '-'))
+    .join('/')
+}
+
+/** Return the canonical V2 name sent to the workspace-owning server. */
+export function normalizeWorktreeName(value: string): string {
+  return normalizeWorktreeNameInput(value)
+    .split('/')
+    .map((segment) => segment.replace(/^-+|-+$/gu, ''))
+    .filter(Boolean)
+    .join('/')
+}
+
 /** Generate the editable default V2 suffix shown for a new worktree. */
 export function generateDefaultWorktreeName(): string {
   const bytes = new Uint8Array(4)
@@ -112,7 +138,8 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
     return { action: 'block', reason: 'missing-base-ref' }
   }
   if (state.worktreeV2Enabled) {
-    if (!state.worktreeNameSuffix?.trim()) {
+    const worktreeName = normalizeWorktreeName(state.worktreeNameSuffix ?? '')
+    if (!worktreeName) {
       return { action: 'block', reason: 'missing-worktree-name' }
     }
     return {
@@ -122,7 +149,7 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
         mode: 'managed-worktree',
         workingDirectory: state.workingDirectory,
         baseRef: state.baseRef,
-        worktreeNameSuffix: state.worktreeNameSuffix,
+        worktreeNameSuffix: worktreeName,
       },
     }
   }

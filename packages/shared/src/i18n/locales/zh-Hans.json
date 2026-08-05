@@ -588,7 +588,7 @@
   "git.workspace.worktree": "工作树",
   "git.workspace.worktreeCommittedNote": "工作树从已提交的状态开始。未提交的更改不会被复制。",
   "git.workspace.worktreeName": "Worktree 名称",
-  "git.workspace.worktreeNameDesc": "用作显示名称和 kata-agent 分支后缀。",
+  "git.workspace.worktreeNameDesc": "用作显示名称和 kata-agent 分支后缀。大写字母和空格会转换为小写 kebab-case。",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "请输入新 Worktree 的名称。",
   "git.workspace.worktreeReady": "工作树已就绪",

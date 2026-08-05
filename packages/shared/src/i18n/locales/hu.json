@@ -588,7 +588,7 @@
   "git.workspace.worktree": "Worktree",
   "git.workspace.worktreeCommittedNote": "A worktree a commitolt állapotból indul. A nem commitolt változások nem másolódnak át.",
   "git.workspace.worktreeName": "Worktree neve",
-  "git.workspace.worktreeNameDesc": "Megjelenített névként és a kata-agent ág utótagjaként használatos.",
+  "git.workspace.worktreeNameDesc": "Megjelenített névként és a kata-agent ág utótagjaként használatos. A nagybetűk és szóközök kisbetűs kebab-case formára alakulnak.",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "Adj nevet az új worktree-nek.",
   "git.workspace.worktreeReady": "Worktree kész",

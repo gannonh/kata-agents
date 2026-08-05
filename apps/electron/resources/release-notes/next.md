@@ -5,7 +5,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Features
 
 - **Share managed worktrees across sessions** — The workspace checkout control now offers **Existing worktree** for a new empty session: any ready managed worktree of the current workspace + repository can be selected, and the session binds to it as a shared owner without recreating or mutating the checkout. Every session bound to a worktree shows the same branch label; shared ownership shows as a Users icon and tooltip, and the existing deletion guards keep the checkout while any other session owns it ([#33](https://github.com/gannonh/kata-agents/issues/33), commit [ac0dd3b4](https://github.com/gannonh/kata-agents/commit/ac0dd3b4a41d81bef3c8c20353bc8b4cc2b3a4b1)).
-- **Named managed worktrees and server-owned roots** — With Worktree V2 enabled, new worktrees accept an exact branch suffix and display name, while the Worktrees settings page configures a server-local materialization root without moving existing checkouts ([#40](https://github.com/gannonh/kata-agents/issues/40)).
+- **Named managed worktrees and server-owned roots** — With Worktree V2 enabled, new worktrees accept a human-readable name that is normalized to lowercase kebab-case for the exact branch suffix and display name, while the Worktrees settings page configures a server-local materialization root without moving existing checkouts ([#40](https://github.com/gannonh/kata-agents/issues/40)).
 ## Improvements
 
 ## Bug Fixes

@@ -588,7 +588,7 @@
   "git.workspace.worktree": "Worktree",
   "git.workspace.worktreeCommittedNote": "El worktree parte del estado confirmado. Los cambios sin confirmar no se copian.",
   "git.workspace.worktreeName": "Nombre del worktree",
-  "git.workspace.worktreeNameDesc": "Se usa como nombre visible y sufijo de la rama kata-agent.",
+  "git.workspace.worktreeNameDesc": "Se usa como nombre visible y sufijo de la rama kata-agent. Las mayúsculas y los espacios se convierten a kebab-case en minúsculas.",
   "git.workspace.worktreeNamePlaceholder": "auth-refresh",
   "git.workspace.worktreeNameRequired": "Introduce un nombre para el nuevo worktree.",
   "git.workspace.worktreeReady": "Worktree listo",

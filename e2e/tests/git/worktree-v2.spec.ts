@@ -105,7 +105,8 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       await workspaceControl.locator("button").click();
       await page.getByTestId("git-workspace-new-worktree").click();
       await expect(page.getByTestId("git-workspace-name")).toBeVisible();
-      await page.getByTestId("git-workspace-name").fill("auth-refresh");
+      await page.getByTestId("git-workspace-name").fill("Auth Refresh");
+      await expect(page.getByTestId("git-workspace-name")).toHaveValue("auth-refresh");
       await page.getByTestId("git-workspace-create").click();
 
       await expect(page.getByTestId("git-workspace-identity")).toContainText("auth-refresh");
