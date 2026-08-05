@@ -1011,6 +1011,36 @@ export class ManagedWorktreeService {
         ownerSessionIds: [...rec.ownerSessionIds],
       }
 
+      // Phase 2 lifecycle states are owned by the lifecycle service: startup
+      // reconciliation must never reclassify an in-flight or snapshot-backed
+      // transaction (a removed checkout of a snapshotted record is evidence of
+      // a completed removal, not a `missing` path). The lifecycle service
+      // classifies those records from the journal. These states exist only in
+      // V2, so no feature-flag gate is needed.
+      if (
+        rec.state === 'snapshotting' ||
+        rec.state === 'snapshotted' ||
+        rec.state === 'restoring' ||
+        rec.state === 'cleanup-failed' ||
+        rec.state === 'restore-failed'
+      ) {
+        continue
+      }
+      // V2 unowned records are owned by the lifecycle service (automatic
+      // cleanup); the V1 reclamation path below must not prune their
+      // branches.
+      if (rec.state === 'unowned') {
+        // Still reconcile owner references for the record itself.
+        const beforeOwners = rec.ownerSessionIds.length
+        const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
+        report.droppedOwnerRefs += beforeOwners - liveOwners.length
+        if (liveOwners.length !== beforeOwners) {
+          rec.ownerSessionIds = liveOwners
+          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+        }
+        continue
+      }
+
       // 1. Drop dead owner references.
       const beforeOwners = rec.ownerSessionIds.length
       const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
@@ -1067,7 +1097,8 @@ export class ManagedWorktreeService {
       // reached through any session, and nothing else removes one — so without
       // this it would sit on disk forever. Reachable when the removal step of a
       // session deletion is blocked or interrupted after the session is already
-      // gone (see the deletion ordering in SessionManager).
+      // gone (see the deletion ordering in SessionManager). V2 never uses this
+      // path: the lifecycle service owns unowned records and automatic cleanup.
       //
       // `removeWorktree` is reused rather than reimplemented so identity safety
       // cannot diverge between the two callers, and `force` is deliberately NOT

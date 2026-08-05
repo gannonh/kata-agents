@@ -39,6 +39,7 @@ import {
   openSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -209,13 +210,28 @@ export class WorktreeSnapshotService {
     const problems: string[] = []
     try {
       const gitDir = (
-        await runGit(['rev-parse', '--git-dir'], { cwd: checkoutPath })
+        await runGit(['rev-parse', '--path-format=absolute', '--git-dir'], { cwd: checkoutPath })
       ).stdout.trim()
       // An in-progress Git operation leaves an index lock in the per-worktree
       // git dir. Ref locks would also block the hidden-ref CAS later; both are
       // covered by this presence check.
       if (existsSync(join(resolvePath(gitDir), 'index.lock'))) {
         problems.push('a Git operation is in progress')
+      }
+      // Unresolved merge/rebase/cherry-pick/revert state is unsupported: the
+      // working tree carries operation metadata that a snapshot would silently
+      // lose on restore.
+      for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG']) {
+        if (existsSync(join(resolvePath(gitDir), marker))) {
+          problems.push(`an unresolved ${marker.replace('_HEAD', '').toLowerCase()} operation is in progress`)
+          break
+        }
+      }
+      for (const marker of ['rebase-merge', 'rebase-apply']) {
+        if (existsSync(join(resolvePath(gitDir), marker))) {
+          problems.push('a rebase is in progress')
+          break
+        }
       }
     } catch {
       problems.push('the checkout is not a readable Git worktree')
@@ -366,9 +382,11 @@ export class WorktreeSnapshotService {
             `Snapshot exceeds the capture limit (${this.limits.maxFiles} files / ${this.limits.maxBytes} bytes).`,
           )
         }
+        // Preserve the exact permission bits (mode-for-mode restore): Git
+        // modes are six octal digits, `10` prefix + perms for regular files.
         const entry: SnapshotFileEntry = {
           path: rel,
-          mode: stat.mode & 0o111 ? '100755' : '100644',
+          mode: `10${(stat.mode & 0o777).toString(8).padStart(4, '0')}`,
           size: stat.size,
           sha256: '',
           stored: null,
@@ -468,8 +486,28 @@ export class WorktreeSnapshotService {
         )
       }
       // Final read-back verification of the published payload.
-      const publishedManifest = JSON.parse(readFileSync(join(payloadPath, 'manifest.json'), 'utf8')) as WorktreeSnapshotManifest
-      if (this.manifestHash(publishedManifest) !== manifestHash) {
+      let published: WorktreeSnapshotManifest
+      try {
+        published = JSON.parse(readFileSync(join(payloadPath, 'manifest.json'), 'utf8')) as WorktreeSnapshotManifest
+      } catch (error) {
+        this.removeDir(payloadPath)
+        await runGit(['update-ref', '-d', hiddenRef, headOid], {
+          cwd: record.repositoryRoot,
+          okExitCodes: [1, 128],
+        })
+        throw new WorktreeSnapshotError(
+          'SNAPSHOT_VERIFY_FAILED',
+          `Published payload is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      if (this.manifestHash(published) !== manifestHash) {
+        // The publish is not trustworthy: remove the payload and CAS-delete
+        // the ref so no orphaned snapshot survives a failed capture.
+        this.removeDir(payloadPath)
+        await runGit(['update-ref', '-d', hiddenRef, headOid], {
+          cwd: record.repositoryRoot,
+          okExitCodes: [1, 128],
+        })
         throw new WorktreeSnapshotError('SNAPSHOT_VERIFY_FAILED', 'Published manifest hash differs from the prepared manifest.')
       }
 
@@ -520,6 +558,11 @@ export class WorktreeSnapshotService {
 
   /** Full payload verification against the record's snapshot metadata. */
   verifyPayload(meta: ManagedWorktreeSnapshotMeta): WorktreeSnapshotManifest {
+    // The payload path must live under this service's snapshot root: a forged
+    // or migrated record can never authorize reading outside server storage.
+    if (!isContained(resolvePath(this.snapshotsRoot), resolvePath(meta.payloadPath))) {
+      throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', 'Snapshot payload path escapes the snapshot root.')
+    }
     if (!existsSync(join(meta.payloadPath, 'manifest.json'))) {
       throw new WorktreeSnapshotError('SNAPSHOT_PAYLOAD_MISSING', 'Snapshot payload is missing its manifest.')
     }
@@ -548,6 +591,11 @@ export class WorktreeSnapshotService {
     }
     for (const entry of manifest.files) {
       if (!entry.stored) continue
+      // Stored names are opaque single-file leaf names; anything else is a
+      // forged manifest trying to read or write outside the payload.
+      if (entry.stored.includes('/') || entry.stored.includes('\\') || entry.stored === '..' || entry.stored.startsWith('.')) {
+        throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', `Snapshot stored name is unsafe: ${entry.stored}`)
+      }
       const stored = join(meta.payloadPath, 'files', entry.stored)
       if (!existsSync(stored) || hashFile(stored) !== entry.sha256) {
         throw new WorktreeSnapshotError('SNAPSHOT_VERIFY_FAILED', `Snapshot file hash mismatch: ${entry.path}`)
@@ -672,13 +720,17 @@ export class WorktreeSnapshotService {
       }
       createdWorktree = true
 
-      // Verify the fresh checkout identity before touching any content.
+      // Verify the fresh checkout identity before touching any content: same
+      // common directory, branch, and HEAD, AND the real path must stay inside
+      // the recorded materialization root (no-follow containment even when the
+      // root or destination was swapped through symlinks).
       const ctx = await this.checkoutContext(checkoutPath)
       if (
         !ctx.ok ||
         ctx.gitCommonDir !== resolvePath(record.gitCommonDir) ||
         ctx.branch !== meta.branch ||
-        ctx.headOid !== meta.headOid
+        ctx.headOid !== meta.headOid ||
+        !isContained(safeRealpathFor(record.materializationRoot), safeRealpathFor(checkoutPath))
       ) {
         throw new WorktreeSnapshotError(
           'SNAPSHOT_RESTORE_FAILED',
@@ -873,6 +925,14 @@ export class WorktreeSnapshotService {
     } catch {
       /* best-effort; retained payloads are verified before any retry */
     }
+  }
+}
+
+function safeRealpathFor(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return resolvePath(p)
   }
 }
 

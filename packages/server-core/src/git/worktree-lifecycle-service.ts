@@ -78,6 +78,7 @@ const DELETABLE_STATES = new Set<ManagedWorktreeState>([
   'unowned',
   'cleanup-failed',
   'restore-failed',
+  'missing',
 ])
 /** States restore may start from. */
 const RESTORABLE_STATES = new Set<ManagedWorktreeState>([
@@ -326,8 +327,11 @@ export class WorktreeLifecycleService {
     for (const record of records) {
       switch (record.state) {
         case 'ready':
+          counts.materialized += 1
+          break
         case 'unowned':
           counts.materialized += 1
+          counts.unowned += 1
           break
         case 'missing':
           counts.missing += 1
@@ -447,7 +451,7 @@ export class WorktreeLifecycleService {
     if (!record) {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
-    if (!DELETABLE_STATES.has(record.state) && record.state !== 'missing') {
+    if (!DELETABLE_STATES.has(record.state)) {
       throw new WorktreeLifecycleError(
         'LIFECYCLE_STATE_UNMANAGEABLE',
         `A worktree in state ${record.state} cannot be deleted; restore it or retry its failed step first.`,
@@ -464,16 +468,14 @@ export class WorktreeLifecycleService {
     }
 
     const policy = this.deps.settings.getSnapshot()
-    return this.hostLock.run(async () => {
-      const outcome = await this.runRemovalTransaction(record, {
-        expectedFingerprint: previewFingerprint,
-        policyVersion: policy.version,
-        journalOp: 'delete',
-        requireQuiesce: true,
-      })
-      if (!outcome.ok) return outcome.result
-      return { deleted: true, state: 'snapshotted', snapshotId: outcome.snapshotId }
+    const outcome = await this.runRemovalTransaction(record, {
+      expectedFingerprint: previewFingerprint,
+      policyVersion: policy.version,
+      journalOp: 'delete',
+      requireQuiesce: true,
     })
+    if (!outcome.ok) return outcome.result
+    return { deleted: true, state: 'snapshotted', snapshotId: outcome.snapshotId }
   }
 
   private async removeMissingRecord(record: ManagedWorktreeRecordV2): Promise<WorktreeDeleteResult> {
@@ -487,6 +489,11 @@ export class WorktreeLifecycleService {
       })
       this.deps.journal.step(journalEntry.journalId, 'missing-verified')
       this.deps.registry.remove(record.managedWorktreeId)
+      // The confirmed removal releases every owner lease; their sessions are
+      // now unfenced (the record is gone) and can rebind or delete.
+      for (const owner of record.ownerSessionIds) {
+        this.deps.leases.releaseSession(owner)
+      }
       this.deps.journal.commit(journalEntry.journalId, 'record-removed')
       return { deleted: true, state: 'missing' }
     })
@@ -516,59 +523,99 @@ export class WorktreeLifecycleService {
     const policy = this.deps.settings.getSnapshot()
     const meta = record.snapshot
 
-    return this.hostLock.run(async () => {
-      const journalEntry = this.deps.journal.begin({
-        op: 'restore',
-        recordId: record.managedWorktreeId,
-        sessionIds: record.ownerSessionIds,
-        policyVersion: policy.version,
-      })
-      try {
+    // One lifecycle scope: host lock → common-directory mutation lock (same
+    // order as removal/creation), registry lock per state transition.
+    return this.hostLock.run(() =>
+      this.deps.mutationLock.withLock(record.gitCommonDir, async () => {
+        const journalEntry = this.deps.journal.begin({
+          op: 'restore',
+          recordId: record.managedWorktreeId,
+          sessionIds: record.ownerSessionIds,
+          policyVersion: policy.version,
+        })
+        try {
           this.deps.journal.step(journalEntry.journalId, 'locks-acquired')
-        const destination = this.buildRestoreDestination(record)
-        this.deps.journal.step(journalEntry.journalId, 'destination-validated')
-        const restored = await this.deps.snapshots.restore({ record, meta, checkoutPath: destination })
-        this.deps.journal.step(journalEntry.journalId, 'state-restored')
+          // Durable in-flight marker before any checkout mutation, so a crash
+          // is classified as an interrupted restore, never a ready record.
+          await this.deps.registry.runExclusive(async (tx) => {
+            const current = tx.get(record.managedWorktreeId)
+            if (!current || current.state !== record.state) {
+              throw new WorktreeLifecycleError('LIFECYCLE_STATE_UNMANAGEABLE', 'The worktree state changed; re-inspect it.')
+            }
+            current.state = 'restoring'
+            current.lastError = undefined
+            current.stateChangedAt = Date.now()
+            tx.commit()
+          })
+          this.deps.journal.step(journalEntry.journalId, 'registry-restoring')
+          const destination = this.buildRestoreDestination(record)
+          this.deps.journal.step(journalEntry.journalId, 'destination-validated')
+          const restored = await this.deps.snapshots.restore({ record, meta, checkoutPath: destination })
+          this.deps.journal.step(journalEntry.journalId, 'state-restored')
 
-        const readyRecord: ManagedWorktreeRecordV2 = {
-          ...record,
-          state: 'ready',
-          checkoutPath: restored.checkoutPath,
-          lastUsedAt: Date.now(),
-          lastError: undefined,
-          snapshot: undefined,
-          stateChangedAt: Date.now(),
-        }
-        await this.deps.registry.runExclusive(async (tx) => {
-          const current = tx.get(record.managedWorktreeId)
-          if (!current) throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record disappeared during restore.')
-          Object.assign(current, readyRecord)
-          tx.commit()
-        })
-        await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
-          managedWorktreeId: record.managedWorktreeId,
-          state: 'ready',
-          checkoutPath: restored.checkoutPath,
-        })
-        // Re-lease every owner to the restored path so lifecycle decisions see
-        // the full fence set at the live checkout.
-        for (const owner of record.ownerSessionIds) {
-          this.deps.leases.releaseSession(owner)
-          this.deps.leases.lease(owner, restored.checkoutPath)
-        }
-        this.deps.journal.commit(journalEntry.journalId, 'registry-sessions-committed')
+          // Commit #1: ready record + owner sessions through the journal. The
+          // snapshot metadata is retained until the payload and hidden ref are
+          // provably gone, so a post-commit failure can never orphan a
+          // restorable payload behind a record that no longer references it.
+          const readyRecord: ManagedWorktreeRecordV2 = {
+            ...record,
+            state: 'ready',
+            checkoutPath: restored.checkoutPath,
+            lastUsedAt: Date.now(),
+            lastError: undefined,
+            stateChangedAt: Date.now(),
+          }
+          await this.deps.registry.runExclusive(async (tx) => {
+            const current = tx.get(record.managedWorktreeId)
+            if (!current) throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record disappeared during restore.')
+            Object.assign(current, readyRecord)
+            tx.commit()
+          })
+          await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
+            managedWorktreeId: record.managedWorktreeId,
+            state: 'ready',
+            checkoutPath: restored.checkoutPath,
+          })
+          // Re-lease every owner to the restored path so lifecycle decisions see
+          // the full fence set at the live checkout.
+          for (const owner of record.ownerSessionIds) {
+            this.deps.leases.releaseSession(owner)
+            this.deps.leases.lease(owner, restored.checkoutPath)
+          }
+          this.deps.journal.commit(journalEntry.journalId, 'registry-sessions-committed')
 
-        // Only after the commit: remove the payload and CAS-delete the ref.
-        this.deps.snapshots.removePayload(meta)
-        await this.deps.snapshots.casDeleteRef(record.repositoryRoot, meta)
-        return { restored: true, state: 'ready', checkoutPath: restored.checkoutPath }
-      } catch (error) {
-        const sanitized = sanitizeError(error)
-        this.deps.journal.fail(journalEntry.journalId, sanitized)
-        await this.recordFailure(record.managedWorktreeId, 'restore-failed', sanitized)
-        return { restored: false, state: 'restore-failed', error: sanitized }
-      }
-    })
+          // Only after the commit: remove the payload and CAS-delete the ref.
+          this.deps.snapshots.removePayload(meta)
+          await this.deps.snapshots.casDeleteRef(record.repositoryRoot, meta)
+          // Commit #2: drop the snapshot reference now that the payload and
+          // hidden ref are provably gone. On failure the record stays `ready`
+          // with snapshot metadata and startup reconciliation retries cleanup.
+          try {
+            await this.deps.registry.runExclusive(async (tx) => {
+              const current = tx.get(record.managedWorktreeId)
+              if (!current) return
+              current.snapshot = undefined
+              tx.commit()
+            })
+          } catch {
+            /* reconciliation retries the snapshot cleanup */
+          }
+          return { restored: true, state: 'ready', checkoutPath: restored.checkoutPath }
+        } catch (error) {
+          const sanitized = sanitizeError(error)
+          this.deps.journal.fail(journalEntry.journalId, sanitized)
+          const current = this.getRecord(record.managedWorktreeId)
+          // A post-commit failure leaves the record ready (restore succeeded;
+          // only snapshot cleanup is pending). Pre-commit failures keep the
+          // snapshot metadata so retry can restore again.
+          const committed = current?.state === 'ready'
+          if (!committed) {
+            await this.recordFailure(record.managedWorktreeId, 'restore-failed', sanitized)
+          }
+          return { restored: committed, state: committed ? 'ready' : 'restore-failed', error: sanitized }
+        }
+      }),
+    )
   }
 
   /**
@@ -619,14 +666,12 @@ export class WorktreeLifecycleService {
       }
       // No snapshot yet: re-run the full snapshot-first removal.
       const policy = this.deps.settings.getSnapshot()
-      const outcome = await this.hostLock.run(() =>
-        this.runRemovalTransaction(record, {
-          expectedFingerprint: null,
-          policyVersion: policy.version,
-          journalOp: 'delete',
-          requireQuiesce: true,
-        }),
-      )
+      const outcome = await this.runRemovalTransaction(record, {
+        expectedFingerprint: null,
+        policyVersion: policy.version,
+        journalOp: 'delete',
+        requireQuiesce: true,
+      })
       if (!outcome.ok) return { retried: false, state: record.state, error: outcome.result.error }
       return { retried: true, state: 'snapshotted' }
     }
@@ -775,15 +820,13 @@ export class WorktreeLifecycleService {
       }
     }
     const policy = this.deps.settings.getSnapshot()
-    const outcome = await this.hostLock.run(() =>
-      this.runRemovalTransaction(record, {
-        expectedFingerprint: null,
-        policyVersion: policy.version,
-        journalOp: 'session-delete',
-        requireQuiesce: false,
-        droppingSessions: [input.sessionId],
-      }),
-    )
+    const outcome = await this.runRemovalTransaction(record, {
+      expectedFingerprint: null,
+      policyVersion: policy.version,
+      journalOp: 'session-delete',
+      requireQuiesce: false,
+      droppingSessions: [input.sessionId],
+    })
     if (!outcome.ok) return { outcome: 'blocked', reason: outcome.result.error ?? 'Removal failed.', reasonCode: 'agent_not_quiesced' }
     return { outcome: 'removed' }
   }
@@ -794,13 +837,16 @@ export class WorktreeLifecycleService {
 
   /**
    * Coalescing enqueue: one sweep runs at a time; callers await the sweep that
-   * covers their enqueue.
+   * covers their enqueue. The finally-chain resets the slot only when the
+   * original sweep settles, so later events always start a fresh sweep.
    */
   enqueueCleanup(): Promise<WorktreeCleanupResult> {
-    const running = this.sweepRunning ?? this.runCleanupSweep()
-    this.sweepRunning = running.finally(() => {
-      if (this.sweepRunning === running) this.sweepRunning = null
-    })
+    if (!this.sweepRunning) {
+      const sweep = this.runCleanupSweep()
+      this.sweepRunning = sweep.finally(() => {
+        if (this.sweepRunning === sweep) this.sweepRunning = null
+      })
+    }
     return this.sweepRunning
   }
 
@@ -972,6 +1018,27 @@ export class WorktreeLifecycleService {
       droppingSessions?: string[]
     },
   ): Promise<{ ok: true; snapshotId: string } | { ok: false; result: WorktreeDeleteResult }> {
+    // Every destructive transaction enters one lifecycle scope: the host
+    // lifecycle lock (per server), then the common-directory mutation lock, and
+    // the registry lock per state transition — in the same order creation uses
+    // (mutation → registry), so no lock cycle is possible.
+    return this.hostLock.run(() =>
+      this.deps.mutationLock.withLock(record.gitCommonDir, () =>
+        this.runRemovalTransactionLocked(record, options),
+      ),
+    )
+  }
+
+  private async runRemovalTransactionLocked(
+    record: ManagedWorktreeRecordV2,
+    options: {
+      expectedFingerprint: string | null
+      policyVersion: number
+      journalOp: 'delete' | 'session-delete' | 'cleanup'
+      requireQuiesce: boolean
+      droppingSessions?: string[]
+    },
+  ): Promise<{ ok: true; snapshotId: string } | { ok: false; result: WorktreeDeleteResult }> {
     const managedWorktreeId = record.managedWorktreeId
     const ownerSet = new Set(record.ownerSessionIds)
     const journalEntry = this.deps.journal.begin({
@@ -1003,14 +1070,19 @@ export class WorktreeLifecycleService {
           return fail('LIFECYCLE_NOT_QUIESCED', 'An owning agent runtime could not be quiesced.')
         }
       }
-        this.deps.journal.step(journalEntry.journalId, 'quiesced')
+      this.deps.journal.step(journalEntry.journalId, 'quiesced')
 
-      // Revalidate the fingerprint immediately before capture.
+      // Revalidate the fingerprint immediately before capture. Automatic and
+      // session-delete transactions have no client confirmation, so a stable
+      // pre-capture fingerprint is recorded and rechecked after capture.
+      let stabilityFingerprint: string | null = null
       if (options.expectedFingerprint) {
         const fresh = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         if (fresh !== options.expectedFingerprint) {
           return fail('LIFECYCLE_PREVIEW_STALE', 'The worktree changed after the confirmation; inspect it again.')
         }
+      } else {
+        stabilityFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
       }
       this.deps.journal.step(journalEntry.journalId, 'fingerprint-validated')
 
@@ -1026,7 +1098,7 @@ export class WorktreeLifecycleService {
         current.stateChangedAt = Date.now()
         tx.commit()
       })
-        this.deps.journal.step(journalEntry.journalId, 'registry-snapshotting')
+      this.deps.journal.step(journalEntry.journalId, 'registry-snapshotting')
 
       // Capture (skipped when a verified snapshot already exists).
       let meta: ManagedWorktreeSnapshotMeta | null = null
@@ -1044,7 +1116,7 @@ export class WorktreeLifecycleService {
         const captured = await this.deps.snapshots.capture({
           record: { ...record, state: 'snapshotting' },
           finalFingerprint,
-          previewFingerprint: options.expectedFingerprint ?? finalFingerprint,
+          previewFingerprint: options.expectedFingerprint ?? stabilityFingerprint ?? finalFingerprint,
           policyVersion: options.policyVersion,
         })
         meta = captured.meta
@@ -1063,13 +1135,23 @@ export class WorktreeLifecycleService {
         current.stateChangedAt = Date.now()
         tx.commit()
       })
-        this.deps.journal.step(journalEntry.journalId, 'registry-snapshotted')
+      this.deps.journal.step(journalEntry.journalId, 'registry-snapshotted')
 
       // Final post-quiescence fingerprint immediately before source release.
       if (options.expectedFingerprint) {
         const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         if (finalFingerprint !== options.expectedFingerprint) {
           throw new WorktreeLifecycleError('LIFECYCLE_PREVIEW_STALE', 'The worktree changed during capture; nothing was removed.')
+        }
+      } else if (stabilityFingerprint) {
+        // Automatic/session-delete transactions have no client confirmation:
+        // the checkout must be byte-identical to the pre-capture inspection.
+        const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
+        if (finalFingerprint !== stabilityFingerprint) {
+          throw new WorktreeLifecycleError(
+            'LIFECYCLE_PREVIEW_STALE',
+            'The worktree changed while it was being captured; nothing was removed.',
+          )
         }
       }
       this.deps.journal.step(journalEntry.journalId, 'fingerprint-final')
@@ -1082,16 +1164,15 @@ export class WorktreeLifecycleService {
       }
       this.deps.journal.step(journalEntry.journalId, 'checkout-removed')
 
-      // Drop sessions being deleted from the owner set; owners of a manually
-      // deleted worktree remain attached (fenced) until restore/permanent
-      // delete resolves them.
-      const remainingOwners = options.droppingSessions
-        ? record.ownerSessionIds.filter((owner) => !options.droppingSessions!.includes(owner))
-        : record.ownerSessionIds
+      // Drop sessions being deleted from the owner set. The owner set is
+      // re-read under the registry lock: the record was not `ready` throughout
+      // the transaction, so no new owner can have bound since the snapshot was
+      // taken, but the write must never overwrite a fresher set.
       await this.deps.registry.runExclusive(async (tx) => {
         const current = tx.get(managedWorktreeId)
         if (!current) return
-        current.ownerSessionIds = remainingOwners
+        const dropping = new Set(options.droppingSessions ?? [])
+        current.ownerSessionIds = current.ownerSessionIds.filter((owner) => !dropping.has(owner))
         current.stateChangedAt = Date.now()
         tx.commit()
       })
@@ -1123,9 +1204,22 @@ export class WorktreeLifecycleService {
     const inProgress = this.deps.journal.inProgress()
     for (const entry of inProgress) {
       const record = this.getRecord(entry.recordId)
-      const snapshotExists = record?.snapshot
-        ? existsSync(join(record.snapshot.payloadPath, 'manifest.json'))
-        : false
+      let snapshotVerified = false
+      let refVerified = false
+      if (record?.snapshot) {
+        try {
+          this.deps.snapshots.verifyPayload(record.snapshot)
+          snapshotVerified = true
+        } catch {
+          snapshotVerified = false
+        }
+        try {
+          await this.deps.snapshots.verifyHiddenRef(record.repositoryRoot, record.snapshot)
+          refVerified = true
+        } catch {
+          refVerified = false
+        }
+      }
       const checkoutGone = record ? !existsSync(record.checkoutPath) : true
       const branchStillThere = record
         ? await this.refExists(record.repositoryRoot, `refs/heads/${record.expectedBranch}`)
@@ -1146,14 +1240,15 @@ export class WorktreeLifecycleService {
           report.recovered += 1
           continue
         }
-        if (record && record.state === 'snapshotted' && snapshotExists && checkoutGone) {
+        if (record && record.state === 'snapshotted' && snapshotVerified && refVerified && checkoutGone) {
           // Capture + removal completed; only the journal commit was lost.
           this.deps.journal.recover(entry.journalId, 'delete-completed')
           report.resumed += 1
           continue
         }
-        if (record && record.state === 'snapshotted' && snapshotExists && !checkoutGone) {
-          // Removal did not complete; resume it idempotently.
+        if (record && record.state === 'snapshotted' && snapshotVerified && !checkoutGone) {
+          // Removal did not complete; resume it idempotently. The hidden ref
+          // pins the captured HEAD, so releasing the checkout is safe.
           const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
           if (released) {
             this.deps.journal.recover(entry.journalId, 'checkout-removed')
@@ -1178,26 +1273,52 @@ export class WorktreeLifecycleService {
       }
       if (entry.op === 'restore') {
         if (record && record.state === 'ready' && entry.steps.includes('state-restored')) {
-          // Restore completed through the registry commit; finish the journal.
+          // Restore completed through the registry commit; finish the journal
+          // and clean up the retained snapshot (payload + hidden ref) if the
+          // post-commit cleanup never ran.
+          if (record.snapshot) {
+            try {
+              this.deps.snapshots.removePayload(record.snapshot)
+              await this.deps.snapshots.casDeleteRef(record.repositoryRoot, record.snapshot)
+              const cleared = this.getRecord(record.managedWorktreeId)
+              if (cleared?.snapshot) {
+                const next: ManagedWorktreeRecordV2 = { ...cleared, snapshot: undefined }
+                this.deps.registry.upsert(next)
+              }
+            } catch {
+              /* retained for a later retry; the record stays ready */
+            }
+          }
           this.deps.journal.recover(entry.journalId, 'restore-completed')
           report.resumed += 1
           continue
         }
-        if (record && record.state === 'restoring') {
-          const reverted: ManagedWorktreeRecordV2 = {
-            ...record,
-            state: 'restore-failed',
-            lastError: 'Interrupted restore; retry it.',
-            stateChangedAt: Date.now(),
+        if (record && (record.state === 'restoring' || record.state === 'restore-failed')) {
+          // Interrupted restore: the snapshot is intact and the attempt-created
+          // artifacts were already removed by the restore compensation. Keep
+          // the payload/ref and mark the step failed for an explicit retry.
+          if (record.state === 'restoring') {
+            const reverted: ManagedWorktreeRecordV2 = {
+              ...record,
+              state: 'restore-failed',
+              lastError: 'Interrupted restore; retry it.',
+              stateChangedAt: Date.now(),
+            }
+            this.deps.registry.upsert(reverted)
           }
-          this.deps.registry.upsert(reverted)
           this.deps.journal.recover(entry.journalId, 'restore-interrupted')
           report.recovered += 1
         }
         continue
       }
       if (entry.op === 'permanent-delete') {
-        if (!record && entry.steps.includes('payload-removed')) {
+        if (record && entry.steps.includes('payload-removed')) {
+          // The payload and hidden ref are gone; only the record removal is
+          // pending. Complete it with the journal evidence.
+          this.deps.registry.remove(entry.recordId)
+          this.deps.journal.recover(entry.journalId, 'permanent-delete-completed')
+          report.resumed += 1
+        } else if (!record && entry.steps.includes('payload-removed')) {
           this.deps.journal.recover(entry.journalId, 'permanent-delete-completed')
           report.resumed += 1
         }

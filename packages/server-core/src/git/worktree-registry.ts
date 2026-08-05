@@ -283,8 +283,8 @@ function validateSnapshotMeta(value: unknown, registryPath: string): ManagedWork
     throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot schemaVersion must be a positive integer.', registryPath)
   }
   const hiddenRef = requireString(value.hiddenRef, 'snapshot.hiddenRef', registryPath)
-  if (!hiddenRef.startsWith('refs/kata/worktree-snapshots/')) {
-    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot hiddenRef must live under refs/kata/worktree-snapshots/.', registryPath)
+  if (hiddenRef !== `refs/kata/worktree-snapshots/${snapshotId}`) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot hiddenRef must match its snapshot ID.', registryPath)
   }
   const headOid = value.headOid
   if (!isHexOid(headOid)) {

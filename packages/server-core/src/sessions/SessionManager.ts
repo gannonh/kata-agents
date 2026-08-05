@@ -5364,7 +5364,7 @@ export class SessionManager implements ISessionManager {
           if (!managed) continue
           // Persist the recovery state (and the restored checkout path) on the
           // session's checkout so the UI and runtime use the live path even
-          // before the next inventory fetch.
+          // before the next inventory fetch. Mirrors bindCheckout persistence.
           const checkout = managed.checkout
           if (checkout?.mode !== 'managed-worktree') continue
           const recoveryState =
@@ -5374,8 +5374,13 @@ export class SessionManager implements ISessionManager {
             checkoutPath: record.checkoutPath ?? checkout.checkoutPath,
             recoveryState,
           }
-          managed.workingDirectory = record.checkoutPath ?? managed.workingDirectory
-          managed.sdkCwd = record.checkoutPath ?? managed.sdkCwd
+          if (record.checkoutPath) {
+            managed.workingDirectory = record.checkoutPath
+            managed.sdkCwd = record.checkoutPath
+            managed.agent?.updateWorkingDirectory(record.checkoutPath)
+            managed.agent?.updateSdkCwd(record.checkoutPath)
+          }
+          this.persistSession(managed)
           await this.flushSession(sessionId)
         }
       },
@@ -5786,6 +5791,43 @@ export class SessionManager implements ISessionManager {
       throw new Error('Git workspace feature is not enabled.')
     }
     const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    // V2 never calls branch-pruning V1 removal: the legacy RPC routes through
+    // the lifecycle service with a fresh preview fingerprint, so removal is
+    // snapshot-first and the branch is always retained.
+    if (isWorktreeV2Enabled()) {
+      const git = this.getGitServices()
+      const preview = await git.lifecycle.preview(managedWorktreeId)
+      if (preview.blocked) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: preview.blockedReason ?? 'The worktree cannot be removed right now.',
+        }
+      }
+      if (
+        !options?.force &&
+        (preview.uncommittedFileCount > 0 || preview.branchHasUniqueWork)
+      ) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'Worktree has uncommitted or unique work. Confirm destructive removal to proceed.',
+        }
+      }
+      const result = await git.lifecycle.deleteWorktree(managedWorktreeId, preview.previewFingerprint)
+      if (!result.deleted) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: result.error ?? 'Removal failed.',
+        }
+      }
+      return { removed: true, branchPruned: false, blocked: false }
+    }
     return this.getGitServices().worktrees.removeWorktree(managedWorktreeId, sessionId, options)
   }
 

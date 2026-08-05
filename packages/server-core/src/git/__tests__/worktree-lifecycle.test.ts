@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices, WorktreeLifecycleError } from '../index'
 import type { GitServices } from '../index'
@@ -704,3 +704,114 @@ describe('missing-record handling', () => {
   })
 })
 
+
+describe('review-fix regressions', () => {
+  test('startup reconciliation never reclassifies snapshot-backed states', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    // Delete snapshot-first, leaving a snapshotted record with no checkout.
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+
+    // Reconcile must keep the lifecycle-owned state, never classify the
+    // removed checkout as `missing`.
+    await svc.worktrees.reconcile({ knownSessionIds: new Set(['session-1']) })
+    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(after.state).toBe('snapshotted')
+    expect(after.snapshot).toBeTruthy()
+  })
+
+  test('a write during capture blocks automatic removal (stability fingerprint)', async () => {
+    harness = makeHarness(1)
+    await initRepo(harness.repo)
+    harness.svc.lifecycle.markReady()
+    const svc = harness.svc
+    const first = await makeManagedWorktree('first', ['s1'])
+    const second = await makeManagedWorktree('second', ['s2'])
+    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 5000)
+
+    // Simulate an external writer racing the sweep: capture is intercepted by
+    // recomputing the fingerprint after capture started. Use a hook that writes
+    // into the checkout when the snapshot service starts capture.
+    const originalCapture = svc.snapshots.capture.bind(svc.snapshots)
+    svc.snapshots.capture = (async (input: Parameters<typeof originalCapture>[0]) => {
+      writeFileSync(join(first.checkoutPath, 'race.txt'), 'external write\n')
+      return originalCapture(input)
+    }) as typeof originalCapture
+
+    const result = await svc.lifecycle.runCleanupSweep()
+    expect(result.removedWorktreeId).toBeUndefined()
+    // The racing write is detected: the candidate's removal failed and the
+    // failure is persisted (cleanup-failed) with the checkout intact.
+    const after = svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(after.state).toBe('cleanup-failed')
+    expect(after.lastError).toContain('changed')
+    expect(existsSync(join(first.checkoutPath, 'race.txt'))).toBe(true)
+  })
+
+  test('restore persists the restoring state before touching the checkout', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    // Intercept restore: the state must already be `restoring` when the
+    // snapshot service starts restoring.
+    const originalRestore = svc.snapshots.restore.bind(svc.snapshots)
+    const observed: { state: string | null } = { state: null }
+    svc.snapshots.restore = (async (input: Parameters<typeof originalRestore>[0]) => {
+      observed.state = (svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state
+      return originalRestore(input)
+    }) as typeof originalRestore
+
+    await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
+    expect(observed.state).toBe('restoring')
+    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+  })
+
+  test('inventory counts unowned records separately', async () => {
+    harness = makeHarness(2)
+    await initRepo(harness.repo)
+    harness.svc.lifecycle.markReady()
+    const svc = harness.svc
+    const record = await makeManagedWorktree('feature-x', ['session-1'])
+    await makeManagedWorktree('other', ['session-9'])
+    // Disable auto-delete so the enqueued sweep does not remove the record.
+    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
+    await svc.lifecycle.detachSession('session-1')
+
+    const inventory = svc.lifecycle.inventory()
+    expect(inventory.counts.unowned).toBe(1)
+    expect(inventory.counts.materialized).toBe(2)
+    expect(inventory.rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)?.state).toBe('unowned')
+  })
+
+  test('a completed sweep releases the enqueue slot for later events', async () => {
+    const { svc } = harness
+    await makeManagedWorktree('feature-x')
+    const first = await svc.lifecycle.enqueueCleanup()
+    // Under the limit there is nothing to remove; the sweep still completes
+    // and records its result.
+    expect(['blocked', 'skipped']).toContain(first.outcome)
+    // A second enqueue must run a NEW sweep, not reuse the resolved promise.
+    const second = await svc.lifecycle.enqueueCleanup()
+    expect(second).toBeDefined()
+    expect(svc.lifecycle.inventory().lastCleanupResult?.at).toBeGreaterThanOrEqual(first.at)
+  })
+
+  test('removing a missing record releases owner leases', async () => {
+    const { repo, svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    const { rmSync } = await import('node:fs')
+    rmSync(record.checkoutPath, { recursive: true, force: true })
+    await git(repo, ['worktree', 'prune'])
+    await svc.worktrees.reconcile({ knownSessionIds: new Set(['session-1']) })
+
+    await svc.lifecycle.deleteWorktree(record.managedWorktreeId, 'irrelevant')
+    expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
+  })
+})

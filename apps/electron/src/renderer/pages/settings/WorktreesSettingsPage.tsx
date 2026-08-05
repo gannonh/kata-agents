@@ -109,12 +109,11 @@ function formatBytes(bytes: number | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
 }
 
-/** Lifecycle states that allow snapshot-first deletion. */
+/** Lifecycle states that allow snapshot-first deletion from the UI. Failed
+ * states use Retry/Restore instead (their preview carries no fingerprint). */
 const DELETABLE_STATES = new Set<ManagedWorktreeState>([
   'ready',
   'unowned',
-  'cleanup-failed',
-  'restore-failed',
   'missing',
 ])
 /** States whose recovery path is restore. */
@@ -275,21 +274,26 @@ export default function WorktreesSettingsPage() {
 
   const loadInventory = useCallback(async () => {
     if (!selectedTarget) return
+    const targetKey = selectedTarget.key
     setIsLoadingInventory(true)
     try {
       const next = await invokeTarget(
         selectedTarget,
         RPC_CHANNELS.git.WORKTREE_INVENTORY,
       ) as WorktreeInventory
+      // A target switch while the request was in flight must not apply this
+      // server's inventory to another server's page state.
+      if (selectedTargetKey !== targetKey) return
       setInventory(next)
     } catch (err) {
+      if (selectedTargetKey !== targetKey) return
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
       toast.error(t('settings.worktrees.inventoryFailed'), { description: message })
     } finally {
-      setIsLoadingInventory(false)
+      if (selectedTargetKey === targetKey) setIsLoadingInventory(false)
     }
-  }, [selectedTarget, t])
+  }, [selectedTarget, selectedTargetKey, t])
 
   useEffect(() => {
     if (!selectedTarget) return
@@ -339,9 +343,12 @@ export default function WorktreesSettingsPage() {
   }, [isLoadingSettings, selectedTarget, t])
 
   const handleReset = useCallback(() => {
+    if (!snapshot) return
     setRoot(savedRoot)
+    setAutoDeleteEnabled(snapshot.autoDeleteEnabled)
+    setRetentionLimit(snapshot.retentionLimit)
     setError(null)
-  }, [savedRoot])
+  }, [savedRoot, snapshot])
 
   const runRowAction = useCallback(
     async (row: WorktreeInventoryRow, action: () => Promise<unknown>) => {
@@ -365,6 +372,7 @@ export default function WorktreesSettingsPage() {
   const handleDeleteClick = useCallback(
     async (row: WorktreeInventoryRow) => {
       if (!selectedTarget) return
+      const targetKey = selectedTarget.key
       setBusyRowId(row.managedWorktreeId)
       setError(null)
       try {
@@ -373,16 +381,20 @@ export default function WorktreesSettingsPage() {
           RPC_CHANNELS.git.WORKTREE_PREVIEW,
           row.managedWorktreeId,
         ) as WorktreePreviewResult
+        // The preview belongs to the target it was fetched from; never present
+        // it as a confirmation for a different server.
+        if (selectedTargetKey !== targetKey) return
         setConfirmDelete({ row, preview })
       } catch (err) {
+        if (selectedTargetKey !== targetKey) return
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         toast.error(t('settings.worktrees.previewFailed'), { description: message })
       } finally {
-        setBusyRowId(null)
+        if (selectedTargetKey === targetKey) setBusyRowId(null)
       }
     },
-    [selectedTarget, t],
+    [selectedTarget, selectedTargetKey, t],
   )
 
   const confirmDeleteAction = useCallback(async () => {

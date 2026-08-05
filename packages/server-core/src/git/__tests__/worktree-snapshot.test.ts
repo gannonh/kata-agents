@@ -663,4 +663,3 @@ describe('computeWorktreeFingerprint', () => {
     expect(await fingerprint(record)).toBe(afterStaged)
   })
 })
-
