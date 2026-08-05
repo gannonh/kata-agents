@@ -1,14 +1,18 @@
 import { access, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 
 import { E2E_TAGS } from "../../src/config/tags.ts";
+import { completeDeferredSetup } from "../../src/flows/onboarding.ts";
 import { startNewSession } from "../../src/flows/agentChat.ts";
 import {
   readManagedWorktreeSessions,
   useRepositoryAsWorkspaceDefault,
 } from "../../src/flows/gitWorkspace.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
+import { buildElectronLaunchEnv } from "../../src/harness/launchEnv.ts";
+import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 
 process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = "1";
 process.env.KATA_FEATURE_WORKTREE_V2 = "1";
@@ -34,6 +38,33 @@ async function createRepository(): Promise<string> {
   return repository;
 }
 
+/** Restart the Electron process while retaining the fixture's Vite server/config. */
+async function restartElectron(
+  current: ElectronApplication,
+  context: E2ERunContext,
+): Promise<{ app: ElectronApplication; page: Page }> {
+  await current.close();
+  const env = Object.fromEntries(
+    Object.entries(buildElectronLaunchEnv(context)).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string",
+    ),
+  );
+  const app = await electron.launch({
+    args: [join(context.repoRoot, "apps/electron")],
+    cwd: context.repoRoot,
+    env,
+  });
+  const page = await app.firstWindow();
+  await completeDeferredSetup(page);
+  // The renderer can retain a completed splash transition across a process
+  // restart, so assert the ready shell's stable New Session control instead of
+  // relying on the one-shot #app-ready marker.
+  await expect(page.locator("body")).toContainText("New Session", {
+    timeout: 30_000,
+  });
+  return { app, page };
+}
+
 async function deleteManagedSessions(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(async () => {
     const api = (window as unknown as {
@@ -56,8 +87,12 @@ async function deleteManagedSessions(page: import("@playwright/test").Page): Pro
 
 test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
   test("creates a named worktree, changes the server root, and recovers both paths after restart @worktree-v2 name root", async ({
-    authenticatedAppWindow: page,
+    authenticatedAppWindow: initialPage,
+    launchedApp,
+    runContext,
   }) => {
+    let page = initialPage;
+    let restartedApp: ElectronApplication | undefined;
     const repository = await createRepository();
     const customRoot = await mkdtemp(join(tmpdir(), "kata-agents-worktree-v2-root-"));
 
@@ -104,6 +139,7 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       await page.getByTestId("git-workspace-new-worktree").click();
       await page.getByTestId("git-workspace-name").fill("custom-root");
       await page.getByTestId("git-workspace-create").click();
+      await expect(page.getByTestId("git-workspace-identity")).toContainText("custom-root");
 
       const sessions = await readManagedWorktreeSessions(page);
       const second = sessions.find((session) => session.checkout.displayName === "custom-root");
@@ -114,10 +150,9 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       expect(second.checkout.checkoutPath.startsWith(canonicalRoot)).toBe(true);
       await access(second.checkout.checkoutPath);
 
-      await page.evaluate(async () => {
-        await (window as unknown as { electronAPI: { relaunchApp(): Promise<void> } }).electronAPI.relaunchApp();
-      });
-      await expect(page.locator("#app-ready")).toBeVisible({ timeout: 30_000 });
+      const restarted = await restartElectron(launchedApp.electronApp, runContext);
+      restartedApp = restarted.app;
+      page = restarted.page;
 
       const recovered = await readManagedWorktreeSessions(page);
       expect(recovered).toEqual(
@@ -147,6 +182,7 @@ test.describe(`Worktree V2 name and root ${E2E_TAGS.worktreeV2}`, () => {
       expect(statusPaths).toEqual(expect.arrayContaining(recovered.map((session) => session.checkout.checkoutPath)));
     } finally {
       await deleteManagedSessions(page).catch(() => undefined);
+      await restartedApp?.close().catch(() => undefined);
       await rm(repository, { recursive: true, force: true });
       await rm(customRoot, { recursive: true, force: true });
     }
