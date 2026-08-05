@@ -1,41 +1,268 @@
 /**
- * Mutation lock keyed by Git common directory.
+ * Cross-process mutation locks.
  *
  * Linked worktrees share one Git common directory, so concurrent Kata-issued
- * mutations can race on shared Git metadata. This serializes mutations per
- * common directory while allowing read-only status/diff operations to run
- * concurrently (they simply don't acquire the lock).
+ * mutations can race on shared Git metadata.  A process-local promise chain is
+ * not enough when two server processes own the same filesystem, therefore the
+ * tail of every chain also takes an OS-visible mkdir lock.  Lock directories
+ * are kept under server/config storage (never in the repository itself).
  */
 
-import { resolve as resolvePath } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve as resolvePath } from 'node:path'
+import { randomBytes, createHash } from 'node:crypto'
+import { CONFIG_DIR } from '@kata-sh/shared/config/paths'
 
+export interface CrossProcessLockOptions {
+  /** Maximum time to wait before reporting a lock timeout. */
+  timeoutMs?: number
+  /** Delay between attempts to acquire an already-held lock. */
+  retryDelayMs?: number
+  /** Age after which an owner that cannot be inspected is recoverable. */
+  staleAfterMs?: number
+}
+
+interface LockOwner {
+  token: string
+  pid: number
+  acquiredAt: number
+}
+
+const DEFAULT_TIMEOUT_MS = 60_000
+const DEFAULT_RETRY_DELAY_MS = 10
+const DEFAULT_STALE_AFTER_MS = 30_000
+
+function sleepSync(ms: number): void {
+  // Public registry methods are synchronous. Atomics.wait provides a bounded
+  // sleep without a busy loop while another process owns the lock.
+  const signal = new Int32Array(new SharedArrayBuffer(4))
+  Atomics.wait(signal, 0, 0, ms)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function processIsAlive(pid: number): boolean | null {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ESRCH') return false
+    // EPERM means the process exists but this process cannot signal it.
+    if (code === 'EPERM') return true
+    return null
+  }
+}
+
+/**
+ * A small mkdir-based lock. `mkdir` is atomic across processes and filesystems
+ * supported by Node. The owner token prevents a stale-lock reaper from
+ * deleting a newer owner's lock when the old owner finally returns.
+ */
+export class CrossProcessFileLock {
+  readonly lockPath: string
+  private readonly options: Required<CrossProcessLockOptions>
+
+  constructor(lockPath: string, options: CrossProcessLockOptions = {}) {
+    this.lockPath = lockPath
+    this.options = {
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      retryDelayMs: options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
+      staleAfterMs: options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS,
+    }
+  }
+
+  private ownerPath(): string {
+    return join(this.lockPath, 'owner.json')
+  }
+
+  private readOwner(): LockOwner | null {
+    try {
+      const parsed = JSON.parse(readFileSync(this.ownerPath(), 'utf8')) as Partial<LockOwner>
+      if (
+        typeof parsed.token !== 'string' ||
+        !parsed.token ||
+        !Number.isInteger(parsed.pid) ||
+        !Number.isFinite(parsed.acquiredAt)
+      ) {
+        return null
+      }
+      return {
+        token: parsed.token,
+        pid: parsed.pid as number,
+        acquiredAt: parsed.acquiredAt as number,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  private isStale(): boolean {
+    const owner = this.readOwner()
+    if (owner) {
+      const alive = processIsAlive(owner.pid)
+      if (alive === false) return true
+      if (alive === true) return false
+    }
+    try {
+      const age = Date.now() - statSync(this.lockPath).mtimeMs
+      return age >= this.options.staleAfterMs
+    } catch {
+      // A lock that disappears while inspected is not held anymore.
+      return true
+    }
+  }
+
+  private tryBreakStale(): void {
+    if (!existsSync(this.lockPath) || !this.isStale()) return
+    try {
+      rmSync(this.lockPath, { recursive: true, force: true })
+    } catch {
+      // The owner or another waiter may have won the race. The next attempt
+      // will inspect the current lock again.
+    }
+  }
+
+  private acquireInternalSync(): LockOwner {
+    const started = Date.now()
+    const owner: LockOwner = {
+      token: randomBytes(16).toString('hex'),
+      pid: process.pid,
+      acquiredAt: Date.now(),
+    }
+    mkdirSync(dirname(this.lockPath), { recursive: true })
+
+    for (;;) {
+      try {
+        mkdirSync(this.lockPath)
+        try {
+          writeFileSync(this.ownerPath(), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
+        } catch (error) {
+          rmSync(this.lockPath, { recursive: true, force: true })
+          throw error
+        }
+        return owner
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        this.tryBreakStale()
+        if (Date.now() - started >= this.options.timeoutMs) {
+          throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
+        }
+        sleepSync(this.options.retryDelayMs)
+      }
+    }
+  }
+
+  private async acquireInternal(): Promise<LockOwner> {
+    const started = Date.now()
+    const owner: LockOwner = {
+      token: randomBytes(16).toString('hex'),
+      pid: process.pid,
+      acquiredAt: Date.now(),
+    }
+    await mkdirAsync(dirname(this.lockPath), true)
+
+    for (;;) {
+      try {
+        await mkdirAsync(this.lockPath, false)
+        try {
+          writeFileSync(this.ownerPath(), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
+        } catch (error) {
+          rmSync(this.lockPath, { recursive: true, force: true })
+          throw error
+        }
+        return owner
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        this.tryBreakStale()
+        if (Date.now() - started >= this.options.timeoutMs) {
+          throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
+        }
+        await sleep(this.options.retryDelayMs)
+      }
+    }
+  }
+
+  private release(owner: LockOwner): void {
+    try {
+      const current = this.readOwner()
+      if (current?.token !== owner.token) return
+      rmSync(this.lockPath, { recursive: true, force: true })
+    } catch {
+      // Release is best-effort. A stale lock can be recovered by the next
+      // waiter, and never turns a successful mutation into a false failure.
+    }
+  }
+
+  runSync<T>(fn: () => T): T {
+    const owner = this.acquireInternalSync()
+    try {
+      return fn()
+    } finally {
+      this.release(owner)
+    }
+  }
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    const owner = await this.acquireInternal()
+    try {
+      return await fn()
+    } finally {
+      this.release(owner)
+    }
+  }
+}
+
+/**
+ * Mutation lock keyed by Git common directory. Calls for the same common
+ * directory serialize in call order both within this process and across
+ * server processes. Different common directories use different files and can
+ * proceed concurrently.
+ */
 export class MutationLock {
+  private readonly lockDirectory: string
+  private readonly lockOptions: CrossProcessLockOptions
   private chains = new Map<string, Promise<unknown>>()
 
-  /**
-   * Run `fn` while holding the lock for `gitCommonDir`. Calls for the same
-   * common directory run strictly one-at-a-time in call order; calls for
-   * different common directories run concurrently.
-   */
+  constructor(
+    lockDirectory = join(CONFIG_DIR, 'locks', 'git'),
+    options: CrossProcessLockOptions = {},
+  ) {
+    this.lockDirectory = resolvePath(lockDirectory)
+    this.lockOptions = options
+  }
+
+  /** Stable lock path used by a common-directory key. */
+  getLockPath(gitCommonDir: string): string {
+    const key = resolvePath(gitCommonDir)
+    const digest = createHash('sha256').update(key).digest('hex').slice(0, 32)
+    return join(this.lockDirectory, `${digest}.lock`)
+  }
+
   async withLock<T>(gitCommonDir: string, fn: () => Promise<T>): Promise<T> {
     const key = resolvePath(gitCommonDir)
     const prev = this.chains.get(key) ?? Promise.resolve()
-    // Chain onto the previous op; swallow its result/rejection so one failure
-    // doesn't poison subsequent queued operations.
-    const run = prev.then(() => fn(), () => fn())
-    // Keep the chain alive but non-rejecting for the next queuer.
-    this.chains.set(
-      key,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
+    const run = prev.then(
+      () => new CrossProcessFileLock(this.getLockPath(key), this.lockOptions).run(fn),
+      () => new CrossProcessFileLock(this.getLockPath(key), this.lockOptions).run(fn),
     )
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.chains.set(key, tail)
     try {
       return await run
     } finally {
-      // Clean up when this was the tail of the chain.
-      if (this.chains.get(key) === undefined) this.chains.delete(key)
+      if (this.chains.get(key) === tail) this.chains.delete(key)
     }
   }
+}
+
+async function mkdirAsync(path: string, recursive: boolean): Promise<void> {
+  const { mkdir } = await import('node:fs/promises')
+  await mkdir(path, { recursive })
 }

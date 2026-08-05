@@ -16,6 +16,7 @@ import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
   ManagedWorktreeRecordV2,
+  ManagedWorktreeRecordVersioned,
   ManagedWorktreeSummary,
   ManagedWorktreeSummaryV2,
   ManagedWorktreeSummaryVersioned,
@@ -71,6 +72,7 @@ export interface CreateWorktreeParams {
 }
 
 export interface CreateWorktreeResult {
+  /** Creation remains V1-shaped until the V2 named-creation slice lands. */
   record: ManagedWorktreeRecord
   include: WorktreeIncludeResult
 }
@@ -164,7 +166,7 @@ export class ManagedWorktreeService {
    * records (persisted before `workspaceId` existed) derive it from the
    * `<worktreeRoot>/<workspace-id>/<repo-key>/<token>` layout.
    */
-  workspaceIdOf(record: ManagedWorktreeRecord): string | null {
+  workspaceIdOf(record: ManagedWorktreeRecordVersioned): string | null {
     if (record.workspaceId) return record.workspaceId
     const rel = relative(safeRealpath(this.worktreeRoot), safeRealpath(record.checkoutPath))
     if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
@@ -336,7 +338,7 @@ export class ManagedWorktreeService {
    * ref.
    */
   private async createRemovalConfirmationFingerprint(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
     entries: GitWorkingTreeEntry[],
     ignoredPaths: string[],
   ): Promise<string> {
@@ -531,7 +533,25 @@ export class ManagedWorktreeService {
       return { removed: false, branchPruned: false, blocked: false }
     }
 
-    return this.mutationLock.withLock(rec.gitCommonDir, async () => {
+    const initialCommonDir = rec.gitCommonDir
+    return this.mutationLock.withLock(initialCommonDir, async () => {
+      // The registry is shared across server processes. Re-read it after the
+      // Git lock is acquired so a stale in-memory record cannot authorize a
+      // removal using an old path, owner set, or common directory.
+      const current = this.registry.get(managedWorktreeId)
+      if (!current) {
+        return { removed: false, branchPruned: false, blocked: false }
+      }
+      if (safeRealpath(current.gitCommonDir) !== safeRealpath(initialCommonDir)) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: 'Managed worktree repository identity changed during removal.',
+        }
+      }
+      const rec = current
+
       // Validate static containment/common-directory/branch expectations before
       // taking the authoritative content snapshot. No awaited identity check
       // may run after that snapshot: an external write during such a gap would
@@ -828,7 +848,7 @@ export class ManagedWorktreeService {
    * is safe to reconcile away (registry + branch prune only).
    */
   private async validateRemovalIdentity(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (!this.isUnderWorktreeRoot(rec.checkoutPath)) {
       return {
@@ -874,7 +894,7 @@ export class ManagedWorktreeService {
    * prompt or points at a checkout other than the selected one.
    */
   async revalidateShareable(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (!existsSync(rec.checkoutPath)) {
       return { ok: false, reason: 'Managed worktree checkout no longer exists on disk.' }

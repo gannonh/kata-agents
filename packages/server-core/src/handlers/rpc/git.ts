@@ -16,7 +16,7 @@ import type {
   GitCommitInput,
   GitFileDiff,
   GitStatusChangedEvent,
-  ManagedWorktreeRecord,
+  ManagedWorktreeRecordVersioned,
   RepositoryContext,
   SessionCheckout,
 } from '@kata-sh/shared/protocol'
@@ -73,7 +73,7 @@ interface ResolvedSession {
 export function checkManagedCheckoutIdentity(input: {
   checkout: SessionCheckout | null | undefined
   liveContext: Pick<RepositoryContext, 'repositoryRoot' | 'gitCommonDir' | 'currentBranch' | 'detached'>
-  record: ManagedWorktreeRecord | null | undefined
+  record: ManagedWorktreeRecordVersioned | null | undefined
 }): string | null {
   const { checkout, liveContext, record } = input
   if (!checkout || checkout.mode !== 'managed-worktree') return null
