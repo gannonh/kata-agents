@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   RPC_CHANNELS,
   WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_LIFECYCLE_ERROR_CODE,
+  WORKTREE_OWNERS_PRESENT_CODE,
+  WORKTREE_PREVIEW_STALE_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
+  WORKTREE_STATE_UNMANAGEABLE_CODE,
   WORKTREE_V2_CAPABILITY_ERROR_CODE,
 } from '@kata-sh/shared/protocol'
 import type {
@@ -140,6 +144,38 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       },
     },
     worktrees: {},
+    lifecycle: {
+      assertReady: () => undefined,
+      markReady: () => undefined,
+      isReady: () => true,
+      recordStateForSession: (sessionId: string) => ({ managedWorktreeId: null, state: 'ready' }),
+      isSessionRecordReady: () => true,
+      inventory: () => ({
+        serverId: 'mock-server',
+        policy: { autoDeleteEnabled: true, retentionLimit: 15, policyVersion: 0 },
+        counts: { total: 0, materialized: 0, missing: 0, cleanupFailed: 0, snapshotted: 0, restoreFailed: 0, unowned: 0 },
+        rows: [],
+      }),
+      preview: async () => ({
+        managedWorktreeId: 'wt-1',
+        exists: true,
+        state: 'ready',
+        owners: [],
+        uncommittedFileCount: 0,
+        unpushedCommitCount: 0,
+        branchHasUniqueWork: false,
+        previewFingerprint: 'fp',
+        hasSnapshot: false,
+        ignoredPolicy: { includeOnly: true, includeFileCount: 0 },
+        blocked: false,
+      }),
+      deleteWorktree: async () => ({ deleted: true, state: 'snapshotted', snapshotId: 'snap-1' }),
+      restoreWorktree: async () => ({ restored: true, state: 'ready', checkoutPath: '/wt' }),
+      retryWorktree: async () => ({ retried: true, state: 'ready' }),
+      permanentDelete: async () => ({ deleted: true }),
+      setArchived: async () => ({ archived: true, state: 'ready', cleanupEnqueued: false }),
+      enqueueCleanup: async () => ({ at: 1, outcome: 'skipped', policyVersion: 0 }),
+    },
     worktreeSettings: {
       getCapability: (serverId = 'mock-server') => ({ serverId, worktreeV2: true }),
       getSnapshot: (serverId = 'mock-server') => ({
@@ -148,6 +184,8 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
         version: 0,
         materializationRoot: '/worktrees',
         capturedAt: 1,
+        autoDeleteEnabled: true,
+        retentionLimit: 15,
       }),
       update: (input: { materializationRoot: string }, serverId = 'mock-server') => ({
         schemaVersion: 1,
@@ -155,6 +193,8 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
         version: 1,
         materializationRoot: input.materializationRoot,
         capturedAt: 2,
+        autoDeleteEnabled: true,
+        retentionLimit: 15,
       }),
     },
   } as unknown as GitServices
@@ -399,6 +439,102 @@ describe('registerGitHandlers', () => {
         { materializationRoot: '/custom-worktrees' },
       ),
     ).resolves.toMatchObject({ materializationRoot: '/custom-worktrees', version: 1 })
+  })
+
+  it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {
+    process.env[FLAG] = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    const { git } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(harness.handlers.get(RPC_CHANNELS.git.WORKTREE_INVENTORY)!(ctx)).resolves.toMatchObject({
+      serverId: 'mock-server',
+    })
+    await expect(harness.handlers.get(RPC_CHANNELS.git.WORKTREE_PREVIEW)!(ctx, 'wt-1')).resolves.toMatchObject({
+      managedWorktreeId: 'wt-1',
+      previewFingerprint: 'fp',
+    })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_DELETE)!(ctx, {
+        managedWorktreeId: 'wt-1',
+        previewFingerprint: 'fp',
+      }),
+    ).resolves.toMatchObject({ deleted: true, state: 'snapshotted' })
+    await expect(harness.handlers.get(RPC_CHANNELS.git.WORKTREE_RESTORE)!(ctx, 'wt-1')).resolves.toMatchObject({
+      restored: true,
+    })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_RETRY)!(ctx, { managedWorktreeId: 'wt-1' }),
+    ).resolves.toMatchObject({ retried: true })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_PERMANENT_DELETE)!(ctx, {
+        managedWorktreeId: 'wt-1',
+        confirmIrreversible: true,
+      }),
+    ).resolves.toMatchObject({ deleted: true })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_ARCHIVE)!(ctx, {
+        managedWorktreeId: 'wt-1',
+        sessionId: 's1',
+        archived: true,
+      }),
+    ).resolves.toMatchObject({ archived: true })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_UNARCHIVE)!(ctx, {
+        managedWorktreeId: 'wt-1',
+        sessionId: 's1',
+        archived: false,
+      }),
+    ).resolves.toMatchObject({ archived: true })
+  })
+
+  it('maps lifecycle failures to typed wire errors', async () => {
+    process.env[FLAG] = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    const { git } = makeGitServices()
+    const { WorktreeLifecycleError } = await import('../../git')
+    ;(git.lifecycle as any).deleteWorktree = async () => {
+      throw new WorktreeLifecycleError('LIFECYCLE_PREVIEW_STALE', 'stale')
+    }
+    const harness = makeHarness(git)
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_DELETE)!(harness.ctx, {
+        managedWorktreeId: 'wt-1',
+        previewFingerprint: 'old',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_PREVIEW_STALE_CODE })
+    ;(git.lifecycle as any).permanentDelete = async () => {
+      throw new WorktreeLifecycleError('LIFECYCLE_OWNERS_PRESENT', 'owners')
+    }
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_PERMANENT_DELETE)!(harness.ctx, {
+        managedWorktreeId: 'wt-1',
+        confirmIrreversible: true,
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_OWNERS_PRESENT_CODE })
+    ;(git.lifecycle as any).restoreWorktree = async () => {
+      throw new WorktreeLifecycleError('LIFECYCLE_STATE_UNMANAGEABLE', 'state')
+    }
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_RESTORE)!(harness.ctx, 'wt-1'),
+    ).rejects.toMatchObject({ code: WORKTREE_STATE_UNMANAGEABLE_CODE })
+  })
+
+  it('rejects lifecycle RPCs while V2 is disabled and without a worktree id', async () => {
+    process.env[FLAG] = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '0'
+    const { git } = makeGitServices()
+    const harness = makeHarness(git)
+
+    await expect(harness.handlers.get(RPC_CHANNELS.git.WORKTREE_INVENTORY)!(harness.ctx)).rejects.toMatchObject({
+      code: WORKTREE_V2_CAPABILITY_ERROR_CODE,
+    })
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.WORKTREE_PREVIEW)!(harness.ctx, ''),
+    ).rejects.toMatchObject({ code: WORKTREE_LIFECYCLE_ERROR_CODE })
   })
 
   it('maps settings validation failures to the typed settings wire error', async () => {

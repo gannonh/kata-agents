@@ -147,6 +147,25 @@ export class WorktreeLifecycleService {
     this.hostLock = new CrossProcessFileLock(deps.hostLockPath)
   }
 
+  /**
+   * Install runtime hooks late (the SessionManager wires them after the
+   * services are constructed). Only the runtime-observation hooks are
+   * replaceable; structural dependencies stay fixed at construction.
+   */
+  setHooks(hooks: {
+    quiesceRuntimes?: WorktreeLifecycleDeps['quiesceRuntimes']
+    isSessionActive?: WorktreeLifecycleDeps['isSessionActive']
+    isSessionFlagged?: WorktreeLifecycleDeps['isSessionFlagged']
+    applyOwnerSessionState?: WorktreeLifecycleDeps['applyOwnerSessionState']
+    touchSessionCheckout?: WorktreeLifecycleDeps['touchSessionCheckout']
+  }): void {
+    if (hooks.quiesceRuntimes) this.deps.quiesceRuntimes = hooks.quiesceRuntimes
+    if (hooks.isSessionActive) this.deps.isSessionActive = hooks.isSessionActive
+    if (hooks.isSessionFlagged) this.deps.isSessionFlagged = hooks.isSessionFlagged
+    if (hooks.applyOwnerSessionState) this.deps.applyOwnerSessionState = hooks.applyOwnerSessionState
+    if (hooks.touchSessionCheckout) this.deps.touchSessionCheckout = hooks.touchSessionCheckout
+  }
+
   // -------------------------------------------------------------------------
   // Readiness gate
   // -------------------------------------------------------------------------

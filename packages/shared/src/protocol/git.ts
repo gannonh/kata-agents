@@ -94,6 +94,8 @@ export interface SessionCheckoutV1 {
   managedWorktreeId: string | null
   /** Expected `kata-agent/<token>` branch for a managed worktree, or null. */
   expectedBranch: string | null
+  /** Recovery state, present only while the worktree record is not ready. */
+  recoveryState?: WorktreeRecoveryState
 }
 
 /**
@@ -115,11 +117,27 @@ export interface SessionCheckoutV2
   expectedBranch: string
   /** Canonical server-local root captured for this checkout. */
   materializationRoot: string
+  /**
+   * Recovery state stamped when the worktree record leaves `ready`. The
+   * recovery UI renders name/branch + status; Send/agent creation/Git actions
+   * stay fenced until restore or an explicit resolution succeeds.
+   */
+  recoveryState?: WorktreeRecoveryState
 }
 
 /** A checkout record from either the V1 or V2 wire schema. */
 export type SessionCheckout = SessionCheckoutV1 | SessionCheckoutV2
 export type SessionCheckoutVersioned = SessionCheckout
+
+/** Non-ready lifecycle states a session checkout may be fenced in. */
+export type WorktreeRecoveryState =
+  | 'snapshotted'
+  | 'restore-failed'
+  | 'cleanup-failed'
+  | 'missing'
+  | 'unowned'
+  | 'restoring'
+  | 'snapshotting'
 
 // ---------------------------------------------------------------------------
 // Checkout preparation (empty-session gate)

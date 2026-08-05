@@ -3066,6 +3066,7 @@ export class SessionManager implements ISessionManager {
       if (parentCheckout.mode === 'managed-worktree' && parentCheckout.managedWorktreeId) {
         try {
           this.getGitServices().worktrees.addOwner(parentCheckout.managedWorktreeId, storedSession.id)
+          this.getGitServices().pathLeases.lease(storedSession.id, parentCheckout.checkoutPath)
         } catch (err) {
           sessionLog.warn('Failed to register conversation-branch worktree owner', {
             sessionId: storedSession.id,
@@ -5329,6 +5330,56 @@ export class SessionManager implements ISessionManager {
    */
   setGitServices(services: GitServices): void {
     this.gitServicesInstance = services
+    // Phase 2: wire runtime observation hooks (quiescence, activity, flagged
+    // owners, recovery-state application) into the lifecycle service. These are
+    // the same services the RPC handlers use, so ownership never diverges.
+    services.lifecycle.setHooks({
+      isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
+      isSessionFlagged: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed) return false
+        // A session interrupted mid-turn and awaiting user attention is a
+        // flagged owner: lifecycle decisions must not interrupt it silently.
+        return managed.wasInterrupted === true && !managed.isProcessing
+      },
+      quiesceRuntimes: async (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          const managed = this.sessions.get(sessionId)
+          if (!managed) continue
+          if (!managed.isProcessing) continue
+          const quiesced = await this.awaitAgentTeardown(
+            sessionId,
+            managed,
+            // Lifecycle quiescence is bounded; unquiesceable runtimes block.
+            60_000,
+            false,
+          )
+          if (!quiesced) return false
+        }
+        return true
+      },
+      applyOwnerSessionState: async (sessionIds, record) => {
+        for (const sessionId of sessionIds) {
+          const managed = this.sessions.get(sessionId)
+          if (!managed) continue
+          // Persist the recovery state on the session's checkout so the UI can
+          // render recovery status even before the next inventory fetch.
+          const checkout = managed.checkout
+          if (checkout?.mode !== 'managed-worktree') continue
+          const recoveryState =
+            record.state === 'ready' ? undefined : (record.state as import('@kata-sh/shared/protocol').WorktreeRecoveryState)
+          managed.checkout = {
+            ...checkout,
+            recoveryState,
+          }
+          await this.flushSession(sessionId)
+        }
+      },
+      touchSessionCheckout: async (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (managed) await this.flushSession(sessionId)
+      },
+    })
   }
 
   /**
@@ -5562,6 +5613,10 @@ export class SessionManager implements ISessionManager {
         git.worktrees.removeOwner(record.managedWorktreeId, sessionId)
         throw bindErr
       }
+      // Phase 2: the session leases its checkout path from the first instant,
+      // so lifecycle decisions see this owner even before the registry write
+      // is durable.
+      git.pathLeases.lease(sessionId, record.checkoutPath)
       // Durable persist so restart/resume immediately after preparation returns
       // to the same managed worktree (AC5).
       await this.flushSession(sessionId)
@@ -5631,6 +5686,8 @@ export class SessionManager implements ISessionManager {
     try {
       this.bindCheckout(managed, checkout, record.checkoutPath)
       git.registry.setState(record.managedWorktreeId, 'ready')
+      // Phase 2: lease the new checkout path immediately.
+      git.pathLeases.lease(sessionId, record.checkoutPath)
       // Durable persist so restart/resume immediately after preparation returns
       // to the same managed worktree (AC5).
       await this.flushSession(sessionId)
@@ -5656,6 +5713,24 @@ export class SessionManager implements ISessionManager {
       workingDirectory: record.checkoutPath,
       sdkCwd: managed.sdkCwd ?? record.checkoutPath,
       warnings: resultWarnings,
+    }
+  }
+
+  /**
+   * Phase 2 recovery fence: Send and agent creation stay blocked while the
+   * session's managed-worktree record is not `ready` (or lifecycle
+   * reconciliation has not completed). Sessions without a managed checkout
+   * are unaffected. Session deletion remains available as the escape hatch.
+   */
+  private assertSessionCheckoutReady(sessionId: string): void {
+    if (!isWorktreeV2Enabled()) return
+    const git = this.getGitServices()
+    git.lifecycle.assertReady()
+    const { state } = git.lifecycle.recordStateForSession(sessionId)
+    if (state !== 'ready') {
+      throw new Error(
+        `This session's worktree is ${state}. Open Worktrees settings to restore or resolve it before continuing.`,
+      )
     }
   }
 
@@ -5758,6 +5833,55 @@ export class SessionManager implements ISessionManager {
       )
       if (result.blocked) return { outcome: 'blocked', result }
       return { outcome: 'removed', result }
+    } catch (err) {
+      return {
+        outcome: 'blocked',
+        result: {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: err instanceof Error ? err.message : String(err),
+        },
+      }
+    }
+  }
+
+  /**
+   * Phase 2 variant of the session-deletion removal: routes through the
+   * lifecycle service so the delete is snapshot-first, journaled, and staged
+   * session storage is restored when removal fails. A session-delete request
+   * can never remove a worktree with another owner.
+   */
+  private async removeManagedWorktreeViaLifecycleForSessionDeletion(
+    sessionId: string,
+    managedWorktreeId: string | null,
+  ): Promise<
+    | { outcome: 'nothing-to-remove' }
+    | { outcome: 'removed'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
+    | { outcome: 'blocked'; result: import('@kata-sh/shared/protocol').WorktreeRemovalResult }
+  > {
+    if (!managedWorktreeId) return { outcome: 'nothing-to-remove' }
+    try {
+      const outcome = await this.getGitServices().lifecycle.removeForSessionDeletion({
+        sessionId,
+        managedWorktreeId,
+      })
+      if (outcome.outcome === 'blocked') {
+        return {
+          outcome: 'blocked',
+          result: {
+            removed: false,
+            branchPruned: false,
+            blocked: true,
+            blockedReason: outcome.reason,
+            blockedReasonCode: outcome.reasonCode as 'agent_not_quiesced' | undefined,
+          },
+        }
+      }
+      return {
+        outcome: 'removed',
+        result: { removed: true, branchPruned: false, blocked: false },
+      }
     } catch (err) {
       return {
         outcome: 'blocked',
@@ -6282,10 +6406,12 @@ export class SessionManager implements ISessionManager {
         }
       }
 
-      const removal = await this.removeManagedWorktreeBeforeSessionDeletion(sessionId, {
-        force: options.forceWorktreeRemoval,
-        expectedConfirmation: options.worktreeRemovalConfirmation,
-      })
+      const removal = isWorktreeV2Enabled()
+        ? await this.removeManagedWorktreeViaLifecycleForSessionDeletion(sessionId, ownedWorktreeId)
+        : await this.removeManagedWorktreeBeforeSessionDeletion(sessionId, {
+            force: options.forceWorktreeRemoval,
+            expectedConfirmation: options.worktreeRemovalConfirmation,
+          })
       if (removal.outcome === 'blocked') {
         try {
           this.restoreStagedSessionStorage(stagedSessionStorage ?? null)
@@ -6303,10 +6429,17 @@ export class SessionManager implements ISessionManager {
     // Drop managed-worktree ownership for this session. Deleting a session never
     // removes the checkout on its own; it only releases the owner reference so
     // shared-owner counts stay correct. When explicit removal was requested,
-    // the registry record is already gone and this is a harmless no-op.
+    // the registry record is already gone and this is a harmless no-op. Phase 2
+    // routes through the lifecycle service (final-owner detach leaves an
+    // unowned record and enqueues policy cleanup).
     if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
       try {
-        this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
+        if (isWorktreeV2Enabled()) {
+          await this.getGitServices().lifecycle.detachSession(sessionId)
+        } else {
+          this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
+          this.getGitServices().pathLeases.releaseSession(sessionId)
+        }
       } catch (err) {
         sessionLog.warn(`Failed to release worktree ownership for ${sessionId}:`, err)
       }
@@ -6454,6 +6587,9 @@ export class SessionManager implements ISessionManager {
     if (this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
     }
+    // Phase 2: Send stays fenced while the session's worktree record is not
+    // ready (recovery required). Sessions without a managed checkout pass.
+    this.assertSessionCheckoutReady(sessionId)
     await this.awaitActiveAgentTeardown(sessionId, managed)
     if (this.sessions.get(sessionId) !== managed || this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
@@ -6549,6 +6685,12 @@ export class SessionManager implements ISessionManager {
       // enqueues with a 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
       onAck?.(userMessage.id)
+      // Phase 2: an accepted user message is server-authored activity.
+      try {
+        this.getGitServices().lifecycle.touchForSession(sessionId)
+      } catch {
+        /* activity touch is best-effort */
+      }
       return
     }
 
@@ -6582,6 +6724,12 @@ export class SessionManager implements ISessionManager {
       this.persistSession(managed)
       await this.flushSession(managed.id)
       onAck?.(userMessage.id)
+      // Phase 2: an accepted user message is server-authored activity.
+      try {
+        this.getGitServices().lifecycle.touchForSession(sessionId)
+      } catch {
+        /* activity touch is best-effort */
+      }
 
       // Emit user_message event so UI can confirm the optimistic message
       this.sendEvent({
