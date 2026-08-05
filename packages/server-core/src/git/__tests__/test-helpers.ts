@@ -48,4 +48,6 @@ export function writeFile(dir: string, relPath: string, content: string): void {
   writeFileSync(full, content)
 }
 
+export { runGit }
+
 export { GIT_ENV }
