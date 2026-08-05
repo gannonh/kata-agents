@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-05
+
+* **Worktree V2 name normalization**: [#40](https://github.com/gannonh/kata-agents/issues/40) now canonicalizes human-readable composer names to lowercase kebab-case before preparing the exact `kata-agent/<name>` branch; the server continues to reject names that remain Git-invalid.
+
 ## 2026-08-04
 
 * **Worktree V2 Phase 1 Verify evidence posted**: [#40](https://github.com/gannonh/kata-agents/issues/40) has a 13/13-pass acceptance matrix covering the required server, Electron, headless, registry, root, locale, and documentation evidence. The issue remains open at `status:implemented` pending user sign-off.

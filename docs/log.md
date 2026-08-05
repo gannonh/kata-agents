@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-05
+
+* **Worktree V2 name normalization**: [#40](https://github.com/gannonh/kata-agents/issues/40) now normalizes composer-entered uppercase letters, spaces, and underscores to lowercase kebab-case before named worktree preparation; renderer/unit/E2E coverage and localized guidance were updated.
+
 ## 2026-08-04
 
 * **Worktree V2 Phase 1 implemented and UAT verified**: [#40](https://github.com/gannonh/kata-agents/issues/40) now covers named managed-worktree identity, server-owned configurable roots, fixed-registry authority, capability-aware Electron controls, and local/headless parity. Updated the roadmap, architecture overview, online Git/worktree documentation, ADR, release notes, and OKF logs; the real-Electron local UAT passes after the required Electron build.
