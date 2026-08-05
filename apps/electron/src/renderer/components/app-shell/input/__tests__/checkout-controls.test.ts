@@ -463,11 +463,12 @@ describe('resolveCheckoutRecovery', () => {
   ] as const)('surfaces the persisted %s lifecycle recovery state', (state) => {
     const r = resolveCheckoutRecovery({
       checkout: { ...worktreeCheckout, recoveryState: state },
-      contextLoaded: true,
-      // Even with a live, matching checkout the persisted fence wins.
-      liveBranch: 'kata-agent/aabbccdd',
+      // Not gated on local context: the checkout may be gone, so the context
+      // never loads — the persisted fence must still surface.
+      contextLoaded: false,
+      liveBranch: null,
       liveDetached: false,
-      checkoutExists: true,
+      checkoutExists: false,
     })
     expect(r).toEqual({ kind: 'lifecycle', state })
   })

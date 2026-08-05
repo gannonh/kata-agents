@@ -325,17 +325,22 @@ export type CheckoutRecovery =
  * (`checkManagedCheckoutIdentity`) so the composer badge surfaces the same drift
  * the server would refuse to mutate on — Kata never silently switches directory.
  *
- * Precedence: lifecycle → blocked → missing → branch-drift. A current checkout,
- * an absent checkout, or an unloaded repository context returns `ok`.
+ * Precedence: lifecycle → blocked → missing → branch-drift. A persisted
+ * lifecycle state is authoritative server data and is NOT gated on local
+ * context loading: a fenced session must always show its recovery state (the
+ * context for a removed checkout may never load). Other recovery kinds stay
+ * suppressed until context loads so a resumed/restarted session keeps its
+ * locked identity and does not flash a false drift warning.
  */
 export function resolveCheckoutRecovery(state: CheckoutRecoveryState): CheckoutRecovery {
   const { checkout } = state
   if (!checkout || checkout.mode !== 'managed-worktree') return { kind: 'ok' }
-  if (!state.contextLoaded) return { kind: 'ok' }
 
   // The server persists the exact non-ready lifecycle state on the session
   // checkout; it is authoritative over any local inference.
   if (checkout.recoveryState) return { kind: 'lifecycle', state: checkout.recoveryState }
+
+  if (!state.contextLoaded) return { kind: 'ok' }
 
   if (state.worktreeStatus === 'blocked') return { kind: 'blocked' }
   if (!state.checkoutExists || state.worktreeStatus === 'missing') return { kind: 'missing' }
