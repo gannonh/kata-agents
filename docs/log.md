@@ -2,6 +2,8 @@
 
 ## 2026-08-05
 
+* **Worktree V2 Phase 2 implemented**: [#41](https://github.com/gannonh/kata-agents/issues/41) adds the snapshot service (streaming binary capture, versioned manifests, CAS hidden refs, exact restore), the lifecycle service (preview/delete/restore/retry/permanent-delete, archive, LRU sweeps, journal), path leases, awaited startup reconciliation, session fencing, per-server auto-delete policy, and the Worktrees settings inventory/recovery UI. ADR: [adrs/2026-08-05-snapshot-backed-worktree-lifecycle.md](adrs/2026-08-05-snapshot-backed-worktree-lifecycle.md).
+
 * **Worktree V2 name normalization**: [#40](https://github.com/gannonh/kata-agents/issues/40) now normalizes composer-entered uppercase letters, spaces, and underscores to lowercase kebab-case before named worktree preparation; renderer/unit/E2E coverage and localized guidance were updated.
 
 ## 2026-08-04

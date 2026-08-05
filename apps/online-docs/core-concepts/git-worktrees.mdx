@@ -87,6 +87,46 @@ such as `team/auth-refresh` are allowed. If a request fails after creating a
 branch, the server removes it only when it can prove that the failed transaction
 still owns the original branch OID.
 
+## Snapshot-backed management and automatic cleanup
+
+Every V2 destructive path is snapshot-first and reversible. **Settings →
+Worktrees** shows a per-server inventory of every managed worktree across all
+workspaces, repositories, and roots: display name, branch, workspace,
+repository, server path, every owner with its archived/active/flagged
+protection, created/last-used timestamps, lifecycle state, and sanitized
+failure text. Snapshot payload bytes never leave the server.
+
+- **Deleting a worktree** asks for a fresh risk preview naming every owner and
+the excluded ignored-file policy (only `.worktreeinclude` files are preserved).
+After confirmation the server captures a verified snapshot — staged and
+unstaged changes, binary files, renames, deletions, untracked regular files,
+symlink nodes, and `.worktreeinclude` files — pins a hidden
+`refs/kata/worktree-snapshots/<id>` ref at the captured HEAD, and only then
+releases the checkout. The local branch is always retained.
+- **Restoring** a snapshotted worktree recreates the branch only when it is
+absent or still at the captured OID (a differently advanced branch is never
+force-reset) and restores the state byte-for-byte and mode-for-mode. Failed
+steps are retryable; interrupted transactions are classified and resumed at
+server startup.
+- **Permanently deleting a snapshot** (available only with zero owner sessions)
+removes the verified payload and the owned hidden ref after a second
+irreversibility confirmation, and retains the branch.
+- **Archiving** is per owner. When every owner of a worktree is archived and
+none is active or flagged, the checkout is removed snapshot-first. Unarchiving
+a session restores its claim and refreshes activity.
+- **Automatic cleanup** (default on, limit 15, configurable 1–1000 per server)
+removes the oldest idle unarchived worktrees beyond the limit after lifecycle
+events: startup reconciliation, successful materialization/restore, policy
+changes, final-owner archive, and final-owner session deletion. `lastUsedAt`
+updates on creation, restore, owner attachment, unarchive, and accepted user
+messages; candidates order by it, then creation time, then ID. Disabling
+automatic cleanup stops new candidates immediately; in-flight removals complete
+their journaled transaction. Snapshots do not count toward the limit.
+- While a worktree record is not `ready` (snapshotted, restore-failed,
+cleanup-failed, missing, …), its owners see the name/branch and recovery status,
+and Send, agent creation, Git actions, and further lifecycle actions stay fenced
+until restore or an explicit resolution succeeds.
+
 ## Reviewing and sharing work
 
 The Changes panel and the header Git control show the worktree's status and let
@@ -114,10 +154,17 @@ until you restore the expected branch or delete the session.
 
 ## Archiving and deleting sessions
 
-- **Archiving** a session never removes its worktree.
+- **Archiving** a session never removes its worktree, but with Worktree V2 the
+  archived session's claim is recorded: when **every** owner of a worktree is
+  archived (and none is active), the worktree is removed snapshot-first and can
+  be restored from the inventory page.
 - **Deleting** a session drops that session's claim on the worktree but does not
-  remove the checkout on its own. Removing the managed worktree is a separate,
-  explicit choice in the delete dialog. It is blocked while another session still
-  shares the worktree, and removing a worktree with uncommitted or unpushed work
-  requires an extra destructive confirmation that names what would be lost. The
-  temporary branch is pruned only when it has no unique work.
+  remove the checkout on its own (the final-owner deletion leaves the worktree
+  `unowned` and schedules it for automatic cleanup). Removing the managed
+  worktree is a separate, explicit choice in the delete dialog. It is blocked
+  while another session still shares the worktree, and removing a worktree with
+  uncommitted or unpushed work requires an extra destructive confirmation that
+  names what would be lost. With Worktree V2, **Delete session and worktree**
+  captures a verified snapshot first and restores the session if removal fails;
+  the local branch is always retained. Without V2, the temporary branch is
+  pruned only when it has no unique work.

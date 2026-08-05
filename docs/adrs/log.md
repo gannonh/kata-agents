@@ -1,5 +1,8 @@
 # ADR Update Log
 
+## 2026-08-05
+
+* **Snapshot-backed lifecycle ADR accepted**: [2026-08-05-snapshot-backed-worktree-lifecycle.md](2026-08-05-snapshot-backed-worktree-lifecycle.md) records the single lifecycle entry for every destructive V2 path, verified snapshot-before-release, CAS-owned hidden refs, path leases and runtime quiescence, the durable journal with awaited startup classification, event-driven LRU retention, and the second-confirmation permanent snapshot deletion.
 ## 2026-08-04
 
 * **ADR extended for Worktree V2 Phase 1**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) records exact named branch identity, default-false capability gating, server-owned canonical roots, fixed-registry authority, immutable creation snapshots, and compare-and-swap compensation.
