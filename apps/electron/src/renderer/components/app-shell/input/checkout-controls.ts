@@ -29,7 +29,17 @@ export function normalizeWorktreeNameInput(value: string): string {
     .toLowerCase()
     .replace(/\s*\/\s*/gu, '/')
     .split('/')
-    .map((segment) => segment.replace(/[\s_]+/gu, '-').replace(/-+/gu, '-'))
+    .map((segment) =>
+      segment
+        // Git forbids these characters in ref names; strip them so the client
+        // and the server agree on a valid name without a round trip.
+        .replace(/[~^:?*\[\]\\]/gu, '-')
+        .replace(/\.{2,}/gu, '.')
+        .replace(/@\{/gu, '-')
+        .replace(/[\x00-\x1f\x7f]/gu, '')
+        .replace(/[\s_]+/gu, '-')
+        .replace(/-+/gu, '-'),
+    )
     .join('/')
 }
 
@@ -37,7 +47,7 @@ export function normalizeWorktreeNameInput(value: string): string {
 export function normalizeWorktreeName(value: string): string {
   return normalizeWorktreeNameInput(value)
     .split('/')
-    .map((segment) => segment.replace(/^-+|-+$/gu, ''))
+    .map((segment) => segment.replace(/^[.-]+|[.-]+$/gu, ''))
     .filter(Boolean)
     .join('/')
 }
@@ -67,6 +77,8 @@ export interface SendGateState {
   worktreeIntent?: 'new' | 'existing'
   /** Effective V2 capability of the selected workspace-owning server. */
   worktreeV2Enabled?: boolean
+  /** True while the owning server's V2 capability is still being discovered. */
+  worktreeV2Pending?: boolean
   /** Exact V2 branch suffix/display name for a new worktree. */
   worktreeNameSuffix?: string | null
   /** Active working directory used to resolve repository identity. */
@@ -136,6 +148,12 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
   }
   if (!state.baseRef) {
     return { action: 'block', reason: 'missing-base-ref' }
+  }
+  // Defer new-worktree preparation until the owning server's V2 capability is
+  // known: emitting the V1 intent now would persist a generated branch that a
+  // V2-capable server cannot upgrade to the requested name later.
+  if (state.worktreeV2Pending) {
+    return { action: 'wait' }
   }
   if (state.worktreeV2Enabled) {
     const worktreeName = normalizeWorktreeName(state.worktreeNameSuffix ?? '')

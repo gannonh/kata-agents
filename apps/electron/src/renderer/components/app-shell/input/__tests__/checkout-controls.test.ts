@@ -67,6 +67,15 @@ describe('normalizeWorktreeName', () => {
   test('preserves nested refs while normalizing each name segment', () => {
     expect(normalizeWorktreeName(' Team / Auth_Refresh ')).toBe('team/auth-refresh')
   })
+
+  test('strips Git-forbidden ref characters instead of passing them through', () => {
+    expect(normalizeWorktreeName('feat:auth')).toBe('feat-auth')
+    expect(normalizeWorktreeName('a..b')).toBe('a.b')
+    expect(normalizeWorktreeName('x@{y')).toBe('x-y')
+    expect(normalizeWorktreeName('bad~name^v1')).toBe('bad-name-v1')
+    expect(normalizeWorktreeName('q?[*]\\r')).toBe('q-r')
+    expect(normalizeWorktreeName('..edge.')).toBe('edge')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -144,6 +153,60 @@ describe('resolveSendGate', () => {
       baseRef: 'main',
       worktreeV2Enabled: false,
       worktreeNameSuffix: 'auth-refresh',
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: { mode: 'managed-worktree', workingDirectory: '/repo', baseRef: 'main' },
+    })
+  })
+
+  test('waits while the owning server capability is unresolved before preparing a new worktree', () => {
+    // A V1 intent persisted during capability discovery would lock the session
+    // to a generated branch that a V2-capable server cannot upgrade later.
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      worktreeV2Pending: true,
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({ action: 'wait' })
+  })
+
+  test('does not wait on capability discovery when binding an existing worktree', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: null,
+      managedWorktreeId: 'repo-aabbccdd',
+      worktreeIntent: 'existing',
+      worktreeV2Pending: true,
+      workingDirectory: '/repo',
+      prepared: false,
+      hasPersistedCheckout: false,
+      isGitRepository: true,
+    })
+    expect(decision).toEqual({
+      action: 'prepare',
+      intent: {
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        managedWorktreeId: 'repo-aabbccdd',
+      },
+    })
+  })
+
+  test('prepares the V1 intent once capability resolution reports a V1-only server', () => {
+    const decision = resolveSendGate({
+      mode: 'managed-worktree',
+      baseRef: 'main',
+      worktreeV2Pending: false,
+      worktreeV2Enabled: false,
       workingDirectory: '/repo',
       prepared: false,
       hasPersistedCheckout: false,

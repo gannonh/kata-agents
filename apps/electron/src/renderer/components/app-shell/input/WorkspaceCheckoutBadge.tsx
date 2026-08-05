@@ -101,6 +101,11 @@ function dedupeRefs(refs: GitRef[]): GitRef[] {
   return out
 }
 
+/** Visible identity of a managed worktree summary: the V2 display name when present. */
+function worktreeDisplayLabel(worktree: ManagedWorktreeSummaryVersioned): string {
+  return 'displayName' in worktree ? worktree.displayName : worktree.expectedBranch
+}
+
 function WorkspaceCheckoutBadgeInner(
   {
     sessionId,
@@ -136,6 +141,7 @@ function WorkspaceCheckoutBadgeInner(
   const context = contextMatchesRequest ? contextState.context : null
   const [mode, setMode] = React.useState<CheckoutMode>('current')
   const [serverV2Available, setServerV2Available] = React.useState(false)
+  const [serverV2Pending, setServerV2Pending] = React.useState(true)
   // V2 is governed by the workspace-owning server, not by the local renderer
   // environment (see the capability effect below).
   const worktreeV2Enabled = serverV2Available
@@ -181,12 +187,16 @@ function WorkspaceCheckoutBadgeInner(
         if (cancelled) return
         const available = !!capability?.worktreeV2
         setServerV2Available(available)
+        setServerV2Pending(false)
         if (available) {
           setWorktreeNameSuffix((previous) => previous ?? generateDefaultWorktreeName())
         }
       })
       .catch(() => {
-        if (!cancelled) setServerV2Available(false)
+        if (!cancelled) {
+          setServerV2Available(false)
+          setServerV2Pending(false)
+        }
       })
     return () => {
       cancelled = true
@@ -202,6 +212,7 @@ function WorkspaceCheckoutBadgeInner(
     setIntentKind('new')
     setBaseRef(null)
     setWorktreeNameSuffix(null)
+    setServerV2Pending(true)
     setSelectedWorktreeId(null)
     setWorktrees([])
     setWorktreesLoading(false)
@@ -301,6 +312,7 @@ function WorkspaceCheckoutBadgeInner(
       managedWorktreeId: intentKind === 'existing' ? selectedWorktreeId : null,
       worktreeIntent: intentKind,
       worktreeV2Enabled,
+      worktreeV2Pending: serverV2Pending,
       worktreeNameSuffix,
       workingDirectory: workingDirectory ?? null,
       prepared: !!prepared,
@@ -393,6 +405,7 @@ function WorkspaceCheckoutBadgeInner(
     baseRef,
     selectedWorktreeId,
     worktreeV2Enabled,
+    serverV2Pending,
     worktreeNameSuffix,
     workingDirectory,
     prepared,
@@ -568,9 +581,7 @@ function WorkspaceCheckoutBadgeInner(
   const selectedWorktree =
     worktrees.find((w) => w.managedWorktreeId === selectedWorktreeId) ?? null
   const selectedWorktreeLabel = selectedWorktree
-    ? 'displayName' in selectedWorktree
-      ? selectedWorktree.displayName
-      : selectedWorktree.expectedBranch
+    ? worktreeDisplayLabel(selectedWorktree)
     : null
   const triggerLabel =
     mode === 'managed-worktree'
@@ -663,16 +674,18 @@ function WorkspaceCheckoutBadgeInner(
                     {t('common.loading')}
                   </div>
                 )}
-                {worktrees.map((worktree) => (
-                  <CommandPrimitive.Item
-                    key={worktree.managedWorktreeId}
-                    value={`${worktree.expectedBranch} ${worktree.checkoutPath}`}
-                    onSelect={() => setSelectedWorktreeId(worktree.managedWorktreeId)}
-                    className={cn(MENU_ITEM_STYLE, 'items-start')}
-                  >
-                    <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="flex-1 min-w-0">
-                      <span className="block truncate">{worktree.expectedBranch}</span>
+                {worktrees.map((worktree) => {
+                  const worktreeLabel = worktreeDisplayLabel(worktree)
+                  return (
+                    <CommandPrimitive.Item
+                      key={worktree.managedWorktreeId}
+                      value={`${worktreeLabel} ${worktree.expectedBranch} ${worktree.checkoutPath}`}
+                      onSelect={() => setSelectedWorktreeId(worktree.managedWorktreeId)}
+                      className={cn(MENU_ITEM_STYLE, 'items-start')}
+                    >
+                      <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">{worktreeLabel}</span>
                       <span className="block truncate text-[11px] text-muted-foreground">
                         {worktree.baseRef && worktree.ownerCount > 1 &&
                           t('git.workspace.sharedFromRef', {
@@ -689,7 +702,8 @@ function WorkspaceCheckoutBadgeInner(
                       <Check className="h-4 w-4 shrink-0" />
                     )}
                   </CommandPrimitive.Item>
-                ))}
+                  )
+                })}
                 {!worktreesLoading && worktrees.length === 0 && (
                   <CommandPrimitive.Empty className="py-3 text-center text-sm text-muted-foreground">
                     {t('git.workspace.noWorktreesFound')}
