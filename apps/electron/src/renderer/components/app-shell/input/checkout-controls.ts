@@ -10,6 +10,7 @@ import type {
   CheckoutMode,
   CheckoutPrepareIntentVersioned,
   SessionCheckout,
+  WorktreeRecoveryState,
 } from '@kata-sh/shared/protocol'
 
 // ---------------------------------------------------------------------------
@@ -310,6 +311,13 @@ export type CheckoutRecovery =
   | { kind: 'branch-drift'; expected: string; found: string | null }
   /** The server marked the worktree blocked (e.g. a Git command failed). */
   | { kind: 'blocked'; reason?: string }
+  /**
+   * Phase 2 lifecycle recovery: the server fenced this session's checkout in a
+   * known non-ready lifecycle state (snapshot-backed removal, restore in
+   * flight, or a failed step). Carries the exact state so the composer can name
+   * the accurate remedy instead of a generic "missing".
+   */
+  | { kind: 'lifecycle'; state: WorktreeRecoveryState }
 
 /**
  * Decide whether a persisted managed-worktree checkout needs a visible recovery
@@ -317,13 +325,17 @@ export type CheckoutRecovery =
  * (`checkManagedCheckoutIdentity`) so the composer badge surfaces the same drift
  * the server would refuse to mutate on — Kata never silently switches directory.
  *
- * Precedence: blocked → missing → branch-drift. A current checkout, an absent
- * checkout, or an unloaded repository context returns `ok`.
+ * Precedence: lifecycle → blocked → missing → branch-drift. A current checkout,
+ * an absent checkout, or an unloaded repository context returns `ok`.
  */
 export function resolveCheckoutRecovery(state: CheckoutRecoveryState): CheckoutRecovery {
   const { checkout } = state
   if (!checkout || checkout.mode !== 'managed-worktree') return { kind: 'ok' }
   if (!state.contextLoaded) return { kind: 'ok' }
+
+  // The server persists the exact non-ready lifecycle state on the session
+  // checkout; it is authoritative over any local inference.
+  if (checkout.recoveryState) return { kind: 'lifecycle', state: checkout.recoveryState }
 
   if (state.worktreeStatus === 'blocked') return { kind: 'blocked' }
   if (!state.checkoutExists || state.worktreeStatus === 'missing') return { kind: 'missing' }

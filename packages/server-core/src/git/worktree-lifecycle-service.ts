@@ -1044,6 +1044,19 @@ export class WorktreeLifecycleService {
       }
 
       // Runtime quiescence: every owning runtime must stop before capture.
+      // A flagged owner protects the worktree even when its runtime would
+      // quiesce — flag state is deliberately not part of the fingerprint
+      // (it changes dynamically), so the protection is enforced here.
+      const protectedOwner = record.ownerSessionIds.find(
+        (owner) =>
+          (this.deps.isSessionActive?.(owner) ?? false) || (this.deps.isSessionFlagged?.(owner) ?? false),
+      )
+      if (protectedOwner) {
+        return fail(
+          'LIFECYCLE_OWNERS_PRESENT',
+          `Session ${protectedOwner} is ${this.deps.isSessionActive?.(protectedOwner) ? 'active' : 'flagged'} and cannot be interrupted.`,
+        )
+      }
       if (options.requireQuiesce) {
         const quiesced = this.deps.quiesceRuntimes ? await this.deps.quiesceRuntimes(record.ownerSessionIds) : true
         if (!quiesced) {
@@ -1052,17 +1065,50 @@ export class WorktreeLifecycleService {
       }
       this.deps.journal.step(journalEntry.journalId, 'quiesced')
 
+      // A verified snapshot may already exist (retry after a failed release).
+      // Verify it FIRST: its captured fingerprint replaces the pre-capture
+      // inspection, and a partially released checkout has no computable
+      // working-tree fingerprint at all.
+      let meta: ManagedWorktreeSnapshotMeta | null = null
+      if (record.snapshot && record.state !== 'ready' && record.state !== 'unowned') {
+        meta = record.snapshot
+        try {
+          this.deps.snapshots.verifyPayload(meta)
+          await this.deps.snapshots.verifyHiddenRef(record.repositoryRoot, meta)
+        } catch {
+          meta = null
+        }
+      }
+
       // Revalidate the fingerprint immediately before capture. Automatic and
       // session-delete transactions have no client confirmation, so a stable
       // pre-capture fingerprint is recorded and rechecked after capture.
       let stabilityFingerprint: string | null = null
-      if (options.expectedFingerprint) {
-        const fresh = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
-        if (fresh !== options.expectedFingerprint) {
-          return fail('LIFECYCLE_PREVIEW_STALE', 'The worktree changed after the confirmation; inspect it again.')
+      if (!meta) {
+        if (options.expectedFingerprint) {
+          const fresh = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
+          if (fresh !== options.expectedFingerprint) {
+            return fail('LIFECYCLE_PREVIEW_STALE', 'The worktree changed after the confirmation; inspect it again.')
+          }
+        } else {
+          stabilityFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         }
       } else {
-        stabilityFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
+        // Retry path: if the checkout is still fully inspectable it must be
+        // byte-identical to what the snapshot captured; if it is no longer a
+        // usable worktree the release already began and there is nothing left
+        // to protect, so the verified snapshot governs.
+        try {
+          const current = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
+          if (current !== meta.fingerprint) {
+            return fail(
+              'LIFECYCLE_PREVIEW_STALE',
+              'The checkout changed after its snapshot was captured; restore it and inspect it again.',
+            )
+          }
+        } catch {
+          /* partially released checkout: the verified snapshot governs */
+        }
       }
       this.deps.journal.step(journalEntry.journalId, 'fingerprint-validated')
 
@@ -1081,16 +1127,6 @@ export class WorktreeLifecycleService {
       this.deps.journal.step(journalEntry.journalId, 'registry-snapshotting')
 
       // Capture (skipped when a verified snapshot already exists).
-      let meta: ManagedWorktreeSnapshotMeta | null = null
-      if (record.snapshot && record.state !== 'ready' && record.state !== 'unowned') {
-        meta = record.snapshot
-        try {
-          this.deps.snapshots.verifyPayload(meta)
-          await this.deps.snapshots.verifyHiddenRef(record.repositoryRoot, meta)
-        } catch {
-          meta = null
-        }
-      }
       if (!meta) {
         const finalFingerprint = await this.deps.snapshots.recomputeFingerprint(record, options.policyVersion)
         const captured = await this.deps.snapshots.capture({

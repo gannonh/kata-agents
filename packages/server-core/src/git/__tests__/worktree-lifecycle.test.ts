@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices, WorktreeLifecycleError } from '../index'
 import type { GitServices } from '../index'
@@ -888,5 +888,90 @@ describe('orphan and pending-restore cleanup', () => {
     await svc.lifecycle.enqueueCleanup()
 
     expect(sweeps).toBe(3)
+  })
+})
+
+describe('UAT regressions', () => {
+  test('a flagged owner blocks manual deletion even with a fresh fingerprint', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x', ['session-1', 'session-2'])
+    const preview = await svc.lifecycle.preview(record.managedWorktreeId)
+    expect(preview.blocked).toBe(false)
+    // Flag AFTER the preview: flag state is deliberately not part of the
+    // fingerprint, so the transaction itself must enforce the protection.
+    flaggedSessions.add('session-2')
+    const result = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    expect(result.deleted).toBe(false)
+    expect(result.error).toContain('flagged')
+    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+  })
+
+  test('an active owner blocks manual deletion', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    const preview = await svc.lifecycle.preview(record.managedWorktreeId)
+    activeSessions.add('session-1')
+    const result = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    expect(result.deleted).toBe(false)
+    expect(result.error).toContain('active')
+    expect(existsSync(record.checkoutPath)).toBe(true)
+  })
+
+  test('retry completes the release when the checkout was already partially released', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
+    const preview = await svc.lifecycle.preview(record.managedWorktreeId)
+    // Injected failure: the checkout directory cannot be removed.
+    chmodSync(record.checkoutPath, 0o555)
+    const failed = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    expect(failed.deleted).toBe(false)
+    const stuck = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(stuck.state).toBe('cleanup-failed')
+    expect(stuck.snapshot).toBeDefined()
+    // The failed attempt already deregistered the worktree, so no working-tree
+    // fingerprint is computable; the verified snapshot must govern the retry.
+    chmodSync(record.checkoutPath, 0o755)
+    const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
+    expect(retried).toMatchObject({ retried: true, state: 'snapshotted' })
+    expect(existsSync(record.checkoutPath)).toBe(false)
+    // …and it still restores exactly.
+    const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
+    expect(restored.restored).toBe(true)
+    expect(readFileSync(join(restored.checkoutPath!, 'work.txt'), 'utf8')).toBe('work in progress\n')
+  })
+
+  test('retry refuses when a still-inspectable checkout changed after capture', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    const preview = await svc.lifecycle.preview(record.managedWorktreeId)
+    chmodSync(record.checkoutPath, 0o555)
+    await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    chmodSync(record.checkoutPath, 0o755)
+    const stuck = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    // Re-register the checkout so a fingerprint is computable again, then
+    // change its content: the retry must refuse rather than lose the change.
+    if (stuck.snapshot) {
+      svc.registry.upsert({ ...stuck, snapshot: { ...stuck.snapshot, fingerprint: 'fingerprint-from-a-different-tree' } })
+    }
+    const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
+    if (existsSync(join(record.checkoutPath, '.git'))) {
+      expect(retried.retried).toBe(false)
+      expect(retried.error).toContain('changed after its snapshot')
+    }
+  })
+
+  test('reconciliation gives missing records actionable recovery text', async () => {
+    const { svc, root } = harness
+    const record = await makeManagedWorktree('feature-x')
+    rmSync(record.checkoutPath, { recursive: true, force: true })
+    await svc.worktrees.reconcile({ knownSessionIds: new Set(['session-1']) })
+    const missing = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(missing.state).toBe('missing')
+    expect(missing.lastError ?? '').toContain('no longer on disk')
+    const row = svc.lifecycle.inventory().rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)
+    expect(row?.lastError ?? '').toContain('no longer on disk')
+    expect(root).toBeDefined()
   })
 })

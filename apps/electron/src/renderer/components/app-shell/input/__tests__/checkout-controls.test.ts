@@ -449,6 +449,40 @@ describe('resolveCheckoutIdentity', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveCheckoutRecovery', () => {
+  // Phase 2 (issue #41 AC14): the server persists the exact non-ready lifecycle
+  // state on the session checkout; it is authoritative over local inference so
+  // a fenced session names the accurate remedy instead of a generic "missing".
+  test.each([
+    'snapshotted',
+    'restoring',
+    'restore-failed',
+    'cleanup-failed',
+    'unowned',
+    'snapshotting',
+    'missing',
+  ] as const)('surfaces the persisted %s lifecycle recovery state', (state) => {
+    const r = resolveCheckoutRecovery({
+      checkout: { ...worktreeCheckout, recoveryState: state },
+      contextLoaded: true,
+      // Even with a live, matching checkout the persisted fence wins.
+      liveBranch: 'kata-agent/aabbccdd',
+      liveDetached: false,
+      checkoutExists: true,
+    })
+    expect(r).toEqual({ kind: 'lifecycle', state })
+  })
+
+  test('falls back to local inference when no lifecycle state is persisted', () => {
+    const r = resolveCheckoutRecovery({
+      checkout: worktreeCheckout,
+      contextLoaded: true,
+      liveBranch: null,
+      liveDetached: false,
+      checkoutExists: false,
+    })
+    expect(r.kind).toBe('missing')
+  })
+
   test('is ok for a current checkout (recovery only applies to managed worktrees)', () => {
     const r = resolveCheckoutRecovery({
       checkout: currentCheckout,

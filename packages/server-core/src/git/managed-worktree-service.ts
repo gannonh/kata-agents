@@ -1078,22 +1078,33 @@ export class ManagedWorktreeService {
       const listedEntry =
         list?.get(resolvePath(rec.checkoutPath)) ?? list?.get(safeRealpath(rec.checkoutPath))
 
+      // Lifecycle-visible recovery text lives on the V2 shape; the registry
+      // upgrades every record in place, so this view is safe.
+      const recV2 = rec as ManagedWorktreeRecordV2
       let nextState = rec.state
       if (!worktreePresentOnDisk && !listedEntry) {
         nextState = 'missing'
         report.markedMissing += 1
+        // Actionable recovery text for the inventory row (spec: AC2, AC14).
+        recV2.lastError =
+          'The checkout is no longer on disk. Remove this record from Worktrees settings, or delete the sessions that own it.'
       } else if (listedEntry && listedEntry.branch && listedEntry.branch !== rec.expectedBranch) {
         // The checkout exists but is on an unexpected branch — ambiguous.
         nextState = 'blocked'
         report.markedBlocked += 1
+        recV2.lastError =
+          'The checkout is on an unexpected branch. Restore the expected branch, or delete the sessions that own it.'
       } else if (worktreePresentOnDisk && !listedEntry) {
         // On disk but not a registered worktree — ambiguous, do not touch it.
         nextState = 'blocked'
         report.markedBlocked += 1
+        recV2.lastError =
+          'The checkout directory exists but Git no longer tracks it as a worktree. Inspect it on the server before removing it.'
       } else if (listedEntry && rec.state !== 'ready' && rec.state !== 'removing') {
         // Healthy again after being marked missing/preparing/blocked. An
         // in-flight removal is never reopened by reconciliation.
         nextState = 'ready'
+        recV2.lastError = undefined
       }
       rec.state = nextState
       if (!this.registry.upsertIfUnchanged(observed, rec)) {
