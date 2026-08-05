@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   rmdirSync,
   statSync,
@@ -39,8 +40,10 @@ interface LockOwner {
 }
 
 interface ObservedOwner {
-  owner: LockOwner
+  owner?: LockOwner
   path: string
+  /** Marker content + filesystem identity observed for exact deletion. */
+  fingerprint: string
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -90,22 +93,41 @@ export class CrossProcessFileLock {
     }
   }
 
-  private ownerPath(token: string): string {
-    return join(this.lockPath, `owner-${token}.json`)
+  private ownerPath(token: string, root = this.lockPath): string {
+    return join(root, `owner-${token}.json`)
+  }
+
+  private claimPath(token: string): string {
+    return `${this.lockPath}.claim-${token}`
   }
 
   private parseOwnerFile(path: string, expectedName?: string): ObservedOwner | null {
+    let raw: string
+    let fingerprint: string
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<LockOwner>
+      raw = readFileSync(path, 'utf8')
+      const stat = statSync(path)
+      fingerprint = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${createHash('sha256').update(raw).digest('hex')}`
+    } catch {
+      return null
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<LockOwner>
       if (
         typeof parsed.token !== 'string' ||
         !parsed.token ||
         !Number.isInteger(parsed.pid) ||
         !Number.isFinite(parsed.acquiredAt) ||
         (expectedName !== undefined && expectedName !== `owner-${parsed.token}.json`)
-      ) return null
+      ) {
+        // Current owners are written completely in a private claim directory
+        // before publication. A malformed visible marker is therefore safely
+        // recoverable only by exact-marker deletion after it becomes stale.
+        return { path, fingerprint }
+      }
       return {
         path,
+        fingerprint,
         owner: {
           token: parsed.token,
           pid: parsed.pid as number,
@@ -113,7 +135,7 @@ export class CrossProcessFileLock {
         },
       }
     } catch {
-      return null
+      return { path, fingerprint }
     }
   }
 
@@ -128,8 +150,9 @@ export class CrossProcessFileLock {
     const ownerNames = names.filter(
       (name) => name.startsWith('owner-') && name.endsWith('.json'),
     )
-    // A lock may be observed between mkdir and owner marker creation. It is
-    // not safe to infer an owner from anything else in the directory.
+    // A lock may be observed between mkdir and owner marker creation. The
+    // atomic claim protocol never publishes such a directory; ownerless
+    // directories are consequently not stale-reaped.
     if (ownerNames.length === 1) {
       return this.parseOwnerFile(join(this.lockPath, ownerNames[0]!), ownerNames[0])
     }
@@ -143,7 +166,8 @@ export class CrossProcessFileLock {
   }
 
   private isStale(observed: ObservedOwner | null): boolean {
-    if (observed) {
+    if (!observed) return false
+    if (observed.owner) {
       const alive = processIsAlive(observed.owner.pid)
       if (alive === false) return true
       if (alive === true) return false
@@ -167,27 +191,70 @@ export class CrossProcessFileLock {
   private tryBreakStale(): void {
     if (!existsSync(this.lockPath)) return
     const observed = this.readOwner()
-    if (!this.isStale(observed)) return
+    // The atomic claim protocol never exposes an ownerless lock directory. Do
+    // not reap one: an in-flight claimant must never be allowed to continue
+    // against a successor that acquired the same path.
+    if (!observed || !this.isStale(observed)) return
     try {
       const confirmed = this.readOwner()
-      if (observed || confirmed) {
-        if (
-          !observed ||
-          !confirmed ||
-          confirmed.path !== observed.path ||
-          confirmed.owner.token !== observed.owner.token ||
-          confirmed.owner.acquiredAt !== observed.owner.acquiredAt
-        ) return
-        unlinkSync(confirmed.path)
-      } else if (readdirSync(this.lockPath).length !== 0) {
-        return
-      }
+      if (
+        !confirmed ||
+        confirmed.path !== observed.path ||
+        confirmed.fingerprint !== observed.fingerprint ||
+        confirmed.owner?.token !== observed.owner?.token ||
+        confirmed.owner?.acquiredAt !== observed.owner?.acquiredAt
+      ) return
+      unlinkSync(confirmed.path)
       // Non-recursive removal is the final ownership check. If a replacement
       // marker appeared, the directory is non-empty and remains protected.
       rmdirSync(this.lockPath)
     } catch {
       // The owner or another waiter may have won the race. The next attempt
       // will inspect the current lock again.
+    }
+  }
+
+  private claimSync(owner: LockOwner): boolean {
+    const claimPath = this.claimPath(owner.token)
+    let claimed = false
+    try {
+      mkdirSync(claimPath)
+      claimed = true
+      writeFileSync(this.ownerPath(owner.token, claimPath), JSON.stringify(owner), {
+        encoding: 'utf8',
+        flag: 'wx',
+      })
+      renameSync(claimPath, this.lockPath)
+      claimed = false
+      return true
+    } catch (error) {
+      if (claimed) rmSync(claimPath, { recursive: true, force: true })
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST' || (error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
+        return false
+      }
+      throw error
+    }
+  }
+
+  private async claim(owner: LockOwner): Promise<boolean> {
+    const claimPath = this.claimPath(owner.token)
+    let claimed = false
+    try {
+      await mkdirAsync(claimPath, false)
+      claimed = true
+      writeFileSync(this.ownerPath(owner.token, claimPath), JSON.stringify(owner), {
+        encoding: 'utf8',
+        flag: 'wx',
+      })
+      renameSync(claimPath, this.lockPath)
+      claimed = false
+      return true
+    } catch (error) {
+      if (claimed) rmSync(claimPath, { recursive: true, force: true })
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST' || (error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
+        return false
+      }
+      throw error
     }
   }
 
@@ -202,22 +269,15 @@ export class CrossProcessFileLock {
 
     for (;;) {
       try {
-        mkdirSync(this.lockPath)
-        try {
-          writeFileSync(this.ownerPath(owner.token), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
-        } catch (error) {
-          rmSync(this.lockPath, { recursive: true, force: true })
-          throw error
-        }
-        return owner
+        if (this.claimSync(owner)) return owner
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        this.tryBreakStale()
-        if (Date.now() - started >= this.options.timeoutMs) {
-          throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
-        }
-        sleepSync(this.options.retryDelayMs)
       }
+      this.tryBreakStale()
+      if (Date.now() - started >= this.options.timeoutMs) {
+        throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
+      }
+      sleepSync(this.options.retryDelayMs)
     }
   }
 
@@ -232,35 +292,28 @@ export class CrossProcessFileLock {
 
     for (;;) {
       try {
-        await mkdirAsync(this.lockPath, false)
-        try {
-          writeFileSync(this.ownerPath(owner.token), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
-        } catch (error) {
-          rmSync(this.lockPath, { recursive: true, force: true })
-          throw error
-        }
-        return owner
+        if (await this.claim(owner)) return owner
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        this.tryBreakStale()
-        if (Date.now() - started >= this.options.timeoutMs) {
-          throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
-        }
-        await sleep(this.options.retryDelayMs)
       }
+      this.tryBreakStale()
+      if (Date.now() - started >= this.options.timeoutMs) {
+        throw new Error(`Timed out acquiring cross-process lock: ${this.lockPath}`)
+      }
+      await sleep(this.options.retryDelayMs)
     }
   }
 
   private release(owner: LockOwner): void {
     try {
       const observed = this.readOwner()
-      if (!observed || observed.owner.token !== owner.token) return
+      if (!observed || observed.owner?.token !== owner.token) return
       const confirmed = this.readOwner()
       if (
         !confirmed ||
         confirmed.path !== observed.path ||
-        confirmed.owner.token !== observed.owner.token ||
-        confirmed.owner.acquiredAt !== observed.owner.acquiredAt
+        confirmed.owner?.token !== observed.owner?.token ||
+        confirmed.owner?.acquiredAt !== observed.owner?.acquiredAt
       ) return
       // Remove only this exact marker, then require the directory to be empty.
       // This prevents a delayed release from recursively deleting a successor

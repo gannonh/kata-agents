@@ -63,6 +63,49 @@ describe('MutationLock', () => {
     cleanup(root)
   })
 
+  test('does not stale-reap an active successor after dead-owner handoff', async () => {
+    const root = makeTmpDir('kata-successor-lock-test-')
+    const lockPath = resolve(root, 'server-locks', 'common.lock')
+    mkdirSync(lockPath, { recursive: true })
+    const staleMarker = resolve(lockPath, 'owner-dead-token.json')
+    writeFileSync(
+      staleMarker,
+      JSON.stringify({ token: 'dead-token', pid: 999999, acquiredAt: 1 }),
+    )
+    const old = new Date(1)
+    utimesSync(lockPath, old, old)
+    const started = resolve(root, 'successor-started')
+    const finished = resolve(root, 'successor-finished')
+    const modulePath = resolve(import.meta.dir, '../mutation-lock.ts')
+    const script = `
+      import { writeFileSync } from 'node:fs'
+      import { CrossProcessFileLock } from ${JSON.stringify(modulePath)}
+      const lock = new CrossProcessFileLock(${JSON.stringify(lockPath)}, { staleAfterMs: 0, timeoutMs: 5000, retryDelayMs: 5 })
+      await lock.run(async () => {
+        writeFileSync(${JSON.stringify(started)}, 'started')
+        await new Promise((resolve) => setTimeout(resolve, 180))
+        writeFileSync(${JSON.stringify(finished)}, 'finished')
+      })
+    `
+    const child = spawn(process.execPath, ['-e', script], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    })
+    try {
+      for (let attempt = 0; attempt < 100 && !existsSync(started); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(readFileSync(started, 'utf8')).toBe('started')
+      const parent = new CrossProcessFileLock(lockPath, { staleAfterMs: 0, timeoutMs: 5000, retryDelayMs: 5 })
+      parent.runSync(() => undefined)
+      expect(readFileSync(finished, 'utf8')).toBe('finished')
+    } finally {
+      if (!child.killed) child.kill('SIGKILL')
+      cleanup(root)
+    }
+  })
+
   test('serializes with a separate process without placing locks in the repository', async () => {
     const root = makeTmpDir('kata-lock-test-')
     const lockRoot = resolve(root, 'server-locks')

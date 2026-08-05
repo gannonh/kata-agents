@@ -13,6 +13,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
   openSync,
   closeSync,
@@ -120,6 +121,12 @@ export function getWorktreeRegistryEvidencePaths(registryPath: string): {
 /** Alias with a shorter name for callers that need to inspect evidence. */
 export const worktreeRegistryEvidencePaths = getWorktreeRegistryEvidencePaths
 
+/** Optional deterministic race hooks used by filesystem/concurrency tests. */
+export interface WorktreeRegistryHooks {
+  beforePersist?: () => void
+  beforeReplace?: () => void
+}
+
 const VALID_STATES = new Set<ManagedWorktreeState>([
   'preparing',
   'ready',
@@ -132,6 +139,11 @@ const HEX8 = /^[0-9a-f]{8}$/
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function statFingerprint(path: string): string {
+  const stat = statSync(path)
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`
 }
 
 function isSha256(value: unknown): value is string {
@@ -439,13 +451,19 @@ export class WorktreeRegistry {
   private readonly registryPath: string
   private readonly evidencePaths: ReturnType<typeof getWorktreeRegistryEvidencePaths>
   private readonly lock: CrossProcessFileLock
+  private readonly hooks: WorktreeRegistryHooks
   private cache = new Map<string, ManagedWorktreeRecordV2>()
   private sourceState: 'unknown' | 'absent' | 'present' = 'unknown'
 
-  constructor(registryPath: string, lockOptions?: CrossProcessLockOptions) {
+  constructor(
+    registryPath: string,
+    lockOptions?: CrossProcessLockOptions,
+    hooks: WorktreeRegistryHooks = {},
+  ) {
     this.registryPath = resolvePath(registryPath)
     this.evidencePaths = getWorktreeRegistryEvidencePaths(this.registryPath)
     this.lock = new CrossProcessFileLock(this.evidencePaths.lockPath, lockOptions)
+    this.hooks = hooks
   }
 
   getRegistryPath(): string {
@@ -502,13 +520,31 @@ export class WorktreeRegistry {
     return this.getUpgradeEvidence()
   }
 
-  private readSource(): { exists: boolean; raw: string; bytes: Buffer; hash: string } {
+  private readSource(): {
+    exists: boolean
+    raw: string
+    bytes: Buffer
+    hash: string
+    identity: string | null
+  } {
     try {
       const bytes = readFileSync(this.registryPath)
-      return { exists: true, raw: bytes.toString('utf8'), bytes, hash: sha256(bytes) }
+      return {
+        exists: true,
+        raw: bytes.toString('utf8'),
+        bytes,
+        hash: sha256(bytes),
+        identity: statFingerprint(this.registryPath),
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { exists: false, raw: '', bytes: Buffer.alloc(0), hash: sha256(Buffer.alloc(0)) }
+        return {
+          exists: false,
+          raw: '',
+          bytes: Buffer.alloc(0),
+          hash: sha256(Buffer.alloc(0)),
+          identity: null,
+        }
       }
       throw wrapError(
         error,
@@ -637,7 +673,10 @@ export class WorktreeRegistry {
     }
   }
 
-  private upgradeLocked(source: { raw: string; bytes: Buffer; hash: string }, parsed: RegistryFile): ManagedWorktreeRecordV2[] {
+  private upgradeLocked(
+    source: { raw: string; bytes: Buffer; hash: string; identity: string | null },
+    parsed: RegistryFile,
+  ): ManagedWorktreeRecordV2[] {
     const priorEvidence = this.getUpgradeEvidence()
     if (priorEvidence) {
       if (!existsSync(this.evidencePaths.backupPath)) {
@@ -733,8 +772,13 @@ export class WorktreeRegistry {
     // overwriting newer bytes with migration derived from an older source.
     try {
       writeBytesAtomically(this.registryPath, targetBytes, () => {
+        this.hooks.beforeReplace?.()
         const beforeReplace = this.readSource()
-        if (!beforeReplace.exists || beforeReplace.hash !== source.hash) {
+        if (
+          !beforeReplace.exists ||
+          beforeReplace.hash !== source.hash ||
+          beforeReplace.identity !== source.identity
+        ) {
           throw new WorktreeRegistryError(
             'REGISTRY_CONFLICT',
             'The registry source changed during upgrade; source bytes were preserved.',
@@ -806,48 +850,17 @@ export class WorktreeRegistry {
     }
   }
 
-  private persistLocked(records: Iterable<ManagedWorktreeRecordV2>): void {
-    let source = this.readSource()
-    if (!source.exists) {
-      this.recoverMissingSourceLocked()
-      source = this.readSource()
-    }
-    let authoritativeHash: string | null = null
-    if (source.exists) {
-      const parsed = parseRegistry(source.raw, this.registryPath)
-      const authoritative = this.upgradeLocked(source, parsed)
-      // `upgradeLocked` may have just replaced a V1 source. Re-read so the
-      // mutation is based on the exact bytes now on disk.
-      const current = this.readSource()
-      if (!current.exists) {
-        throw new WorktreeRegistryError(
-          'REGISTRY_CONFLICT',
-          'The registry disappeared while preparing a mutation.',
-          this.registryPath,
-        )
-      }
-      if (parsed.version === 2 && current.hash !== source.hash) {
-        // A non-cooperating writer changed the V2 source while it was being
-        // read. Never overwrite it from cache.
-        throw new WorktreeRegistryError(
-          'REGISTRY_CONFLICT',
-          'The registry source changed during mutation.',
-          this.registryPath,
-        )
-      }
-      authoritativeHash = current.hash
-      this.cache = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
-    } else {
-      this.cache = new Map()
-      this.sourceState = 'absent'
-    }
-
-    const bytes = encodeRegistry(records)
-    const expectedHash = sha256(bytes)
-    const latest = this.readSource()
+  private persistLocked(
+    records: Iterable<ManagedWorktreeRecordV2>,
+    expectedSource: { exists: boolean; hash: string; identity: string | null },
+  ): void {
+    const source = this.readSource()
     if (
-      latest.exists !== source.exists ||
-      (source.exists && latest.hash !== authoritativeHash)
+      source.exists !== expectedSource.exists ||
+      (expectedSource.exists && (
+        source.hash !== expectedSource.hash ||
+        source.identity !== expectedSource.identity
+      ))
     ) {
       throw new WorktreeRegistryError(
         'REGISTRY_CONFLICT',
@@ -855,12 +868,19 @@ export class WorktreeRegistry {
         this.registryPath,
       )
     }
+
+    const bytes = encodeRegistry(records)
+    const expectedHash = sha256(bytes)
     try {
       writeBytesAtomically(this.registryPath, bytes, () => {
+        this.hooks.beforeReplace?.()
         const beforeReplace = this.readSource()
         if (
-          beforeReplace.exists !== source.exists ||
-          (source.exists && beforeReplace.hash !== authoritativeHash)
+          beforeReplace.exists !== expectedSource.exists ||
+          (expectedSource.exists && (
+            beforeReplace.hash !== expectedSource.hash ||
+            beforeReplace.identity !== expectedSource.identity
+          ))
         ) {
           throw new WorktreeRegistryError(
             'REGISTRY_CONFLICT',
@@ -917,16 +937,25 @@ export class WorktreeRegistry {
         }
         let records = new Map<string, ManagedWorktreeRecordV2>()
         let authoritativeHash = source.hash
+        let authoritativeIdentity = source.identity
         if (source.exists) {
           const parsed = parseRegistry(source.raw, this.registryPath)
           const authoritative = this.upgradeLocked(source, parsed)
-          authoritativeHash = this.readSource().hash
+          const authoritativeSource = this.readSource()
+          authoritativeHash = authoritativeSource.hash
+          authoritativeIdentity = authoritativeSource.identity
           records = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
         }
         const changed = mutator(records)
         if (!changed) {
           const latest = this.readSource()
-          if (latest.exists !== source.exists || (source.exists && latest.hash !== authoritativeHash)) {
+          if (
+            latest.exists !== source.exists ||
+            (source.exists && (
+              latest.hash !== authoritativeHash ||
+              latest.identity !== authoritativeIdentity
+            ))
+          ) {
             throw new WorktreeRegistryError(
               'REGISTRY_CONFLICT',
               'The registry source changed during a no-op mutation.',
@@ -937,7 +966,12 @@ export class WorktreeRegistry {
           this.sourceState = source.exists ? 'present' : 'absent'
           return
         }
-        this.persistLocked(records.values())
+        this.hooks.beforePersist?.()
+        this.persistLocked(records.values(), {
+          exists: source.exists,
+          hash: authoritativeHash,
+          identity: authoritativeIdentity,
+        })
       })
     } catch (error) {
       if (error instanceof WorktreeRegistryError) throw error

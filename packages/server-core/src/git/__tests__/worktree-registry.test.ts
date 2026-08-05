@@ -173,6 +173,54 @@ describe('WorktreeRegistry', () => {
     expect(readFileSync(path, 'utf8')).toBe(source)
   })
 
+  test('rejects an intervening writer instead of overwriting its new record', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const seed = new WorktreeRegistry(path)
+    seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
+    const first = seed.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    const second = {
+      ...first,
+      managedWorktreeId: 'repo-eeff0011',
+      expectedBranch: 'kata-agent/eeff0011',
+      displayName: 'eeff0011',
+      checkoutPath: join(root, 'workspace-1', '0123456789abcdef', 'eeff0011'),
+    }
+    const writerBytes = JSON.stringify({ version: 2, records: [first, second] }, null, 2) + '\n'
+    const racing = new WorktreeRegistry(path, undefined, {
+      beforePersist: () => writeFileSync(path, writerBytes),
+    })
+
+    expect(() => racing.setState(first.managedWorktreeId, 'blocked')).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(writerBytes)
+    expect(new WorktreeRegistry(path).list().map((record) => record.managedWorktreeId).sort()).toEqual([
+      'repo-aabbccdd',
+      'repo-eeff0011',
+    ])
+  })
+
+  test('aborts before rename when a writer changes the source at the deterministic race hook', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const seed = new WorktreeRegistry(path)
+    seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
+    const first = seed.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    const second = {
+      ...first,
+      managedWorktreeId: 'repo-eeff0011',
+      expectedBranch: 'kata-agent/eeff0011',
+      displayName: 'eeff0011',
+      checkoutPath: join(root, 'workspace-1', '0123456789abcdef', 'eeff0011'),
+    }
+    const writerBytes = JSON.stringify({ version: 2, records: [first, second] }, null, 2) + '\n'
+    const racing = new WorktreeRegistry(path, undefined, {
+      beforeReplace: () => writeFileSync(path, writerBytes),
+    })
+
+    expect(() => racing.setState(first.managedWorktreeId, 'blocked')).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(writerBytes)
+  })
+
   test('rejects a source that conflicts with prior upgrade evidence', () => {
     const root = tmp()
     const path = join(root, 'registry.json')
