@@ -74,10 +74,9 @@ async function deleteManagedSessions(page: Page): Promise<void> {
   });
 }
 
-test.describe(`Worktree V2 snapshot management ${E2E_TAGS.worktreeV2}`, () => {
-  test("deletes a worktree snapshot-first, restores it, and saves cleanup policy @worktree-v2 manage cleanup restore", async ({
+test.describe(`Worktree V2 management ${E2E_TAGS.worktreeV2}`, () => {
+  test("shows a simple delete-only worktree list and saves cleanup policy @worktree-v2 manage cleanup", async ({
     authenticatedAppWindow: page,
-    runContext,
   }) => {
     const repository = await createRepository();
     let worktreeId: string | undefined;
@@ -106,52 +105,37 @@ test.describe(`Worktree V2 snapshot management ${E2E_TAGS.worktreeV2}`, () => {
       await git(originalCheckoutPath, "add", "precious.txt");
       await git(originalCheckoutPath, "commit", "-m", "unique work");
 
-      // Inventory exposes the row with lifecycle state and branch.
+      // Inventory exposes a compact row with the worktree name, branch, and one
+      // destructive action.
       await openWorktreesSettings(page);
       const row = page.getByTestId(`worktree-row-${worktreeId}`);
       await expect(row).toBeVisible();
       await expect(row).toContainText("manage-me");
       await expect(row).toContainText("kata-agent/manage-me");
-      await expect(row.getByTestId("worktree-row-state")).toContainText("Ready");
+      await expect(row.getByRole("button")).toHaveCount(1);
+      await expect(row.getByTestId("worktree-row-state")).toHaveCount(0);
+      await expect(page.getByTestId("worktrees-auto-delete")).toContainText("Automatically delete old worktrees");
+      await expect(page.getByTestId("worktrees-auto-delete").locator('[role="switch"]')).toHaveAttribute(
+        "aria-checked",
+        "false",
+      );
 
-      // Policy controls: set the retention limit and disable auto-delete, then
-      // save; the inventory reflects the last cleanup result.
+      // Policy controls: set the retention limit while automatic deletion stays
+      // off by default, then save.
       await page.getByTestId("worktrees-retention-limit").locator("input").fill("1");
       await page.getByTestId("worktrees-save").click();
       await expect(page.getByTestId("worktrees-retention-limit").locator("input")).toHaveValue("1");
 
-      // Delete with fresh preview + confirmation → snapshotted state.
+      // Delete with fresh preview + confirmation; the active row disappears.
       await page.getByTestId(`worktree-delete-${worktreeId}`).click();
       await expect(page.getByTestId("worktrees-confirm-delete")).toBeVisible();
       await expect(page.getByTestId("worktrees-confirm-delete")).toContainText("Delete worktree");
       await page.getByTestId("worktrees-confirm-delete").click();
-      await expect(row.getByTestId("worktree-row-state")).toContainText("Snapshotted", {
-        timeout: 30_000,
-      });
+      await expect(row).toHaveCount(0, { timeout: 30_000 });
 
-      // The checkout is gone but the branch survives.
+      // The checkout is gone but the branch survives the snapshot-backed delete.
       const branch = await git(repository, "rev-parse", "--verify", "refs/heads/kata-agent/manage-me");
       expect(branch).toHaveLength(40);
-
-      // Restore recreates the checkout with the exact state.
-      await page.getByTestId(`worktree-restore-${worktreeId}`).click();
-      await expect(row.getByTestId("worktree-row-state")).toContainText("Ready", {
-        timeout: 30_000,
-      });
-      const restored = (await readManagedWorktreeSessions(page)).find(
-        (session) => session.checkout.managedWorktreeId === worktreeId,
-      );
-      expect(restored).toBeDefined();
-      if (!restored) throw new Error("Worktree V2 manage E2E: restore did not rebind the session.");
-      expect(restored.checkout.checkoutPath).not.toBe(originalCheckoutPath);
-      expect(await git(restored.checkout.checkoutPath, "branch", "--show-current")).toBe(
-        "kata-agent/manage-me",
-      );
-      // The committed unique work is back byte-for-byte via the retained branch.
-      expect(await git(restored.checkout.checkoutPath, "log", "--oneline", "-1")).toContain(
-        "unique work",
-      );
-      expect(await git(restored.checkout.checkoutPath, "status", "--porcelain")).toBe("");
     } finally {
       await deleteManagedSessions(page).catch(() => undefined);
       await rm(repository, { recursive: true, force: true });

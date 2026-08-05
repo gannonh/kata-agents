@@ -64,7 +64,7 @@ describe('WorktreeSettingsService', () => {
       version: 0,
       materializationRoot: settings.expandPath(defaultRoot),
       capturedAt: expect.any(Number),
-      autoDeleteEnabled: true,
+      autoDeleteEnabled: false,
       retentionLimit: 15,
     })
     expect(Object.isFrozen(snapshot)).toBe(true)
@@ -132,7 +132,7 @@ describe('WorktreeSettingsService', () => {
       registry: new WorktreeRegistry(join(defaultRoot, 'registry.json')),
     })
     const snapshot = reloaded.getSnapshot()
-    expect(snapshot.autoDeleteEnabled).toBe(true)
+    expect(snapshot.autoDeleteEnabled).toBe(false)
     expect(snapshot.retentionLimit).toBe(15)
   })
 

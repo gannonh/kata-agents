@@ -47,7 +47,11 @@ function makeHarness(limit = 15): Harness {
       touchSessionCheckout: () => undefined,
     },
   })
-  svc.worktreeSettings.update({ materializationRoot: join(root, 'worktrees'), retentionLimit: limit })
+  svc.worktreeSettings.update({
+    materializationRoot: join(root, 'worktrees'),
+    autoDeleteEnabled: true,
+    retentionLimit: limit,
+  })
   return { root, repo, svc }
 }
 

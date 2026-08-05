@@ -4,30 +4,23 @@ import {
   FolderOpen,
   GitBranch,
   RefreshCw,
-  RotateCcw,
   Server as ServerIcon,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import type {
-  ManagedWorktreeState,
   ServerCapabilityDto,
-  WorktreeArchiveResult,
   WorktreeDeleteResult,
   WorktreeInventory,
   WorktreeInventoryRow,
-  WorktreePermanentDeleteResult,
   WorktreePreviewResult,
-  WorktreeRestoreResult,
-  WorktreeRetryResult,
   WorktreeSettingsSnapshot,
 } from '@kata-sh/shared/protocol'
 import type { RemoteServerConfig } from '@kata-sh/core/types'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@kata-sh/ui'
 import {
   Dialog,
@@ -97,48 +90,11 @@ function remoteKey(remoteServer: RemoteServerConfig): string {
   return `remote:${remoteServer.url}:${remoteServer.token}`
 }
 
-function formatTime(ts: number | undefined): string {
-  if (typeof ts !== 'number' || !Number.isFinite(ts)) return '—'
-  return new Date(ts).toLocaleString()
-}
-
-function formatBytes(bytes: number | undefined): string {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
-}
-
-/** Lifecycle states that allow snapshot-first deletion from the UI. Failed
- * states use Retry/Restore instead (their preview carries no fingerprint). */
-const DELETABLE_STATES = new Set<ManagedWorktreeState>([
-  'ready',
-  'unowned',
-  'missing',
-])
-/** States whose recovery path is restore. */
-const RESTORABLE_STATES = new Set<ManagedWorktreeState>([
-  'snapshotted',
-  'restore-failed',
-  'cleanup-failed',
-])
-
-function stateBadgeVariant(state: ManagedWorktreeState): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (state === 'ready' || state === 'unowned') return 'default'
-  if (state === 'snapshotted') return 'secondary'
-  if (state === 'missing' || state === 'cleanup-failed' || state === 'restore-failed') return 'destructive'
-  return 'outline'
-}
-
 interface ConfirmDeleteState {
   row: WorktreeInventoryRow
   preview: WorktreePreviewResult
   /** Target the preview was fetched from; the delete must still be current. */
   targetKey: string
-}
-
-interface ConfirmPermanentState {
-  row: WorktreeInventoryRow
 }
 
 export default function WorktreesSettingsPage() {
@@ -148,7 +104,7 @@ export default function WorktreesSettingsPage() {
   const [root, setRoot] = useState('')
   const [savedRoot, setSavedRoot] = useState('')
   const [snapshot, setSnapshot] = useState<WorktreeSettingsSnapshot | null>(null)
-  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true)
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(false)
   const [retentionLimit, setRetentionLimit] = useState(15)
   const [inventory, setInventory] = useState<WorktreeInventory | null>(null)
   const [isLoadingTargets, setIsLoadingTargets] = useState(true)
@@ -158,8 +114,6 @@ export default function WorktreesSettingsPage() {
   const [busyRowId, setBusyRowId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
-  const [confirmPermanent, setConfirmPermanent] = useState<ConfirmPermanentState | null>(null)
-  const [permanentTyped, setPermanentTyped] = useState('')
 
   const selectedTarget = useMemo(
     () => targets.find(({ target }) => target.key === selectedTargetKey)?.target ?? null,
@@ -361,25 +315,6 @@ export default function WorktreesSettingsPage() {
     setError(null)
   }, [savedRoot, snapshot])
 
-  const runRowAction = useCallback(
-    async (row: WorktreeInventoryRow, action: () => Promise<unknown>) => {
-      if (!selectedTarget) return
-      setBusyRowId(row.managedWorktreeId)
-      setError(null)
-      try {
-        await action()
-        await loadInventory()
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        setError(message)
-        toast.error(t('settings.worktrees.actionFailed'), { description: message })
-      } finally {
-        setBusyRowId(null)
-      }
-    },
-    [loadInventory, selectedTarget, t],
-  )
-
   const handleDeleteClick = useCallback(
     async (row: WorktreeInventoryRow) => {
       if (!selectedTarget) return
@@ -443,66 +378,15 @@ export default function WorktreesSettingsPage() {
     }
   }, [confirmDelete, isCurrentTarget, loadInventory, selectedTarget, t])
 
-  const handleRestore = useCallback(
-    (row: WorktreeInventoryRow) =>
-      runRowAction(row, () =>
-        invokeTarget(selectedTarget!, RPC_CHANNELS.git.WORKTREE_RESTORE, row.managedWorktreeId) as Promise<WorktreeRestoreResult>,
-      ),
-    [runRowAction, selectedTarget],
-  )
-
-  const handleRetry = useCallback(
-    (row: WorktreeInventoryRow) =>
-      runRowAction(row, () =>
-        invokeTarget(selectedTarget!, RPC_CHANNELS.git.WORKTREE_RETRY, { managedWorktreeId: row.managedWorktreeId }) as Promise<WorktreeRetryResult>,
-      ),
-    [runRowAction, selectedTarget],
-  )
-
-  const handleArchive = useCallback(
-    (row: WorktreeInventoryRow, sessionId: string, archived: boolean) =>
-      runRowAction(row, () =>
-        invokeTarget(
-          selectedTarget!,
-          archived ? RPC_CHANNELS.git.WORKTREE_UNARCHIVE : RPC_CHANNELS.git.WORKTREE_ARCHIVE,
-          { managedWorktreeId: row.managedWorktreeId, sessionId, archived },
-        ) as Promise<WorktreeArchiveResult>,
-      ),
-    [runRowAction, selectedTarget],
-  )
-
-  const confirmPermanentAction = useCallback(async () => {
-    if (!selectedTarget || !confirmPermanent) return
-    if (permanentTyped.trim().toLowerCase() !== 'delete') return
-    setBusyRowId(confirmPermanent.row.managedWorktreeId)
-    try {
-      const result = await invokeTarget(
-        selectedTarget,
-        RPC_CHANNELS.git.WORKTREE_PERMANENT_DELETE,
-        {
-          managedWorktreeId: confirmPermanent.row.managedWorktreeId,
-          confirmIrreversible: true,
-        },
-      ) as WorktreePermanentDeleteResult
-      setConfirmPermanent(null)
-      setPermanentTyped('')
-      if (!result.deleted) {
-        toast.error(t('settings.worktrees.permanentDeleteFailed'), { description: result.error })
-        return
-      }
-      toast.success(t('settings.worktrees.permanentlyDeleted'))
-      await loadInventory()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('settings.worktrees.permanentDeleteFailed'), { description: message })
-    } finally {
-      setBusyRowId(null)
-    }
-  }, [confirmPermanent, loadInventory, permanentTyped, selectedTarget, t])
-
   const pendingPolicyDirty =
     snapshot !== null &&
     (autoDeleteEnabled !== snapshot.autoDeleteEnabled || retentionLimit !== snapshot.retentionLimit)
+  // The management list is intentionally limited to worktrees that still have
+  // a checkout. Snapshot and recovery records remain server-side for lifecycle
+  // safety, but they are not presented as extra actions in this simple list.
+  const activeRows = inventory?.rows.filter(
+    (row) => row.state === 'ready' || row.state === 'unowned',
+  ) ?? []
 
   if (isLoadingTargets) {
     return (
@@ -621,22 +505,6 @@ export default function WorktreesSettingsPage() {
                       inCard
                     />
                   </div>
-                  {inventory?.lastCleanupResult && (
-                    <SettingsRow
-                      label={t('settings.worktrees.lastCleanup')}
-                      description={`${formatTime(inventory.lastCleanupResult.at)} · ${t(
-                        `settings.worktrees.cleanupOutcome.${inventory.lastCleanupResult.outcome}`,
-                      )}${inventory.lastCleanupResult.reason ? ` — ${inventory.lastCleanupResult.reason}` : ''}`}
-                    >
-                      <span className="text-xs text-muted-foreground">
-                        {inventory.lastCleanupResult.removedWorktreeId
-                          ? t('settings.worktrees.cleanupRemoved', {
-                              id: inventory.lastCleanupResult.removedWorktreeId,
-                            })
-                          : ''}
-                      </span>
-                    </SettingsRow>
-                  )}
                 </SettingsCard>
               </SettingsSection>
             </>
@@ -650,16 +518,7 @@ export default function WorktreesSettingsPage() {
               <SettingsCard>
                 <div className="flex items-center justify-between px-4 pt-3">
                   <p className="text-xs text-muted-foreground">
-                    {inventory
-                      ? t('settings.worktrees.inventoryCounts', {
-                          total: inventory.counts.total,
-                          materialized: inventory.counts.materialized,
-                          missing: inventory.counts.missing,
-                          snapshotted: inventory.counts.snapshotted,
-                          cleanupFailed: inventory.counts.cleanupFailed,
-                          restoreFailed: inventory.counts.restoreFailed,
-                        })
-                      : ''}
+                    {inventory ? t('settings.worktrees.inventoryCount', { count: activeRows.length }) : ''}
                   </p>
                   <Button
                     data-testid="worktrees-inventory-refresh"
@@ -676,146 +535,38 @@ export default function WorktreesSettingsPage() {
                   <div className="flex justify-center py-8">
                     <Spinner />
                   </div>
-                ) : inventory && inventory.rows.length === 0 ? (
+                ) : activeRows.length === 0 ? (
                   <p className="px-4 py-6 text-center text-sm text-muted-foreground">
                     {t('settings.worktrees.inventoryEmpty')}
                   </p>
                 ) : (
                   <div className="divide-y" data-testid="worktrees-inventory">
-                    {inventory?.rows.map((row) => (
+                    {activeRows.map((row) => (
                       <div
                         key={row.managedWorktreeId}
                         data-testid={`worktree-row-${row.managedWorktreeId}`}
-                        className="space-y-2 px-4 py-3"
+                        className="flex items-center justify-between gap-4 px-4 py-3"
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{row.displayName}</span>
-                          <Badge variant={stateBadgeVariant(row.state)} data-testid="worktree-row-state">
-                            {t(`settings.worktrees.state.${row.state}`)}
-                          </Badge>
-                          {row.state === 'unowned' && (
-                            <Badge variant="secondary">{t('settings.worktrees.unownedBadge')}</Badge>
-                          )}
-                          <span className="text-xs text-muted-foreground">{row.expectedBranch}</span>
-                        </div>
-                        <div className="grid gap-1 text-xs text-muted-foreground">
-                          <div className="flex flex-wrap gap-x-4">
-                            <span>{t('settings.worktrees.workspace')}: {row.workspaceId}</span>
-                            <span>{t('settings.worktrees.repository')}: {row.repositoryRoot}</span>
-                            <span>{t('settings.worktrees.checkoutPath')}: {row.checkoutPath}</span>
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="font-medium">{row.displayName}</span>
+                            <span className="text-xs text-muted-foreground">{row.expectedBranch}</span>
                           </div>
-                          <div className="flex flex-wrap gap-x-4">
-                            <span>{t('settings.worktrees.createdAt')}: {formatTime(row.createdAt)}</span>
-                            <span>{t('settings.worktrees.lastUsedAt')}: {formatTime(row.lastUsedAt)}</span>
-                            {row.snapshot && (
-                              <span>
-                                {t('settings.worktrees.snapshotMeta', {
-                                  at: formatTime(row.snapshot.createdAt),
-                                  files: row.snapshot.fileCount,
-                                  bytes: formatBytes(row.snapshot.totalBytes),
-                                })}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span>{t('settings.worktrees.owners')}:</span>
-                            {row.owners.map((owner) => (
-                              <span
-                                key={owner.sessionId}
-                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
-                                data-testid={`worktree-owner-${owner.sessionId}`}
-                              >
-                                {owner.sessionId}
-                                {owner.archived && (
-                                  <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-                                    {t('settings.worktrees.archivedBadge')}
-                                  </Badge>
-                                )}
-                                {owner.active && (
-                                  <Badge variant="outline" className="px-1 py-0 text-[10px]">
-                                    {t('settings.worktrees.activeBadge')}
-                                  </Badge>
-                                )}
-                                {owner.flagged && (
-                                  <Badge variant="outline" className="px-1 py-0 text-[10px]">
-                                    {t('settings.worktrees.flaggedBadge')}
-                                  </Badge>
-                                )}
-                                <button
-                                  type="button"
-                                  className="text-[10px] underline-offset-2 hover:underline"
-                                  disabled={busyRowId === row.managedWorktreeId}
-                                  onClick={() => void handleArchive(row, owner.sessionId, owner.archived)}
-                                >
-                                  {owner.archived
-                                    ? t('settings.worktrees.unarchive')
-                                    : t('settings.worktrees.archive')}
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                          {row.lastError && (
-                            <p className="text-destructive" data-testid="worktree-row-error">
-                              {row.lastError}
-                            </p>
-                          )}
+                          <p className="truncate text-xs text-muted-foreground">
+                            {row.checkoutPath}
+                          </p>
                         </div>
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          {DELETABLE_STATES.has(row.state) && (
-                            <Button
-                              data-testid={`worktree-delete-${row.managedWorktreeId}`}
-                              variant="destructive"
-                              size="sm"
-                              disabled={busyRowId === row.managedWorktreeId}
-                              onClick={() => void handleDeleteClick(row)}
-                            >
-                              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                              {row.state === 'missing'
-                                ? t('settings.worktrees.removeRecord')
-                                : t('settings.worktrees.delete')}
-                            </Button>
-                          )}
-                          {RESTORABLE_STATES.has(row.state) && (
-                            <Button
-                              data-testid={`worktree-restore-${row.managedWorktreeId}`}
-                              variant="outline"
-                              size="sm"
-                              disabled={busyRowId === row.managedWorktreeId}
-                              onClick={() => void handleRestore(row)}
-                            >
-                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                              {t('settings.worktrees.restore')}
-                            </Button>
-                          )}
-                          {(row.state === 'cleanup-failed' || row.state === 'restore-failed') && (
-                            <Button
-                              data-testid={`worktree-retry-${row.managedWorktreeId}`}
-                              variant="outline"
-                              size="sm"
-                              disabled={busyRowId === row.managedWorktreeId}
-                              onClick={() => void handleRetry(row)}
-                            >
-                              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                              {t('settings.worktrees.retry')}
-                            </Button>
-                          )}
-                          {(row.state === 'snapshotted' || row.state === 'restore-failed') &&
-                            row.owners.length === 0 && (
-                              <Button
-                                data-testid={`worktree-permanent-delete-${row.managedWorktreeId}`}
-                                variant="ghost"
-                                size="sm"
-                                disabled={busyRowId === row.managedWorktreeId}
-                                onClick={() => {
-                                  setConfirmPermanent({ row })
-                                  setPermanentTyped('')
-                                }}
-                              >
-                                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                                {t('settings.worktrees.permanentDelete')}
-                              </Button>
-                            )}
-                        </div>
+                        <Button
+                          data-testid={`worktree-delete-${row.managedWorktreeId}`}
+                          variant="destructive"
+                          size="sm"
+                          className="shrink-0"
+                          disabled={busyRowId === row.managedWorktreeId}
+                          onClick={() => void handleDeleteClick(row)}
+                        >
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          {t('settings.worktrees.delete')}
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -850,28 +601,22 @@ export default function WorktreesSettingsPage() {
               <p>
                 {t('settings.worktrees.confirmDeleteBranch', { branch: confirmDelete.row.expectedBranch })}
               </p>
-              <p>
-                {t('settings.worktrees.confirmDeleteOwners', {
-                  owners: confirmDelete.preview.owners.map((o) => o.sessionId).join(', ') || '—',
-                })}
-              </p>
+              {confirmDelete.preview.owners.length > 0 && (
+                <p className="text-muted-foreground">
+                  {t('settings.worktrees.confirmDeleteOwners', {
+                    owners: confirmDelete.preview.owners.map((owner) => owner.sessionId).join(', '),
+                  })}
+                </p>
+              )}
               {confirmDelete.preview.blocked ? (
                 <p className="text-destructive">{confirmDelete.preview.blockedReason}</p>
               ) : (
-                <>
-                  <p>
-                    {t('settings.worktrees.confirmDeleteWork', {
-                      files: confirmDelete.preview.uncommittedFileCount,
-                      commits: confirmDelete.preview.unpushedCommitCount,
-                    })}
-                  </p>
-                  <p className="text-muted-foreground">
-                    {t('settings.worktrees.confirmDeleteIgnored', {
-                      count: confirmDelete.preview.ignoredPolicy.includeFileCount,
-                    })}
-                  </p>
-                  <p className="text-muted-foreground">{t('settings.worktrees.confirmDeleteSnapshot')}</p>
-                </>
+                <p>
+                  {t('settings.worktrees.confirmDeleteWork', {
+                    files: confirmDelete.preview.uncommittedFileCount,
+                    commits: confirmDelete.preview.unpushedCommitCount,
+                  })}
+                </p>
               )}
             </div>
             <DialogFooter>
@@ -892,41 +637,6 @@ export default function WorktreesSettingsPage() {
         </Dialog>
       )}
 
-      {confirmPermanent && (
-        <Dialog open onOpenChange={(open) => { if (!open) { setConfirmPermanent(null); setPermanentTyped('') } }}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{t('settings.worktrees.confirmPermanentTitle', { name: confirmPermanent.row.displayName })}</DialogTitle>
-              <DialogDescription>{t('settings.worktrees.confirmPermanentDesc')}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2 text-sm">
-              <p>{t('settings.worktrees.confirmPermanentBranch', { branch: confirmPermanent.row.expectedBranch })}</p>
-              <p className="text-destructive">{t('settings.worktrees.confirmPermanentIrreversible')}</p>
-              <input
-                data-testid="worktrees-permanent-confirm-input"
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="delete"
-                value={permanentTyped}
-                onChange={(event) => setPermanentTyped(event.target.value)}
-              />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" size="sm" onClick={() => { setConfirmPermanent(null); setPermanentTyped('') }}>
-                {t('common.cancel')}
-              </Button>
-              <Button
-                data-testid="worktrees-confirm-permanent-delete"
-                variant="destructive"
-                size="sm"
-                disabled={permanentTyped.trim().toLowerCase() !== 'delete' || busyRowId === confirmPermanent.row.managedWorktreeId}
-                onClick={() => void confirmPermanentAction()}
-              >
-                {t('settings.worktrees.confirmPermanentAction')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
   )
 }

@@ -39,9 +39,9 @@ Phase 2 ([#41](https://github.com/gannonh/kata-agents/issues/41)) must make ever
 
 ### Automatic cleanup
 
-- Policy is per server: `autoDeleteEnabled` (default true) and `retentionLimit` (default 15, accepted 1–1000). Cleanup is event-driven after awaited startup reconciliation, successful materialization/restore, policy change, final-owner archive, and final-owner deletion — no background daemon, no age/disk policy.
+- Policy is per server: `autoDeleteEnabled` (default false) and `retentionLimit` (default 15, accepted 1–1000). Cleanup is event-driven after awaited startup reconciliation, successful materialization/restore, policy change, final-owner archive, and final-owner deletion — no background daemon, no age/disk policy.
 - Archive cleanup requires every owner archived with none active, flagged, or unquiesceable. Retention cleanup may select idle unarchived records, ordered by `lastUsedAt` (created at creation/restore/owner-attach/unarchive/accepted message), then creation time, then opaque ID. Each candidate is tried at most once per sweep; candidate-specific blocks are skipped and failures persisted. Disabling auto-delete fences new candidates at the policy-version boundary; an in-flight source release completes its journaled transaction.
-- The materialized-worktree limit excludes snapshots; snapshot payloads are removed after verified restore or by explicit permanent deletion with a second irreversibility confirmation.
+- The materialized-worktree limit excludes snapshots; snapshot payloads are removed after verified restore or by explicit permanent deletion with a second irreversibility confirmation. The Settings → Worktrees inventory intentionally presents only active checkouts with a single Delete action; snapshot and recovery records remain server-side rather than adding restore/archive/retry controls to the main list.
 
 ### Verify-phase findings (2026-08-05)
 

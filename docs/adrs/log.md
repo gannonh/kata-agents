@@ -2,6 +2,8 @@
 
 ## 2026-08-05
 
+* **Worktree lifecycle presentation simplified**: the accepted Phase 2 decision now defaults automatic cleanup off and keeps snapshot/recovery records server-side while the settings inventory exposes only active checkouts with a single Delete action.
+
 * **Snapshot-backed lifecycle ADR accepted**: [2026-08-05-snapshot-backed-worktree-lifecycle.md](2026-08-05-snapshot-backed-worktree-lifecycle.md) records the single lifecycle entry for every destructive V2 path, verified snapshot-before-release, CAS-owned hidden refs, path leases and runtime quiescence, the durable journal with awaited startup classification, event-driven LRU retention, and the second-confirmation permanent snapshot deletion.
 * **Verify-phase findings appended**: [2026-08-05-snapshot-backed-worktree-lifecycle.md](2026-08-05-snapshot-backed-worktree-lifecycle.md) gains the Verify-phase findings from offline UAT (136 checks): dynamic active/flagged protections are enforced inside the removal transaction, retry of partially released checkouts is governed by the verified snapshot, and the renderer surfaces the persisted lifecycle `recoveryState` with translated inventory refresh labels (all seven locales).
 ## 2026-08-04

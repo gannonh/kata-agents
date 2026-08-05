@@ -605,7 +605,7 @@ export interface WorktreeSettingsSnapshot {
   materializationRoot: string
   /** Server timestamp at which this snapshot was captured. */
   capturedAt: number
-  /** Automatic archive/retention cleanup enabled (default true). */
+  /** Automatic archive/retention cleanup enabled (default false). */
   autoDeleteEnabled: boolean
   /** Materialized-worktree retention limit, 1..1000 (default 15). */
   retentionLimit: number

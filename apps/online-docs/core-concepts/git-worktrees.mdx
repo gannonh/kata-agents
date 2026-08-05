@@ -65,18 +65,18 @@ current checkout.
 
 Worktree V2 is controlled by the workspace-owning server, not by the desktop
 client. In **Settings → Worktrees**, select a capable local or connected server
-to view and change its materialization root. The page labels remote roots with
+to view and change its Worktree root. The page labels remote roots with
 their server identity; a local directory picker is available only for the local
 server.
 
-The default root is `<CONFIG_DIR>/worktrees`. A saved absolute root (or `~/…`
-path) is canonicalized and validated by the owning server before it is stored.
+The default Worktree root is `<CONFIG_DIR>/worktrees`. A saved absolute root (or
+`~/…` path) is canonicalized and validated by the owning server before it is stored.
 It cannot overlap server configuration, snapshot storage, a registered
 repository, or an existing managed checkout. A root change affects only new
 worktrees; every existing checkout retains the canonical root recorded when it
 was created. The fixed registry remains at
 `<CONFIG_DIR>/worktrees/registry.json`, independently of the selected
-materialization root.
+Worktree root.
 
 Names are branch suffixes, not filesystem paths. In the composer, uppercase
 letters, spaces, and underscores are normalized to lowercase kebab-case before
@@ -87,45 +87,35 @@ such as `team/auth-refresh` are allowed. If a request fails after creating a
 branch, the server removes it only when it can prove that the failed transaction
 still owns the original branch OID.
 
-## Snapshot-backed management and automatic cleanup
+## Worktree root and managed worktrees
 
-Every V2 destructive path is snapshot-first and reversible. **Settings →
-Worktrees** shows a per-server inventory of every managed worktree across all
-workspaces, repositories, and roots: display name, branch, workspace,
-repository, server path, every owner with its archived/active/flagged
-protection, created/last-used timestamps, lifecycle state, and sanitized
-failure text. Snapshot payload bytes never leave the server.
+In **Settings → Worktrees**, select the server that owns the workspace files. The
+root setting is labeled **Worktree root** with the description **Directory where
+Kata Agents creates managed worktrees**. Changing it affects only new
+worktrees; existing checkouts stay where they were created.
 
-- **Deleting a worktree** asks for a fresh risk preview naming every owner and
-the excluded ignored-file policy (only `.worktreeinclude` files are preserved).
-After confirmation the server captures a verified snapshot — staged and
-unstaged changes, binary files, renames, deletions, untracked regular files,
-symlink nodes, and `.worktreeinclude` files — pins a hidden
-`refs/kata/worktree-snapshots/<id>` ref at the captured HEAD, and only then
-releases the checkout. The local branch is always retained.
-- **Restoring** a snapshotted worktree recreates the branch only when it is
-absent or still at the captured OID (a differently advanced branch is never
-force-reset) and restores the state byte-for-byte and mode-for-mode. Failed
-steps are retryable; interrupted transactions are classified and resumed at
-server startup.
-- **Permanently deleting a snapshot** (available only with zero owner sessions)
-removes the verified payload and the owned hidden ref after a second
-irreversibility confirmation, and retains the branch.
-- **Archiving** is per owner. When every owner of a worktree is archived and
-none is active or flagged, the checkout is removed snapshot-first. Unarchiving
-a session restores its claim and refreshes activity.
-- **Automatic cleanup** (default on, limit 15, configurable 1–1000 per server)
-removes the oldest idle unarchived worktrees beyond the limit after lifecycle
-events: startup reconciliation, successful materialization/restore, policy
-changes, final-owner archive, and final-owner session deletion. `lastUsedAt`
-updates on creation, restore, owner attachment, unarchive, and accepted user
-messages; candidates order by it, then creation time, then ID. Disabling
-automatic cleanup stops new candidates immediately; in-flight removals complete
-their journaled transaction. Snapshots do not count toward the limit.
-- While a worktree record is not `ready` (snapshotted, restore-failed,
-cleanup-failed, missing, …), its owners see the name/branch and recovery status,
-and Send, agent creation, Git actions, and further lifecycle actions stay fenced
-until restore or an explicit resolution succeeds.
+The **Managed worktrees** list intentionally stays simple. Each active worktree
+shows its name, branch, server path, and one **Delete** button. After a worktree
+is deleted, it disappears from the active list. Lifecycle recovery data remains
+server-side rather than adding restore, archive, retry, or snapshot controls to
+this list.
+
+Deletion still uses a fresh server-side inspection and snapshot-first removal so
+Kata Agents can fail safely if the checkout changes while it is being deleted.
+The local branch is retained, and snapshots stay on the owning server for
+lifecycle recovery; snapshot payload bytes never leave that server.
+
+## Automatic deletion
+
+Automatic deletion is **off by default**.
+
+- **Automatically delete old worktrees** — Recommended for most users. Turn this off only if you want to manage old worktrees and disk usage yourself.
+- **Auto-delete limit** — Number of managed worktrees to keep before older ones are pruned automatically. Kata Agents snapshots worktrees before deleting, so pruned worktrees should always be restorable.
+
+The limit is configurable from 1–1000 per server and counts materialized
+worktrees only. Cleanup is event-driven; it does not run a background daemon or
+use age or disk-size policies. Active or otherwise protected worktrees are
+skipped, and in-flight removals complete their journaled transaction.
 
 ## Reviewing and sharing work
 
@@ -156,8 +146,8 @@ until you restore the expected branch or delete the session.
 
 - **Archiving** a session never removes its worktree, but with Worktree V2 the
   archived session's claim is recorded: when **every** owner of a worktree is
-  archived (and none is active), the worktree is removed snapshot-first and can
-  be restored from the inventory page.
+  archived (and none is active), the worktree is removed snapshot-first and its
+  recovery data remains on the owning server.
 - **Deleting** a session drops that session's claim on the worktree but does not
   remove the checkout on its own (the final-owner deletion leaves the worktree
   `unowned` and schedules it for automatic cleanup). Removing the managed

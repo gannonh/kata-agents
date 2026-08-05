@@ -75,14 +75,14 @@ interface StoredWorktreeSettings {
   schemaVersion: 1
   version: number
   materializationRoot: string
-  /** Automatic archive/retention cleanup (default true). */
+  /** Automatic archive/retention cleanup (default false). */
   autoDeleteEnabled?: boolean
   /** Materialized-worktree retention limit (default 15, accepted 1..1000). */
   retentionLimit?: number
 }
 
 /** Default automatic archive/retention cleanup state. */
-export const DEFAULT_AUTO_DELETE_ENABLED = true
+export const DEFAULT_AUTO_DELETE_ENABLED = false
 /** Default materialized-worktree retention limit. */
 export const DEFAULT_RETENTION_LIMIT = 15
 /** Accepted retention limit bounds (inclusive). */
