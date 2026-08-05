@@ -9,7 +9,7 @@
  */
 
 import { CodedError, WORKTREE_V2_CAPABILITY_ERROR_CODE } from './types'
-export { WORKTREE_V2_CAPABILITY_ERROR_CODE } from './types'
+export { WORKTREE_V2_CAPABILITY_ERROR_CODE, WORKTREE_SETTINGS_ERROR_CODE } from './types'
 
 // ---------------------------------------------------------------------------
 // Repository context and refs

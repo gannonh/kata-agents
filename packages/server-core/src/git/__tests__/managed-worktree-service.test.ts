@@ -161,6 +161,130 @@ describe('ManagedWorktreeService.createWorktree', () => {
     // Worktree starts from committed state, not the dirty working tree.
     expect(readFileSync(join(record.checkoutPath, 'README.md'), 'utf8')).toBe('# test repo\n')
   })
+
+  test('uses the root captured from server-owned settings for new materializations', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const customRoot = tmp()
+      const snapshot = svc.worktreeSettings.update({ materializationRoot: customRoot })
+      const gcd = await commonDir(repo)
+
+      const { record } = await svc.worktrees.createWorktree({
+        workspaceId: 'ws1',
+        sessionId: 'sessA',
+        repositoryRoot: repo,
+        gitCommonDir: gcd,
+        baseRef: 'main',
+      })
+
+      expect(record.checkoutPath.startsWith(snapshot.materializationRoot)).toBe(true)
+      expect(svc.registry.get(record.managedWorktreeId)).toMatchObject({
+        materializationRoot: snapshot.materializationRoot,
+      })
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('revalidates a V2 root against the selected repository at creation time', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const customRoot = join(repo, 'inside-repository')
+      svc.worktreeSettings.update({ materializationRoot: customRoot })
+
+      await expect(
+        svc.worktrees.createWorktree({
+          workspaceId: 'ws1',
+          sessionId: 'sessA',
+          repositoryRoot: repo,
+          gitCommonDir: await commonDir(repo),
+          baseRef: 'main',
+        }),
+      ).rejects.toMatchObject({ code: 'WORKTREE_SETTINGS_REPOSITORY_OVERLAP' })
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('rejects symlinked destination components before Git materialization', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const customRoot = tmp()
+      const outside = tmp()
+      svc.worktreeSettings.update({ materializationRoot: customRoot })
+      symlinkSync(outside, join(customRoot, 'ws1'))
+
+      await expect(
+        svc.worktrees.createWorktree({
+          workspaceId: 'ws1',
+          sessionId: 'sessA',
+          repositoryRoot: repo,
+          gitCommonDir: await commonDir(repo),
+          baseRef: 'main',
+        }),
+      ).rejects.toMatchObject({ code: 'WORKTREE_DESTINATION_UNSAFE' })
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('uses the fixed V1 root while V2 settings are ineffective', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const customRoot = tmp()
+      svc.worktreeSettings.update({ materializationRoot: customRoot })
+      process.env.KATA_FEATURE_WORKTREE_V2 = '0'
+
+      const { record } = await svc.worktrees.createWorktree({
+        workspaceId: 'ws1',
+        sessionId: 'sessA',
+        repositoryRoot: repo,
+        gitCommonDir: await commonDir(repo),
+        baseRef: 'main',
+      })
+
+      expect(record.checkoutPath.startsWith(svc.worktreeSettings.getDefaultRoot())).toBe(true)
+      expect(record.checkoutPath.startsWith(customRoot)).toBe(false)
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
 })
 
 describe('.worktreeinclude', () => {
@@ -288,7 +412,7 @@ describe('managed worktree discovery summaries', () => {
         checkoutPath: record.checkoutPath,
         displayName: record.expectedBranch.slice('kata-agent/'.length),
         expectedBranch: record.expectedBranch,
-        materializationRoot: worktreeRoot,
+        materializationRoot: svc.worktreeSettings.getSnapshot().materializationRoot,
         baseRef: 'main',
         ownerCount: 1,
         state: 'ready',

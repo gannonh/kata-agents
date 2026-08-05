@@ -39,6 +39,7 @@ import {
   type WorktreeRemovalBeginResult,
 } from './worktree-registry'
 import { applyWorktreeInclude } from './worktree-include'
+import type { WorktreeSettingsSnapshot } from '@kata-sh/shared/protocol'
 
 const MAX_TOKEN_RETRIES = 5
 
@@ -83,6 +84,15 @@ export interface CreateWorktreeResult {
   /** Creation remains V1-shaped until the V2 named-creation slice lands. */
   record: ManagedWorktreeRecord
   include: WorktreeIncludeResult
+}
+
+export interface WorktreeRootProvider {
+  /** Capture the root/version used by one materialization operation. */
+  getSnapshot(): WorktreeSettingsSnapshot
+  /** V1 fallback root when persisted V2 settings are ineffective. */
+  getDefaultRoot?(): string
+  /** Revalidate a captured policy against the selected source before creation. */
+  validateForCreation?(snapshot: WorktreeSettingsSnapshot, repositoryRoot: string): void
 }
 
 export interface ReconcileParams {
@@ -143,12 +153,46 @@ export function parseWorktreeListPorcelain(output: string): WorktreeListEntry[] 
 }
 
 export class ManagedWorktreeService {
+  private readonly worktreeRootProvider: WorktreeRootProvider
+
   constructor(
-    private readonly worktreeRoot: string,
+    worktreeRoot: string | WorktreeRootProvider,
     private readonly registry: WorktreeRegistry,
     private readonly repositoryService: RepositoryService,
     private readonly mutationLock: MutationLock,
-  ) {}
+  ) {
+    this.worktreeRootProvider = typeof worktreeRoot === 'string'
+      ? {
+          getSnapshot: () => ({
+            schemaVersion: 1,
+            serverId: 'local',
+            version: 0,
+            materializationRoot: resolvePath(worktreeRoot),
+            capturedAt: Date.now(),
+          }),
+          getDefaultRoot: () => resolvePath(worktreeRoot),
+        }
+      : worktreeRoot
+  }
+
+  getWorktreeRoot(): string {
+    return this.getEffectiveRootSnapshot().materializationRoot
+  }
+
+  private getEffectiveRootSnapshot(): WorktreeSettingsSnapshot {
+    if (isWorktreeV2Enabled()) return this.worktreeRootProvider.getSnapshot()
+    const defaultRoot = this.worktreeRootProvider.getDefaultRoot?.()
+    if (defaultRoot) {
+      return {
+        schemaVersion: 1,
+        serverId: 'local',
+        version: 0,
+        materializationRoot: resolvePath(defaultRoot),
+        capturedAt: Date.now(),
+      }
+    }
+    return this.worktreeRootProvider.getSnapshot()
+  }
 
   getRegistry(): WorktreeRegistry {
     return this.registry
@@ -159,11 +203,11 @@ export class ManagedWorktreeService {
   }
 
   /** True when `path` is contained within the configured worktree root. */
-  isUnderWorktreeRoot(path: string): boolean {
+  isUnderWorktreeRoot(path: string, allowedRoot = this.getWorktreeRoot()): boolean {
     // Git may report macOS temporary paths through /private/var while the
     // configured root was created through /var. Canonicalize both sides before
     // containment checks so the safety guard does not reject its own checkout.
-    const root = safeRealpath(this.worktreeRoot)
+    const root = safeRealpath(allowedRoot)
     const p = safeRealpath(path)
     const rel = relative(root, p)
     return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
@@ -176,7 +220,10 @@ export class ManagedWorktreeService {
    */
   workspaceIdOf(record: ManagedWorktreeRecordVersioned): string | null {
     if (record.workspaceId) return record.workspaceId
-    const rel = relative(safeRealpath(this.worktreeRoot), safeRealpath(record.checkoutPath))
+    const recordRoot = 'materializationRoot' in record
+      ? record.materializationRoot
+      : this.getWorktreeRoot()
+    const rel = relative(safeRealpath(recordRoot), safeRealpath(record.checkoutPath))
     if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
     // `relative()` uses the platform separator: backslash-delimited paths on
     // Windows must split the same way or the whole relative path is returned.
@@ -250,17 +297,26 @@ export class ManagedWorktreeService {
     await this.assertRefExists(repositoryRoot, baseRef)
 
     return this.mutationLock.withLock(gitCommonDir, async () => {
+      // Capture one immutable root snapshot before deriving the destination.
+      // A later settings update affects only subsequent materializations.
+      const rootSnapshot = this.getEffectiveRootSnapshot()
+      if (isWorktreeV2Enabled()) {
+        this.worktreeRootProvider.validateForCreation?.(rootSnapshot, repositoryRoot)
+      }
+      const materializationRoot = safeRealpath(rootSnapshot.materializationRoot)
       const realCommonDir = safeRealpath(gitCommonDir)
       const repoKey = computeRepoKey(realCommonDir)
+      const destinationRoot = this.prepareDestinationRoot(materializationRoot, workspaceId, repoKey)
 
       let lastError: unknown
       for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
         const token = generateToken()
         const branch = `kata-agent/${token}`
-        const worktreePath = join(this.worktreeRoot, workspaceId, repoKey, token)
+        const worktreePath = join(destinationRoot, token)
 
-        // Collision check: both branch and path must be free.
-        if (existsSync(worktreePath)) continue
+        // Collision check: both branch and path must be free. A broken
+        // symlink is also occupied: never let Git follow it outside the root.
+        if (existsSync(worktreePath) || this.isSymlink(worktreePath)) continue
         if (await this.branchExists(repositoryRoot, branch)) continue
 
         const managedWorktreeId = `${repoKey}-${token}`
@@ -279,25 +335,42 @@ export class ManagedWorktreeService {
         this.registry.upsert(provisional)
 
         try {
-          mkdirSync(join(this.worktreeRoot, workspaceId, repoKey), { recursive: true })
+          // Recheck every destination component immediately before Git creates
+          // the checkout. The post-add identity check below closes the
+          // remaining external symlink-swap window.
+          const revalidatedDestinationRoot = this.prepareDestinationRoot(
+            materializationRoot,
+            workspaceId,
+            repoKey,
+          )
+          if (revalidatedDestinationRoot !== destinationRoot) {
+            throw new WorktreeCreationError(
+              'Managed-worktree destination changed during creation.',
+              'WORKTREE_DESTINATION_UNSAFE',
+            )
+          }
           await runGit(['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseRef], {
             cwd: repositoryRoot,
             timeoutMs: 120_000,
           })
 
-          let include: WorktreeIncludeResult = {
-            copiedFileCount: 0,
-            skippedSymlinks: 0,
-            totalBytes: 0,
+          const createdContext = await this.repositoryService.getContext(worktreePath)
+          if (
+            !createdContext.isGitRepository ||
+            !createdContext.gitCommonDir ||
+            safeRealpath(createdContext.gitCommonDir) !== realCommonDir ||
+            createdContext.currentBranch !== branch ||
+            !this.isUnderWorktreeRoot(worktreePath, materializationRoot)
+          ) {
+            throw new WorktreeCreationError(
+              'Git created a managed checkout with an unexpected identity or destination.',
+              'WORKTREE_DESTINATION_UNSAFE',
+            )
           }
-          try {
-            include = await applyWorktreeInclude(repositoryRoot, worktreePath)
-          } catch (includeErr) {
-            // .worktreeinclude limit or copy failure: tear down the still-clean
-            // worktree and surface the error.
-            await this.cleanupProvisional(repositoryRoot, worktreePath, branch, managedWorktreeId)
-            throw includeErr
-          }
+
+          // .worktreeinclude limit or copy failure is handled by the outer
+          // creation compensation, which tears down the still-clean checkout.
+          const include = await applyWorktreeInclude(repositoryRoot, worktreePath)
 
           const ready: ManagedWorktreeRecord = { ...provisional, checkoutPath: safeRealpath(worktreePath), state: 'ready' }
           this.registry.upsert(ready)
@@ -311,6 +384,8 @@ export class ManagedWorktreeService {
               lastError = err
               continue
             }
+          } else {
+            await this.cleanupProvisional(repositoryRoot, worktreePath, branch, managedWorktreeId)
           }
           throw err
         }
@@ -910,7 +985,10 @@ export class ManagedWorktreeService {
   private async validateRemovalIdentity(
     rec: ManagedWorktreeRecordVersioned,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (!this.isUnderWorktreeRoot(rec.checkoutPath)) {
+    const recordRoot = 'materializationRoot' in rec
+      ? rec.materializationRoot
+      : this.getWorktreeRoot()
+    if (!this.isUnderWorktreeRoot(rec.checkoutPath, recordRoot)) {
       return {
         ok: false,
         reason: 'Refusing to remove a checkout outside the Kata managed-worktree root.',
@@ -981,6 +1059,80 @@ export class ManagedWorktreeService {
       }
     }
     return { ok: true }
+  }
+
+  private isSymlink(path: string): boolean {
+    try {
+      return lstatSync(path).isSymbolicLink()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw new WorktreeCreationError(
+        `Unable to inspect managed-worktree destination: ${path}`,
+        'WORKTREE_DESTINATION_UNSAFE',
+      )
+    }
+  }
+
+  /**
+   * Create and verify the non-leaf destination components without following
+   * symlinks. The final path is intentionally left absent for `git worktree
+   * add`; Git identity + root containment are verified immediately afterwards.
+   */
+  private prepareDestinationRoot(
+    materializationRoot: string,
+    workspaceId: string,
+    repoKey: string,
+  ): string {
+    let root = safeRealpath(materializationRoot)
+    try {
+      mkdirSync(root, { recursive: true })
+      root = safeRealpath(root)
+      if (this.isSymlink(root)) {
+        throw new WorktreeCreationError(
+          'Managed-worktree materialization root must not be a symlink.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      const destination = resolvePath(root, workspaceId, repoKey)
+      const rel = relative(root, destination)
+      if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+        throw new WorktreeCreationError(
+          'Managed-worktree destination escapes the configured root.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      let current = root
+      for (const component of rel.split(/[\\/]+/).filter(Boolean)) {
+        current = join(current, component)
+        if (!existsSync(current)) mkdirSync(current)
+        if (this.isSymlink(current)) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination contains a symlink component.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+        const stat = lstatSync(current)
+        if (!stat.isDirectory()) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination contains a non-directory component.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+        if (safeRealpath(current) !== resolvePath(current)) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination changed through a symlink.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+      }
+      return current
+    } catch (error) {
+      if (error instanceof WorktreeCreationError) throw error
+      throw new WorktreeCreationError(
+        `Unable to prepare managed-worktree destination: ${error instanceof Error ? error.message : String(error)}`,
+        'WORKTREE_DESTINATION_UNSAFE',
+      )
+    }
   }
 
   private async cleanupProvisional(

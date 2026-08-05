@@ -367,7 +367,10 @@ function deriveLegacyLayout(
 
   if (workspaceId) {
     const checkoutParts = splitPathSegments(checkout)
-    const wsParts = splitPathSegments(workspaceId)
+    // Workspace IDs are logical path segments, not filesystem paths. Resolving
+    // a relative ID against cwd would prepend the process directory and make
+    // custom-root legacy layouts fall back to the fixed registry directory.
+    const wsParts = workspaceId.split(/[\\/]+/).filter(Boolean)
     const suffix = [...wsParts, checkoutParts.at(-2) ?? '', checkoutParts.at(-1) ?? '']
     const suffixMatches = suffix.length <= checkoutParts.length && suffix.every(
       (part, index) => checkoutParts[checkoutParts.length - suffix.length + index] === part,

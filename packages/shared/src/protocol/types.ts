@@ -74,6 +74,8 @@ export interface WireError {
 
 /** Wire error returned when a V2 Git worktree RPC targets an incapable server. */
 export const WORKTREE_V2_CAPABILITY_ERROR_CODE = 'GIT_WORKTREE_V2_UNAVAILABLE' as const
+/** Wire error returned when a worktree settings update fails validation or persistence. */
+export const WORKTREE_SETTINGS_ERROR_CODE = 'GIT_WORKTREE_SETTINGS_INVALID' as const
 
 export type ErrorCode =
   | 'HANDLER_ERROR'
@@ -89,6 +91,7 @@ export type ErrorCode =
   | 'REQUEST_TIMEOUT'
   | 'CAPABILITY_UNAVAILABLE'
   | typeof WORKTREE_V2_CAPABILITY_ERROR_CODE
+  | typeof WORKTREE_SETTINGS_ERROR_CODE
   | 'CLIENT_DISCONNECTED'
   | 'CLIENT_REQUEST_TIMEOUT'
   | 'BROWSER_NO_CAPABLE_CLIENT'
@@ -110,6 +113,7 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'REQUEST_TIMEOUT',
   'CAPABILITY_UNAVAILABLE',
   WORKTREE_V2_CAPABILITY_ERROR_CODE,
+  WORKTREE_SETTINGS_ERROR_CODE,
   'CLIENT_DISCONNECTED',
   'CLIENT_REQUEST_TIMEOUT',
   'BROWSER_NO_CAPABLE_CLIENT',
