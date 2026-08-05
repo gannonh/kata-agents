@@ -108,6 +108,9 @@ test.describe(`Worktree V2 management ${E2E_TAGS.worktreeV2}`, () => {
       // Inventory exposes a compact row with the worktree name, branch, and one
       // destructive action.
       await openWorktreesSettings(page);
+      await expect(page.getByRole("heading", { name: "Worktree Settings" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Managed Worktrees" })).toBeVisible();
+      await expect(page.getByText("Server identity", { exact: true })).toHaveCount(0);
       await expect(page.getByTestId("worktrees-root-input")).toContainText("Worktree root");
       await expect(page.getByTestId("worktrees-root-input")).toContainText(
         "Directory where Kata Agents creates managed worktrees",
@@ -122,7 +125,9 @@ test.describe(`Worktree V2 management ${E2E_TAGS.worktreeV2}`, () => {
       await expect(row).toContainText("kata-agent/manage-me");
       await expect(row.getByRole("button")).toHaveCount(1);
       await expect(row.getByTestId("worktree-row-state")).toHaveCount(0);
-      await expect(page.getByTestId("worktrees-auto-delete")).toContainText("Automatically delete old worktrees");
+      await expect(
+        page.getByTestId("worktrees-auto-delete").getByText("Automatically delete old worktrees", { exact: true }),
+      ).toHaveCount(1);
       await expect(page.getByTestId("worktrees-auto-delete").locator('[role="switch"]')).toHaveAttribute(
         "aria-checked",
         "false",

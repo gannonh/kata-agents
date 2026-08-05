@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import {
   FolderOpen,
   RefreshCw,
-  Server as ServerIcon,
   Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -34,7 +33,7 @@ import {
   SettingsCard,
   SettingsCardFooter,
   SettingsInput,
-  SettingsRow,
+  SettingsInputRow,
   SettingsSection,
   SettingsSelect,
   SettingsToggle,
@@ -397,13 +396,10 @@ export default function WorktreesSettingsPage() {
 
   return (
     <div data-testid="worktrees-settings-page" className="flex h-full flex-col">
-      <PanelHeader title={t('settings.worktrees.title')} />
+      <PanelHeader title={t('settings.worktrees.settingsSection')} />
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-5 px-5 py-7">
-          <SettingsSection
-            title={t('settings.worktrees.serverSection')}
-            description={t('settings.worktrees.serverSectionDesc')}
-          >
+          {selectedTarget && snapshot && (
             <SettingsCard>
               <SettingsSelect
                 label={t('settings.worktrees.server')}
@@ -420,87 +416,53 @@ export default function WorktreesSettingsPage() {
                 placeholder={t('settings.worktrees.selectServer')}
                 inCard
               />
-              {selectedTarget && (
-                <SettingsRow
-                  label={t('settings.worktrees.serverIdentity')}
-                  description={selectedTarget.kind === 'remote'
-                    ? t('settings.worktrees.remotePathNotice', { serverId: selectedTarget.serverId })
-                    : t('settings.worktrees.localPathNotice', { serverId: selectedTarget.serverId })}
-                >
-                  <ServerIcon className="h-4 w-4 text-muted-foreground" />
-                </SettingsRow>
-              )}
-            </SettingsCard>
-          </SettingsSection>
-
-          {selectedTarget && snapshot && (
-            <>
-              <SettingsSection
-                title={t('settings.worktrees.rootSection')}
-                description={t('settings.worktrees.rootSectionDesc')}
-              >
-                <SettingsCard>
-                  <div data-testid="worktrees-root-input">
-                    <SettingsInput
-                    label={t('settings.worktrees.root')}
-                    description={t('settings.worktrees.rootDesc')}
-                    value={root}
-                    onChange={setRoot}
-                    placeholder={t('settings.worktrees.rootPlaceholder')}
-                    disabled={isLoadingSettings || isSaving}
-                    inCard
-                    action={selectedTarget.kind === 'local' ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-9 shrink-0"
-                        onClick={handleBrowse}
-                        disabled={isLoadingSettings || isSaving}
-                      >
-                        <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
-                        {t('settings.worktrees.browse')}
-                      </Button>
-                    ) : undefined}
-                    />
-                  </div>
-                </SettingsCard>
-              </SettingsSection>
-
-              <SettingsSection
-                title={t('settings.worktrees.cleanupSection')}
-                description={t('settings.worktrees.cleanupSectionDesc')}
-              >
-                <SettingsCard>
-                  <div data-testid="worktrees-auto-delete">
-                    <SettingsRow
-                      label={t('settings.worktrees.autoDelete')}
-                      description={t('settings.worktrees.autoDeleteDesc')}
+              <div data-testid="worktrees-root-input">
+                <SettingsInput
+                  label={t('settings.worktrees.root')}
+                  description={t('settings.worktrees.rootDesc')}
+                  value={root}
+                  onChange={setRoot}
+                  placeholder={t('settings.worktrees.rootPlaceholder')}
+                  disabled={isLoadingSettings || isSaving}
+                  inCard
+                  action={selectedTarget.kind === 'local' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0"
+                      onClick={handleBrowse}
+                      disabled={isLoadingSettings || isSaving}
                     >
-                      <SettingsToggle
-                        label={t('settings.worktrees.autoDelete')}
-                        checked={autoDeleteEnabled}
-                        onCheckedChange={setAutoDeleteEnabled}
-                        disabled={isSaving}
-                      />
-                    </SettingsRow>
-                  </div>
-                  <div data-testid="worktrees-retention-limit">
-                    <SettingsInput
-                      label={t('settings.worktrees.retentionLimit')}
-                      description={t('settings.worktrees.retentionLimitDesc')}
-                      value={String(retentionLimit)}
-                      onChange={(value) => {
-                        const parsed = Number(value)
-                        if (Number.isFinite(parsed)) setRetentionLimit(parsed)
-                      }}
-                      disabled={isSaving}
-                      inCard
-                    />
-                  </div>
-                </SettingsCard>
-              </SettingsSection>
-            </>
+                      <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                      {t('settings.worktrees.browse')}
+                    </Button>
+                  ) : undefined}
+                />
+              </div>
+              <div data-testid="worktrees-auto-delete">
+                <SettingsToggle
+                  label={t('settings.worktrees.autoDelete')}
+                  description={t('settings.worktrees.autoDeleteDesc')}
+                  checked={autoDeleteEnabled}
+                  onCheckedChange={setAutoDeleteEnabled}
+                  disabled={isSaving}
+                />
+              </div>
+              <div data-testid="worktrees-retention-limit">
+                <SettingsInputRow
+                  label={t('settings.worktrees.retentionLimit')}
+                  description={t('settings.worktrees.retentionLimitDesc')}
+                  value={String(retentionLimit)}
+                  onChange={(value) => {
+                    const parsed = Number(value)
+                    if (Number.isFinite(parsed)) setRetentionLimit(parsed)
+                  }}
+                  disabled={isSaving}
+                  inCard
+                />
+              </div>
+            </SettingsCard>
           )}
 
           {selectedTarget && (
