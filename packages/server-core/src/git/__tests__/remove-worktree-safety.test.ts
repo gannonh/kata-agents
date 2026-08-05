@@ -265,10 +265,16 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
       gitCommonDir: gcd,
       baseRef: 'main',
     })
+    // Use a separate service/registry instance to exercise the same
+    // cross-process registry lock that production servers share.
+    const otherService = createGitServices({
+      worktreeRoot: svc.worktreeRoot,
+      registryPath: svc.registry.getRegistryPath(),
+    })
     const originalInspect = svc.worktrees.inspectRemoval.bind(svc.worktrees)
     svc.worktrees.inspectRemoval = (async (...args: Parameters<typeof originalInspect>) => {
       const risk = await originalInspect(...args)
-      svc.worktrees.addOwner(record.managedWorktreeId, 'late-owner')
+      otherService.worktrees.addOwner(record.managedWorktreeId, 'late-owner')
       return risk
     }) as typeof svc.worktrees.inspectRemoval
 
@@ -296,7 +302,9 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
       gitCommonDir: gcd,
       baseRef: 'main',
     })
-    svc.registry.setState(record.managedWorktreeId, 'removing')
+    expect(svc.registry.beginRemoval(record.managedWorktreeId, 'first')).toEqual({
+      status: 'started',
+    })
 
     expect(() =>
       svc.worktrees.addOwner(record.managedWorktreeId, 'late-owner'),

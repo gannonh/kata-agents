@@ -240,18 +240,44 @@ describe('WorktreeRegistry', () => {
     expect(readFileSync(path, 'utf8')).toBe(changed)
   })
 
-  test('competing instances retain distinct read-modify-write records', () => {
+  test('competing instances serialize owner binding and removal claims', () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const first = new WorktreeRegistry(path)
     const second = new WorktreeRegistry(path)
-    first.upsert(legacyRecord(root, 'repo-aabbccdd'))
-    second.upsert(legacyRecord(root, 'repo-eeff0011'))
+    const record = legacyRecord(root)
+    first.upsert(record)
 
-    expect(first.list().map((record) => record.managedWorktreeId).sort()).toEqual([
-      'repo-aabbccdd',
-      'repo-eeff0011',
-    ])
-    expect(second.list()).toHaveLength(2)
+    expect(second.addOwnerIfReady(record.managedWorktreeId, 'session-2')).toEqual({
+      status: 'added',
+    })
+    expect(first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+      status: 'other-owner',
+    })
+
+    second.removeOwner(record.managedWorktreeId, 'session-2')
+    expect(first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+      status: 'started',
+    })
+    expect(second.addOwnerIfReady(record.managedWorktreeId, 'session-3')).toMatchObject({
+      status: 'not-ready',
+      state: 'removing',
+    })
+  })
+
+  test('missing and blocked records remain retryable for explicit removal', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    registry.upsert(record)
+
+    for (const state of ['missing', 'blocked'] as const) {
+      registry.setState(record.managedWorktreeId, state)
+      expect(registry.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+        status: 'started',
+      })
+      registry.setState(record.managedWorktreeId, 'ready')
+    }
   })
 })

@@ -447,6 +447,19 @@ function writeBytesAtomically(path: string, bytes: string | Buffer, beforeRename
   }
 }
 
+export type WorktreeOwnerBindResult =
+  | { status: 'added' }
+  | { status: 'already-owned' }
+  | { status: 'missing' }
+  | { status: 'not-ready'; state: ManagedWorktreeState }
+
+export type WorktreeRemovalBeginResult =
+  | { status: 'started' }
+  | { status: 'missing' }
+  | { status: 'not-owner' }
+  | { status: 'other-owner' }
+  | { status: 'not-ready'; state: ManagedWorktreeState }
+
 export class WorktreeRegistry {
   private readonly registryPath: string
   private readonly evidencePaths: ReturnType<typeof getWorktreeRegistryEvidencePaths>
@@ -1010,6 +1023,30 @@ export class WorktreeRegistry {
     })
   }
 
+  /**
+   * Replace a record only when its full value is unchanged since the caller
+   * observed it. Reconciliation uses this to avoid writing a stale snapshot
+   * over an owner bind or an in-flight removal.
+   */
+  upsertIfUnchanged(
+    expected: ManagedWorktreeRecordVersioned,
+    replacement: ManagedWorktreeRecord | ManagedWorktreeRecordV2,
+  ): boolean {
+    const expectedNormalized = normalizeRecord(expected, this.registryPath)
+    const replacementNormalized = normalizeRecord(replacement, this.registryPath)
+    let applied = false
+    this.mutate((records) => {
+      const current = records.get(expectedNormalized.managedWorktreeId)
+      if (!current || JSON.stringify(current) !== JSON.stringify(expectedNormalized)) {
+        return false
+      }
+      applied = true
+      records.set(expectedNormalized.managedWorktreeId, replacementNormalized)
+      return JSON.stringify(current) !== JSON.stringify(replacementNormalized)
+    })
+    return applied
+  }
+
   setState(id: string, state: ManagedWorktreeState): void {
     if (!VALID_STATES.has(state)) {
       throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Invalid managed-worktree state.', this.registryPath)
@@ -1022,6 +1059,87 @@ export class WorktreeRegistry {
     })
   }
 
+  /**
+   * Add an owner only while the record is still ready. The state check and
+   * owner write happen in one locked read-modify-write, so removal can use
+   * the same registry transaction to claim the record for destruction.
+   */
+  addOwnerIfReady(
+    id: string,
+    sessionId: string,
+  ): WorktreeOwnerBindResult {
+    if (!sessionId) {
+      throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Owner session ID must be non-empty.', this.registryPath)
+    }
+    let result: WorktreeOwnerBindResult = { status: 'missing' }
+    this.mutate((records) => {
+      const rec = records.get(id)
+      if (!rec) {
+        result = { status: 'missing' }
+        return false
+      }
+      if (rec.state !== 'ready') {
+        result = { status: 'not-ready', state: rec.state }
+        return false
+      }
+      if (rec.ownerSessionIds.includes(sessionId)) {
+        result = { status: 'already-owned' }
+        return false
+      }
+      rec.ownerSessionIds.push(sessionId)
+      result = { status: 'added' }
+      return true
+    })
+    return result
+  }
+
+  /**
+   * Atomically claim a removable record after rechecking ownership.
+   * `allowUnowned` is used only by reconciliation, which removes records after
+   * it has resolved all persisted owner references. Missing and blocked records
+   * remain claimable for explicit registry/branch cleanup retries.
+   */
+  beginRemoval(
+    id: string,
+    requestingSessionId: string,
+    allowUnowned = false,
+  ): WorktreeRemovalBeginResult {
+    let result: WorktreeRemovalBeginResult = { status: 'missing' }
+    this.mutate((records) => {
+      const rec = records.get(id)
+      if (!rec) {
+        result = { status: 'missing' }
+        return false
+      }
+      // Missing and blocked records are still explicitly removable: their
+      // checkout may already be gone, or a prior removal may have failed and
+      // left a tracked record for retry. Only an in-flight removal is fenced
+      // from a second destructive operation.
+      if (rec.state === 'removing') {
+        result = { status: 'not-ready', state: rec.state }
+        return false
+      }
+      const otherOwners = rec.ownerSessionIds.filter((owner) => owner !== requestingSessionId)
+      if (otherOwners.length > 0) {
+        result = { status: 'other-owner' }
+        return false
+      }
+      if (!allowUnowned && !rec.ownerSessionIds.includes(requestingSessionId)) {
+        result = { status: 'not-owner' }
+        return false
+      }
+      if (allowUnowned && rec.ownerSessionIds.length > 0) {
+        result = { status: 'other-owner' }
+        return false
+      }
+      rec.state = 'removing'
+      result = { status: 'started' }
+      return true
+    })
+    return result
+  }
+
+  /** Legacy unconditional owner mutation retained for registry maintenance callers. */
   addOwner(id: string, sessionId: string): void {
     if (!sessionId) {
       throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Owner session ID must be non-empty.', this.registryPath)

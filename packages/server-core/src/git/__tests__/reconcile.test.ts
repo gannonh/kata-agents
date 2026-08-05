@@ -139,6 +139,28 @@ describe('ManagedWorktreeService.reconcile', () => {
     expect(svc.registry.get(record.managedWorktreeId)!.state).toBe('missing')
   })
 
+  test('does not reopen a worktree already claimed by removal', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const svc = servicesFor()
+    const gcd = await commonDir(repo)
+    const { record } = await svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'owner',
+      repositoryRoot: repo,
+      gitCommonDir: gcd,
+      baseRef: 'main',
+    })
+    svc.registry.setState(record.managedWorktreeId, 'removing')
+
+    await svc.worktrees.reconcile({ knownSessionIds: new Set(['owner']) })
+
+    expect(svc.registry.get(record.managedWorktreeId)!.state).toBe('removing')
+    expect(() => svc.worktrees.addOwner(record.managedWorktreeId, 'late')).toThrow(
+      /while it is removing/,
+    )
+  })
+
   // Reconcile used to guarantee it never deleted anything. That guarantee is now
   // narrower: it reclaims a checkout only when the checkout has no live owner
   // AND is clean. Anything still owned, or holding work, is never auto-deleted.
@@ -208,6 +230,30 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
     expect(report.retainedUnownedWithWork).toBe(1)
     expect(existsSync(rec.checkoutPath)).toBe(true)
     expect(services.registry.get(rec.managedWorktreeId)!.state).toBe('blocked')
+  })
+
+  test('does not drop an owner bound while reclaiming a stale snapshot', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const services = servicesFor()
+    const otherServices = createGitServices({
+      worktreeRoot: services.worktreeRoot,
+      registryPath: services.registry.getRegistryPath(),
+    })
+    const rec = await makeWorktree(services, repo, 'gone')
+    const originalInspect = services.worktrees.inspectRemoval.bind(services.worktrees)
+    services.worktrees.inspectRemoval = (async (...args: Parameters<typeof originalInspect>) => {
+      const risk = await originalInspect(...args)
+      otherServices.worktrees.addOwner(rec.managedWorktreeId, 'late-owner')
+      return risk
+    }) as typeof services.worktrees.inspectRemoval
+
+    const report = await services.worktrees.reconcile({ knownSessionIds: new Set() })
+
+    expect(report.reclaimedUnowned).toBe(0)
+    expect(report.retainedUnownedWithWork).toBe(1)
+    expect(services.registry.get(rec.managedWorktreeId)!.ownerSessionIds).toEqual(['late-owner'])
+    expect(existsSync(rec.checkoutPath)).toBe(true)
   })
 
   test('keeps an unowned checkout that holds unique commits', async () => {

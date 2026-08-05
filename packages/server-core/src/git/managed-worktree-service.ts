@@ -30,7 +30,14 @@ import type {
 import { runGit, GitCommandError } from './command-runner'
 import { RepositoryService } from './repository-service'
 import { MutationLock } from './mutation-lock'
-import { WorktreeRegistry, computeRepoKey, generateToken, removeDir } from './worktree-registry'
+import {
+  WorktreeRegistry,
+  computeRepoKey,
+  generateToken,
+  removeDir,
+  type WorktreeOwnerBindResult,
+  type WorktreeRemovalBeginResult,
+} from './worktree-registry'
 import { applyWorktreeInclude } from './worktree-include'
 
 const MAX_TOKEN_RETRIES = 5
@@ -317,14 +324,13 @@ export class ManagedWorktreeService {
   }
 
   addOwner(managedWorktreeId: string, sessionId: string): void {
-    const rec = this.registry.get(managedWorktreeId)
-    if (!rec) {
+    const result: WorktreeOwnerBindResult = this.registry.addOwnerIfReady(managedWorktreeId, sessionId)
+    if (result.status === 'missing') {
       throw new Error('Managed worktree record not found.')
     }
-    if (rec.state !== 'ready') {
-      throw new Error(`Managed worktree cannot add an owner while it is ${rec.state}.`)
+    if (result.status === 'not-ready') {
+      throw new Error(`Managed worktree cannot add an owner while it is ${result.state}.`)
     }
-    this.registry.addOwner(managedWorktreeId, sessionId)
   }
 
   removeOwner(managedWorktreeId: string, sessionId: string): void {
@@ -651,7 +657,39 @@ export class ManagedWorktreeService {
         return { removed: false, branchPruned: false, blocked: false }
       }
 
-      this.registry.setState(managedWorktreeId, 'removing')
+      // Claim the record in the same locked registry transaction that checks
+      // ownership and readiness. addOwnerIfReady() uses that transaction too,
+      // so a late owner either lands before this claim (and blocks removal) or
+      // is rejected after the record becomes removing.
+      const removalBegin: WorktreeRemovalBeginResult = this.registry.beginRemoval(
+        managedWorktreeId,
+        requestingSessionId,
+        requestingSessionId === RECONCILE_ACTOR,
+      )
+      if (removalBegin.status !== 'started') {
+        let blockedReason: string
+        switch (removalBegin.status) {
+          case 'other-owner':
+            blockedReason = 'Another session still owns this worktree.'
+            break
+          case 'not-owner':
+            blockedReason = 'Worktree ownership changed during removal. Inspect it again before removing it.'
+            break
+          case 'not-ready':
+            blockedReason = `Worktree cannot begin removal while it is ${removalBegin.state}.`
+            break
+          case 'missing':
+            blockedReason = 'Managed worktree record disappeared during removal.'
+            break
+        }
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason,
+        }
+      }
+
       // Remove the worktree registration + directory.
       try {
         await runGit(['worktree', 'remove', '--force', rec.checkoutPath], {
@@ -767,6 +805,14 @@ export class ManagedWorktreeService {
     }
 
     for (const rec of records) {
+      // Keep the exact registry snapshot used for reconciliation. The final
+      // write is conditional so a concurrent owner bind or removal claim is
+      // never overwritten by this stale async inspection.
+      const observed: ManagedWorktreeRecordVersioned = {
+        ...rec,
+        ownerSessionIds: [...rec.ownerSessionIds],
+      }
+
       // 1. Drop dead owner references.
       const beforeOwners = rec.ownerSessionIds.length
       const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
@@ -807,12 +853,17 @@ export class ManagedWorktreeService {
         // On disk but not a registered worktree — ambiguous, do not touch it.
         nextState = 'blocked'
         report.markedBlocked += 1
-      } else if (listedEntry && rec.state !== 'ready') {
-        // Healthy again after being marked missing/preparing.
+      } else if (listedEntry && rec.state !== 'ready' && rec.state !== 'removing') {
+        // Healthy again after being marked missing/preparing/blocked. An
+        // in-flight removal is never reopened by reconciliation.
         nextState = 'ready'
       }
       rec.state = nextState
-      this.registry.upsert(rec)
+      if (!this.registry.upsertIfUnchanged(observed, rec)) {
+        // Another lifecycle operation won the registry race. Do not use this
+        // stale inspection to reclaim or re-mark the checkout.
+        continue
+      }
 
       // Reclaim leaked checkouts. A record with no live owners can no longer be
       // reached through any session, and nothing else removes one — so without
@@ -834,8 +885,14 @@ export class ManagedWorktreeService {
           // marked so the state is visible rather than inferred from a
           // directory nobody can reach.
           report.retainedUnownedWithWork += 1
-          rec.state = 'blocked'
-          this.registry.upsert(rec)
+          const blockedRecord: ManagedWorktreeRecordVersioned = {
+            ...rec,
+            state: 'blocked',
+            ownerSessionIds: [...rec.ownerSessionIds],
+          }
+          // Do not overwrite a late owner reference (or a concurrent removal
+          // outcome) with this stale reconciliation snapshot.
+          this.registry.upsertIfUnchanged(rec, blockedRecord)
         }
       }
     }
