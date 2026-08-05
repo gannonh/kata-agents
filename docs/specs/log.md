@@ -2,6 +2,8 @@
 
 ## 2026-08-04
 
+* **Worktree V2 approved**: approved epic [#17](https://github.com/gannonh/kata-agents/issues/17) and sequential sub-specs [#40](https://github.com/gannonh/kata-agents/issues/40) through [#43](https://github.com/gannonh/kata-agents/issues/43) after adversarial safety and feasibility review. The approved contract covers custom identity, per-server settings, snapshot-first lifecycle, conflict-safe handoff, and isolated current-head conversation forks. All five issues are ready for Build; Build has not started.
+
 * **Root Bun test sweep stabilized (#25)**: corrected BrowserPaneManager test contracts and cleanup containment, covered Git and RTK RPC registrations, isolated WebUI password hashes, repaired global fetch and isolated-suite fixtures, and excluded Playwright `.spec.ts` files from Bun discovery. `bun run test` now passes; the root sweep covers 5,223 passing tests and 12 skips.
 
 * **Status and backlog normalization**: normalized all 13 open spec issues with `Draft`/`Implemented` status sections, exact acceptance headings, Build handoffs, and cleared needs flags; marked #21 and #22 `Verified` with acceptance evidence; marked #33 `Implemented` and ready for Verify; retained #4 and #7–#12 open as deferred work with explicit triage decisions.
