@@ -112,16 +112,18 @@ describe('ManagedWorktreeService.createWorktree', () => {
       const registryPath = svc.registry.getRegistryPath()
       const beforeRegistry = existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null
 
-      await expect(
-        svc.worktrees.createWorktree({
-          workspaceId: 'ws1',
-          sessionId: 'sess1',
-          repositoryRoot: repo,
-          gitCommonDir: gcd,
-          baseRef: 'main',
-          worktreeNameSuffix: 'auth-refresh',
-        }),
-      ).rejects.toMatchObject({ code: 'WORKTREE_BRANCH_COLLISION' })
+      for (const worktreeNameSuffix of ['auth-refresh', 'AUTH-REFRESH']) {
+        await expect(
+          svc.worktrees.createWorktree({
+            workspaceId: 'ws1',
+            sessionId: `sess-${worktreeNameSuffix}`,
+            repositoryRoot: repo,
+            gitCommonDir: gcd,
+            baseRef: 'main',
+            worktreeNameSuffix,
+          }),
+        ).rejects.toMatchObject({ code: 'WORKTREE_BRANCH_COLLISION' })
+      }
 
       expect(existsSync(join(svc.worktreeSettings.getSnapshot().materializationRoot, 'ws1'))).toBe(false)
       expect(svc.registry.list()).toEqual([])
