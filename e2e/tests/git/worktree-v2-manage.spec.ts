@@ -111,7 +111,8 @@ test.describe(`Worktree V2 management ${E2E_TAGS.worktreeV2}`, () => {
       await expect(page.getByRole("heading", { name: "Worktree Settings" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Managed Worktrees" })).toBeVisible();
       await expect(page.getByText("Server identity", { exact: true })).toHaveCount(0);
-      await expect(page.getByTestId("worktrees-root-input")).toContainText("Worktree root");
+      await expect(page.getByTestId("worktrees-root-input")).toContainText("Worktrees root");
+      await expect(page.getByText("Worktrees server", { exact: true })).toBeVisible();
       await expect(page.getByTestId("worktrees-root-input")).toContainText(
         "Directory where Kata Agents creates managed worktrees",
       );
