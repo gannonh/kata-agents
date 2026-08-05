@@ -345,6 +345,10 @@ export const RPC_CHANNELS = {
     LIST_MANAGED_WORKTREES: 'git:listManagedWorktrees',
     // Empty-session checkout preparation (Phase 1)
     PREPARE_CHECKOUT: 'git:prepareCheckout',
+    // Worktree V2 capability and settings (handlers land with the settings service)
+    GET_CAPABILITIES: 'git:getCapabilities',
+    GET_WORKTREE_SETTINGS: 'git:getWorktreeSettings',
+    UPDATE_WORKTREE_SETTINGS: 'git:updateWorktreeSettings',
     // Managed-worktree risk inspection and removal (Phase 1 inspection; Phase 4 removal UI)
     INSPECT_WORKTREE_REMOVAL: 'git:inspectWorktreeRemoval',
     REMOVE_WORKTREE: 'git:removeWorktree',

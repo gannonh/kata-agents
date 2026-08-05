@@ -87,8 +87,8 @@ export interface ISessionManager {
    */
   prepareCheckout(
     sessionId: string,
-    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
-  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult>
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntentVersioned,
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResultVersioned>
   /**
    * Ready managed worktrees in the session's workspace + repository that a
    * new session may bind to (read-only discovery; excludes the session's own
@@ -97,7 +97,7 @@ export interface ISessionManager {
   listManagedWorktrees(
     sessionId: string,
     workingDirectory: string,
-  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummary[]>
+  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummaryVersioned[]>
   /**
    * Inject the server-owned Git domain so the checkout gate shares one
    * managed-worktree registry with the git RPC handlers. Optional: falls back

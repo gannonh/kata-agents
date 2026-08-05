@@ -12,11 +12,16 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs'
 import { join, relative, isAbsolute, resolve as resolvePath } from 'node:path'
 import { createHash } from 'node:crypto'
+import { isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
+  ManagedWorktreeRecordV2,
+  ManagedWorktreeRecordVersioned,
   ManagedWorktreeSummary,
-  SessionCheckoutV1,
+  ManagedWorktreeSummaryV2,
+  ManagedWorktreeSummaryVersioned,
+  SessionCheckout,
   WorktreeRemovalConfirmation,
   WorktreeIncludeResult,
   WorktreeRemovalRisk,
@@ -25,8 +30,16 @@ import type {
 import { runGit, GitCommandError } from './command-runner'
 import { RepositoryService } from './repository-service'
 import { MutationLock } from './mutation-lock'
-import { WorktreeRegistry, computeRepoKey, generateToken, removeDir } from './worktree-registry'
+import {
+  WorktreeRegistry,
+  computeRepoKey,
+  generateToken,
+  removeDir,
+  type WorktreeOwnerBindResult,
+  type WorktreeRemovalBeginResult,
+} from './worktree-registry'
 import { applyWorktreeInclude } from './worktree-include'
+import type { WorktreeSettingsSnapshot } from '@kata-sh/shared/protocol'
 
 const MAX_TOKEN_RETRIES = 5
 
@@ -50,6 +63,22 @@ function matchesRemovalConfirmation(
  */
 const RECONCILE_ACTOR = '__reconcile__'
 
+/**
+ * Convert a user-controlled branch suffix into a path leaf fragment. The
+ * branch/display name itself is never changed; this value is only a bounded,
+ * path-safe hint combined with a random internal token.
+ */
+function filesystemSafeDisplayFragment(name: string): string {
+  const fragment = name
+    .normalize('NFC')
+    .replace(/[\\/]+/g, '-')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^[.-]+/, '')
+    .replace(/[.-]+$/, '')
+    .slice(0, 80)
+  return fragment || 'worktree'
+}
+
 export class WorktreeCreationError extends Error {
   readonly code: string
   constructor(message: string, code = 'WORKTREE_CREATE_FAILED') {
@@ -65,11 +94,31 @@ export interface CreateWorktreeParams {
   repositoryRoot: string
   gitCommonDir: string
   baseRef: string
+  /** V2 branch suffix/display name. Omitted for the exact V1 token flow. */
+  worktreeNameSuffix?: string
 }
 
 export interface CreateWorktreeResult {
-  record: ManagedWorktreeRecord
+  /** V1 creation returns the legacy record shape; V2 returns the named record. */
+  record: ManagedWorktreeRecord | ManagedWorktreeRecordV2
   include: WorktreeIncludeResult
+}
+
+interface ProvisionalCreation {
+  worktreeCreated: boolean
+  /** True only after this transaction observed that its requested branch was absent. */
+  branchCreated: boolean
+  /** Exact OID recorded immediately after this transaction created the branch. */
+  createdBranchOid: string | null
+}
+
+export interface WorktreeRootProvider {
+  /** Capture the root/version used by one materialization operation. */
+  getSnapshot(): WorktreeSettingsSnapshot
+  /** V1 fallback root when persisted V2 settings are ineffective. */
+  getDefaultRoot?(): string
+  /** Revalidate a captured policy against the selected source before creation. */
+  validateForCreation?(snapshot: WorktreeSettingsSnapshot, repositoryRoot: string): void
 }
 
 export interface ReconcileParams {
@@ -80,7 +129,7 @@ export interface ReconcileParams {
    * references (a session whose checkout points at a worktree it no longer
    * owns in the registry).
    */
-  sessionCheckouts?: Map<string, SessionCheckoutV1>
+  sessionCheckouts?: Map<string, SessionCheckout>
 }
 
 export interface ReconcileReport {
@@ -130,12 +179,46 @@ export function parseWorktreeListPorcelain(output: string): WorktreeListEntry[] 
 }
 
 export class ManagedWorktreeService {
+  private readonly worktreeRootProvider: WorktreeRootProvider
+
   constructor(
-    private readonly worktreeRoot: string,
+    worktreeRoot: string | WorktreeRootProvider,
     private readonly registry: WorktreeRegistry,
     private readonly repositoryService: RepositoryService,
     private readonly mutationLock: MutationLock,
-  ) {}
+  ) {
+    this.worktreeRootProvider = typeof worktreeRoot === 'string'
+      ? {
+          getSnapshot: () => ({
+            schemaVersion: 1,
+            serverId: 'local',
+            version: 0,
+            materializationRoot: resolvePath(worktreeRoot),
+            capturedAt: Date.now(),
+          }),
+          getDefaultRoot: () => resolvePath(worktreeRoot),
+        }
+      : worktreeRoot
+  }
+
+  getWorktreeRoot(): string {
+    return this.getEffectiveRootSnapshot().materializationRoot
+  }
+
+  private getEffectiveRootSnapshot(): WorktreeSettingsSnapshot {
+    if (isWorktreeV2Enabled()) return this.worktreeRootProvider.getSnapshot()
+    const defaultRoot = this.worktreeRootProvider.getDefaultRoot?.()
+    if (defaultRoot) {
+      return {
+        schemaVersion: 1,
+        serverId: 'local',
+        version: 0,
+        materializationRoot: resolvePath(defaultRoot),
+        capturedAt: Date.now(),
+      }
+    }
+    return this.worktreeRootProvider.getSnapshot()
+  }
 
   getRegistry(): WorktreeRegistry {
     return this.registry
@@ -146,11 +229,16 @@ export class ManagedWorktreeService {
   }
 
   /** True when `path` is contained within the configured worktree root. */
-  isUnderWorktreeRoot(path: string): boolean {
+  isUnderWorktreeRoot(path: string, allowedRoot = this.getWorktreeRoot()): boolean {
     // Git may report macOS temporary paths through /private/var while the
     // configured root was created through /var. Canonicalize both sides before
     // containment checks so the safety guard does not reject its own checkout.
-    const root = safeRealpath(this.worktreeRoot)
+    // Never follow a root symlink here: a root swap must fail closed rather
+    // than authorize a checkout in an unrelated destination.
+    const rootPath = resolvePath(allowedRoot)
+    if (this.isSymlink(rootPath)) return false
+    const root = safeRealpath(rootPath)
+    if (root !== rootPath) return false
     const p = safeRealpath(path)
     const rel = relative(root, p)
     return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
@@ -161,9 +249,12 @@ export class ManagedWorktreeService {
    * records (persisted before `workspaceId` existed) derive it from the
    * `<worktreeRoot>/<workspace-id>/<repo-key>/<token>` layout.
    */
-  workspaceIdOf(record: ManagedWorktreeRecord): string | null {
+  workspaceIdOf(record: ManagedWorktreeRecordVersioned): string | null {
     if (record.workspaceId) return record.workspaceId
-    const rel = relative(safeRealpath(this.worktreeRoot), safeRealpath(record.checkoutPath))
+    const recordRoot = 'materializationRoot' in record
+      ? record.materializationRoot
+      : this.getWorktreeRoot()
+    const rel = relative(safeRealpath(recordRoot), safeRealpath(record.checkoutPath))
     if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
     // `relative()` uses the platform separator: backslash-delimited paths on
     // Windows must split the same way or the whole relative path is returned.
@@ -183,7 +274,7 @@ export class ManagedWorktreeService {
     workspaceId: string,
     gitCommonDir: string,
     excludeWorktreeId?: string,
-  ): ManagedWorktreeSummary[] {
+  ): ManagedWorktreeSummaryVersioned[] {
     const repoKey = computeRepoKey(safeRealpath(gitCommonDir))
     return this.registry
       .list()
@@ -194,91 +285,249 @@ export class ManagedWorktreeService {
           this.workspaceIdOf(rec) === workspaceId &&
           computeRepoKey(safeRealpath(rec.gitCommonDir)) === repoKey,
       )
-      .map((rec) => ({
-        managedWorktreeId: rec.managedWorktreeId,
-        checkoutPath: rec.checkoutPath,
-        expectedBranch: rec.expectedBranch,
-        baseRef: rec.baseRef,
-        ownerCount: rec.ownerSessionIds.length,
-        state: rec.state,
-      }))
+      .map((rec): ManagedWorktreeSummaryVersioned => {
+        const legacy: ManagedWorktreeSummary = {
+          managedWorktreeId: rec.managedWorktreeId,
+          checkoutPath: rec.checkoutPath,
+          expectedBranch: rec.expectedBranch,
+          baseRef: rec.baseRef,
+          ownerCount: rec.ownerSessionIds.length,
+          state: rec.state,
+        }
+        const versioned = rec as unknown as ManagedWorktreeRecord | ManagedWorktreeRecordV2
+        // The fixed registry upgrades legacy records to V2 storage, but V1
+        // discovery must retain its exact public summary until V2 is effective.
+        if (!isWorktreeV2Enabled() || versioned.schemaVersion !== 2) return legacy
+
+        const v2 = versioned
+        const summary: ManagedWorktreeSummaryV2 = {
+          schemaVersion: 2,
+          managedWorktreeId: v2.managedWorktreeId,
+          checkoutPath: v2.checkoutPath,
+          displayName: v2.displayName,
+          expectedBranch: v2.expectedBranch,
+          materializationRoot: v2.materializationRoot,
+          baseRef: v2.baseRef,
+          ownerCount: v2.ownerSessionIds.length,
+          state: v2.state,
+        }
+        return summary
+      })
   }
 
   /**
-   * Create a managed worktree and its temporary `kata-agent/<token>` branch.
-   * Serializes by Git common directory. On failure, cleans up a still-clean
-   * provisional worktree/branch; if cleanup fails the registry record is left
-   * `blocked` for explicit recovery.
+   * Create a managed worktree and its branch. V1 uses the generated
+   * `kata-agent/<token>` identity; V2 uses the exact requested
+   * `kata-agent/<name>` identity and a separate random path token.
+   * Serializes by Git common directory. On failure, compensation removes only
+   * artifacts recorded as created by this transaction; if compensation cannot
+   * prove ownership, the registry record is left `blocked` for recovery.
    */
   async createWorktree(params: CreateWorktreeParams): Promise<CreateWorktreeResult> {
-    const { workspaceId, sessionId, repositoryRoot, gitCommonDir, baseRef } = params
+    const {
+      workspaceId,
+      sessionId,
+      repositoryRoot,
+      gitCommonDir,
+      baseRef,
+      worktreeNameSuffix,
+    } = params
+    const named = worktreeNameSuffix !== undefined
+    if (named && typeof worktreeNameSuffix !== 'string') {
+      throw new WorktreeCreationError(
+        'Worktree name must be a string.',
+        'WORKTREE_NAME_INVALID',
+      )
+    }
+    if (named && !isWorktreeV2Enabled()) {
+      throw new WorktreeCreationError(
+        'Git worktree V2 capability is unavailable on this server.',
+        'GIT_WORKTREE_V2_UNAVAILABLE',
+      )
+    }
 
     // Validate base ref exists before taking the lock.
     await this.assertRefExists(repositoryRoot, baseRef)
 
     return this.mutationLock.withLock(gitCommonDir, async () => {
+      // Capture one immutable root snapshot before deriving the destination.
+      // A later settings update affects only subsequent materializations.
+      const rootSnapshot = this.getEffectiveRootSnapshot()
+      if (isWorktreeV2Enabled()) {
+        this.worktreeRootProvider.validateForCreation?.(rootSnapshot, repositoryRoot)
+      }
+      // Snapshots are already canonicalized by the settings provider. Keep
+      // this path lexical until the no-follow destination validation runs so a
+      // root replaced by a symlink cannot be silently followed.
+      const materializationRoot = resolvePath(rootSnapshot.materializationRoot)
       const realCommonDir = safeRealpath(gitCommonDir)
       const repoKey = computeRepoKey(realCommonDir)
+      const requestedBranch = named ? `kata-agent/${worktreeNameSuffix}` : null
+      if (requestedBranch) {
+        // Validate the requested identity before creating any destination
+        // directories, then repeat the check immediately before Git mutation.
+        await this.assertNamedBranchAvailable(repositoryRoot, requestedBranch)
+      }
+      if (!workspaceId || workspaceId === '.' || workspaceId === '..' || /[\\/]/.test(workspaceId)) {
+        throw new WorktreeCreationError(
+          'Managed-worktree workspace identity is not a safe path component.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      const destinationRoot = this.prepareDestinationRoot(materializationRoot, workspaceId, repoKey)
+      const displayFragment = named
+        ? filesystemSafeDisplayFragment(worktreeNameSuffix!)
+        : null
 
       let lastError: unknown
       for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
         const token = generateToken()
-        const branch = `kata-agent/${token}`
-        const worktreePath = join(this.worktreeRoot, workspaceId, repoKey, token)
+        const branch = requestedBranch ?? `kata-agent/${token}`
+        const leaf = displayFragment ? `${displayFragment}-${token}` : token
+        const worktreePath = join(destinationRoot, leaf)
 
-        // Collision check: both branch and path must be free.
-        if (existsSync(worktreePath)) continue
-        if (await this.branchExists(repositoryRoot, branch)) continue
+        // Collision check: both branch and path must be free. A broken
+        // symlink is also occupied: never let Git follow it outside the root.
+        if (existsSync(worktreePath) || this.isSymlink(worktreePath)) continue
+        if (!named && (await this.branchExists(repositoryRoot, branch))) continue
+        if (named) {
+          // Another writer may be using Git directly rather than Kata's lock;
+          // recheck the requested ref immediately before recording a
+          // provisional transaction. A requested branch collision is visible,
+          // never silently renamed to another branch.
+          await this.assertNamedBranchAvailable(repositoryRoot, branch)
+        }
 
         const managedWorktreeId = `${repoKey}-${token}`
-        const provisional: ManagedWorktreeRecord = {
-          managedWorktreeId,
-          workspaceId,
-          repositoryRoot: resolvePath(repositoryRoot),
-          gitCommonDir: realCommonDir,
-          checkoutPath: resolvePath(worktreePath),
-          baseRef,
-          expectedBranch: branch,
-          createdAt: Date.now(),
-          ownerSessionIds: [sessionId],
-          state: 'preparing',
-        }
+        const createdAt = Date.now()
+        const provisional: ManagedWorktreeRecord | ManagedWorktreeRecordV2 = named
+          ? {
+              schemaVersion: 2,
+              managedWorktreeId,
+              workspaceId,
+              repositoryRoot: resolvePath(repositoryRoot),
+              gitCommonDir: realCommonDir,
+              checkoutPath: resolvePath(worktreePath),
+              baseRef,
+              expectedBranch: branch,
+              displayName: worktreeNameSuffix!,
+              materializationRoot,
+              createdAt,
+              lastUsedAt: createdAt,
+              ownerSessionIds: [sessionId],
+              state: 'preparing',
+            }
+          : {
+              managedWorktreeId,
+              workspaceId,
+              repositoryRoot: resolvePath(repositoryRoot),
+              gitCommonDir: realCommonDir,
+              checkoutPath: resolvePath(worktreePath),
+              baseRef,
+              expectedBranch: branch,
+              createdAt,
+              ownerSessionIds: [sessionId],
+              state: 'preparing',
+            }
         this.registry.upsert(provisional)
+        const transaction: ProvisionalCreation = {
+          worktreeCreated: false,
+          branchCreated: false,
+          createdBranchOid: null,
+        }
 
         try {
-          mkdirSync(join(this.worktreeRoot, workspaceId, repoKey), { recursive: true })
+          // Recheck every destination component immediately before Git creates
+          // the checkout. The post-add identity check below closes the
+          // remaining external symlink-swap window.
+          const revalidatedDestinationRoot = this.prepareDestinationRoot(
+            materializationRoot,
+            workspaceId,
+            repoKey,
+          )
+          if (revalidatedDestinationRoot !== destinationRoot) {
+            throw new WorktreeCreationError(
+              'Managed-worktree destination changed during creation.',
+              'WORKTREE_DESTINATION_UNSAFE',
+            )
+          }
+          if (named) await this.assertNamedBranchAvailable(repositoryRoot, branch)
+          // Capture the requested base OID immediately before Git creates the
+          // branch. If an external actor changes the new ref before the first
+          // ownership read, the created ref will no longer match this proof and
+          // compensation must retain it instead of treating it as ours.
+          const expectedBaseOid = await this.assertRefExists(repositoryRoot, baseRef)
           await runGit(['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseRef], {
             cwd: repositoryRoot,
             timeoutMs: 120_000,
           })
-
-          let include: WorktreeIncludeResult = {
-            copiedFileCount: 0,
-            skippedSymlinks: 0,
-            totalBytes: 0,
+          transaction.worktreeCreated = true
+          const createdBranchOid = await this.getBranchOid(repositoryRoot, branch)
+          if (!createdBranchOid || createdBranchOid !== expectedBaseOid) {
+            throw new WorktreeCreationError(
+              'The created branch identity could not be verified safely.',
+              'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN',
+            )
           }
-          try {
-            include = await applyWorktreeInclude(repositoryRoot, worktreePath)
-          } catch (includeErr) {
-            // .worktreeinclude limit or copy failure: tear down the still-clean
-            // worktree and surface the error.
-            await this.cleanupProvisional(repositoryRoot, worktreePath, branch, managedWorktreeId)
-            throw includeErr
+          transaction.branchCreated = true
+          transaction.createdBranchOid = createdBranchOid
+
+          const createdContext = await this.repositoryService.getContext(worktreePath)
+          if (
+            !createdContext.isGitRepository ||
+            !createdContext.gitCommonDir ||
+            safeRealpath(createdContext.gitCommonDir) !== realCommonDir ||
+            createdContext.currentBranch !== branch ||
+            createdContext.headSha !== createdBranchOid ||
+            !this.isUnderWorktreeRoot(worktreePath, materializationRoot)
+          ) {
+            throw new WorktreeCreationError(
+              'Git created a managed checkout with an unexpected identity or destination.',
+              'WORKTREE_DESTINATION_UNSAFE',
+            )
           }
 
-          const ready: ManagedWorktreeRecord = { ...provisional, checkoutPath: safeRealpath(worktreePath), state: 'ready' }
+          // .worktreeinclude limit or copy failure is handled by the outer
+          // creation compensation, which tears down the still-clean checkout.
+          const include = await applyWorktreeInclude(repositoryRoot, worktreePath)
+          const ready: ManagedWorktreeRecord | ManagedWorktreeRecordV2 = named
+            ? {
+                ...(provisional as ManagedWorktreeRecordV2),
+                checkoutPath: safeRealpath(worktreePath),
+                state: 'ready',
+                lastUsedAt: Date.now(),
+              }
+            : {
+                ...(provisional as ManagedWorktreeRecord),
+                checkoutPath: safeRealpath(worktreePath),
+                state: 'ready',
+              }
           this.registry.upsert(ready)
           return { record: ready, include }
         } catch (err) {
-          if (err instanceof GitCommandError) {
-            // If the branch/path already existed, retry with a new token.
-            const retryable = /already exists|already checked out|is already used/i.test(err.stderr)
-            await this.cleanupProvisional(repositoryRoot, worktreePath, branch, managedWorktreeId)
-            if (retryable) {
-              lastError = err
-              continue
-            }
+          const branchCollision = this.isBranchCollisionError(err)
+          const pathCollision = this.isPathCollisionError(err)
+          await this.cleanupProvisional(
+            repositoryRoot,
+            worktreePath,
+            branch,
+            managedWorktreeId,
+            transaction,
+          )
+          if ((branchCollision || pathCollision) && !named) {
+            lastError = err
+            continue
           }
+          if (branchCollision && named) {
+            throw new WorktreeCreationError(
+              `The requested worktree branch "${branch}" is already in use.`,
+              'WORKTREE_BRANCH_COLLISION',
+            )
+          }
+          // A V2 path is an internal random-ID collision, not an identity
+          // collision. Retry it with another path while keeping the requested
+          // branch unchanged.
+          if (pathCollision && named) continue
           throw err
         }
       }
@@ -291,14 +540,13 @@ export class ManagedWorktreeService {
   }
 
   addOwner(managedWorktreeId: string, sessionId: string): void {
-    const rec = this.registry.get(managedWorktreeId)
-    if (!rec) {
+    const result: WorktreeOwnerBindResult = this.registry.addOwnerIfReady(managedWorktreeId, sessionId)
+    if (result.status === 'missing') {
       throw new Error('Managed worktree record not found.')
     }
-    if (rec.state !== 'ready') {
-      throw new Error(`Managed worktree cannot add an owner while it is ${rec.state}.`)
+    if (result.status === 'not-ready') {
+      throw new Error(`Managed worktree cannot add an owner while it is ${result.state}.`)
     }
-    this.registry.addOwner(managedWorktreeId, sessionId)
   }
 
   removeOwner(managedWorktreeId: string, sessionId: string): void {
@@ -315,7 +563,7 @@ export class ManagedWorktreeService {
    * ref.
    */
   private async createRemovalConfirmationFingerprint(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
     entries: GitWorkingTreeEntry[],
     ignoredPaths: string[],
   ): Promise<string> {
@@ -510,7 +758,25 @@ export class ManagedWorktreeService {
       return { removed: false, branchPruned: false, blocked: false }
     }
 
-    return this.mutationLock.withLock(rec.gitCommonDir, async () => {
+    const initialCommonDir = rec.gitCommonDir
+    return this.mutationLock.withLock(initialCommonDir, async () => {
+      // The registry is shared across server processes. Re-read it after the
+      // Git lock is acquired so a stale in-memory record cannot authorize a
+      // removal using an old path, owner set, or common directory.
+      const current = this.registry.get(managedWorktreeId)
+      if (!current) {
+        return { removed: false, branchPruned: false, blocked: false }
+      }
+      if (safeRealpath(current.gitCommonDir) !== safeRealpath(initialCommonDir)) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason: 'Managed worktree repository identity changed during removal.',
+        }
+      }
+      const rec = current
+
       // Validate static containment/common-directory/branch expectations before
       // taking the authoritative content snapshot. No awaited identity check
       // may run after that snapshot: an external write during such a gap would
@@ -607,7 +873,39 @@ export class ManagedWorktreeService {
         return { removed: false, branchPruned: false, blocked: false }
       }
 
-      this.registry.setState(managedWorktreeId, 'removing')
+      // Claim the record in the same locked registry transaction that checks
+      // ownership and readiness. addOwnerIfReady() uses that transaction too,
+      // so a late owner either lands before this claim (and blocks removal) or
+      // is rejected after the record becomes removing.
+      const removalBegin: WorktreeRemovalBeginResult = this.registry.beginRemoval(
+        managedWorktreeId,
+        requestingSessionId,
+        requestingSessionId === RECONCILE_ACTOR,
+      )
+      if (removalBegin.status !== 'started') {
+        let blockedReason: string
+        switch (removalBegin.status) {
+          case 'other-owner':
+            blockedReason = 'Another session still owns this worktree.'
+            break
+          case 'not-owner':
+            blockedReason = 'Worktree ownership changed during removal. Inspect it again before removing it.'
+            break
+          case 'not-ready':
+            blockedReason = `Worktree cannot begin removal while it is ${removalBegin.state}.`
+            break
+          case 'missing':
+            blockedReason = 'Managed worktree record disappeared during removal.'
+            break
+        }
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason,
+        }
+      }
+
       // Remove the worktree registration + directory.
       try {
         await runGit(['worktree', 'remove', '--force', rec.checkoutPath], {
@@ -723,6 +1021,14 @@ export class ManagedWorktreeService {
     }
 
     for (const rec of records) {
+      // Keep the exact registry snapshot used for reconciliation. The final
+      // write is conditional so a concurrent owner bind or removal claim is
+      // never overwritten by this stale async inspection.
+      const observed: ManagedWorktreeRecordVersioned = {
+        ...rec,
+        ownerSessionIds: [...rec.ownerSessionIds],
+      }
+
       // 1. Drop dead owner references.
       const beforeOwners = rec.ownerSessionIds.length
       const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
@@ -763,12 +1069,17 @@ export class ManagedWorktreeService {
         // On disk but not a registered worktree — ambiguous, do not touch it.
         nextState = 'blocked'
         report.markedBlocked += 1
-      } else if (listedEntry && rec.state !== 'ready') {
-        // Healthy again after being marked missing/preparing.
+      } else if (listedEntry && rec.state !== 'ready' && rec.state !== 'removing') {
+        // Healthy again after being marked missing/preparing/blocked. An
+        // in-flight removal is never reopened by reconciliation.
         nextState = 'ready'
       }
       rec.state = nextState
-      this.registry.upsert(rec)
+      if (!this.registry.upsertIfUnchanged(observed, rec)) {
+        // Another lifecycle operation won the registry race. Do not use this
+        // stale inspection to reclaim or re-mark the checkout.
+        continue
+      }
 
       // Reclaim leaked checkouts. A record with no live owners can no longer be
       // reached through any session, and nothing else removes one — so without
@@ -790,8 +1101,14 @@ export class ManagedWorktreeService {
           // marked so the state is visible rather than inferred from a
           // directory nobody can reach.
           report.retainedUnownedWithWork += 1
-          rec.state = 'blocked'
-          this.registry.upsert(rec)
+          const blockedRecord: ManagedWorktreeRecordVersioned = {
+            ...rec,
+            state: 'blocked',
+            ownerSessionIds: [...rec.ownerSessionIds],
+          }
+          // Do not overwrite a late owner reference (or a concurrent removal
+          // outcome) with this stale reconciliation snapshot.
+          this.registry.upsertIfUnchanged(rec, blockedRecord)
         }
       }
     }
@@ -807,9 +1124,12 @@ export class ManagedWorktreeService {
    * is safe to reconcile away (registry + branch prune only).
    */
   private async validateRemovalIdentity(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (!this.isUnderWorktreeRoot(rec.checkoutPath)) {
+    const recordRoot = 'materializationRoot' in rec
+      ? rec.materializationRoot
+      : this.getWorktreeRoot()
+    if (!this.isUnderWorktreeRoot(rec.checkoutPath, recordRoot)) {
       return {
         ok: false,
         reason: 'Refusing to remove a checkout outside the Kata managed-worktree root.',
@@ -853,7 +1173,7 @@ export class ManagedWorktreeService {
    * prompt or points at a checkout other than the selected one.
    */
   async revalidateShareable(
-    rec: ManagedWorktreeRecord,
+    rec: ManagedWorktreeRecordVersioned,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     if (!existsSync(rec.checkoutPath)) {
       return { ok: false, reason: 'Managed worktree checkout no longer exists on disk.' }
@@ -882,32 +1202,151 @@ export class ManagedWorktreeService {
     return { ok: true }
   }
 
+  private isSymlink(path: string): boolean {
+    try {
+      return lstatSync(path).isSymbolicLink()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw new WorktreeCreationError(
+        `Unable to inspect managed-worktree destination: ${path}`,
+        'WORKTREE_DESTINATION_UNSAFE',
+      )
+    }
+  }
+
+  /**
+   * Create and verify the non-leaf destination components without following
+   * symlinks. The final path is intentionally left absent for `git worktree
+   * add`; Git identity + root containment are verified immediately afterwards.
+   */
+  private prepareDestinationRoot(
+    materializationRoot: string,
+    workspaceId: string,
+    repoKey: string,
+  ): string {
+    let root = resolvePath(materializationRoot)
+    try {
+      if (this.isSymlink(root)) {
+        throw new WorktreeCreationError(
+          'Managed-worktree materialization root must not be a symlink.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      mkdirSync(root, { recursive: true })
+      if (this.isSymlink(root) || safeRealpath(root) !== root) {
+        throw new WorktreeCreationError(
+          'Managed-worktree materialization root changed through a symlink.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      const rootStat = lstatSync(root)
+      if (!rootStat.isDirectory()) {
+        throw new WorktreeCreationError(
+          'Managed-worktree materialization root is not a directory.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      const destination = resolvePath(root, workspaceId, repoKey)
+      const rel = relative(root, destination)
+      if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+        throw new WorktreeCreationError(
+          'Managed-worktree destination escapes the configured root.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
+      let current = root
+      for (const component of rel.split(/[\\/]+/).filter(Boolean)) {
+        current = join(current, component)
+        if (!existsSync(current)) mkdirSync(current)
+        if (this.isSymlink(current)) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination contains a symlink component.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+        const stat = lstatSync(current)
+        if (!stat.isDirectory()) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination contains a non-directory component.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+        if (safeRealpath(current) !== resolvePath(current)) {
+          throw new WorktreeCreationError(
+            'Managed-worktree destination changed through a symlink.',
+            'WORKTREE_DESTINATION_UNSAFE',
+          )
+        }
+      }
+      return current
+    } catch (error) {
+      if (error instanceof WorktreeCreationError) throw error
+      throw new WorktreeCreationError(
+        `Unable to prepare managed-worktree destination: ${error instanceof Error ? error.message : String(error)}`,
+        'WORKTREE_DESTINATION_UNSAFE',
+      )
+    }
+  }
+
   private async cleanupProvisional(
     repositoryRoot: string,
     worktreePath: string,
     branch: string,
     managedWorktreeId: string,
+    transaction: ProvisionalCreation,
   ): Promise<void> {
     let clean = true
-    try {
-      await runGit(['worktree', 'remove', '--force', worktreePath], {
-        cwd: repositoryRoot,
-        okExitCodes: [128],
-      })
-    } catch {
-      clean = false
+    if (transaction.worktreeCreated || existsSync(worktreePath) || this.isSymlink(worktreePath)) {
+      try {
+        await runGit(['worktree', 'remove', '--force', worktreePath], {
+          cwd: repositoryRoot,
+          okExitCodes: [128],
+        })
+      } catch {
+        clean = false
+      }
+      if (!removeDir(worktreePath)) clean = false
+      try {
+        await runGit(['worktree', 'prune'], { cwd: repositoryRoot, okExitCodes: [128] })
+      } catch {
+        /* ignore */
+      }
     }
-    if (!removeDir(worktreePath)) clean = false
-    try {
-      await runGit(['worktree', 'prune'], { cwd: repositoryRoot, okExitCodes: [128] })
-    } catch {
-      /* ignore */
+
+    // Never delete a branch merely because its name was requested. A branch is
+    // removable only when this transaction recorded that it created the ref,
+    // captured its exact OID, and a fresh compare-and-swap check still sees the
+    // same OID. An external replacement is retained and the registry is left
+    // blocked for explicit recovery.
+    if (transaction.branchCreated) {
+      if (!transaction.createdBranchOid) {
+        clean = false
+      } else {
+        let currentOid: string | null
+        try {
+          currentOid = await this.getBranchOid(repositoryRoot, branch)
+        } catch {
+          clean = false
+          currentOid = null
+        }
+        if (currentOid === null) {
+          // Another actor already removed the request-owned branch.
+        } else if (currentOid !== transaction.createdBranchOid) {
+          clean = false
+        } else {
+          try {
+            await runGit(['branch', '-D', branch], {
+              cwd: repositoryRoot,
+              okExitCodes: [1, 128],
+            })
+            if ((await this.getBranchOid(repositoryRoot, branch)) !== null) clean = false
+          } catch {
+            clean = false
+          }
+        }
+      }
     }
-    try {
-      await runGit(['branch', '-D', branch], { cwd: repositoryRoot, okExitCodes: [1, 128] })
-    } catch {
-      clean = false
-    }
+
     if (clean) {
       this.registry.remove(managedWorktreeId)
     } else {
@@ -916,28 +1355,108 @@ export class ManagedWorktreeService {
     }
   }
 
-  private async assertRefExists(repositoryRoot: string, ref: string): Promise<void> {
+  private async assertNamedBranchAvailable(
+    repositoryRoot: string,
+    branch: string,
+  ): Promise<void> {
+    const suffix = branch.startsWith('kata-agent/') ? branch.slice('kata-agent/'.length) : ''
+    if (!suffix || suffix.trim() !== suffix || suffix.includes('\0')) {
+      throw new WorktreeCreationError(
+        'Worktree name must be non-empty and must not have leading or trailing whitespace.',
+        'WORKTREE_NAME_INVALID',
+      )
+    }
+    let formatResult
+    try {
+      formatResult = await runGit(['check-ref-format', '--branch', branch], {
+        cwd: repositoryRoot,
+        okExitCodes: [1, 128],
+      })
+    } catch (error) {
+      if (error instanceof GitCommandError && (error.exitCode === 1 || error.exitCode === 128)) {
+        throw new WorktreeCreationError(
+          `Worktree name "${suffix}" is not a valid Git branch suffix.`,
+          'WORKTREE_NAME_INVALID',
+        )
+      }
+      throw error
+    }
+    if (formatResult.exitCode !== 0) {
+      throw new WorktreeCreationError(
+        `Worktree name "${suffix}" is not a valid Git branch suffix.`,
+        'WORKTREE_NAME_INVALID',
+      )
+    }
+
+    let refs
+    try {
+      refs = await runGit(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], {
+        cwd: repositoryRoot,
+      })
+    } catch (error) {
+      throw new WorktreeCreationError(
+        'Unable to inspect existing Git branches before creating the worktree.',
+        'WORKTREE_BRANCH_INSPECTION_FAILED',
+      )
+    }
+    const requestedLower = branch.toLocaleLowerCase()
+    const collision = refs.stdout
+      .split(/\r?\n/)
+      .map((ref) => ref.trim())
+      .find((ref) => ref && ref.toLocaleLowerCase() === requestedLower)
+    if (collision) {
+      throw new WorktreeCreationError(
+        `The requested worktree branch "${branch}" is already in use.`,
+        'WORKTREE_BRANCH_COLLISION',
+      )
+    }
+  }
+
+  private isBranchCollisionError(error: unknown): boolean {
+    if (error instanceof WorktreeCreationError) return error.code === 'WORKTREE_BRANCH_COLLISION'
+    if (!(error instanceof GitCommandError)) return false
+    const text = `${error.message} ${error.stderr}`
+    return (
+      /branch named .* already exists|already checked out|is already used by worktree/i.test(text) ||
+      (text.includes('cannot lock ref') && text.includes('refs/heads/'))
+    )
+  }
+
+  private isPathCollisionError(error: unknown): boolean {
+    if (!(error instanceof GitCommandError)) return false
+    return /worktree .*already exists|path .*already exists|already exists at/i.test(
+      `${error.message} ${error.stderr}`,
+    )
+  }
+
+  private async assertRefExists(repositoryRoot: string, ref: string): Promise<string> {
     try {
       const res = await runGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
         cwd: repositoryRoot,
         okExitCodes: [1],
       })
-      if (res.exitCode !== 0) {
+      const oid = res.stdout.trim()
+      if (res.exitCode !== 0 || !oid) {
         throw new WorktreeCreationError(`Base ref "${ref}" not found.`, 'BASE_REF_NOT_FOUND')
       }
+      return oid
     } catch (err) {
       if (err instanceof WorktreeCreationError) throw err
       throw new WorktreeCreationError(`Base ref "${ref}" could not be resolved.`, 'BASE_REF_NOT_FOUND')
     }
   }
 
+  private async getBranchOid(repositoryRoot: string, branch: string): Promise<string | null> {
+    const res = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: repositoryRoot,
+      okExitCodes: [1, 128],
+    })
+    return res.exitCode === 0 ? res.stdout.trim() || null : null
+  }
+
   private async branchExists(repositoryRoot: string, branch: string): Promise<boolean> {
     try {
-      const res = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
-        cwd: repositoryRoot,
-        okExitCodes: [1],
-      })
-      return res.exitCode === 0
+      return (await this.getBranchOid(repositoryRoot, branch)) !== null
     } catch {
       return false
     }

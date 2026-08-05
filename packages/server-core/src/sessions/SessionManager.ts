@@ -32,7 +32,7 @@ import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaul
 import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { getDefaultGitServices, type GitServices, safeRealpath } from '../git'
-import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
+import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import { InitGate } from '@kata-sh/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
 import {
@@ -91,7 +91,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -841,7 +841,7 @@ interface ManagedSession {
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
   // Git checkout metadata (managed worktree / current checkout), when bound.
-  checkout?: import('@kata-sh/shared/protocol').SessionCheckoutV1
+  checkout?: import('@kata-sh/shared/protocol').SessionCheckout
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -5355,7 +5355,7 @@ export class SessionManager implements ISessionManager {
   async listManagedWorktrees(
     sessionId: string,
     workingDirectory: string,
-  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummary[]> {
+  ): Promise<import('@kata-sh/shared/protocol').ManagedWorktreeSummaryVersioned[]> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
@@ -5389,8 +5389,20 @@ export class SessionManager implements ISessionManager {
    */
   async prepareCheckout(
     sessionId: string,
-    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
-  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResult> {
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntentVersioned,
+  ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResultVersioned> {
+    const isV2Intent = intent.schemaVersion === 2
+    if (isV2Intent && typeof intent.worktreeNameSuffix !== 'string') {
+      throw new Error('V2 named worktree preparation requires a name suffix.')
+    }
+    if (isV2Intent && !isWorktreeV2Enabled()) {
+      throw new WorktreeV2CapabilityError()
+    }
+    // Runtime callers may still send an unversioned object carrying a V2-only
+    // field. Never reinterpret that input as a V1 generated-token request.
+    if (!isV2Intent && 'worktreeNameSuffix' in intent) {
+      throw new WorktreeV2CapabilityError()
+    }
     if (!isGitWorkspaceV1Enabled()) {
       throw new Error('Git workspace feature is not enabled.')
     }
@@ -5423,14 +5435,35 @@ export class SessionManager implements ISessionManager {
       let sameIntent = false
       if (intent.mode === 'current') {
         sameIntent = sameMode && sameRepo
+      } else if (isV2Intent) {
+        const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
+        sameIntent =
+          sameMode &&
+          sameRepo &&
+          existing.schemaVersion === 2 &&
+          existing.displayName === intent.worktreeNameSuffix &&
+          existing.baseRef === intentBaseRef
       } else if (intent.managedWorktreeId) {
         sameIntent =
           sameMode && sameRepo && existing.managedWorktreeId === intent.managedWorktreeId
       } else {
         const intentBaseRef = intent.baseRef || ctx.currentBranch || ctx.defaultRef
-        sameIntent = sameMode && sameRepo && existing.baseRef === intentBaseRef
+        sameIntent =
+          sameMode &&
+          sameRepo &&
+          existing.schemaVersion !== 2 &&
+          existing.baseRef === intentBaseRef
       }
       if (sameIntent) {
+        // Preserve the schema discriminator when a versioned checkout is
+        // re-used; never coerce a V2 session record back to the V1 result.
+        if (existing.schemaVersion === 2) {
+          return {
+            checkout: existing,
+            workingDirectory: existing.checkoutPath,
+            sdkCwd: managed.sdkCwd ?? existing.checkoutPath,
+          }
+        }
         return {
           checkout: existing,
           workingDirectory: existing.checkoutPath,
@@ -5497,16 +5530,30 @@ export class SessionManager implements ISessionManager {
       // (re-checked here under the same registry the list was derived from).
       git.worktrees.addOwner(record.managedWorktreeId, sessionId)
 
-      const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
-        schemaVersion: 1,
-        mode: 'managed-worktree',
-        repositoryRoot: record.repositoryRoot,
-        checkoutPath: record.checkoutPath,
-        branchAtPreparation: record.expectedBranch,
-        baseRef: record.baseRef,
-        managedWorktreeId: record.managedWorktreeId,
-        expectedBranch: record.expectedBranch,
-      }
+      const checkout: import('@kata-sh/shared/protocol').SessionCheckout =
+        isWorktreeV2Enabled() && record.schemaVersion === 2
+          ? {
+              schemaVersion: 2,
+              mode: 'managed-worktree',
+              repositoryRoot: record.repositoryRoot,
+              checkoutPath: record.checkoutPath,
+              branchAtPreparation: record.expectedBranch,
+              baseRef: record.baseRef,
+              managedWorktreeId: record.managedWorktreeId,
+              displayName: record.displayName,
+              expectedBranch: record.expectedBranch,
+              materializationRoot: record.materializationRoot,
+            }
+          : {
+              schemaVersion: 1,
+              mode: 'managed-worktree',
+              repositoryRoot: record.repositoryRoot,
+              checkoutPath: record.checkoutPath,
+              branchAtPreparation: record.expectedBranch,
+              baseRef: record.baseRef,
+              managedWorktreeId: record.managedWorktreeId,
+              expectedBranch: record.expectedBranch,
+            }
       try {
         this.bindCheckout(managed, checkout, record.checkoutPath)
       } catch (bindErr) {
@@ -5518,6 +5565,13 @@ export class SessionManager implements ISessionManager {
       // Durable persist so restart/resume immediately after preparation returns
       // to the same managed worktree (AC5).
       await this.flushSession(sessionId)
+      if (checkout.schemaVersion === 2) {
+        return {
+          checkout,
+          workingDirectory: record.checkoutPath,
+          sdkCwd: managed.sdkCwd ?? record.checkoutPath,
+        }
+      }
       return {
         checkout,
         workingDirectory: record.checkoutPath,
@@ -5537,6 +5591,7 @@ export class SessionManager implements ISessionManager {
       repositoryRoot: ctx.repositoryRoot,
       gitCommonDir: ctx.gitCommonDir,
       baseRef,
+      worktreeNameSuffix: isV2Intent ? intent.worktreeNameSuffix : undefined,
     })
 
     // Re-verify the gate after the async worktree creation; a concurrent send
@@ -5548,16 +5603,30 @@ export class SessionManager implements ISessionManager {
       throw gateErr
     }
 
-    const checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1 = {
-      schemaVersion: 1,
-      mode: 'managed-worktree',
-      repositoryRoot: ctx.repositoryRoot,
-      checkoutPath: record.checkoutPath,
-      branchAtPreparation: record.expectedBranch,
-      baseRef,
-      managedWorktreeId: record.managedWorktreeId,
-      expectedBranch: record.expectedBranch,
-    }
+    const checkout: import('@kata-sh/shared/protocol').SessionCheckout =
+      isV2Intent && record.schemaVersion === 2
+        ? {
+            schemaVersion: 2,
+            mode: 'managed-worktree',
+            repositoryRoot: ctx.repositoryRoot,
+            checkoutPath: record.checkoutPath,
+            branchAtPreparation: record.expectedBranch,
+            baseRef,
+            managedWorktreeId: record.managedWorktreeId,
+            displayName: record.displayName,
+            expectedBranch: record.expectedBranch,
+            materializationRoot: record.materializationRoot,
+          }
+        : {
+            schemaVersion: 1,
+            mode: 'managed-worktree',
+            repositoryRoot: ctx.repositoryRoot,
+            checkoutPath: record.checkoutPath,
+            branchAtPreparation: record.expectedBranch,
+            baseRef,
+            managedWorktreeId: record.managedWorktreeId,
+            expectedBranch: record.expectedBranch,
+          }
 
     try {
       this.bindCheckout(managed, checkout, record.checkoutPath)
@@ -5571,13 +5640,22 @@ export class SessionManager implements ISessionManager {
       throw bindErr
     }
 
+    const resultWarnings = include.skippedSymlinks > 0
+      ? [`Skipped ${include.skippedSymlinks} symlink(s) while applying .worktreeinclude.`]
+      : undefined
+    if (checkout.schemaVersion === 2) {
+      return {
+        checkout,
+        workingDirectory: record.checkoutPath,
+        sdkCwd: managed.sdkCwd ?? record.checkoutPath,
+        warnings: resultWarnings,
+      }
+    }
     return {
       checkout,
       workingDirectory: record.checkoutPath,
       sdkCwd: managed.sdkCwd ?? record.checkoutPath,
-      warnings: include.skippedSymlinks > 0
-        ? [`Skipped ${include.skippedSymlinks} symlink(s) while applying .worktreeinclude.`]
-        : undefined,
+      warnings: resultWarnings,
     }
   }
 
@@ -5866,7 +5944,7 @@ export class SessionManager implements ISessionManager {
    */
   private bindCheckout(
     managed: ManagedSession,
-    checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1,
+    checkout: import('@kata-sh/shared/protocol').SessionCheckout,
     resolvedWorkingDir: string,
   ): void {
     managed.checkout = checkout

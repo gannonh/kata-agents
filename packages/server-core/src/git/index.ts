@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { CONFIG_DIR } from '@kata-sh/shared/config/paths'
 import { RepositoryService } from './repository-service'
 import { ManagedWorktreeService } from './managed-worktree-service'
+import { WorktreeSettingsService } from './worktree-settings-service'
 import { WorktreeRegistry } from './worktree-registry'
 import { MutationLock } from './mutation-lock'
 import { GitActionService } from './action-service'
@@ -20,6 +21,7 @@ import { GitHubCliService } from './github-cli-service'
 export * from './command-runner'
 export * from './repository-service'
 export * from './managed-worktree-service'
+export * from './worktree-settings-service'
 export * from './worktree-registry'
 export * from './worktree-include'
 export * from './mutation-lock'
@@ -37,22 +39,45 @@ export interface GitServices {
   actions: GitActionService
   /** GitHub `gh` adapter for capability + pull requests (spec: AC15). */
   github: GitHubCliService
+  /** Current server-owned materialization root (registry remains fixed). */
   worktreeRoot: string
+  worktreeSettings: WorktreeSettingsService
 }
 
 export interface GitServicesConfig {
-  /** Root directory beneath which managed worktrees are created. */
+  /** Default root directory beneath which managed worktrees are created. */
   worktreeRoot: string
   /** Path to the managed-worktree registry JSON file. */
   registryPath: string
+  /** Stable identity used in capability/settings snapshots. */
+  serverId?: string
+  /** Optional override for the fixed settings file, primarily for tests. */
+  worktreeSettingsPath?: string
+  /** Additional server-owned paths that a materialization root may not overlap. */
+  protectedWorktreePaths?: string[]
+  /** Inject an already-owned settings service when composing a host. */
+  worktreeSettings?: WorktreeSettingsService
 }
 
 export function createGitServices(config: GitServicesConfig): GitServices {
   const registry = new WorktreeRegistry(config.registryPath)
+  const worktreeSettings = config.worktreeSettings ?? new WorktreeSettingsService({
+    serverId: config.serverId ?? 'local',
+    defaultRoot: config.worktreeRoot,
+    settingsPath: config.worktreeSettingsPath ?? join(config.worktreeRoot, 'settings.json'),
+    registry,
+    protectedPaths: config.protectedWorktreePaths,
+  })
+  // Root-update validation consults the settings service's own registry; it
+  // must be the same authority ManagedWorktreeService uses, or overlap checks
+  // would miss records in the active registry.
+  if (config.worktreeSettings && config.worktreeSettings.registry?.getRegistryPath() !== config.registryPath) {
+    throw new Error('Injected worktree settings must be bound to the active worktree registry.')
+  }
   const repository = new RepositoryService()
   const mutationLock = new MutationLock()
   const worktrees = new ManagedWorktreeService(
-    config.worktreeRoot,
+    worktreeSettings,
     registry,
     repository,
     mutationLock,
@@ -66,7 +91,10 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     mutationLock,
     actions,
     github,
-    worktreeRoot: config.worktreeRoot,
+    worktreeSettings,
+    get worktreeRoot() {
+      return worktrees.getWorktreeRoot()
+    },
   }
 }
 

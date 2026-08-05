@@ -7,9 +7,9 @@ import { AlertTriangle, Check, FolderGit2, GitBranch, GitFork, Loader2, Users } 
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import type {
   CheckoutMode,
-  CheckoutPrepareResult,
+  CheckoutPrepareResultVersioned,
   GitRef,
-  ManagedWorktreeSummary,
+  ManagedWorktreeSummaryVersioned,
 } from '@kata-sh/shared/protocol'
 
 import { sessionAtomFamily, updateSessionAtom } from '@/atoms/sessions'
@@ -20,6 +20,9 @@ import { cn } from '@/lib/utils'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import {
   resolveCheckoutIdentity,
+  generateDefaultWorktreeName,
+  normalizeWorktreeName,
+  normalizeWorktreeNameInput,
   resolveCheckoutRecovery,
   resolveLiveBranchLabel,
   resolveSendGate,
@@ -59,7 +62,7 @@ export interface WorkspaceCheckoutBadgeProps {
   isEmptySession?: boolean
   onWorkingDirectoryChange: (path: string) => void
   /** Notified once a checkout is prepared and the controls lock. */
-  onCheckoutPrepared?: (result: CheckoutPrepareResult) => void
+  onCheckoutPrepared?: (result: CheckoutPrepareResultVersioned) => void
 }
 
 /** Result of a prepare-before-send attempt. */
@@ -98,6 +101,11 @@ function dedupeRefs(refs: GitRef[]): GitRef[] {
   return out
 }
 
+/** Visible identity of a managed worktree summary: the V2 display name when present. */
+function worktreeDisplayLabel(worktree: ManagedWorktreeSummaryVersioned): string {
+  return 'displayName' in worktree ? worktree.displayName : worktree.expectedBranch
+}
+
 function WorkspaceCheckoutBadgeInner(
   {
     sessionId,
@@ -132,12 +140,18 @@ function WorkspaceCheckoutBadgeInner(
   const contextReady = contextMatchesRequest && contextState.status === 'ready'
   const context = contextMatchesRequest ? contextState.context : null
   const [mode, setMode] = React.useState<CheckoutMode>('current')
+  const [serverV2Available, setServerV2Available] = React.useState(false)
+  const [serverV2Pending, setServerV2Pending] = React.useState(true)
+  // V2 is governed by the workspace-owning server, not by the local renderer
+  // environment (see the capability effect below).
+  const worktreeV2Enabled = serverV2Available
   const modeRef = React.useRef(mode)
   modeRef.current = mode
   const [intentKind, setIntentKind] = React.useState<'new' | 'existing'>('new')
   const [baseRef, setBaseRef] = React.useState<string | null>(null)
+  const [worktreeNameSuffix, setWorktreeNameSuffix] = React.useState<string | null>(null)
   const [selectedWorktreeId, setSelectedWorktreeId] = React.useState<string | null>(null)
-  const [worktrees, setWorktrees] = React.useState<ManagedWorktreeSummary[]>([])
+  const [worktrees, setWorktrees] = React.useState<ManagedWorktreeSummaryVersioned[]>([])
   const [worktreesLoading, setWorktreesLoading] = React.useState(false)
   const [refs, setRefs] = React.useState<GitRef[]>([])
   const [refsLoading, setRefsLoading] = React.useState(false)
@@ -146,7 +160,7 @@ function WorkspaceCheckoutBadgeInner(
   const [error, setError] = React.useState<string | null>(null)
   const [preparedState, setPreparedState] = React.useState<{
     sessionId?: string
-    result: CheckoutPrepareResult | null
+    result: CheckoutPrepareResultVersioned | null
   }>(() => ({ sessionId, result: null }))
   // A prepared checkout belongs to one session. Do not let a reused badge carry
   // its local identity into a newly selected session before the cleanup effect.
@@ -160,13 +174,45 @@ function WorkspaceCheckoutBadgeInner(
   const persistedCheckout = session?.checkout ?? null
   const sharedOwnerCount = session?.sharedOwnerCount
 
+  // Discover the effective capability from the workspace-owning server. V2 is
+  // governed by the owning server's feature flag, not by the local renderer
+  // environment: a remote/headless server with Worktree V2 enabled drives the
+  // V2 controls even when the desktop client did not set the flag, while a
+  // V1-only server retains the V1 intent shape.
+  React.useEffect(() => {
+    let cancelled = false
+    window.electronAPI
+      ?.getGitCapabilities?.()
+      .then((capability) => {
+        if (cancelled) return
+        const available = !!capability?.worktreeV2
+        setServerV2Available(available)
+        setServerV2Pending(false)
+        if (available) {
+          setWorktreeNameSuffix((previous) => previous ?? generateDefaultWorktreeName())
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServerV2Available(false)
+          setServerV2Pending(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, workingDirectory, isFocusedPanel])
+
   // Reset transient selection state when the active session or directory
   // changes. Panel focus changes deliberately preserve a pending New worktree
-  // intent while still triggering fresh Git discovery below.
+  // intent while still triggering fresh Git discovery below. The V2 default
+  // name is seeded when the owning server's capability resolves.
   React.useEffect(() => {
     setMode('current')
     setIntentKind('new')
     setBaseRef(null)
+    setWorktreeNameSuffix(null)
+    setServerV2Pending(true)
     setSelectedWorktreeId(null)
     setWorktrees([])
     setWorktreesLoading(false)
@@ -238,6 +284,9 @@ function WorkspaceCheckoutBadgeInner(
       .finally(() => setWorktreesLoading(false))
   }, [sessionId, workingDirectory])
 
+  // Capability arrives asynchronously after mount, so `worktreeV2Enabled`
+  // must be a dependency here: without it the callback captures the initial
+  // false forever and would clear a seeded default name on every menu open.
   const handleSelectMode = React.useCallback(
     (next: CheckoutMode, kind?: 'new' | 'existing') => {
       setError(null)
@@ -245,11 +294,16 @@ function WorkspaceCheckoutBadgeInner(
       if (next === 'managed-worktree') {
         const chosenKind = kind ?? intentKind
         setIntentKind(chosenKind)
+        if (chosenKind === 'new') {
+          setWorktreeNameSuffix((previous) =>
+            worktreeV2Enabled ? previous ?? generateDefaultWorktreeName() : null,
+          )
+        }
         if (chosenKind === 'new' && refs.length === 0) loadRefs()
         if (chosenKind === 'existing' && worktrees.length === 0) loadWorktrees()
       }
     },
-    [intentKind, refs.length, worktrees.length, loadRefs, loadWorktrees],
+    [intentKind, refs.length, worktrees.length, loadRefs, loadWorktrees, worktreeV2Enabled],
   )
 
   // Prepare-before-send gate (AC4). Idempotent: once prepared or already bound
@@ -260,6 +314,9 @@ function WorkspaceCheckoutBadgeInner(
       baseRef,
       managedWorktreeId: intentKind === 'existing' ? selectedWorktreeId : null,
       worktreeIntent: intentKind,
+      worktreeV2Enabled,
+      worktreeV2Pending: serverV2Pending,
+      worktreeNameSuffix,
       workingDirectory: workingDirectory ?? null,
       prepared: !!prepared,
       hasPersistedCheckout: !!persistedCheckout,
@@ -287,7 +344,9 @@ function WorkspaceCheckoutBadgeInner(
       const msg =
         gate.reason === 'missing-existing-selection'
           ? t('git.workspace.existingSelectionRequired')
-          : t('git.workspace.baseRefRequired')
+          : gate.reason === 'missing-worktree-name'
+            ? t('git.workspace.worktreeNameRequired')
+            : t('git.workspace.baseRefRequired')
       setError(msg)
       setOpen(true)
       return { status: 'error', error: msg }
@@ -348,6 +407,9 @@ function WorkspaceCheckoutBadgeInner(
     intentKind,
     baseRef,
     selectedWorktreeId,
+    worktreeV2Enabled,
+    serverV2Pending,
+    worktreeNameSuffix,
     workingDirectory,
     prepared,
     persistedCheckout,
@@ -405,6 +467,7 @@ function WorkspaceCheckoutBadgeInner(
   if (identity.kind === 'worktree' || identity.kind === 'shared-worktree') {
     const shared = identity.kind === 'shared-worktree'
     const branch = identity.branch ?? t('git.workspace.worktree')
+    const displayName = identity.displayName ?? branch
 
     // AC20 — surface a visible recovery/blocked state when the managed worktree
     // was moved, removed, or externally switched. Kata never silently switches
@@ -458,7 +521,7 @@ function WorkspaceCheckoutBadgeInner(
       <span data-testid="git-workspace-identity">
         <FreeFormInputContextBadge
           icon={shared ? <Users className="h-4 w-4" /> : <GitFork className="h-4 w-4" />}
-          label={branch}
+          label={displayName}
           isExpanded
           hasSelection
           showChevron={false}
@@ -520,10 +583,13 @@ function WorkspaceCheckoutBadgeInner(
   // identity.kind === 'menu' — interactive Workspace/ref selection.
   const selectedWorktree =
     worktrees.find((w) => w.managedWorktreeId === selectedWorktreeId) ?? null
+  const selectedWorktreeLabel = selectedWorktree
+    ? worktreeDisplayLabel(selectedWorktree)
+    : null
   const triggerLabel =
     mode === 'managed-worktree'
       ? selectedWorktree
-        ? selectedWorktree.expectedBranch
+        ? selectedWorktreeLabel ?? t('git.workspace.worktree')
         : intentKind === 'existing'
           ? t('git.workspace.existingWorktree')
           : t('git.workspace.fromRef', { ref: baseRef ?? liveBranch })
@@ -611,16 +677,18 @@ function WorkspaceCheckoutBadgeInner(
                     {t('common.loading')}
                   </div>
                 )}
-                {worktrees.map((worktree) => (
-                  <CommandPrimitive.Item
-                    key={worktree.managedWorktreeId}
-                    value={`${worktree.expectedBranch} ${worktree.checkoutPath}`}
-                    onSelect={() => setSelectedWorktreeId(worktree.managedWorktreeId)}
-                    className={cn(MENU_ITEM_STYLE, 'items-start')}
-                  >
-                    <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="flex-1 min-w-0">
-                      <span className="block truncate">{worktree.expectedBranch}</span>
+                {worktrees.map((worktree) => {
+                  const worktreeLabel = worktreeDisplayLabel(worktree)
+                  return (
+                    <CommandPrimitive.Item
+                      key={worktree.managedWorktreeId}
+                      value={`${worktreeLabel} ${worktree.expectedBranch} ${worktree.checkoutPath}`}
+                      onSelect={() => setSelectedWorktreeId(worktree.managedWorktreeId)}
+                      className={cn(MENU_ITEM_STYLE, 'items-start')}
+                    >
+                      <GitFork className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">{worktreeLabel}</span>
                       <span className="block truncate text-[11px] text-muted-foreground">
                         {worktree.baseRef && worktree.ownerCount > 1 &&
                           t('git.workspace.sharedFromRef', {
@@ -637,7 +705,8 @@ function WorkspaceCheckoutBadgeInner(
                       <Check className="h-4 w-4 shrink-0" />
                     )}
                   </CommandPrimitive.Item>
-                ))}
+                  )
+                })}
                 {!worktreesLoading && worktrees.length === 0 && (
                   <CommandPrimitive.Empty className="py-3 text-center text-sm text-muted-foreground">
                     {t('git.workspace.noWorktreesFound')}
@@ -670,6 +739,32 @@ function WorkspaceCheckoutBadgeInner(
 
         {mode === 'managed-worktree' && intentKind === 'new' && (
           <div className="border-t border-border/50">
+            {worktreeV2Enabled && (
+              <div className="border-b border-border/50 px-3 py-2">
+                <label
+                  htmlFor="git-workspace-name"
+                  className="block pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  {t('git.workspace.worktreeName')}
+                </label>
+                <input
+                  id="git-workspace-name"
+                  data-testid="git-workspace-name"
+                  value={worktreeNameSuffix ?? ''}
+                  onChange={(event) =>
+                    setWorktreeNameSuffix(normalizeWorktreeNameInput(event.target.value))
+                  }
+                  onBlur={() =>
+                    setWorktreeNameSuffix((current) => normalizeWorktreeName(current ?? ''))
+                  }
+                  placeholder={t('git.workspace.worktreeNamePlaceholder')}
+                  className="w-full rounded-[6px] bg-muted/50 px-2.5 py-1.5 text-[13px] outline-none ring-0 placeholder:text-muted-foreground/50 focus:bg-background"
+                />
+                <p className="pt-1 text-[11px] text-muted-foreground">
+                  {t('git.workspace.worktreeNameDesc')}
+                </p>
+              </div>
+            )}
             <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {t('git.workspace.fromRefLabel')}
             </div>
@@ -717,10 +812,10 @@ function WorkspaceCheckoutBadgeInner(
                 type="button"
                 data-testid="git-workspace-create"
                 onClick={handlePrepare}
-                disabled={!baseRef || preparing}
+                disabled={!baseRef || preparing || (worktreeV2Enabled && !worktreeNameSuffix?.trim())}
                 className={cn(
                   'flex w-full items-center justify-center gap-2 rounded-[6px] bg-foreground px-3 py-1.5 text-[13px] font-medium text-background transition-opacity',
-                  (!baseRef || preparing) && 'opacity-50',
+                  (!baseRef || preparing || (worktreeV2Enabled && !worktreeNameSuffix?.trim())) && 'opacity-50',
                 )}
               >
                 {preparing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

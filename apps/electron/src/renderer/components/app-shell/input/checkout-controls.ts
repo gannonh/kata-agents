@@ -8,13 +8,61 @@
 
 import type {
   CheckoutMode,
-  CheckoutPrepareIntent,
-  SessionCheckoutV1,
+  CheckoutPrepareIntentVersioned,
+  SessionCheckout,
 } from '@kata-sh/shared/protocol'
 
 // ---------------------------------------------------------------------------
 // Prepare-before-send gate (AC4)
 // ---------------------------------------------------------------------------
+
+/**
+ * Normalize the editable V2 name as it is typed.
+ *
+ * Keep a trailing separator while the user is typing the next word; the
+ * finalized helper below trims it before creating the branch. Slashes remain
+ * nested Git-ref separators, while spaces/underscores become kebab separators.
+ */
+export function normalizeWorktreeNameInput(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s*\/\s*/gu, '/')
+    .split('/')
+    .map((segment) =>
+      segment
+        // Git forbids these characters in ref names; strip them so the client
+        // and the server agree on a valid name without a round trip.
+        .replace(/[~^:?*\[\]\\]/gu, '-')
+        .replace(/\.{2,}/gu, '.')
+        .replace(/@\{/gu, '-')
+        .replace(/[\x00-\x1f\x7f]/gu, '')
+        .replace(/[\s_]+/gu, '-')
+        .replace(/-+/gu, '-'),
+    )
+    .join('/')
+}
+
+/** Return the canonical V2 name sent to the workspace-owning server. */
+export function normalizeWorktreeName(value: string): string {
+  return normalizeWorktreeNameInput(value)
+    .split('/')
+    .map((segment) => segment.replace(/^[.-]+|[.-]+$/gu, ''))
+    .filter(Boolean)
+    .join('/')
+}
+
+/** Generate the editable default V2 suffix shown for a new worktree. */
+export function generateDefaultWorktreeName(): string {
+  const bytes = new Uint8Array(4)
+  globalThis.crypto?.getRandomValues(bytes)
+  if (bytes.every((byte) => byte === 0) && !globalThis.crypto) {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
 
 export interface SendGateState {
   /** Currently selected Workspace mode in the composer. */
@@ -27,6 +75,12 @@ export interface SendGateState {
    *  Existing intent without a selection can never fall through to New-worktree
    *  preparation, even when a base ref from the Git context is present. */
   worktreeIntent?: 'new' | 'existing'
+  /** Effective V2 capability of the selected workspace-owning server. */
+  worktreeV2Enabled?: boolean
+  /** True while the owning server's V2 capability is still being discovered. */
+  worktreeV2Pending?: boolean
+  /** Exact V2 branch suffix/display name for a new worktree. */
+  worktreeNameSuffix?: string | null
   /** Active working directory used to resolve repository identity. */
   workingDirectory: string | null
   /** True once a managed worktree has been prepared in this composer mount. */
@@ -41,9 +95,9 @@ export interface SendGateState {
 
 export type SendGateDecision =
   | { action: 'send' }
-  | { action: 'prepare'; intent: CheckoutPrepareIntent }
+  | { action: 'prepare'; intent: CheckoutPrepareIntentVersioned }
   | { action: 'wait' }
-  | { action: 'block'; reason: 'missing-base-ref' | 'missing-existing-selection' }
+  | { action: 'block'; reason: 'missing-base-ref' | 'missing-existing-selection' | 'missing-worktree-name' }
 
 /**
  * Decide what must happen when the user hits Send.
@@ -95,6 +149,28 @@ export function resolveSendGate(state: SendGateState): SendGateDecision {
   if (!state.baseRef) {
     return { action: 'block', reason: 'missing-base-ref' }
   }
+  // Defer new-worktree preparation until the owning server's V2 capability is
+  // known: emitting the V1 intent now would persist a generated branch that a
+  // V2-capable server cannot upgrade to the requested name later.
+  if (state.worktreeV2Pending) {
+    return { action: 'wait' }
+  }
+  if (state.worktreeV2Enabled) {
+    const worktreeName = normalizeWorktreeName(state.worktreeNameSuffix ?? '')
+    if (!worktreeName) {
+      return { action: 'block', reason: 'missing-worktree-name' }
+    }
+    return {
+      action: 'prepare',
+      intent: {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: state.workingDirectory,
+        baseRef: state.baseRef,
+        worktreeNameSuffix: worktreeName,
+      },
+    }
+  }
   return {
     action: 'prepare',
     intent: {
@@ -121,17 +197,19 @@ export interface CheckoutIdentityState {
   isEmptySession: boolean
   hasSessionId: boolean
   /** Persisted checkout from the session DTO (present after preparation/resume). */
-  persistedCheckout: SessionCheckoutV1 | null
+  persistedCheckout: SessionCheckout | null
   /** Checkout produced by a just-completed local preparation, before the DTO round-trips. */
-  locallyPrepared: SessionCheckoutV1 | null
+  locallyPrepared: SessionCheckout | null
   /** Shared-owner count derived on the server; > 1 means a shared worktree. */
   sharedOwnerCount: number | undefined
 }
 
 export interface CheckoutIdentity {
   kind: CheckoutIdentityKind
-  /** Branch/identity label to display, when applicable. */
+  /** Exact branch identity, when applicable. */
   branch?: string | null
+  /** V2 display name, when the server supplied one. */
+  displayName?: string | null
 }
 
 /**
@@ -154,7 +232,8 @@ export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutI
     if (checkout.mode === 'managed-worktree') {
       const branch = checkout.expectedBranch ?? checkout.branchAtPreparation ?? null
       const shared = (state.sharedOwnerCount ?? 0) > 1
-      return { kind: shared ? 'shared-worktree' : 'worktree', branch }
+      const displayName = 'displayName' in checkout ? checkout.displayName : null
+      return { kind: shared ? 'shared-worktree' : 'worktree', branch, displayName }
     }
     return { kind: 'current', branch: checkout.branchAtPreparation ?? null }
   }
@@ -206,7 +285,7 @@ export type WorktreeLifecycleStatus = 'active' | 'missing' | 'blocked'
 
 export interface CheckoutRecoveryState {
   /** Persisted managed-worktree checkout; recovery only applies to these. */
-  checkout: SessionCheckoutV1 | null
+  checkout: SessionCheckout | null
   /**
    * Whether repository context finished loading. Recovery is suppressed while
    * loading so a resumed/restarted session keeps its locked identity and does

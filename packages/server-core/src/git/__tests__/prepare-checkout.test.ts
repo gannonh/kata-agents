@@ -45,6 +45,131 @@ function injectSession(sm: SessionManager, id: string, workspaceRootPath: string
 }
 
 describe('SessionManager.prepareCheckout — managed worktree', () => {
+  test('binds named V2 checkout identity and persists the exact display name', async () => {
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const { sm, services } = makeManager()
+      const wsRoot = tmp()
+      const managed = injectSession(sm, 'named-session', wsRoot)
+
+      const result = await sm.prepareCheckout('named-session', {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      })
+
+      expect(result.checkout).toMatchObject({
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        displayName: 'auth-refresh',
+        expectedBranch: 'kata-agent/auth-refresh',
+        materializationRoot: services.worktreeSettings.getSnapshot().materializationRoot,
+      })
+      expect(result.checkout.checkoutPath).toMatch(/auth-refresh-[0-9a-f]{8}$/)
+      expect(managed.checkout).toEqual(result.checkout)
+      expect(loadStoredSession(wsRoot, 'named-session')?.checkout).toEqual(result.checkout)
+    } finally {
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('repeated named preparation is idempotent only for the same name', async () => {
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const { sm, services } = makeManager()
+      const wsRoot = tmp()
+      injectSession(sm, 'named-repeat', wsRoot)
+
+      const intent = {
+        schemaVersion: 2 as const,
+        mode: 'managed-worktree' as const,
+        workingDirectory: repo,
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      }
+      const first = await sm.prepareCheckout('named-repeat', intent)
+      const second = await sm.prepareCheckout('named-repeat', intent)
+      expect(second.checkout).toEqual(first.checkout)
+      expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+
+      await expect(
+        sm.prepareCheckout('named-repeat', { ...intent, worktreeNameSuffix: 'other-name' }),
+      ).rejects.toThrow(/already prepared/i)
+    } finally {
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('rejects direct named preparation when V2 is ineffective', async () => {
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    delete process.env.KATA_FEATURE_WORKTREE_V2
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const { sm } = makeManager()
+      const wsRoot = tmp()
+      injectSession(sm, 'named-disabled', wsRoot)
+
+      await expect(
+        sm.prepareCheckout('named-disabled', {
+          schemaVersion: 2,
+          mode: 'managed-worktree',
+          workingDirectory: repo,
+          baseRef: 'main',
+          worktreeNameSuffix: 'auth-refresh',
+        }),
+      ).rejects.toMatchObject({ code: 'GIT_WORKTREE_V2_UNAVAILABLE' })
+    } finally {
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('binds V2 metadata when sharing an existing V2 worktree', async () => {
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const { sm } = makeManager()
+      const wsRoot = tmp()
+      injectSession(sm, 'named-owner', wsRoot)
+      const first = await sm.prepareCheckout('named-owner', {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      })
+
+      injectSession(sm, 'named-sharer', wsRoot)
+      const shared = await sm.prepareCheckout('named-sharer', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        managedWorktreeId: first.checkout.managedWorktreeId,
+      })
+      expect(shared.checkout).toMatchObject({
+        schemaVersion: 2,
+        displayName: 'auth-refresh',
+        expectedBranch: 'kata-agent/auth-refresh',
+        materializationRoot: (first.checkout as { materializationRoot: string }).materializationRoot,
+      })
+    } finally {
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
   test('binds checkout, workingDirectory, and sdkCwd to a new worktree before first message', async () => {
     const repo = tmp()
     await initRepo(repo)

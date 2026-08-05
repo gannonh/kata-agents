@@ -75,7 +75,8 @@ workspaces at parity.
   - `ManagedWorktreeService` + `WorktreeRegistry` (create/inspect/remove worktrees, ownership, reconciliation),
   - `MutationLock` (serializes mutations by Git common directory) and `GitStatusSubscription` (coalesced polling → workspace-routed change events).
 - **RPC surface (`packages/server-core/src/handlers/rpc/git.ts`)** — all channels are remote-eligible. Mutations resolve identity server-side and revalidate a managed worktree's checkout path, Git common directory, and expected branch before acting; drift produces a visible recoverable error rather than a silent directory switch. PR base ref authority is the managed worktree's persisted base ref when present, otherwise the detected default ref.
-- **Managed worktrees** live beneath the owning server's Kata config root (not inside the repository) on temporary `kata-agent/<8-hex>` branches. Host-specific worktree IDs/paths are not portable; session import and remote transfer clear managed-worktree ownership.
+- **Managed worktrees** live beneath the owning server's configured root (not inside the repository). V1 uses generated `kata-agent/<8-hex>` branches; opt-in V2 accepts an exact validated suffix such as `kata-agent/auth-refresh` and adds a random internal ID to the filesystem leaf. The fixed authoritative registry remains at `<CONFIG_DIR>/worktrees/registry.json`, separate from the configurable materialization root. Host-specific worktree IDs/paths are not portable; session import and remote transfer clear managed-worktree ownership.
+- **V2 settings** are server-owned and effective only when both `KATA_FEATURE_GIT_WORKSPACE_V1` and `KATA_FEATURE_WORKTREE_V2` are enabled. Roots are canonicalized, writable, and overlap-checked against protected storage, repositories, and registered checkouts. Root changes affect only new worktrees; records retain their own materialization roots.
 - **Lifecycle** — archiving preserves worktrees; deleting a session drops the owner reference but never removes the checkout on its own. Managed-worktree removal is a separate, explicitly-confirmed choice, blocked while another owner remains, and destructive removal requires force and names uncommitted/unpushed/unique work.
 
 Remote-server requirement: the workspace-owning machine needs a working `git`
@@ -93,6 +94,7 @@ Runtime config lives at `~/.kata-agents/` (unchanged from Kata Agents upstream):
 ├── credentials.enc       # AES-256-GCM encrypted credentials
 ├── preferences.json      # UI preferences (language, theme, etc.)
 ├── theme.json            # App-level theme
+├── worktrees/            # Fixed registry and default managed-worktree root
 └── workspaces/{id}/
     ├── config.json
     ├── sessions/         # Session JSONL

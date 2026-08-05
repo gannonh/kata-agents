@@ -6,7 +6,10 @@ keywords: ["git", "github", "worktree", "commit", "pull request", "gh"]
 
 <Note>
   Git & GitHub worktrees are a preview feature and are enabled by default. Set
-  `KATA_FEATURE_GIT_WORKSPACE_V1=0` on the workspace-owning machine to disable them.
+  `KATA_FEATURE_GIT_WORKSPACE_V1=0` on the workspace-owning machine to disable
+  them. Named Worktree V2 is opt-in: set `KATA_FEATURE_WORKTREE_V2=1` on the
+  workspace-owning server, and keep V1 enabled, to show the naming and root
+  settings controls.
 </Note>
 
 When a session's working directory is inside an existing Git repository, Kata
@@ -44,16 +47,45 @@ control:
     The session works directly in your existing checkout and branch.
   </Step>
   <Step title="New worktree">
-    Pick a base ref (defaults to the current branch). Kata creates a managed
-    worktree on a temporary `kata-agent/<id>` branch starting from that ref. The
-    worktree starts from committed state — uncommitted changes in your current
-    checkout are not copied.
+    Pick a base ref (defaults to the current branch). With Worktree V2 enabled,
+    you can edit the generated name before creating the checkout. Kata uses the
+    exact name as the suffix of a `kata-agent/<name>` branch and adds a random
+    internal ID to the filesystem leaf. Without V2, it retains the generated
+    eight-hex `kata-agent/<id>` branch behavior. The worktree starts from
+    committed state — uncommitted changes in your current checkout are not
+    copied.
   </Step>
 </Steps>
 
 Once a worktree is prepared, the session is locked to it. Restarting or resuming
 the session keeps the same worktree — it never silently falls back to your
 current checkout.
+
+## Worktree V2 names and roots
+
+Worktree V2 is controlled by the workspace-owning server, not by the desktop
+client. In **Settings → Worktrees**, select a capable local or connected server
+to view and change its materialization root. The page labels remote roots with
+their server identity; a local directory picker is available only for the local
+server.
+
+The default root is `<CONFIG_DIR>/worktrees`. A saved absolute root (or `~/…`
+path) is canonicalized and validated by the owning server before it is stored.
+It cannot overlap server configuration, snapshot storage, a registered
+repository, or an existing managed checkout. A root change affects only new
+worktrees; every existing checkout retains the canonical root recorded when it
+was created. The fixed registry remains at
+`<CONFIG_DIR>/worktrees/registry.json`, independently of the selected
+materialization root.
+
+Names are branch suffixes, not filesystem paths. In the composer, uppercase
+letters, spaces, and underscores are normalized to lowercase kebab-case before
+the request is sent—for example, `My New Feature` becomes
+`my-new-feature`. Empty names and names that remain Git-invalid, occupied, or
+case-colliding are rejected without changing the repository. Nested valid names
+such as `team/auth-refresh` are allowed. If a request fails after creating a
+branch, the server removes it only when it can prove that the failed transaction
+still owns the original branch OID.
 
 ## Reviewing and sharing work
 

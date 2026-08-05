@@ -8,22 +8,38 @@
  * and stub with a feature/not-implemented rejection until their slice lands.
  */
 
-import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import {
+  CodedError,
+  RPC_CHANNELS,
+  WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
+  WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_NAME_INVALID_CODE,
+  WORKTREE_SETTINGS_ERROR_CODE,
+  WorktreeV2CapabilityError,
+} from '@kata-sh/shared/protocol'
 import type {
-  CheckoutPrepareIntent,
+  CheckoutPrepareIntentVersioned,
   CreatePullRequestInput,
+  ErrorCode,
   GitActionResult,
+  WorktreeSettingsUpdateInput,
   GitCommitInput,
   GitFileDiff,
   GitStatusChangedEvent,
-  ManagedWorktreeRecord,
+  ManagedWorktreeRecordVersioned,
   RepositoryContext,
-  SessionCheckoutV1,
+  SessionCheckout,
 } from '@kata-sh/shared/protocol'
-import { isGitWorkspaceV1Enabled } from '@kata-sh/shared/feature-flags'
+import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import { pushTyped } from '../../transport/push'
-import { getDefaultGitServices, GitStatusSubscription } from '../../git'
+import {
+  getDefaultGitServices,
+  GitStatusSubscription,
+  WorktreeCreationError,
+  WorktreeSettingsError,
+} from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -32,6 +48,9 @@ export const GIT_HANDLED_CHANNELS = [
   RPC_CHANNELS.git.LIST_REFS,
   RPC_CHANNELS.git.LIST_MANAGED_WORKTREES,
   RPC_CHANNELS.git.PREPARE_CHECKOUT,
+  RPC_CHANNELS.git.GET_CAPABILITIES,
+  RPC_CHANNELS.git.GET_WORKTREE_SETTINGS,
+  RPC_CHANNELS.git.UPDATE_WORKTREE_SETTINGS,
   RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL,
   RPC_CHANNELS.git.REMOVE_WORKTREE,
   RPC_CHANNELS.git.GET_STATUS,
@@ -52,13 +71,41 @@ function assertFeatureEnabled(): void {
   }
 }
 
+function assertWorktreeV2Enabled(): void {
+  if (!isWorktreeV2Enabled()) {
+    throw new WorktreeV2CapabilityError()
+  }
+}
+
+function throwTypedWorktreeSettingsError(error: unknown): never {
+  if (error instanceof WorktreeSettingsError) {
+    throw new CodedError(WORKTREE_SETTINGS_ERROR_CODE, error.message)
+  }
+  throw error
+}
+
+const WORKTREE_CREATION_WIRE_CODES: Readonly<Record<string, ErrorCode>> = {
+  WORKTREE_NAME_INVALID: WORKTREE_NAME_INVALID_CODE,
+  WORKTREE_BRANCH_COLLISION: WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_DESTINATION_UNSAFE: WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_BRANCH_OWNERSHIP_UNKNOWN: WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
+}
+
+function throwTypedWorktreeCreationError(error: unknown): never {
+  if (error instanceof WorktreeCreationError) {
+    const wireCode = WORKTREE_CREATION_WIRE_CODES[error.code]
+    if (wireCode) throw new CodedError(wireCode, error.message)
+  }
+  throw error
+}
+
 interface ResolvedSession {
   checkoutPath: string
   workspaceId: string
   /** Managed worktree base ref (PR-delta base), when persisted. */
   baseRef: string | null
   /** Persisted checkout metadata (null for legacy sessions). */
-  checkout: SessionCheckoutV1 | null
+  checkout: SessionCheckout | null
 }
 
 /**
@@ -71,9 +118,9 @@ interface ResolvedSession {
  * Current checkout sessions do not assume the branch remains unchanged.
  */
 export function checkManagedCheckoutIdentity(input: {
-  checkout: SessionCheckoutV1 | null | undefined
+  checkout: SessionCheckout | null | undefined
   liveContext: Pick<RepositoryContext, 'repositoryRoot' | 'gitCommonDir' | 'currentBranch' | 'detached'>
-  record: ManagedWorktreeRecord | null | undefined
+  record: ManagedWorktreeRecordVersioned | null | undefined
 }): string | null {
   const { checkout, liveContext, record } = input
   if (!checkout || checkout.mode !== 'managed-worktree') return null
@@ -161,8 +208,14 @@ function normalizeBaseRef(ref: string | null, primaryRemote: string | null): str
   return b || null
 }
 
-export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void {
+export function registerGitHandlers(
+  server: RpcServer,
+  deps: HandlerDeps,
+  owningServerId?: string,
+): void {
   const git = deps.gitServices ?? getDefaultGitServices()
+  const worktreeSettings = git.worktreeSettings
+  const serverId = owningServerId ?? worktreeSettings?.getCapability().serverId ?? 'local'
   // Ensure the SessionManager's checkout gate operates on the same registry
   // instance as these handlers so ownership state never diverges.
   deps.sessionManager.setGitServices?.(git)
@@ -211,6 +264,38 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
     }
   })()
 
+  // --- Worktree V2 capability and server-owned settings ---
+
+  server.handle(RPC_CHANNELS.git.GET_CAPABILITIES, async () => {
+    if (!worktreeSettings) {
+      return { serverId, worktreeV2: false }
+    }
+    return worktreeSettings.getCapability(serverId)
+  })
+
+  server.handle(RPC_CHANNELS.git.GET_WORKTREE_SETTINGS, async () => {
+    assertWorktreeV2Enabled()
+    if (!worktreeSettings) throw new WorktreeV2CapabilityError()
+    try {
+      return worktreeSettings.getSnapshot(serverId)
+    } catch (error) {
+      throwTypedWorktreeSettingsError(error)
+    }
+  })
+
+  server.handle(
+    RPC_CHANNELS.git.UPDATE_WORKTREE_SETTINGS,
+    async (_ctx, input: WorktreeSettingsUpdateInput) => {
+      assertWorktreeV2Enabled()
+      if (!worktreeSettings) throw new WorktreeV2CapabilityError()
+      try {
+        return worktreeSettings.update(input, serverId)
+      } catch (error) {
+        throwTypedWorktreeSettingsError(error)
+      }
+    },
+  )
+
   // --- Repository context and ref listing (Phase 1, read-only) ---
 
   server.handle(RPC_CHANNELS.git.GET_CONTEXT, async (_ctx, dir: string) => {
@@ -237,9 +322,20 @@ export function registerGitHandlers(server: RpcServer, deps: HandlerDeps): void 
 
   server.handle(
     RPC_CHANNELS.git.PREPARE_CHECKOUT,
-    async (_ctx, sessionId: string, intent: CheckoutPrepareIntent) => {
+    async (_ctx, sessionId: string, intent: CheckoutPrepareIntentVersioned) => {
+      // V2 is explicit on the wire. An unversioned object carrying a V2-only
+      // field is rejected rather than silently falling back to V1 identity.
+      if (intent.schemaVersion === 2) {
+        assertWorktreeV2Enabled()
+      } else if ('worktreeNameSuffix' in intent) {
+        throw new WorktreeV2CapabilityError()
+      }
       assertFeatureEnabled()
-      return deps.sessionManager.prepareCheckout(sessionId, intent)
+      try {
+        return await deps.sessionManager.prepareCheckout(sessionId, intent)
+      } catch (error) {
+        throwTypedWorktreeCreationError(error)
+      }
     },
   )
 

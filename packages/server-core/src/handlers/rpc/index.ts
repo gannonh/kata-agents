@@ -33,7 +33,7 @@ export function registerCoreRpcHandlers(
   registerAuthHandlers(server, deps)
   registerAutomationsHandlers(server, deps)
   registerFilesHandlers(server, deps)
-  registerGitHandlers(server, deps)
+  registerGitHandlers(server, deps, serverCtx?.serverId)
   registerLabelsHandlers(server, deps)
   registerLlmConnectionsHandlers(server, deps)
   registerOAuthHandlers(server, deps)
