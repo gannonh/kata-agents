@@ -399,8 +399,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
  */
 export const SETTINGS_ITEMS: SettingsMenuItem[] = SETTINGS_PAGES
   .filter(page =>
-    (page.id !== 'server' || FEATURE_FLAGS.embeddedServer) &&
-    (page.id !== 'worktrees' || FEATURE_FLAGS.worktreeV2)
+    (page.id !== 'server' || FEATURE_FLAGS.embeddedServer)
   )
   .map(page => ({
     id: page.id,

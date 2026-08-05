@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GitBranch, FolderOpen, Server as ServerIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import type {
   ServerCapabilityDto,
@@ -159,7 +158,6 @@ export default function WorktreesSettingsPage() {
   }, [t])
 
   useEffect(() => {
-    if (!FEATURE_FLAGS.worktreeV2) return
     void loadTargets()
   }, [loadTargets])
 
@@ -236,8 +234,6 @@ export default function WorktreesSettingsPage() {
     setRoot(savedRoot)
     setError(null)
   }, [savedRoot])
-
-  if (!FEATURE_FLAGS.worktreeV2) return null
 
   if (isLoadingTargets) {
     return (

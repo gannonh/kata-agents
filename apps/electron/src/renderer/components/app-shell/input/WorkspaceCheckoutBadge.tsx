@@ -113,7 +113,6 @@ function WorkspaceCheckoutBadgeInner(
 ) {
   const { t } = useTranslation()
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
-  const worktreeV2FlagEnabled = FEATURE_FLAGS.worktreeV2
   const isFocusedPanel = useOptionalAppShellContext()?.isFocusedPanel ?? true
   const [contextRefreshToken, setContextRefreshToken] = React.useState(0)
   const contextRequestKey = getGitContextRefreshKey({
@@ -137,7 +136,9 @@ function WorkspaceCheckoutBadgeInner(
   const context = contextMatchesRequest ? contextState.context : null
   const [mode, setMode] = React.useState<CheckoutMode>('current')
   const [serverV2Available, setServerV2Available] = React.useState(false)
-  const worktreeV2Enabled = worktreeV2FlagEnabled && serverV2Available
+  // V2 is governed by the workspace-owning server, not by the local renderer
+  // environment (see the capability effect below).
+  const worktreeV2Enabled = serverV2Available
   const modeRef = React.useRef(mode)
   modeRef.current = mode
   const [intentKind, setIntentKind] = React.useState<'new' | 'existing'>('new')
@@ -167,19 +168,22 @@ function WorkspaceCheckoutBadgeInner(
   const persistedCheckout = session?.checkout ?? null
   const sharedOwnerCount = session?.sharedOwnerCount
 
-  // Discover the effective capability from the workspace-owning server. A
-  // local flag alone is insufficient: a connected remote server may still be
-  // V1-only, in which case the renderer must retain the V1 intent shape.
+  // Discover the effective capability from the workspace-owning server. V2 is
+  // governed by the owning server's feature flag, not by the local renderer
+  // environment: a remote/headless server with Worktree V2 enabled drives the
+  // V2 controls even when the desktop client did not set the flag, while a
+  // V1-only server retains the V1 intent shape.
   React.useEffect(() => {
-    if (!worktreeV2FlagEnabled) {
-      setServerV2Available(false)
-      return
-    }
     let cancelled = false
     window.electronAPI
       ?.getGitCapabilities?.()
       .then((capability) => {
-        if (!cancelled) setServerV2Available(!!capability?.worktreeV2)
+        if (cancelled) return
+        const available = !!capability?.worktreeV2
+        setServerV2Available(available)
+        if (available) {
+          setWorktreeNameSuffix((previous) => previous ?? generateDefaultWorktreeName())
+        }
       })
       .catch(() => {
         if (!cancelled) setServerV2Available(false)
@@ -187,23 +191,24 @@ function WorkspaceCheckoutBadgeInner(
     return () => {
       cancelled = true
     }
-  }, [worktreeV2FlagEnabled, sessionId, workingDirectory, isFocusedPanel])
+  }, [sessionId, workingDirectory, isFocusedPanel])
 
   // Reset transient selection state when the active session or directory
   // changes. Panel focus changes deliberately preserve a pending New worktree
-  // intent while still triggering fresh Git discovery below.
+  // intent while still triggering fresh Git discovery below. The V2 default
+  // name is seeded when the owning server's capability resolves.
   React.useEffect(() => {
     setMode('current')
     setIntentKind('new')
     setBaseRef(null)
-    setWorktreeNameSuffix(worktreeV2FlagEnabled ? generateDefaultWorktreeName() : null)
+    setWorktreeNameSuffix(null)
     setSelectedWorktreeId(null)
     setWorktrees([])
     setWorktreesLoading(false)
     setRefs([])
     setRefsLoading(false)
     setError(null)
-  }, [flagEnabled, worktreeV2FlagEnabled, workingDirectory, sessionId])
+  }, [flagEnabled, workingDirectory, sessionId])
 
   // Resolve repository identity for the active session, directory, and panel.
   // The session ID prevents stale results across session selection; panel focus
