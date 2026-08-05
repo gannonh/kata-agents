@@ -50,6 +50,21 @@ const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_RETRY_DELAY_MS = 10
 const DEFAULT_STALE_AFTER_MS = 30_000
 
+/**
+ * Codes that mean the lock is already held. POSIX reports EEXIST/ENOTEMPTY;
+ * Windows reports EPERM/EACCES for rename-onto-existing-directory conflicts.
+ */
+const LOCK_CONTENTION_CODES = new Set(['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'])
+
+function isLockContention(error: unknown): boolean {
+  return LOCK_CONTENTION_CODES.has((error as NodeJS.ErrnoException).code ?? '')
+}
+
+function isMkdirContention(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code ?? ''
+  return code === 'EEXIST' || code === 'ENOTEMPTY'
+}
+
 function sleepSync(ms: number): void {
   // Public registry methods are synchronous. Atomics.wait provides a bounded
   // sleep without a busy loop while another process owns the lock.
@@ -218,20 +233,37 @@ export class CrossProcessFileLock {
     const claimPath = this.claimPath(owner.token)
     let claimed = false
     try {
-      mkdirSync(claimPath)
+      try {
+        mkdirSync(claimPath)
+      } catch (error) {
+        // Another claimant won the mkdir race. EPERM/EACCES from mkdir is a
+        // genuine permission problem, not lock contention.
+        if (isMkdirContention(error)) return false
+        throw error
+      }
       claimed = true
       writeFileSync(this.ownerPath(owner.token, claimPath), JSON.stringify(owner), {
         encoding: 'utf8',
         flag: 'wx',
       })
-      renameSync(claimPath, this.lockPath)
+      try {
+        renameSync(claimPath, this.lockPath)
+      } catch (error) {
+        // Rename-onto-existing-directory: EEXIST/ENOTEMPTY on POSIX, and
+        // EPERM/EACCES on Windows — both mean the lock is already held.
+        if (isLockContention(error)) {
+          // Remove the private claim directory so the retry loop (which
+          // reuses this token) can mkdir the same claim path again.
+          rmSync(claimPath, { recursive: true, force: true })
+          claimed = false
+          return false
+        }
+        throw error
+      }
       claimed = false
       return true
     } catch (error) {
       if (claimed) rmSync(claimPath, { recursive: true, force: true })
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST' || (error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
-        return false
-      }
       throw error
     }
   }
@@ -240,20 +272,31 @@ export class CrossProcessFileLock {
     const claimPath = this.claimPath(owner.token)
     let claimed = false
     try {
-      await mkdirAsync(claimPath, false)
+      try {
+        await mkdirAsync(claimPath, false)
+      } catch (error) {
+        if (isMkdirContention(error)) return false
+        throw error
+      }
       claimed = true
       writeFileSync(this.ownerPath(owner.token, claimPath), JSON.stringify(owner), {
         encoding: 'utf8',
         flag: 'wx',
       })
-      renameSync(claimPath, this.lockPath)
+      try {
+        renameSync(claimPath, this.lockPath)
+      } catch (error) {
+        if (isLockContention(error)) {
+          rmSync(claimPath, { recursive: true, force: true })
+          claimed = false
+          return false
+        }
+        throw error
+      }
       claimed = false
       return true
     } catch (error) {
       if (claimed) rmSync(claimPath, { recursive: true, force: true })
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST' || (error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
-        return false
-      }
       throw error
     }
   }
@@ -271,7 +314,7 @@ export class CrossProcessFileLock {
       try {
         if (this.claimSync(owner)) return owner
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        if (!isMkdirContention(error)) throw error
       }
       this.tryBreakStale()
       if (Date.now() - started >= this.options.timeoutMs) {
@@ -294,7 +337,7 @@ export class CrossProcessFileLock {
       try {
         if (await this.claim(owner)) return owner
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        if (!isMkdirContention(error)) throw error
       }
       this.tryBreakStale()
       if (Date.now() - started >= this.options.timeoutMs) {

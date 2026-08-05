@@ -1,6 +1,7 @@
 import { describe, expect, test, afterEach } from 'bun:test'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { createGitServices } from '../index'
 import { WorktreeRegistry } from '../worktree-registry'
 import { WorktreeSettingsError, WorktreeSettingsService } from '../worktree-settings-service'
 import { cleanup, makeTmpDir } from './test-helpers'
@@ -32,6 +33,26 @@ function makeSettings() {
 }
 
 describe('WorktreeSettingsService', () => {
+  test('createGitServices rejects an injected settings service bound to a different registry', () => {
+    const root = tmp()
+    const foreignRoot = join(root, 'foreign')
+    const foreignRegistry = new WorktreeRegistry(join(foreignRoot, 'registry.json'))
+    const foreignSettings = new WorktreeSettingsService({
+      serverId: 'foreign',
+      defaultRoot: join(foreignRoot, 'worktrees'),
+      settingsPath: join(foreignRoot, 'settings.json'),
+      registry: foreignRegistry,
+    })
+
+    expect(() =>
+      createGitServices({
+        worktreeRoot: join(root, 'worktrees'),
+        registryPath: join(root, 'worktrees', 'registry.json'),
+        worktreeSettings: foreignSettings,
+      }),
+    ).toThrow(/active worktree registry/)
+  })
+
   test('returns the default root as an immutable version-zero snapshot', () => {
     const { defaultRoot, settings } = makeSettings()
 

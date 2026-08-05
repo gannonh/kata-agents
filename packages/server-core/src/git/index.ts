@@ -68,6 +68,12 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     registry,
     protectedPaths: config.protectedWorktreePaths,
   })
+  // Root-update validation consults the settings service's own registry; it
+  // must be the same authority ManagedWorktreeService uses, or overlap checks
+  // would miss records in the active registry.
+  if (config.worktreeSettings && config.worktreeSettings.registry?.getRegistryPath() !== config.registryPath) {
+    throw new Error('Injected worktree settings must be bound to the active worktree registry.')
+  }
   const repository = new RepositoryService()
   const mutationLock = new MutationLock()
   const worktrees = new ManagedWorktreeService(

@@ -153,7 +153,8 @@ export class WorktreeSettingsService {
   private readonly serverId: string
   private readonly defaultRoot: string
   private readonly settingsPath: string
-  private readonly registry: WorktreeRegistry
+  /** Fixed registry authority used for overlap validation. */
+  readonly registry: WorktreeRegistry
   private readonly protectedPaths: string[]
   private readonly lock: CrossProcessFileLock
 

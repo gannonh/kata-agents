@@ -1,9 +1,16 @@
 import { describe, test, expect } from 'bun:test'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { CrossProcessFileLock, MutationLock } from '../mutation-lock'
 import { cleanup, makeTmpDir } from './test-helpers'
+
+/** A pid that is guaranteed to be dead (a just-exited child cannot be reused). */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ['-e', 'process.exit(0)'])
+  if (!child.pid) throw new Error('unable to obtain a dead pid for the stale-owner marker')
+  return child.pid
+}
 
 describe('MutationLock', () => {
   test('serializes operations for the same common directory', async () => {
@@ -52,7 +59,7 @@ describe('MutationLock', () => {
     const staleMarker = resolve(lockPath, 'owner-dead-token.json')
     writeFileSync(
       staleMarker,
-      JSON.stringify({ token: 'dead-token', pid: 999999, acquiredAt: 1 }),
+      JSON.stringify({ token: 'dead-token', pid: deadPid(), acquiredAt: 1 }),
     )
     const old = new Date(1)
     utimesSync(lockPath, old, old)
@@ -70,7 +77,7 @@ describe('MutationLock', () => {
     const staleMarker = resolve(lockPath, 'owner-dead-token.json')
     writeFileSync(
       staleMarker,
-      JSON.stringify({ token: 'dead-token', pid: 999999, acquiredAt: 1 }),
+      JSON.stringify({ token: 'dead-token', pid: deadPid(), acquiredAt: 1 }),
     )
     const old = new Date(1)
     utimesSync(lockPath, old, old)
@@ -136,6 +143,10 @@ describe('MutationLock', () => {
       expect(readFileSync(signal, 'utf8')).toBe('started')
       const startedAt = Date.now()
       const lock = new MutationLock(lockRoot, { timeoutMs: 5000, retryDelayMs: 5 })
+      // Positive proof that the cross-process lock lives under the server-owned
+      // lock root (never inside the repository) while the child holds it.
+      const digestLockPath = lock.getLockPath(commonDir)
+      expect(existsSync(digestLockPath)).toBe(true)
       try {
         await lock.withLock(commonDir, async () => undefined)
       } catch (error) {
@@ -146,6 +157,9 @@ describe('MutationLock', () => {
       // it explicitly so a Bun child with inherited test handles cannot keep
       // the test process alive after the assertion.
       if (!child.killed) child.kill('SIGTERM')
+      // After release the digest lock is removed and no stray `git` directory
+      // or repository-adjacent lock was ever created.
+      expect(existsSync(digestLockPath)).toBe(false)
       expect(existsSync(resolve(lockRoot, 'git'))).toBe(false)
       expect(existsSync(resolve('/repo/cross-process', '.kata-lock'))).toBe(false)
     } finally {
