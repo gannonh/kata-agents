@@ -298,14 +298,12 @@ export function registerGitHandlers(
   server.handle(
     RPC_CHANNELS.git.PREPARE_CHECKOUT,
     async (_ctx, sessionId: string, intent: CheckoutPrepareIntentVersioned) => {
-      // The current SessionManager is intentionally V1-only. Keep V2-looking
-      // input out of it until named creation and settings are implemented; a
-      // direct V2 RPC must fail with the typed wire error rather than silently
-      // falling back to generated V1 identity.
-      if ('worktreeNameSuffix' in intent) {
-        throw new WorktreeV2CapabilityError(
-          'Git worktree V2 named creation is not available on this server.',
-        )
+      // V2 is explicit on the wire. An unversioned object carrying a V2-only
+      // field is rejected rather than silently falling back to V1 identity.
+      if (intent.schemaVersion === 2) {
+        assertWorktreeV2Enabled()
+      } else if ('worktreeNameSuffix' in intent) {
+        throw new WorktreeV2CapabilityError()
       }
       assertFeatureEnabled()
       return deps.sessionManager.prepareCheckout(sessionId, intent)

@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test'
 import { readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices } from '../index'
-import type { ManagedWorktreeRecord } from '@kata-sh/shared/protocol'
+import type { ManagedWorktreeRecord, ManagedWorktreeRecordV2 } from '@kata-sh/shared/protocol'
 import { RepositoryService } from '../repository-service'
 import { initRepo, makeTmpDir, cleanup, git, writeFile, GIT_ENV } from './test-helpers'
 import { runGit } from '../command-runner'
@@ -56,6 +56,197 @@ describe('ManagedWorktreeService.createWorktree', () => {
 
     // Registry persisted it.
     expect(svc.registry.get(record.managedWorktreeId)).toBeTruthy()
+  })
+
+  test('creates a named V2 worktree with the exact requested branch and a safe unique leaf', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+
+      const { record } = await svc.worktrees.createWorktree({
+        workspaceId: 'ws1',
+        sessionId: 'sess1',
+        repositoryRoot: repo,
+        gitCommonDir: gcd,
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      })
+
+      expect(record).toMatchObject({
+        schemaVersion: 2,
+        displayName: 'auth-refresh',
+        expectedBranch: 'kata-agent/auth-refresh',
+        materializationRoot: svc.worktreeSettings.getSnapshot().materializationRoot,
+        lastUsedAt: expect.any(Number),
+      })
+      expect(record.checkoutPath).toMatch(/auth-refresh-[0-9a-f]{8}$/)
+      expect(existsSync(record.checkoutPath)).toBe(true)
+      expect(await git(repo, ['branch', '--list', 'kata-agent/auth-refresh'])).toContain(
+        'kata-agent/auth-refresh',
+      )
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('rejects a named worktree when the requested branch already exists without residue', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      await git(repo, ['branch', 'kata-agent/auth-refresh'])
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+      const registryPath = svc.registry.getRegistryPath()
+      const beforeRegistry = existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null
+
+      await expect(
+        svc.worktrees.createWorktree({
+          workspaceId: 'ws1',
+          sessionId: 'sess1',
+          repositoryRoot: repo,
+          gitCommonDir: gcd,
+          baseRef: 'main',
+          worktreeNameSuffix: 'auth-refresh',
+        }),
+      ).rejects.toMatchObject({ code: 'WORKTREE_BRANCH_COLLISION' })
+
+      expect(existsSync(join(svc.worktreeSettings.getSnapshot().materializationRoot, 'ws1'))).toBe(false)
+      expect(svc.registry.list()).toEqual([])
+      expect(existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null).toBe(beforeRegistry)
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('retains an externally changed branch during compensation', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const replacementOid = (await git(repo, ['rev-parse', 'HEAD'])).trim()
+      await git(repo, ['commit', '--allow-empty', '-m', 'replacement'])
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+      const originalGetContext = svc.repository.getContext.bind(svc.repository)
+      let injected = false
+      ;(svc.repository as any).getContext = async (dir: string) => {
+        const context = await originalGetContext(dir)
+        if (!injected) {
+          injected = true
+          await git(repo, ['update-ref', 'refs/heads/kata-agent/auth-refresh', replacementOid])
+          throw new Error('injected identity failure')
+        }
+        return context
+      }
+
+      await expect(
+        svc.worktrees.createWorktree({
+          workspaceId: 'ws1',
+          sessionId: 'sess1',
+          repositoryRoot: repo,
+          gitCommonDir: gcd,
+          baseRef: 'main',
+          worktreeNameSuffix: 'auth-refresh',
+        }),
+      ).rejects.toThrow(/injected identity failure/)
+
+      const retained = svc.registry.list()
+      expect(retained).toHaveLength(1)
+      expect(retained[0]).toMatchObject({
+        state: 'blocked',
+        expectedBranch: 'kata-agent/auth-refresh',
+      })
+      expect((await git(repo, ['branch', '--list', 'kata-agent/auth-refresh'])).trim()).toContain(
+        'kata-agent/auth-refresh',
+      )
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('rejects invalid named branch suffixes before Git mutation', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+
+      for (const worktreeNameSuffix of ['', ' auth-refresh', 'auth-refresh ', '../escape']) {
+        await expect(
+          svc.worktrees.createWorktree({
+            workspaceId: 'ws1',
+            sessionId: `sess-${worktreeNameSuffix || 'empty'}`,
+            repositoryRoot: repo,
+            gitCommonDir: gcd,
+            baseRef: 'main',
+            worktreeNameSuffix,
+          }),
+        ).rejects.toMatchObject({ code: 'WORKTREE_NAME_INVALID' })
+      }
+      expect((await git(repo, ['branch', '--list', 'kata-agent/*'])).trim()).toBe('')
+      expect(svc.registry.list()).toEqual([])
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
+  test('allows nested and Unicode branch suffixes while keeping the leaf path safe', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+      const { record } = await svc.worktrees.createWorktree({
+        workspaceId: 'ws1',
+        sessionId: 'sess1',
+        repositoryRoot: repo,
+        gitCommonDir: gcd,
+        baseRef: 'main',
+        worktreeNameSuffix: 'team/認証-refresh',
+      })
+
+      expect(record.expectedBranch).toBe('kata-agent/team/認証-refresh')
+      expect((record as ManagedWorktreeRecordV2).displayName).toBe('team/認証-refresh')
+      expect(record.checkoutPath).toMatch(/team-認証-refresh-[0-9a-f]{8}$/)
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
   })
 
   test('a worktree created from a remote-tracking base ref inherits no upstream tracking', async () => {

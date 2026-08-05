@@ -87,7 +87,7 @@ export interface ISessionManager {
    */
   prepareCheckout(
     sessionId: string,
-    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntent,
+    intent: import('@kata-sh/shared/protocol').CheckoutPrepareIntentVersioned,
   ): Promise<import('@kata-sh/shared/protocol').CheckoutPrepareResultVersioned>
   /**
    * Ready managed worktrees in the session's workspace + repository that a

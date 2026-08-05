@@ -470,8 +470,44 @@ describe('registerGitHandlers', () => {
     expect(prepareCalls).toEqual([['s1', intent]])
   })
 
-  it('rejects V2 named intent before it reaches the V1 SessionManager', async () => {
+  it('delegates an explicitly versioned V2 named intent when the capability is effective', async () => {
     process.env[FLAG] = 'true'
+    process.env[V2_FLAG] = 'true'
+    const { git } = makeGitServices()
+    const { handlers, ctx, prepareCalls } = makeHarness(git)
+
+    const intent = {
+      schemaVersion: 2,
+      mode: 'managed-worktree',
+      workingDirectory: '/repo',
+      baseRef: 'main',
+      worktreeNameSuffix: 'auth-refresh',
+    }
+    await handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', intent)
+    expect(prepareCalls).toEqual([['s1', intent]])
+  })
+
+  it('rejects V2 named intent before it reaches the V1 SessionManager when incapable', async () => {
+    process.env[FLAG] = 'true'
+    process.env[V2_FLAG] = '0'
+    const { git } = makeGitServices()
+    const { handlers, ctx, prepareCalls } = makeHarness(git)
+
+    await expect(
+      handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    expect(prepareCalls).toHaveLength(0)
+  })
+
+  it('rejects an unversioned V2-looking intent before it reaches the V1 SessionManager', async () => {
+    process.env[FLAG] = 'true'
+    process.env[V2_FLAG] = '1'
     const { git } = makeGitServices()
     const { handlers, ctx, prepareCalls } = makeHarness(git)
 
