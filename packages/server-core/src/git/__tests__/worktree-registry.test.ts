@@ -126,6 +126,53 @@ describe('WorktreeRegistry', () => {
     expect(existsSync(path)).toBe(true)
   })
 
+  test('fails closed instead of restoring an old V1 backup after later V2 mutation', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    const registry = new WorktreeRegistry(path)
+    registry.load()
+    registry.upsert(legacyRecord(root, 'repo-eeff0011'))
+    const backup = readFileSync(getWorktreeRegistryEvidencePaths(path).backupPath)
+    rmSync(path)
+
+    const recovered = new WorktreeRegistry(path)
+    expect(() => recovered.list()).toThrow(WorktreeRegistryError)
+    try {
+      recovered.list()
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'REGISTRY_CONFLICT' })
+    }
+    expect(existsSync(path)).toBe(false)
+    expect(readFileSync(getWorktreeRegistryEvidencePaths(path).backupPath)).toEqual(backup)
+  })
+
+  test('rejects a divergent source against a complete registry hash marker', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    const registry = new WorktreeRegistry(path)
+    registry.load()
+    const current = registry.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    const divergent = {
+      ...current,
+      managedWorktreeId: 'repo-eeff0011',
+      expectedBranch: 'kata-agent/eeff0011',
+      displayName: 'eeff0011',
+      checkoutPath: join(root, 'workspace-1', '0123456789abcdef', 'eeff0011'),
+    }
+    writeFileSync(path, JSON.stringify({ version: 2, records: [current, divergent] }, null, 2) + '\n')
+    const source = readFileSync(path, 'utf8')
+
+    expect(() => registry.load()).toThrow(WorktreeRegistryError)
+    try {
+      registry.load()
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'REGISTRY_CONFLICT' })
+    }
+    expect(readFileSync(path, 'utf8')).toBe(source)
+  })
+
   test('rejects a source that conflicts with prior upgrade evidence', () => {
     const root = tmp()
     const path = join(root, 'registry.json')

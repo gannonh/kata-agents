@@ -558,8 +558,29 @@ export class WorktreeRegistry {
       )
     }
     // Validate before restoring so an arbitrary sidecar cannot turn into a
-    // newly-authoritative empty or malformed registry.
-    parseRegistry(backup, this.registryPath)
+    // newly-authoritative empty or malformed registry. A completed marker also
+    // binds the backup-derived V2 bytes: if later V2 mutations advanced the
+    // marker, restoring this older V1 backup would silently lose records.
+    const parsedBackup = parseRegistry(backup, this.registryPath)
+    if (evidence?.status === 'complete') {
+      if (parsedBackup.version !== 1) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'Completed registry upgrade evidence does not reference a V1 source backup.',
+          this.registryPath,
+        )
+      }
+      const backupUpgradeHash = sha256(
+        encodeRegistry(parsedBackup.records.map((record) => upgradeRecord(record, this.registryPath))),
+      )
+      if (backupUpgradeHash !== evidence.registryHash) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'The registry backup-derived upgrade conflicts with the last completed registry hash.',
+          this.registryPath,
+        )
+      }
+    }
     try {
       writeBytesAtomically(this.registryPath, backupBytes)
     } catch (error) {
@@ -646,6 +667,13 @@ export class WorktreeRegistry {
       }
     }
     if (parsed.version !== 1) {
+      if (priorEvidence?.status === 'complete' && priorEvidence.registryHash !== source.hash) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'Completed registry upgrade evidence does not match the current V2 source.',
+          this.registryPath,
+        )
+      }
       // A process may have crashed after atomically replacing the registry but
       // before publishing completion evidence. Finish the marker without
       // rewriting valid V2 registry bytes.
@@ -682,6 +710,13 @@ export class WorktreeRegistry {
     const records = parsed.records.map((record) => upgradeRecord(record, this.registryPath))
     const targetBytes = encodeRegistry(records)
     const targetHash = sha256(targetBytes)
+    if (priorEvidence?.status === 'complete' && priorEvidence.registryHash !== targetHash) {
+      throw new WorktreeRegistryError(
+        'REGISTRY_CONFLICT',
+        'The backup-derived registry upgrade conflicts with the last completed registry hash.',
+        this.registryPath,
+      )
+    }
     const prepared: RegistryMarker = {
       schemaVersion: 1,
       status: 'prepared',
@@ -777,6 +812,7 @@ export class WorktreeRegistry {
       this.recoverMissingSourceLocked()
       source = this.readSource()
     }
+    let authoritativeHash: string | null = null
     if (source.exists) {
       const parsed = parseRegistry(source.raw, this.registryPath)
       const authoritative = this.upgradeLocked(source, parsed)
@@ -799,6 +835,7 @@ export class WorktreeRegistry {
           this.registryPath,
         )
       }
+      authoritativeHash = current.hash
       this.cache = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
     } else {
       this.cache = new Map()
@@ -808,7 +845,10 @@ export class WorktreeRegistry {
     const bytes = encodeRegistry(records)
     const expectedHash = sha256(bytes)
     const latest = this.readSource()
-    if (source.exists && (!latest.exists || (latest.hash !== source.hash && parsedVersion(source.raw) === 2))) {
+    if (
+      latest.exists !== source.exists ||
+      (source.exists && latest.hash !== authoritativeHash)
+    ) {
       throw new WorktreeRegistryError(
         'REGISTRY_CONFLICT',
         'The registry source changed before the mutation could be committed.',
@@ -816,7 +856,19 @@ export class WorktreeRegistry {
       )
     }
     try {
-      writeBytesAtomically(this.registryPath, bytes)
+      writeBytesAtomically(this.registryPath, bytes, () => {
+        const beforeReplace = this.readSource()
+        if (
+          beforeReplace.exists !== source.exists ||
+          (source.exists && beforeReplace.hash !== authoritativeHash)
+        ) {
+          throw new WorktreeRegistryError(
+            'REGISTRY_CONFLICT',
+            'The registry source changed during mutation; source bytes were preserved.',
+            this.registryPath,
+          )
+        }
+      })
     } catch (error) {
       throw wrapError(
         error,
@@ -994,15 +1046,6 @@ export class WorktreeRegistry {
       }
       return dirty
     })
-  }
-}
-
-function parsedVersion(raw: string): 1 | 2 | null {
-  try {
-    const version = (JSON.parse(raw) as { version?: unknown }).version
-    return version === 1 || version === 2 ? version : null
-  } catch {
-    return null
   }
 }
 

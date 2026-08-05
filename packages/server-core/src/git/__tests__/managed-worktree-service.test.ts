@@ -248,6 +248,60 @@ describe('shared ownership and removal', () => {
   })
 })
 
+describe('managed worktree discovery summaries', () => {
+  test('keeps legacy summaries when V2 is disabled and exposes metadata when enabled', async () => {
+    const originalV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const originalV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '0'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const worktreeRoot = tmp()
+      const svc = createGitServices({
+        worktreeRoot,
+        registryPath: join(worktreeRoot, 'registry.json'),
+      })
+      const gcd = await commonDir(repo)
+      const { record } = await svc.worktrees.createWorktree({
+        workspaceId: 'ws1',
+        sessionId: 'sess1',
+        repositoryRoot: repo,
+        gitCommonDir: gcd,
+        baseRef: 'main',
+      })
+
+      expect(svc.worktrees.listManagedWorktrees('ws1', gcd)).toEqual([{
+        managedWorktreeId: record.managedWorktreeId,
+        checkoutPath: record.checkoutPath,
+        expectedBranch: record.expectedBranch,
+        baseRef: 'main',
+        ownerCount: 1,
+        state: 'ready',
+      }])
+
+      process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+      const versioned = svc.worktrees.listManagedWorktrees('ws1', gcd)
+      expect(versioned).toEqual([{
+        schemaVersion: 2,
+        managedWorktreeId: record.managedWorktreeId,
+        checkoutPath: record.checkoutPath,
+        displayName: record.expectedBranch.slice('kata-agent/'.length),
+        expectedBranch: record.expectedBranch,
+        materializationRoot: worktreeRoot,
+        baseRef: 'main',
+        ownerCount: 1,
+        state: 'ready',
+      }])
+    } finally {
+      if (originalV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = originalV1
+      if (originalV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = originalV2
+    }
+  })
+})
+
 describe('workspaceIdOf legacy fallback', () => {
   test('derives the workspace id from a backslash-delimited relative path (Windows layout)', () => {
     const worktreeRoot = tmp()

@@ -8,7 +8,17 @@
  * are kept under server/config storage (never in the repository itself).
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  rmdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { randomBytes, createHash } from 'node:crypto'
 import { CONFIG_DIR } from '@kata-sh/shared/config/paths'
@@ -26,6 +36,11 @@ interface LockOwner {
   token: string
   pid: number
   acquiredAt: number
+}
+
+interface ObservedOwner {
+  owner: LockOwner
+  path: string
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -75,35 +90,61 @@ export class CrossProcessFileLock {
     }
   }
 
-  private ownerPath(): string {
-    return join(this.lockPath, 'owner.json')
+  private ownerPath(token: string): string {
+    return join(this.lockPath, `owner-${token}.json`)
   }
 
-  private readOwner(): LockOwner | null {
+  private parseOwnerFile(path: string, expectedName?: string): ObservedOwner | null {
     try {
-      const parsed = JSON.parse(readFileSync(this.ownerPath(), 'utf8')) as Partial<LockOwner>
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<LockOwner>
       if (
         typeof parsed.token !== 'string' ||
         !parsed.token ||
         !Number.isInteger(parsed.pid) ||
-        !Number.isFinite(parsed.acquiredAt)
-      ) {
-        return null
-      }
+        !Number.isFinite(parsed.acquiredAt) ||
+        (expectedName !== undefined && expectedName !== `owner-${parsed.token}.json`)
+      ) return null
       return {
-        token: parsed.token,
-        pid: parsed.pid as number,
-        acquiredAt: parsed.acquiredAt as number,
+        path,
+        owner: {
+          token: parsed.token,
+          pid: parsed.pid as number,
+          acquiredAt: parsed.acquiredAt as number,
+        },
       }
     } catch {
       return null
     }
   }
 
-  private isStale(): boolean {
-    const owner = this.readOwner()
-    if (owner) {
-      const alive = processIsAlive(owner.pid)
+  /** Read the exact owner marker and its path for CAS-like stale removal. */
+  private readOwner(): ObservedOwner | null {
+    let names: string[]
+    try {
+      names = readdirSync(this.lockPath)
+    } catch {
+      return null
+    }
+    const ownerNames = names.filter(
+      (name) => name.startsWith('owner-') && name.endsWith('.json'),
+    )
+    // A lock may be observed between mkdir and owner marker creation. It is
+    // not safe to infer an owner from anything else in the directory.
+    if (ownerNames.length === 1) {
+      return this.parseOwnerFile(join(this.lockPath, ownerNames[0]!), ownerNames[0])
+    }
+    if (ownerNames.length !== 0 || names.length !== 1 || names[0] !== 'owner.json') {
+      return null
+    }
+    // Support lock directories created by the previous fixed owner.json
+    // marker while they drain. The stale remover still uses non-recursive,
+    // exact-marker deletion below, so it cannot remove a replacement lock.
+    return this.parseOwnerFile(join(this.lockPath, 'owner.json'))
+  }
+
+  private isStale(observed: ObservedOwner | null): boolean {
+    if (observed) {
+      const alive = processIsAlive(observed.owner.pid)
       if (alive === false) return true
       if (alive === true) return false
     }
@@ -116,10 +157,34 @@ export class CrossProcessFileLock {
     }
   }
 
+  /**
+   * Attempt stale recovery without recursively deleting the lock directory.
+   * We re-read the owner immediately before unlinking the exact observed marker
+   * and then require rmdir to prove the directory is empty. A waiter that won
+   * the race cannot be deleted: it cannot acquire until this directory is
+   * removed, and rmdir fails rather than removing a newly-created marker.
+   */
   private tryBreakStale(): void {
-    if (!existsSync(this.lockPath) || !this.isStale()) return
+    if (!existsSync(this.lockPath)) return
+    const observed = this.readOwner()
+    if (!this.isStale(observed)) return
     try {
-      rmSync(this.lockPath, { recursive: true, force: true })
+      const confirmed = this.readOwner()
+      if (observed || confirmed) {
+        if (
+          !observed ||
+          !confirmed ||
+          confirmed.path !== observed.path ||
+          confirmed.owner.token !== observed.owner.token ||
+          confirmed.owner.acquiredAt !== observed.owner.acquiredAt
+        ) return
+        unlinkSync(confirmed.path)
+      } else if (readdirSync(this.lockPath).length !== 0) {
+        return
+      }
+      // Non-recursive removal is the final ownership check. If a replacement
+      // marker appeared, the directory is non-empty and remains protected.
+      rmdirSync(this.lockPath)
     } catch {
       // The owner or another waiter may have won the race. The next attempt
       // will inspect the current lock again.
@@ -139,7 +204,7 @@ export class CrossProcessFileLock {
       try {
         mkdirSync(this.lockPath)
         try {
-          writeFileSync(this.ownerPath(), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
+          writeFileSync(this.ownerPath(owner.token), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
         } catch (error) {
           rmSync(this.lockPath, { recursive: true, force: true })
           throw error
@@ -169,7 +234,7 @@ export class CrossProcessFileLock {
       try {
         await mkdirAsync(this.lockPath, false)
         try {
-          writeFileSync(this.ownerPath(), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
+          writeFileSync(this.ownerPath(owner.token), JSON.stringify(owner), { encoding: 'utf8', flag: 'wx' })
         } catch (error) {
           rmSync(this.lockPath, { recursive: true, force: true })
           throw error
@@ -188,9 +253,20 @@ export class CrossProcessFileLock {
 
   private release(owner: LockOwner): void {
     try {
-      const current = this.readOwner()
-      if (current?.token !== owner.token) return
-      rmSync(this.lockPath, { recursive: true, force: true })
+      const observed = this.readOwner()
+      if (!observed || observed.owner.token !== owner.token) return
+      const confirmed = this.readOwner()
+      if (
+        !confirmed ||
+        confirmed.path !== observed.path ||
+        confirmed.owner.token !== observed.owner.token ||
+        confirmed.owner.acquiredAt !== observed.owner.acquiredAt
+      ) return
+      // Remove only this exact marker, then require the directory to be empty.
+      // This prevents a delayed release from recursively deleting a successor
+      // that acquired the lock after a stale-owner recovery.
+      unlinkSync(confirmed.path)
+      rmdirSync(this.lockPath)
     } catch {
       // Release is best-effort. A stale lock can be recovered by the next
       // waiter, and never turns a successful mutation into a false failure.

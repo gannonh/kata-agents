@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { MutationLock } from '../mutation-lock'
+import { CrossProcessFileLock, MutationLock } from '../mutation-lock'
 import { cleanup, makeTmpDir } from './test-helpers'
 
 describe('MutationLock', () => {
@@ -43,6 +43,24 @@ describe('MutationLock', () => {
     ).rejects.toThrow('boom')
     const result = await lock.withLock('/repo/.git', async () => 'ok')
     expect(result).toBe('ok')
+  })
+
+  test('recovers a dead owner without recursively deleting a replacement lock', () => {
+    const root = makeTmpDir('kata-stale-lock-test-')
+    const lockPath = resolve(root, 'server-locks', 'common.lock')
+    mkdirSync(lockPath, { recursive: true })
+    const staleMarker = resolve(lockPath, 'owner-dead-token.json')
+    writeFileSync(
+      staleMarker,
+      JSON.stringify({ token: 'dead-token', pid: 999999, acquiredAt: 1 }),
+    )
+    const old = new Date(1)
+    utimesSync(lockPath, old, old)
+
+    const lock = new CrossProcessFileLock(lockPath, { staleAfterMs: 0, timeoutMs: 1000 })
+    expect(lock.runSync(() => 'acquired')).toBe('acquired')
+    expect(existsSync(lockPath)).toBe(false)
+    cleanup(root)
   })
 
   test('serializes with a separate process without placing locks in the repository', async () => {

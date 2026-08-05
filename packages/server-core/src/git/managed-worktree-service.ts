@@ -12,6 +12,7 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs'
 import { join, relative, isAbsolute, resolve as resolvePath } from 'node:path'
 import { createHash } from 'node:crypto'
+import { isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
@@ -209,7 +210,9 @@ export class ManagedWorktreeService {
           state: rec.state,
         }
         const versioned = rec as unknown as ManagedWorktreeRecord | ManagedWorktreeRecordV2
-        if (versioned.schemaVersion !== 2) return legacy
+        // The fixed registry upgrades legacy records to V2 storage, but V1
+        // discovery must retain its exact public summary until V2 is effective.
+        if (!isWorktreeV2Enabled() || versioned.schemaVersion !== 2) return legacy
 
         const v2 = versioned
         const summary: ManagedWorktreeSummaryV2 = {
