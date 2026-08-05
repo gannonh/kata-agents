@@ -2,6 +2,8 @@
 
 ## 2026-08-04
 
+* **Worktree V2 Phase 1 Verify evidence posted**: [#40](https://github.com/gannonh/kata-agents/issues/40) has a 13/13-pass acceptance matrix covering the required server, Electron, headless, registry, root, locale, and documentation evidence. The issue remains open at `status:implemented` pending user sign-off.
+
 * **Worktree V2 Phase 1 implemented and UAT verified**: [#40](https://github.com/gannonh/kata-agents/issues/40) — exact named identity, per-server roots, fail-closed fixed-registry upgrades, capability-aware Electron settings/composer controls, and local/headless parity are implemented. The real-Electron local UAT passes after the required Electron artifact is built.
 
 * **Worktree V2 approved**: approved epic [#17](https://github.com/gannonh/kata-agents/issues/17) and sequential sub-specs [#40](https://github.com/gannonh/kata-agents/issues/40) through [#43](https://github.com/gannonh/kata-agents/issues/43) after adversarial safety and feasibility review. The approved contract covers custom identity, per-server settings, snapshot-first lifecycle, conflict-safe handoff, and isolated current-head conversation forks. All five issues are ready for Build; Build has not started.
