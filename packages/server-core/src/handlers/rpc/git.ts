@@ -11,12 +11,17 @@
 import {
   CodedError,
   RPC_CHANNELS,
+  WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
+  WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_NAME_INVALID_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
   WorktreeV2CapabilityError,
 } from '@kata-sh/shared/protocol'
 import type {
   CheckoutPrepareIntentVersioned,
   CreatePullRequestInput,
+  ErrorCode,
   GitActionResult,
   WorktreeSettingsUpdateInput,
   GitCommitInput,
@@ -29,7 +34,12 @@ import type {
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import { pushTyped } from '../../transport/push'
-import { getDefaultGitServices, GitStatusSubscription, WorktreeSettingsError } from '../../git'
+import {
+  getDefaultGitServices,
+  GitStatusSubscription,
+  WorktreeCreationError,
+  WorktreeSettingsError,
+} from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
@@ -70,6 +80,21 @@ function assertWorktreeV2Enabled(): void {
 function throwTypedWorktreeSettingsError(error: unknown): never {
   if (error instanceof WorktreeSettingsError) {
     throw new CodedError(WORKTREE_SETTINGS_ERROR_CODE, error.message)
+  }
+  throw error
+}
+
+const WORKTREE_CREATION_WIRE_CODES: Readonly<Record<string, ErrorCode>> = {
+  WORKTREE_NAME_INVALID: WORKTREE_NAME_INVALID_CODE,
+  WORKTREE_BRANCH_COLLISION: WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_DESTINATION_UNSAFE: WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_BRANCH_OWNERSHIP_UNKNOWN: WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
+}
+
+function throwTypedWorktreeCreationError(error: unknown): never {
+  if (error instanceof WorktreeCreationError) {
+    const wireCode = WORKTREE_CREATION_WIRE_CODES[error.code]
+    if (wireCode) throw new CodedError(wireCode, error.message)
   }
   throw error
 }
@@ -306,7 +331,11 @@ export function registerGitHandlers(
         throw new WorktreeV2CapabilityError()
       }
       assertFeatureEnabled()
-      return deps.sessionManager.prepareCheckout(sessionId, intent)
+      try {
+        return await deps.sessionManager.prepareCheckout(sessionId, intent)
+      } catch (error) {
+        throwTypedWorktreeCreationError(error)
+      }
     },
   )
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   RPC_CHANNELS,
+  WORKTREE_BRANCH_COLLISION_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
   WORKTREE_V2_CAPABILITY_ERROR_CODE,
 } from '@kata-sh/shared/protocol'
@@ -13,7 +14,7 @@ import type {
   SessionCheckoutV1,
 } from '@kata-sh/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '@kata-sh/server-core/transport'
-import { WorktreeSettingsError } from '../../git'
+import { WorktreeCreationError, WorktreeSettingsError } from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 import { registerGitHandlers, checkManagedCheckoutIdentity } from './git'
@@ -170,6 +171,9 @@ interface SessionShape {
 function makeHarness(
   gitServices: GitServices,
   sessions: SessionShape[] = [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }],
+  overrides?: {
+    prepareCheckout?: (sessionId: string, intent: unknown) => Promise<unknown>
+  },
 ) {
   const handlers = new Map<string, HandlerFn>()
   const prepareCalls: Array<[string, unknown]> = []
@@ -207,6 +211,7 @@ function makeHarness(
         gitStatusRefresher = refresh
       },
       async prepareCheckout(sessionId: string, intent: unknown) {
+        if (overrides?.prepareCheckout) return overrides.prepareCheckout(sessionId, intent)
         prepareCalls.push([sessionId, intent])
         return { checkout: {}, workingDirectory: '/wt', sdkCwd: '/wt' }
       },
@@ -520,6 +525,27 @@ describe('registerGitHandlers', () => {
       }),
     ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
     expect(prepareCalls).toHaveLength(0)
+  })
+
+  it('transports named-worktree creation failures with their registered wire codes', async () => {
+    process.env[FLAG] = 'true'
+    process.env[V2_FLAG] = '1'
+    const { git } = makeGitServices()
+    const { handlers, ctx } = makeHarness(git, undefined, {
+      prepareCheckout: async () => {
+        throw new WorktreeCreationError('already in use', 'WORKTREE_BRANCH_COLLISION')
+      },
+    })
+
+    await expect(
+      handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 's1', {
+        schemaVersion: 2,
+        mode: 'managed-worktree',
+        workingDirectory: '/repo',
+        baseRef: 'main',
+        worktreeNameSuffix: 'auth-refresh',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_BRANCH_COLLISION_CODE })
   })
 
   it('serves existing-worktree discovery read-only regardless of the feature flag', async () => {

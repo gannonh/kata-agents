@@ -76,6 +76,14 @@ export interface WireError {
 export const WORKTREE_V2_CAPABILITY_ERROR_CODE = 'GIT_WORKTREE_V2_UNAVAILABLE' as const
 /** Wire error returned when a worktree settings update fails validation or persistence. */
 export const WORKTREE_SETTINGS_ERROR_CODE = 'GIT_WORKTREE_SETTINGS_INVALID' as const
+/** Wire error returned when a named worktree request fails before any mutation. */
+export const WORKTREE_NAME_INVALID_CODE = 'WORKTREE_NAME_INVALID' as const
+/** Wire error returned when the requested named branch already exists. */
+export const WORKTREE_BRANCH_COLLISION_CODE = 'WORKTREE_BRANCH_COLLISION' as const
+/** Wire error returned when a destination component is unsafe. */
+export const WORKTREE_DESTINATION_UNSAFE_CODE = 'WORKTREE_DESTINATION_UNSAFE' as const
+/** Wire error returned when compensation cannot prove branch ownership. */
+export const WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE = 'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN' as const
 
 export type ErrorCode =
   | 'HANDLER_ERROR'
@@ -92,6 +100,10 @@ export type ErrorCode =
   | 'CAPABILITY_UNAVAILABLE'
   | typeof WORKTREE_V2_CAPABILITY_ERROR_CODE
   | typeof WORKTREE_SETTINGS_ERROR_CODE
+  | typeof WORKTREE_NAME_INVALID_CODE
+  | typeof WORKTREE_BRANCH_COLLISION_CODE
+  | typeof WORKTREE_DESTINATION_UNSAFE_CODE
+  | typeof WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE
   | 'CLIENT_DISCONNECTED'
   | 'CLIENT_REQUEST_TIMEOUT'
   | 'BROWSER_NO_CAPABLE_CLIENT'
@@ -114,6 +126,10 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'CAPABILITY_UNAVAILABLE',
   WORKTREE_V2_CAPABILITY_ERROR_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
+  WORKTREE_NAME_INVALID_CODE,
+  WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
   'CLIENT_DISCONNECTED',
   'CLIENT_REQUEST_TIMEOUT',
   'BROWSER_NO_CAPABLE_CLIENT',
