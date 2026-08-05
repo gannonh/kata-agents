@@ -452,13 +452,18 @@ export class ManagedWorktreeService {
             )
           }
           if (named) await this.assertNamedBranchAvailable(repositoryRoot, branch)
+          // Capture the requested base OID immediately before Git creates the
+          // branch. If an external actor changes the new ref before the first
+          // ownership read, the created ref will no longer match this proof and
+          // compensation must retain it instead of treating it as ours.
+          const expectedBaseOid = await this.assertRefExists(repositoryRoot, baseRef)
           await runGit(['worktree', 'add', '--no-track', '-b', branch, worktreePath, baseRef], {
             cwd: repositoryRoot,
             timeoutMs: 120_000,
           })
           transaction.worktreeCreated = true
           const createdBranchOid = await this.getBranchOid(repositoryRoot, branch)
-          if (!createdBranchOid) {
+          if (!createdBranchOid || createdBranchOid !== expectedBaseOid) {
             throw new WorktreeCreationError(
               'The created branch identity could not be verified safely.',
               'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN',
@@ -473,6 +478,7 @@ export class ManagedWorktreeService {
             !createdContext.gitCommonDir ||
             safeRealpath(createdContext.gitCommonDir) !== realCommonDir ||
             createdContext.currentBranch !== branch ||
+            createdContext.headSha !== createdBranchOid ||
             !this.isUnderWorktreeRoot(worktreePath, materializationRoot)
           ) {
             throw new WorktreeCreationError(
@@ -1423,15 +1429,17 @@ export class ManagedWorktreeService {
     )
   }
 
-  private async assertRefExists(repositoryRoot: string, ref: string): Promise<void> {
+  private async assertRefExists(repositoryRoot: string, ref: string): Promise<string> {
     try {
       const res = await runGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
         cwd: repositoryRoot,
         okExitCodes: [1],
       })
-      if (res.exitCode !== 0) {
+      const oid = res.stdout.trim()
+      if (res.exitCode !== 0 || !oid) {
         throw new WorktreeCreationError(`Base ref "${ref}" not found.`, 'BASE_REF_NOT_FOUND')
       }
+      return oid
     } catch (err) {
       if (err instanceof WorktreeCreationError) throw err
       throw new WorktreeCreationError(`Base ref "${ref}" could not be resolved.`, 'BASE_REF_NOT_FOUND')

@@ -186,6 +186,55 @@ describe('ManagedWorktreeService.createWorktree', () => {
     }
   })
 
+  test('retains a branch changed before the first ownership capture', async () => {
+    const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+    try {
+      const repo = tmp()
+      await initRepo(repo)
+      const baseOid = (await git(repo, ['rev-parse', 'HEAD'])).trim()
+      await git(repo, ['commit', '--allow-empty', '-m', 'replacement'])
+      const replacementOid = (await git(repo, ['rev-parse', 'HEAD'])).trim()
+      await git(repo, ['reset', '--hard', baseOid])
+      const svc = servicesFor()
+      const gcd = await commonDir(repo)
+      const originalGetBranchOid = (svc.worktrees as any).getBranchOid.bind(svc.worktrees)
+      let injected = false
+      ;(svc.worktrees as any).getBranchOid = async (root: string, branch: string) => {
+        const observedOid = await originalGetBranchOid(root, branch)
+        if (!injected) {
+          injected = true
+          await git(repo, ['update-ref', `refs/heads/${branch}`, replacementOid])
+          return replacementOid
+        }
+        return observedOid
+      }
+
+      await expect(
+        svc.worktrees.createWorktree({
+          workspaceId: 'ws1',
+          sessionId: 'sess1',
+          repositoryRoot: repo,
+          gitCommonDir: gcd,
+          baseRef: 'main',
+          worktreeNameSuffix: 'auth-refresh',
+        }),
+      ).rejects.toMatchObject({ code: 'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN' })
+
+      expect(svc.registry.list()).toEqual([])
+      expect((await git(repo, ['branch', '--list', 'kata-agent/auth-refresh'])).trim()).toContain(
+        'kata-agent/auth-refresh',
+      )
+    } finally {
+      if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+      else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
+
   test('rejects invalid named branch suffixes before Git mutation', async () => {
     const previousV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
     const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
