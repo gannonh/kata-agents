@@ -1246,7 +1246,7 @@
   "settings.worktrees.remoteServer": "Serwer zdalny",
   "settings.worktrees.root": "Katalog materializacji",
   "settings.worktrees.rootDesc": "Nowe worktree są tworzone tutaj. Rejestr pozostaje w stałym magazynie serwera.",
-  "settings.worktrees.rootPlaceholder": "/ścieżka/do/worktrees",
+  "settings.worktrees.rootPlaceholder": "/path/to/worktrees",
   "settings.worktrees.rootSection": "Katalog główny worktree",
   "settings.worktrees.rootSectionDesc": "To ustawienie dotyczy tylko nowych worktree.",
   "settings.worktrees.saveFailed": "Nie udało się zapisać ustawień worktree",

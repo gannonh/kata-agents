@@ -1236,7 +1236,7 @@
   "settings.worktrees.remoteServer": "Távoli szerver",
   "settings.worktrees.root": "Materializálási gyökér",
   "settings.worktrees.rootDesc": "Az új worktree-k itt jönnek létre. A registry a szerver rögzített tárhelyén marad.",
-  "settings.worktrees.rootPlaceholder": "/útvonal/worktrees",
+  "settings.worktrees.rootPlaceholder": "/path/to/worktrees",
   "settings.worktrees.rootSection": "Worktree-gyökér",
   "settings.worktrees.rootSectionDesc": "Ez a beállítás csak az új worktree-kre vonatkozik.",
   "settings.worktrees.saveFailed": "A worktree-beállítások mentése sikertelen",

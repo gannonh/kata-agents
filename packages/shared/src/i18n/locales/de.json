@@ -1236,7 +1236,7 @@
   "settings.worktrees.remoteServer": "Remote-Server",
   "settings.worktrees.root": "Materialisierungsstamm",
   "settings.worktrees.rootDesc": "Neue Worktrees werden hier erstellt. Die Registry bleibt im festen Serverspeicher.",
-  "settings.worktrees.rootPlaceholder": "/pfad/zu/worktrees",
+  "settings.worktrees.rootPlaceholder": "/path/to/worktrees",
   "settings.worktrees.rootSection": "Worktree-Stamm",
   "settings.worktrees.rootSectionDesc": "Diese Einstellung gilt nur für neue Worktrees.",
   "settings.worktrees.saveFailed": "Worktree-Einstellungen konnten nicht gespeichert werden",
