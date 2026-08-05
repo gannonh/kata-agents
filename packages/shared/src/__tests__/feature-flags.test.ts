@@ -162,6 +162,14 @@ describe('feature-flags runtime helpers', () => {
     expect(isWorktreeV2Enabled()).toBe(false);
   });
 
+  it('isWorktreeV2Enabled defaults false while V1 is effective', () => {
+    process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+    delete process.env.KATA_FEATURE_WORKTREE_V2
+
+    expect(isWorktreeV2Enabled()).toBe(false)
+    expect(FEATURE_FLAGS.worktreeV2).toBe(false)
+  })
+
   it('isWorktreeV2Enabled requires both V1 and V2 flags', () => {
     process.env.KATA_FEATURE_WORKTREE_V2 = '1';
 

@@ -5875,7 +5875,7 @@ export class SessionManager implements ISessionManager {
    */
   private bindCheckout(
     managed: ManagedSession,
-    checkout: import('@kata-sh/shared/protocol').SessionCheckoutV1,
+    checkout: import('@kata-sh/shared/protocol').SessionCheckout,
     resolvedWorkingDir: string,
   ): void {
     managed.checkout = checkout

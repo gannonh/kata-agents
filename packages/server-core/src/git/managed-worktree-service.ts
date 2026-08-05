@@ -15,6 +15,9 @@ import { createHash } from 'node:crypto'
 import type {
   GitWorkingTreeEntry,
   ManagedWorktreeRecord,
+  ManagedWorktreeRecordV2,
+  ManagedWorktreeSummary,
+  ManagedWorktreeSummaryV2,
   ManagedWorktreeSummaryVersioned,
   SessionCheckout,
   WorktreeRemovalConfirmation,
@@ -194,14 +197,32 @@ export class ManagedWorktreeService {
           this.workspaceIdOf(rec) === workspaceId &&
           computeRepoKey(safeRealpath(rec.gitCommonDir)) === repoKey,
       )
-      .map((rec) => ({
-        managedWorktreeId: rec.managedWorktreeId,
-        checkoutPath: rec.checkoutPath,
-        expectedBranch: rec.expectedBranch,
-        baseRef: rec.baseRef,
-        ownerCount: rec.ownerSessionIds.length,
-        state: rec.state,
-      }))
+      .map((rec): ManagedWorktreeSummaryVersioned => {
+        const legacy: ManagedWorktreeSummary = {
+          managedWorktreeId: rec.managedWorktreeId,
+          checkoutPath: rec.checkoutPath,
+          expectedBranch: rec.expectedBranch,
+          baseRef: rec.baseRef,
+          ownerCount: rec.ownerSessionIds.length,
+          state: rec.state,
+        }
+        const versioned = rec as unknown as ManagedWorktreeRecord | ManagedWorktreeRecordV2
+        if (versioned.schemaVersion !== 2) return legacy
+
+        const v2 = versioned
+        const summary: ManagedWorktreeSummaryV2 = {
+          schemaVersion: 2,
+          managedWorktreeId: v2.managedWorktreeId,
+          checkoutPath: v2.checkoutPath,
+          displayName: v2.displayName,
+          expectedBranch: v2.expectedBranch,
+          materializationRoot: v2.materializationRoot,
+          baseRef: v2.baseRef,
+          ownerCount: v2.ownerSessionIds.length,
+          state: v2.state,
+        }
+        return summary
+      })
   }
 
   /**

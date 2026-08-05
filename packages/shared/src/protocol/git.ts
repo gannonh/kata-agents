@@ -131,6 +131,8 @@ export type SessionCheckoutVersioned = SessionCheckout
  * worktree on an unprepared empty session.
  */
 export interface CheckoutPrepareIntent {
+  /** Legacy requests omit this field; V1 records may be explicitly marked with 1. */
+  schemaVersion?: 1
   mode: CheckoutMode
   /** Currently selected working directory (used to resolve repository identity). */
   workingDirectory: string
@@ -146,13 +148,19 @@ export interface CheckoutPrepareIntent {
    * session.
    */
   managedWorktreeId?: string | null
+  /** V1/shared intents cannot carry a V2-only name suffix. */
+  worktreeNameSuffix?: never
 }
 
 /** New-worktree intent with the V2 name suffix explicitly present. */
-export interface CheckoutPrepareIntentV2 extends Omit<CheckoutPrepareIntent, 'mode'> {
+export interface CheckoutPrepareIntentV2
+  extends Omit<CheckoutPrepareIntent, 'mode' | 'schemaVersion' | 'managedWorktreeId' | 'worktreeNameSuffix'> {
+  schemaVersion: 2
   mode: 'managed-worktree'
   /** Editable suffix that becomes the display name and branch suffix. */
   worktreeNameSuffix: string
+  /** Named creation cannot bind an existing worktree. */
+  managedWorktreeId?: never
 }
 
 /** Preparation intent from either protocol version. */
@@ -194,6 +202,8 @@ export type ManagedWorktreeState =
   | 'blocked'
 
 export interface ManagedWorktreeRecord {
+  /** Legacy records may omit the discriminator; V2 records require 2. */
+  schemaVersion?: 1
   managedWorktreeId: string
   /** Owning workspace ID. Absent on records persisted before this field. */
   workspaceId?: string
@@ -215,7 +225,7 @@ export type ManagedWorktreeRecordV1 = ManagedWorktreeRecord
  * later settings change never authorizes or relocates an existing checkout.
  */
 export interface ManagedWorktreeRecordV2
-  extends Omit<ManagedWorktreeRecord, 'workspaceId' | 'expectedBranch'> {
+  extends Omit<ManagedWorktreeRecord, 'schemaVersion' | 'workspaceId' | 'expectedBranch'> {
   schemaVersion: 2
   workspaceId: string
   displayName: string
@@ -233,6 +243,8 @@ export type ManagedWorktreeRecordVersioned = ManagedWorktreeRecord | ManagedWork
  * is a server-side ownership add keyed by `managedWorktreeId`.
  */
 export interface ManagedWorktreeSummary {
+  /** Legacy summaries may omit the discriminator; V2 summaries require 2. */
+  schemaVersion?: 1
   managedWorktreeId: string
   /** Absolute checkout path (display uses its directory name). */
   checkoutPath: string
@@ -247,7 +259,7 @@ export interface ManagedWorktreeSummary {
 
 /** Server-issued summary for a V2 named worktree. */
 export interface ManagedWorktreeSummaryV2
-  extends Omit<ManagedWorktreeSummary, 'expectedBranch'> {
+  extends Omit<ManagedWorktreeSummary, 'schemaVersion' | 'expectedBranch'> {
   schemaVersion: 2
   displayName: string
   expectedBranch: string

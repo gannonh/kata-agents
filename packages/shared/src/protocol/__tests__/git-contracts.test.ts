@@ -18,8 +18,6 @@ import {
 } from '../git'
 import { isErrorCode } from '../types'
 
-type AssertFalse<T extends false> = T
-
 describe('Git Worktree V2 protocol contracts', () => {
   it('keeps V1 checkout intents and records free of fabricated V2 values', () => {
     const intent: CheckoutPrepareIntent = {
@@ -50,9 +48,7 @@ describe('Git Worktree V2 protocol contracts', () => {
       state: 'ready',
     }
 
-    const v1IntentHasNoSuffix: AssertFalse<'worktreeNameSuffix' extends keyof CheckoutPrepareIntent ? true : false> = false
-
-    expect(v1IntentHasNoSuffix).toBe(false)
+    expect(intent.worktreeNameSuffix).toBeUndefined()
     expect('worktreeNameSuffix' in intent).toBe(false)
     expect('displayName' in checkout).toBe(false)
     expect('materializationRoot' in checkout).toBe(false)
@@ -62,6 +58,7 @@ describe('Git Worktree V2 protocol contracts', () => {
 
   it('models a named V2 preparation and returned identity metadata', () => {
     const intent: CheckoutPrepareIntentV2 = {
+      schemaVersion: 2,
       mode: 'managed-worktree',
       workingDirectory: '/repo',
       baseRef: 'main',

@@ -11,7 +11,7 @@
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
-import type { SessionCheckoutV1 } from '../protocol/git.ts';
+import type { SessionCheckout } from '../protocol/git.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@kata-sh/core/types';
 
 /**
@@ -205,7 +205,7 @@ export interface SessionConfig {
    * bound to a current checkout or managed worktree via checkout preparation.
    * Absent on legacy sessions, which continue with working-directory behavior.
    */
-  checkout?: SessionCheckoutV1;
+  checkout?: SessionCheckout;
 }
 
 /**
@@ -298,7 +298,7 @@ export interface SessionHeader {
   /** Metadata for sessions created by automations */
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
   /** Git checkout metadata (schema-versioned). See SessionConfig.checkout. */
-  checkout?: SessionCheckoutV1;
+  checkout?: SessionCheckout;
   // Pre-computed fields for fast list loading
   /** Number of messages in session */
   messageCount: number;
