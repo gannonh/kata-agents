@@ -923,22 +923,22 @@ export default function App() {
       const workspaceId = windowWorkspaceId ?? ''
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
-      if (event.type === 'session_created') {
+      if (event.type === 'session_created' || event.type === 'session_updated') {
         window.electronAPI.getSessionMessages(sessionId)
-          .then((createdSession: Session | null) => {
-            if (createdSession) {
+          .then((updatedSession: Session | null) => {
+            if (updatedSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
               if (existingMeta) {
-                replaceLoadedSession(createdSession)
+                replaceLoadedSession(updatedSession)
               } else {
-                addSession(createdSession)
+                addSession(updatedSession)
               }
-              syncSessionOptionsFromSession(createdSession)
+              syncSessionOptionsFromSession(updatedSession)
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
           })
-          .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .catch((error: unknown) => console.error('Failed to handle session event:', error))
         return
       }
 

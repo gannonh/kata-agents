@@ -43,6 +43,14 @@ Phase 2 ([#41](https://github.com/gannonh/kata-agents/issues/41)) must make ever
 - Archive cleanup requires every owner archived with none active, flagged, or unquiesceable. Retention cleanup may select idle unarchived records, ordered by `lastUsedAt` (created at creation/restore/owner-attach/unarchive/accepted message), then creation time, then opaque ID. Each candidate is tried at most once per sweep; candidate-specific blocks are skipped and failures persisted. Disabling auto-delete fences new candidates at the policy-version boundary; an in-flight source release completes its journaled transaction.
 - The materialized-worktree limit excludes snapshots; snapshot payloads are removed after verified restore or by explicit permanent deletion with a second irreversibility confirmation.
 
+### Verify-phase findings (2026-08-05)
+
+Offline UAT (136 real-Git checks including restart phases, oversized candidates, failure injection, protections, exact restore, and server-scoped settings) and a real-app capture run tightened three behaviors:
+
+- **Dynamic protections are enforced in the removal transaction itself, not only in the preview fingerprint.** Active/flagged owner state is deliberately not part of the preview fingerprint (it changes between preview and capture), so `runRemovalTransactionLocked()` re-checks every owner's active/flagged state immediately before quiescence and rejects with `LIFECYCLE_OWNERS_PRESENT`. A stale pre-flag preview can no longer delete a protected worktree for any caller (manual, retry, or session delete).
+- **Retry of a partially released checkout is governed by the verified snapshot.** After a failed removal that already deregistered the worktree, the working-tree fingerprint may be unavailable or stale on the leftover path; `retryWorktree` now uses the verified snapshot as authority when the checkout is no longer inspectable, and refuses (with actionable error) when an inspectable checkout no longer matches the captured fingerprint.
+- **The renderer surfaces the persisted `recoveryState`.** The composer badge now reads the server-persisted lifecycle state (`snapshotted`, `restoring`, …) as authoritative and shows the worktree name/branch, so a fenced session names the accurate remedy instead of a generic “missing”. The inventory refresh control renders a translated label (a missing `common.refresh` key existed in no locale and is now present in all seven).
+
 ## Consequences
 
 - Removal can no longer lose supported work: every released checkout has a verified restorable payload, and interrupted transactions are classified or resumed at startup.

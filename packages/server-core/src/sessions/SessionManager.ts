@@ -5382,6 +5382,10 @@ export class SessionManager implements ISessionManager {
           }
           this.persistSession(managed)
           await this.flushSession(sessionId)
+          // Keep the renderer's session DTO in sync: the recovery state (or the
+          // restored checkout path) changed server-side, so the composer badge
+          // and session row must re-fetch instead of showing stale identity.
+          this.sendEvent({ type: 'session_updated', sessionId }, managed.workspace.id)
         }
       },
       touchSessionCheckout: async (sessionId) => {
