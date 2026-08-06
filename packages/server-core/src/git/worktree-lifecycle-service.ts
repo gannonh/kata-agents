@@ -200,6 +200,15 @@ export class WorktreeLifecycleService {
       const record = this.deps.registry.findByCheckoutPath(path)
       if (record) return { managedWorktreeId: record.managedWorktreeId, state: record.state }
     }
+    // Fall back to the owner set: a restore moves the checkout to a new path
+    // before the owner leases are rebound, so in that window the session's
+    // lease still names the old path and the record must stay reachable for
+    // detach and fencing decisions.
+    for (const record of this.listRecords()) {
+      if (record.ownerSessionIds.includes(sessionId)) {
+        return { managedWorktreeId: record.managedWorktreeId, state: record.state }
+      }
+    }
     return { managedWorktreeId: null, state: 'ready' }
   }
 
@@ -539,10 +548,6 @@ export class WorktreeLifecycleService {
           policyVersion: policy.version,
         })
         let committed = false
-        // Owners observed at the ready-commit: session stamping and lease
-        // rebinding use this set so a session that detached during the restore
-        // is never re-associated with the restored checkout.
-        let currentOwners: string[] = []
         try {
           this.deps.journal.step(journalEntry.journalId, 'locks-acquired')
           // Durable in-flight marker before any checkout mutation, so a crash
@@ -580,23 +585,35 @@ export class WorktreeLifecycleService {
             current.stateChangedAt = Date.now()
             tx.commit()
             committed = true
-            // The session updates and lease rebinding below must use the
-            // CURRENT owner set: an owner may have detached while the restore
-            // awaited snapshot I/O, and must not be re-associated with the
-            // restored checkout.
-            currentOwners = [...current.ownerSessionIds]
           })
-          await this.deps.applyOwnerSessionState?.(currentOwners, {
+          // Re-read the owner set under the registry lock immediately before
+          // stamping: an owner may have detached while the restore awaited
+          // snapshot I/O and must not be re-associated with the restored
+          // checkout.
+          let stampOwners: string[] = []
+          await this.deps.registry.runExclusive(async (tx) => {
+            const current = tx.get(record.managedWorktreeId)
+            if (current) stampOwners = [...current.ownerSessionIds]
+          })
+          await this.deps.applyOwnerSessionState?.(stampOwners, {
             managedWorktreeId: record.managedWorktreeId,
             state: 'ready',
             checkoutPath: restored.checkoutPath,
           })
           // Re-lease every owner to the restored path so lifecycle decisions see
-          // the full fence set at the live checkout.
-          for (const owner of currentOwners) {
-            this.deps.leases.releaseSession(owner)
-            this.deps.leases.lease(owner, restored.checkoutPath)
-          }
+          // the full fence set at the live checkout. The owner set is observed
+          // and the leases are moved under one registry-lock hold: a session
+          // that detached during the session-stamping await needs the same
+          // lock to commit, so it can never be leased back onto the restored
+          // checkout after its detachment.
+          await this.deps.registry.runExclusive(async (tx) => {
+            const current = tx.get(record.managedWorktreeId)
+            if (!current) return
+            for (const owner of current.ownerSessionIds) {
+              this.deps.leases.releaseSession(owner)
+              this.deps.leases.lease(owner, restored.checkoutPath)
+            }
+          })
           this.deps.journal.commit(journalEntry.journalId, 'registry-sessions-committed')
 
           // Only after the commit: remove the payload and CAS-delete the ref.

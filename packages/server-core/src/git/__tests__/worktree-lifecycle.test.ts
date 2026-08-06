@@ -1064,6 +1064,40 @@ describe('UAT regressions', () => {
     expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
   })
 
+  test('restore never leases back an owner that detached during session stamping', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x', ['session-1'])
+    writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    // The owner detaches while the restored state is being stamped onto
+    // sessions: the lease rebinding must re-observe the owner set under the
+    // registry lock so the detached session is not leased back onto the
+    // restored checkout, where it would fence later cleanup.
+    const deps = svc.lifecycle as unknown as {
+      deps: {
+        applyOwnerSessionState: (
+          sessionIds: string[],
+          state: { managedWorktreeId: string; state: string; checkoutPath?: string },
+        ) => Promise<void>
+      }
+    }
+    const originalApply = deps.deps.applyOwnerSessionState
+    deps.deps.applyOwnerSessionState = async (sessionIds, state) => {
+      await svc.lifecycle.detachSession('session-1')
+      return originalApply(sessionIds, state)
+    }
+
+    const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
+
+    expect(restored.restored).toBe(true)
+    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(after.ownerSessionIds).toEqual([])
+    expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
+  })
+
   test('startup reconciliation prunes stale lease markers', async () => {
     const { svc, root } = harness
     await makeManagedWorktree('feature-x')
