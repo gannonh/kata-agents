@@ -15,6 +15,11 @@ import { initRepo, makeTmpDir, cleanup, git } from './test-helpers'
 
 const REGISTRY_MODULE = require.resolve('../worktree-registry')
 
+// Snapshot the REAL exports at module load: `import * as` bindings are live,
+// so after mock.module replaces the module, `registryModule.removeDir` points
+// at the mock. Re-registering that namespace cannot restore the original.
+const realRegistryModule = { ...registryModule }
+
 const cleanups: string[] = []
 function tmp(): string {
   const d = makeTmpDir()
@@ -23,7 +28,7 @@ function tmp(): string {
 }
 afterEach(() => {
   // Restore the real directory removal for any other suite in this process.
-  mock.module(REGISTRY_MODULE, () => registryModule)
+  mock.module(REGISTRY_MODULE, () => realRegistryModule)
   delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
   while (cleanups.length) cleanup(cleanups.pop()!)
 })
@@ -60,7 +65,7 @@ describe('removeWorktree — cleanup that did not happen is reported as failure'
     await git(repo, ['worktree', 'lock', record.checkoutPath])
     // …and the manual fallback fails too.
     mock.module(REGISTRY_MODULE, () => ({
-      ...registryModule,
+      ...realRegistryModule,
       removeDir: () => false,
     }))
 

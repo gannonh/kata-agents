@@ -347,20 +347,16 @@ describe('WorktreeSnapshotService.capture', () => {
     const { record } = await makeRecord(root, repo)
     const svc = snapshotServiceFor(root)
 
-    // Simulate a collision by pre-creating the ref for a fake snapshot id.
-    const fakeId = 'deadbeefdeadbeef'
-    await git(repo, ['update-ref', `refs/kata/worktree-snapshots/${fakeId}`, 'main'])
-    const original = svc.capture.bind(svc)
-    // Patch capture to use the colliding id via a subclass-free hook: capture
-    // with a snapshotId collision is exercised by pre-seeding update-ref.
-    const spy = svc as unknown as { hiddenRefFor: (id: string) => string }
-    const refFor = spy.hiddenRefFor
-    const captured = capture(svc, record)
-    // The service generates its own id, so instead verify the CAS path through
-    // a direct update-ref conflict: a second capture of the same ref.
-    await expect(captured).resolves.toBeDefined()
-    void refFor
-    void original
+    // Pin every generated snapshot id to one already-occupied hidden ref so
+    // the CAS update-ref must collide.
+    const collidingRef = 'refs/kata/worktree-snapshots/deadbeefdeadbeef'
+    await git(repo, ['update-ref', collidingRef, 'main'])
+    ;(svc as unknown as { hiddenRefFor: (id: string) => string }).hiddenRefFor = () => collidingRef
+
+    await expect(capture(svc, record)).rejects.toMatchObject({ code: 'SNAPSHOT_REF_CONFLICT' })
+    // The failed capture publishes no payload.
+    const { readdirSync } = await import('node:fs')
+    expect(readdirSync(join(root, 'snapshots'))).toEqual([])
   })
 })
 
@@ -658,6 +654,17 @@ describe('computeWorktreeFingerprint', () => {
     const afterStaged = await fingerprint(record)
     expect(afterStaged).not.toBe(afterDirty)
 
+    // Idempotent for unchanged state.
+    expect(await fingerprint(record)).toBe(afterStaged)
+
+    // A content-only edit of an already-modified file must change the
+    // fingerprint even though the porcelain-v2 status line is unchanged.
+    writeFile(record.checkoutPath, 'tracked.txt', 'v3\n')
+    const afterFirstEdit = await fingerprint(record)
+    expect(afterFirstEdit).not.toBe(afterStaged)
+    writeFile(record.checkoutPath, 'tracked.txt', 'v4\n')
+    expect(await fingerprint(record)).not.toBe(afterFirstEdit)
+
     // Owner set changes the fingerprint.
     const withOwner = await computeWorktreeFingerprint({
       managedWorktreeId: record.managedWorktreeId,
@@ -683,8 +690,5 @@ describe('computeWorktreeFingerprint', () => {
       archivedOwnerSessionIds: [],
     })
     expect(withPolicy).not.toBe(afterStaged)
-
-    // Idempotent for unchanged state.
-    expect(await fingerprint(record)).toBe(afterStaged)
   })
 })

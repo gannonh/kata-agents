@@ -978,6 +978,41 @@ function writePatch(dir: string, name: string, bytes: Buffer): void {
  * owner, branch, HEAD, index, working tree, untracked manifest, root,
  * lifecycle state, or policy refuses a stale confirmation.
  */
+/**
+ * Current path of one `git status --porcelain=v2 -z` record.
+ *
+ * Porcelain v2 records are space-separated field lists (paths may contain
+ * spaces), rename/copy records separate the destination from the origin with a
+ * tab, and `-z` output never quotes paths. Parsing by record type selects the
+ * on-disk (destination) path:
+ *
+ * - `1` ordinary: 8 fixed fields, then the path
+ * - `2` rename/copy: 9 fixed fields, then the destination path (before the tab)
+ * - `u` unmerged: 10 fixed fields, then the path
+ * - `?` untracked / `!` ignored: the path follows the type marker
+ */
+function porcelainV2CurrentPath(record: string): string | null {
+  const type = record[0]
+  if (type === '2') {
+    const head = record.split('\t')[0]
+    const path = head.split(' ').slice(9).join(' ')
+    return path || null
+  }
+  if (type === 'u') {
+    const path = record.split(' ').slice(10).join(' ')
+    return path || null
+  }
+  if (type === '1') {
+    const path = record.split(' ').slice(8).join(' ')
+    return path || null
+  }
+  if (type === '?' || type === '!') {
+    const path = record.slice(2)
+    return path || null
+  }
+  return null
+}
+
 export async function computeWorktreeFingerprint(input: {
   managedWorktreeId: string
   checkoutPath: string
@@ -1022,7 +1057,7 @@ export async function computeWorktreeFingerprint(input: {
   hash.update(status.stdout)
   hash.update('\0')
   for (const record of splitNul(status.stdout)) {
-    const path = record.split('\t').pop()
+    const path = porcelainV2CurrentPath(record)
     if (!path) continue
     const absolutePath = join(input.checkoutPath, path)
     try {

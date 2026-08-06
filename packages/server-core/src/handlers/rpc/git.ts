@@ -40,6 +40,7 @@ import type {
   WorktreeRetryInput,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
+import { i18n } from '@kata-sh/shared/i18n'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import { pushTyped } from '../../transport/push'
 import {
@@ -142,7 +143,9 @@ function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void 
   const { state } = git.lifecycle.recordStateForSession(sessionId)
   if (state !== 'ready') {
     throw new Error(
-      `This session's worktree is ${state}. Restore or resolve it in Worktrees settings before continuing.`,
+      i18n.t('git.worktree.usableFence', {
+        state,
+      }),
     )
   }
 }
@@ -386,7 +389,7 @@ export function registerGitHandlers(
     assertWorktreeV2Enabled()
     git.lifecycle.assertReady()
     if (typeof managedWorktreeId !== 'string' || !managedWorktreeId) {
-      throw new CodedError(WORKTREE_LIFECYCLE_ERROR_CODE, 'A worktree ID is required.')
+      throw new CodedError(WORKTREE_LIFECYCLE_ERROR_CODE, i18n.t('git.worktree.idRequired'))
     }
     try {
       return await git.lifecycle.preview(managedWorktreeId)

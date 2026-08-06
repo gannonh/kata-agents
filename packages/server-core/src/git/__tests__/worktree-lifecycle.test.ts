@@ -232,7 +232,7 @@ describe('manual snapshot-first delete', () => {
   test('deleting an unowned record succeeds snapshot-first', async () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x', ['session-1'])
-    svc.lifecycle.detachSession('session-1')
+    await svc.lifecycle.detachSession('session-1')
     expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('unowned')
 
     const result = await svc.lifecycle.deleteWorktree(
@@ -343,7 +343,7 @@ describe('permanent delete', () => {
 
     // Owners detach (session deletion after restore is impossible here, so the
     // owners are dropped by their session-delete path).
-    svc.lifecycle.detachSession('session-1')
+    await svc.lifecycle.detachSession('session-1')
     const result = await svc.lifecycle.permanentDelete(record.managedWorktreeId, true)
     expect(result.deleted).toBe(true)
     expect(svc.registry.get(record.managedWorktreeId)).toBeUndefined()
@@ -357,7 +357,7 @@ describe('permanent delete', () => {
       record.managedWorktreeId,
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
-    svc.lifecycle.detachSession('session-1')
+    await svc.lifecycle.detachSession('session-1')
     await expect(svc.lifecycle.permanentDelete(record.managedWorktreeId, false)).rejects.toMatchObject({
       code: 'LIFECYCLE_FAILED',
     })
@@ -428,7 +428,7 @@ describe('retention sweep (LRU)', () => {
     const second = await makeManagedWorktree('second', ['s2'])
     const third = await makeManagedWorktree('third', ['s3'])
     // Activity: first used most recently, second oldest.
-    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() + 1000)
+    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 10)
     svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 1000)
 
     const result = await svc.lifecycle.runCleanupSweep()
@@ -440,6 +440,31 @@ describe('retention sweep (LRU)', () => {
     expect(existsSync(third.checkoutPath)).toBe(true)
     expect((svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
     void third
+  })
+
+  test('one sweep removes every surplus worktree beyond the retention limit', async () => {
+    harness = makeHarness(1)
+    await initRepo(harness.repo)
+    harness.svc.lifecycle.markReady()
+    const svc = harness.svc
+
+    const first = await makeManagedWorktree('first', ['s1'])
+    const second = await makeManagedWorktree('second', ['s2'])
+    const third = await makeManagedWorktree('third', ['s3'])
+    // All three idle and unarchived; the limit is 1, so two are surplus.
+    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 3000)
+    svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 2000)
+
+    const result = await svc.lifecycle.runCleanupSweep()
+
+    expect(result.outcome).toBe('succeeded')
+    expect(result.removedWorktreeId).toBe(second.managedWorktreeId)
+    expect((svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((svc.registry.get(third.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+    expect(existsSync(first.checkoutPath)).toBe(false)
+    expect(existsSync(second.checkoutPath)).toBe(false)
+    expect(existsSync(third.checkoutPath)).toBe(true)
   })
 
   test('skips protected (active/flagged) candidates and continues past candidate-specific blocks', async () => {
@@ -512,7 +537,7 @@ describe('session-delete integration', () => {
   test('plain detach removes only that owner; remaining owners and checkout survive', async () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x', ['session-1', 'session-2'])
-    svc.lifecycle.detachSession('session-1')
+    await svc.lifecycle.detachSession('session-1')
     const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.ownerSessionIds).toEqual(['session-2'])
     expect(after.state).toBe('ready')
@@ -682,7 +707,7 @@ describe('inventory', () => {
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
     expect(svc.lifecycle.inventory().counts.snapshotted).toBe(1)
-    svc.lifecycle.detachSession('s1')
+    await svc.lifecycle.detachSession('s1')
     await svc.lifecycle.permanentDelete(record.managedWorktreeId, true)
     expect(svc.lifecycle.inventory().counts.total).toBe(0)
   })
@@ -738,11 +763,14 @@ describe('review-fix regressions', () => {
     svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 5000)
 
     // Simulate an external writer racing the sweep: capture is intercepted by
-    // recomputing the fingerprint after capture started. Use a hook that writes
-    // into the checkout when the snapshot service starts capture.
+    // recomputing the fingerprint after capture started. The checkout already
+    // holds a modified file, and the hook writes MORE content into that same
+    // file — the porcelain-v2 status line stays identical, so only the
+    // per-path content binding can detect the race.
+    writeFileSync(join(first.checkoutPath, 'work.txt'), 'external write\n')
     const originalCapture = svc.snapshots.capture.bind(svc.snapshots)
     svc.snapshots.capture = (async (input: Parameters<typeof originalCapture>[0]) => {
-      writeFileSync(join(first.checkoutPath, 'race.txt'), 'external write\n')
+      writeFileSync(join(first.checkoutPath, 'work.txt'), 'external write 2\n')
       return originalCapture(input)
     }) as typeof originalCapture
 
@@ -753,7 +781,7 @@ describe('review-fix regressions', () => {
     const after = svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('cleanup-failed')
     expect(after.lastError).toContain('changed')
-    expect(existsSync(join(first.checkoutPath, 'race.txt'))).toBe(true)
+    expect(readFileSync(join(first.checkoutPath, 'work.txt'), 'utf8')).toBe('external write 2\n')
   })
 
   test('restore persists the restoring state before touching the checkout', async () => {
@@ -927,16 +955,15 @@ describe('UAT regressions', () => {
     const record = await makeManagedWorktree('feature-x')
     writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
     const preview = await svc.lifecycle.preview(record.managedWorktreeId)
-    // Injected failure: the checkout directory cannot be removed.
-    chmodSync(record.checkoutPath, 0o555)
-    const failed = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
-    expect(failed.deleted).toBe(false)
-    const stuck = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
-    expect(stuck.state).toBe('cleanup-failed')
-    expect(stuck.snapshot).toBeDefined()
-    // The failed attempt already deregistered the worktree, so no working-tree
-    // fingerprint is computable; the verified snapshot must govern the retry.
-    chmodSync(record.checkoutPath, 0o755)
+    await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(snapshotted.state).toBe('snapshotted')
+    // Simulate the crash window of a release that never completed: only a
+    // stray directory remains where the checkout was (no .git metadata, so no
+    // working-tree fingerprint is computable).
+    mkdirSync(record.checkoutPath, { recursive: true })
+    writeFileSync(join(record.checkoutPath, 'stray.tmp'), 'partial release')
+    svc.registry.upsert({ ...snapshotted, state: 'cleanup-failed' })
     const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
     expect(retried).toMatchObject({ retried: true, state: 'snapshotted' })
     expect(existsSync(record.checkoutPath)).toBe(false)
@@ -949,21 +976,30 @@ describe('UAT regressions', () => {
   test('retry refuses when a still-inspectable checkout changed after capture', async () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x')
+    writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
     const preview = await svc.lifecycle.preview(record.managedWorktreeId)
-    chmodSync(record.checkoutPath, 0o555)
-    await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
-    chmodSync(record.checkoutPath, 0o755)
+    // Race the transaction between capture and the final stability check: the
+    // snapshot captures the original content, then an external writer changes
+    // the checkout before release. The delete fails with the checkout intact
+    // and the record cleanup-failed with a valid snapshot.
+    const originalCapture = svc.snapshots.capture.bind(svc.snapshots)
+    svc.snapshots.capture = (async (input: Parameters<typeof originalCapture>[0]) => {
+      const captured = await originalCapture(input)
+      writeFileSync(join(record.checkoutPath, 'work.txt'), 'edited after capture\n')
+      return captured
+    }) as typeof originalCapture
+    const failed = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
+    expect(failed.deleted).toBe(false)
+    expect(failed.error).toContain('changed during capture')
     const stuck = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
-    // Re-register the checkout so a fingerprint is computable again, then
-    // change its content: the retry must refuse rather than lose the change.
-    if (stuck.snapshot) {
-      svc.registry.upsert({ ...stuck, snapshot: { ...stuck.snapshot, fingerprint: 'fingerprint-from-a-different-tree' } })
-    }
+    expect(stuck.state).toBe('cleanup-failed')
+    expect(stuck.snapshot).toBeDefined()
+    // The checkout is fully inspectable and holds the newer content: the
+    // retry must refuse rather than release it against the stale snapshot.
     const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
-    if (existsSync(join(record.checkoutPath, '.git'))) {
-      expect(retried.retried).toBe(false)
-      expect(retried.error).toContain('changed after its snapshot')
-    }
+    expect(retried.retried).toBe(false)
+    expect(retried.error).toContain('changed after its snapshot')
+    expect(readFileSync(join(record.checkoutPath, 'work.txt'), 'utf8')).toBe('edited after capture\n')
   })
 
   test('reconciliation gives missing records actionable recovery text', async () => {
@@ -977,5 +1013,49 @@ describe('UAT regressions', () => {
     const row = svc.lifecycle.inventory().rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)
     expect(row?.lastError ?? '').toContain('no longer on disk')
     expect(root).toBeDefined()
+  })
+
+  test('session-delete removal never stamps the dropped session with owner state', async () => {
+    harness = makeHarness(1)
+    await initRepo(harness.repo)
+    harness.svc.lifecycle.markReady()
+    const stamped: string[][] = []
+    const svc = harness.svc
+    ;(svc.lifecycle as unknown as {
+      deps: { applyOwnerSessionState: (sessionIds: string[]) => Promise<void> }
+    }).deps.applyOwnerSessionState = async (sessionIds) => {
+      stamped.push([...sessionIds])
+    }
+    const record = await makeManagedWorktree('feature-x', ['session-1'])
+
+    const outcome = await svc.lifecycle.removeForSessionDeletion({
+      sessionId: 'session-1',
+      managedWorktreeId: record.managedWorktreeId,
+    })
+
+    expect(outcome.outcome).toBe('removed')
+    // The session being deleted must not be persisted/flushed as an owner of
+    // the removed worktree — that would recreate it at its original path.
+    expect(stamped.flat()).not.toContain('session-1')
+  })
+
+  test('startup reconciliation prunes stale lease markers', async () => {
+    const { svc, root } = harness
+    await makeManagedWorktree('feature-x')
+    // A lease left by a process that has since exited would fence every
+    // destructive transaction on that checkout as a foreign lease.
+    const { resolve } = await import('node:path')
+    const modulePath = resolve(import.meta.dir, '../path-leases.ts')
+    const script = `
+      import { PathLeaseManager } from ${JSON.stringify(modulePath)}
+      new PathLeaseManager(${JSON.stringify(join(root, 'locks', 'path-leases'))}).lease('ghost', ${JSON.stringify(join(root, 'worktrees', 'x'))})
+    `
+    const child = Bun.spawnSync([process.execPath, '-e', script], { cwd: process.cwd() })
+    expect(child.exitCode).toBe(0)
+    expect(svc.pathLeases.leasesForSession('ghost')).toEqual([join(root, 'worktrees', 'x')])
+
+    await svc.lifecycle.reconcileJournal()
+
+    expect(svc.pathLeases.leasesForSession('ghost')).toEqual([])
   })
 })

@@ -385,10 +385,15 @@ describe('WorktreeRegistry', () => {
         import { WorktreeRegistry } from ${JSON.stringify(modulePath)}
         import { writeFileSync } from 'node:fs'
         const registry = new WorktreeRegistry(${JSON.stringify(path)}, { timeoutMs: 400, retryDelayMs: 5 })
+        // Signal BEFORE the attempt: a load/parse failure must not pass the
+        // test as a lock-induced block.
+        writeFileSync(${JSON.stringify(join(root, 'racer-attempted'))}, 'entered')
         try {
           registry.addOwnerIfReady(${JSON.stringify(record.managedWorktreeId)}, 'racer')
           writeFileSync(${JSON.stringify(join(root, 'racer-won'))}, 'won')
-        } catch {}
+        } catch (error) {
+          writeFileSync(${JSON.stringify(join(root, 'racer-failed'))}, error instanceof Error ? error.message : String(error))
+        }
       `
       const child = spawn(process.execPath, ['-e', script], {
         cwd: process.cwd(),
@@ -399,7 +404,14 @@ describe('WorktreeRegistry', () => {
       child.stdout.on('data', (chunk) => { childOutput += String(chunk) })
       child.stderr.on('data', (chunk) => { childOutput += String(chunk) })
       await new Promise<void>((done) => child.on('exit', () => done()))
+      // The child loaded the module and reached the acquisition attempt; it
+      // must have been blocked by the held registry lock, not by a child-side
+      // failure.
+      expect(existsSync(join(root, 'racer-attempted'))).toBe(true)
       expect(existsSync(join(root, 'racer-won'))).toBe(false)
+      expect(existsSync(join(root, 'racer-failed'))).toBe(true)
+      expect(readFileSync(join(root, 'racer-failed'), 'utf8')).toContain('registry lock')
+      expect(childOutput).toBe('')
       current.state = 'snapshotting'
       tx.commit()
       return current.state

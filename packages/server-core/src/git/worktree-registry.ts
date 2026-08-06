@@ -1306,6 +1306,11 @@ export class WorktreeRegistry {
   async runExclusive<T>(
     fn: (tx: WorktreeRegistryTransaction) => Promise<T> | T,
   ): Promise<T> {
+    // Errors thrown by the callback are domain errors (e.g. a lifecycle state
+    // guard) and must reach the caller unchanged; only lock acquisition and
+    // registry I/O failures are lock failures.
+    let callbackFailed = false
+    let callbackError: unknown
     try {
       return await this.lock.run(async () => {
         let source = this.readSource()
@@ -1339,9 +1344,16 @@ export class WorktreeRegistry {
             })
           },
         }
-        return await fn(tx)
+        try {
+          return await fn(tx)
+        } catch (error) {
+          callbackFailed = true
+          callbackError = error
+          throw error
+        }
       })
     } catch (error) {
+      if (callbackFailed) throw callbackError
       if (error instanceof WorktreeRegistryError) throw error
       throw wrapError(
         error,

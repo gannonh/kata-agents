@@ -5352,7 +5352,10 @@ export class SessionManager implements ISessionManager {
             managed,
             // Lifecycle quiescence is bounded; unquiesceable runtimes block.
             60_000,
-            false,
+            // Await the pre-chat barrier within the budget: a precomputed
+            // `false` would make every processing owner unquiesceable and
+            // fence every lifecycle transaction with LIFECYCLE_NOT_QUIESCED.
+            undefined,
           )
           if (!quiesced) return false
         }
@@ -5831,6 +5834,33 @@ export class SessionManager implements ISessionManager {
           blocked: true,
           blockedReason:
             'Worktree has uncommitted or unique work. Confirm destructive removal to proceed.',
+        }
+      }
+      // The destructive confirmation must name what is removed: a stale
+      // confirmation cannot authorize newer work. Mirrors the V1
+      // matchesRemovalConfirmation guard against the fresh preview.
+      if (options?.force && !options.expectedConfirmation) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'The worktree removal confirmation is missing. Inspect the worktree again before removing it.',
+        }
+      }
+      if (
+        options?.force &&
+        options.expectedConfirmation &&
+        (preview.uncommittedFileCount !== options.expectedConfirmation.uncommittedFileCount ||
+          preview.unpushedCommitCount !== options.expectedConfirmation.unpushedCommitCount ||
+          preview.branchHasUniqueWork !== options.expectedConfirmation.branchHasUniqueWork)
+      ) {
+        return {
+          removed: false,
+          branchPruned: false,
+          blocked: true,
+          blockedReason:
+            'The worktree changed after the removal confirmation. Inspect it again before removing it.',
         }
       }
       const result = await git.lifecycle.deleteWorktree(managedWorktreeId, preview.previewFingerprint)

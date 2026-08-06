@@ -720,34 +720,37 @@ export class WorktreeLifecycleService {
   /** Owner archive/unarchive edge. All-archived triggers archive cleanup. */
   async setArchived(managedWorktreeId: string, sessionId: string, archived: boolean): Promise<WorktreeArchiveResult> {
     this.assertReady()
-    const record = this.getRecord(managedWorktreeId)
-    if (!record) {
-      throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
-    }
-    if (!record.ownerSessionIds.includes(sessionId)) {
-      throw new WorktreeLifecycleError('LIFECYCLE_OWNERS_PRESENT', 'Only an owner session can archive or unarchive a worktree.')
-    }
-    const archivedOwners = new Set(record.archivedOwnerSessionIds ?? [])
-    if (archived) archivedOwners.add(sessionId)
-    else archivedOwners.delete(sessionId)
-
-    const next: ManagedWorktreeRecordV2 = {
-      ...record,
-      archivedOwnerSessionIds: [...archivedOwners],
-      lastUsedAt: archived ? record.lastUsedAt : Date.now(),
-      stateChangedAt: Date.now(),
-    }
-    this.deps.registry.upsert(next)
-
-    const allArchived = record.ownerSessionIds.every((owner) => archivedOwners.has(owner))
-    const anyProtected = record.ownerSessionIds.some(
-      (owner) => (this.deps.isSessionActive?.(owner) ?? false) || (this.deps.isSessionFlagged?.(owner) ?? false),
-    )
-    const cleanupEnqueued = archived && allArchived && !anyProtected
+    // Re-read inside the registry lock and mutate only the fields this method
+    // owns so a concurrent owner bind, detach, or state transition is never
+    // overwritten by a stale full-record spread.
+    let result: WorktreeArchiveResult | undefined
+    let cleanupEnqueued = false
+    await this.deps.registry.runExclusive(async (tx) => {
+      const current = tx.get(managedWorktreeId)
+      if (!current) {
+        throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
+      }
+      if (!current.ownerSessionIds.includes(sessionId)) {
+        throw new WorktreeLifecycleError('LIFECYCLE_OWNERS_PRESENT', 'Only an owner session can archive or unarchive a worktree.')
+      }
+      const archivedOwners = new Set(current.archivedOwnerSessionIds ?? [])
+      if (archived) archivedOwners.add(sessionId)
+      else archivedOwners.delete(sessionId)
+      current.archivedOwnerSessionIds = [...archivedOwners]
+      if (!archived) current.lastUsedAt = Date.now()
+      current.stateChangedAt = Date.now()
+      tx.commit()
+      const allArchived = current.ownerSessionIds.every((owner) => archivedOwners.has(owner))
+      const anyProtected = current.ownerSessionIds.some(
+        (owner) => (this.deps.isSessionActive?.(owner) ?? false) || (this.deps.isSessionFlagged?.(owner) ?? false),
+      )
+      cleanupEnqueued = archived && allArchived && !anyProtected
+      result = { archived, state: current.state, cleanupEnqueued }
+    })
     if (cleanupEnqueued) {
       await this.enqueueCleanup()
     }
-    return { archived, state: next.state, cleanupEnqueued }
+    return result!
   }
 
   /**
@@ -758,19 +761,19 @@ export class WorktreeLifecycleService {
   async detachSession(sessionId: string): Promise<void> {
     const { managedWorktreeId } = this.recordStateForSession(sessionId)
     if (!managedWorktreeId) return
-    const record = this.getRecord(managedWorktreeId)
-    if (!record) return
-    const remaining = record.ownerSessionIds.filter((owner) => owner !== sessionId)
-    const next: ManagedWorktreeRecordV2 = {
-      ...record,
-      ownerSessionIds: remaining,
-      archivedOwnerSessionIds: (record.archivedOwnerSessionIds ?? []).filter((owner) => owner !== sessionId),
-      state: remaining.length === 0 ? 'unowned' : record.state,
-      stateChangedAt: Date.now(),
-    }
-    this.deps.registry.upsert(next)
+    let remainingCount = 0
+    await this.deps.registry.runExclusive(async (tx) => {
+      const current = tx.get(managedWorktreeId)
+      if (!current) return
+      current.ownerSessionIds = current.ownerSessionIds.filter((owner) => owner !== sessionId)
+      current.archivedOwnerSessionIds = (current.archivedOwnerSessionIds ?? []).filter((owner) => owner !== sessionId)
+      if (current.ownerSessionIds.length === 0) current.state = 'unowned'
+      current.stateChangedAt = Date.now()
+      remainingCount = current.ownerSessionIds.length
+      tx.commit()
+    })
     this.deps.leases.releaseSession(sessionId)
-    if (remaining.length === 0) {
+    if (remainingCount === 0) {
       await this.enqueueCleanup()
     }
   }
@@ -813,10 +816,13 @@ export class WorktreeLifecycleService {
   /**
    * Coalescing enqueue: one sweep runs at a time; callers await the sweep that
    * covers their enqueue. The finally-chain resets the slot only when the
-   * original sweep settles, so later events always start a fresh sweep.
+   * original sweep settles, so later events always start a fresh sweep. An
+   * enqueue while a sweep is running is answered by a follow-up sweep that
+   * starts once the running one settles, so its candidate is actually covered.
    */
   enqueueCleanup(): Promise<WorktreeCleanupResult> {
-    if (!this.sweepRunning) {
+    const running = this.sweepRunning
+    if (!running) {
       const sweep = this.runCleanupSweep()
       // The slot holds the raw sweep promise; a side-chain clears the slot when
       // THAT sweep settles, so the comparison can never miss.
@@ -826,8 +832,27 @@ export class WorktreeLifecycleService {
           if (this.sweepRunning === sweep) this.sweepRunning = null
         })
         .catch(() => undefined)
+      return sweep
     }
-    return this.sweepRunning
+    // The in-flight sweep already selected its candidates, so it cannot cover
+    // a candidate that became eligible after it started. Chain a follow-up
+    // sweep; concurrent enqueuers all await the same follow-up.
+    return running.then(
+      () => this.scheduleFollowUpSweep(running),
+      () => this.scheduleFollowUpSweep(running),
+    )
+  }
+
+  private scheduleFollowUpSweep(running: Promise<WorktreeCleanupResult>): Promise<WorktreeCleanupResult> {
+    if (this.sweepRunning && this.sweepRunning !== running) return this.sweepRunning
+    const sweep = this.runCleanupSweep()
+    this.sweepRunning = sweep
+    void sweep
+      .finally(() => {
+        if (this.sweepRunning === sweep) this.sweepRunning = null
+      })
+      .catch(() => undefined)
+    return sweep
   }
 
   /**
@@ -895,9 +920,13 @@ export class WorktreeLifecycleService {
       ...archiveCandidates.map((record) => ({ record, kind: 'archive' as const })),
       ...retentionCandidates.map((record) => ({ record, kind: 'retention' as const })),
     ]
-    // One attempt per candidate per sweep.
+    // One attempt per candidate per sweep. The loop continues until no
+    // candidate succeeds, so a sweep that removes one worktree keeps removing
+    // the remaining surplus until the retention limit is satisfied.
     const attempted = new Set<string>()
     const failures: string[] = []
+    let removedCount = 0
+    let lastRemovedId: string | undefined
 
     for (const { record } of candidates) {
       if (attempted.has(record.managedWorktreeId)) continue
@@ -919,19 +948,25 @@ export class WorktreeLifecycleService {
           requireQuiesce: true,
         })
         if (outcome.ok) {
-          const result: WorktreeCleanupResult = {
-            at: Date.now(),
-            outcome: 'succeeded',
-            policyVersion: startedPolicyVersion,
-            removedWorktreeId: record.managedWorktreeId,
-          }
-          this.writeCleanupState({ lastCleanupResult: result })
-          return result
+          removedCount += 1
+          lastRemovedId = record.managedWorktreeId
+          continue
         }
         if (outcome.result.error) failures.push(outcome.result.error)
       } catch (error) {
         failures.push(sanitizeError(error))
       }
+    }
+
+    if (removedCount > 0) {
+      const result: WorktreeCleanupResult = {
+        at: Date.now(),
+        outcome: 'succeeded',
+        policyVersion: startedPolicyVersion,
+        removedWorktreeId: lastRemovedId,
+      }
+      this.writeCleanupState({ lastCleanupResult: result })
+      return result
     }
 
     const insufficient = candidates.length > 0 && failures.length === 0
@@ -969,13 +1004,13 @@ export class WorktreeLifecycleService {
     sanitized: string,
   ): Promise<void> {
     try {
-      const record = this.getRecord(managedWorktreeId)
-      if (!record) return
-      this.deps.registry.upsert({
-        ...record,
-        state,
-        lastError: sanitized,
-        stateChangedAt: Date.now(),
+      await this.deps.registry.runExclusive(async (tx) => {
+        const current = tx.get(managedWorktreeId)
+        if (!current) return
+        current.state = state
+        current.lastError = sanitized
+        current.stateChangedAt = Date.now()
+        tx.commit()
       })
     } catch {
       /* the failure record is best-effort */
@@ -1195,7 +1230,13 @@ export class WorktreeLifecycleService {
       if (options.droppingSessions) {
         for (const sessionId of options.droppingSessions) this.deps.leases.releaseSession(sessionId)
       }
-      await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
+      // Stamp only the remaining owners: the dropped sessions are mid-deletion
+      // with their storage staged away, and persisting them would recreate the
+      // session at its original path.
+      const remainingOwners = record.ownerSessionIds.filter(
+        (owner) => !(options.droppingSessions ?? []).includes(owner),
+      )
+      await this.deps.applyOwnerSessionState?.(remainingOwners, {
         managedWorktreeId,
         state: 'snapshotted',
       })
@@ -1217,6 +1258,9 @@ export class WorktreeLifecycleService {
    */
   async reconcileJournal(): Promise<{ recovered: number; resumed: number }> {
     const report = { recovered: 0, resumed: 0 }
+    // Markers left by a crashed process would otherwise fence every destructive
+    // transaction on that checkout as a foreign lease.
+    this.deps.leases.pruneStale()
     await this.cleanupPendingRestores(report)
     await this.gcOrphanedSnapshots(report)
     const inProgress = this.deps.journal.inProgress()
