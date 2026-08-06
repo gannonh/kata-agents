@@ -2,6 +2,10 @@
 
 ## 2026-08-05
 
+* **Worktree V2 Phase 2 feedback applied**: [#41](https://github.com/gannonh/kata-agents/issues/41) now specifies automatic deletion off by default and a simplified delete-only active-worktree management surface; server-side snapshot safety remains internal.
+
+* **Worktree V2 Phase 2 build completed**: [#41](https://github.com/gannonh/kata-agents/issues/41) — snapshot-backed management and automatic cleanup are implemented on branch `feat/worktree-v2-phase-2-snapshot-backed-management-a`; the issue carries the Build completion report and awaits Verify.
+
 * **Worktree V2 name normalization**: [#40](https://github.com/gannonh/kata-agents/issues/40) now canonicalizes human-readable composer names to lowercase kebab-case before preparing the exact `kata-agent/<name>` branch; the server continues to reject names that remain Git-invalid.
 
 ## 2026-08-04

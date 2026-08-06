@@ -25,7 +25,9 @@ import type {
   ManagedWorktreeRecord,
   ManagedWorktreeRecordV2,
   ManagedWorktreeRecordVersioned,
+  ManagedWorktreeSnapshotMeta,
   ManagedWorktreeState,
+  WorktreeCleanupResult,
 } from '@kata-sh/shared/protocol'
 import { CrossProcessFileLock, type CrossProcessLockOptions } from './mutation-lock'
 
@@ -133,6 +135,12 @@ const VALID_STATES = new Set<ManagedWorktreeState>([
   'missing',
   'removing',
   'blocked',
+  'snapshotting',
+  'snapshotted',
+  'restoring',
+  'cleanup-failed',
+  'restore-failed',
+  'unowned',
 ])
 const HEX16 = /^[0-9a-f]{16}$/
 const HEX8 = /^[0-9a-f]{8}$/
@@ -261,6 +269,80 @@ function validateCommonRecord(value: unknown, registryPath: string): ManagedWork
   return record
 }
 
+function isHexOid(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{40,64}$/.test(value)
+}
+
+function validateSnapshotMeta(value: unknown, registryPath: string): ManagedWorktreeSnapshotMeta {
+  if (!isObject(value)) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot metadata must be an object.', registryPath)
+  }
+  const snapshotId = requireString(value.snapshotId, 'snapshot.snapshotId', registryPath)
+  const schemaVersion = value.schemaVersion
+  if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion) || schemaVersion < 1) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot schemaVersion must be a positive integer.', registryPath)
+  }
+  const hiddenRef = requireString(value.hiddenRef, 'snapshot.hiddenRef', registryPath)
+  if (hiddenRef !== `refs/kata/worktree-snapshots/${snapshotId}`) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot hiddenRef must match its snapshot ID.', registryPath)
+  }
+  const headOid = value.headOid
+  if (!isHexOid(headOid)) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot headOid must be a hex object ID.', registryPath)
+  }
+  const manifestHash = value.manifestHash
+  if (!isSha256(manifestHash)) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot manifestHash must be a SHA-256 hex digest.', registryPath)
+  }
+  const fileCount = value.fileCount
+  if (typeof fileCount !== 'number' || !Number.isInteger(fileCount) || fileCount < 0) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot fileCount must be a non-negative integer.', registryPath)
+  }
+  const totalBytes = value.totalBytes
+  if (typeof totalBytes !== 'number' || !Number.isFinite(totalBytes) || totalBytes < 0) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry snapshot totalBytes must be a non-negative number.', registryPath)
+  }
+  return {
+    snapshotId,
+    schemaVersion,
+    hiddenRef,
+    headOid,
+    branch: requireString(value.branch, 'snapshot.branch', registryPath),
+    manifestHash,
+    payloadPath: requireString(value.payloadPath, 'snapshot.payloadPath', registryPath, { absolute: true }),
+    createdAt: requireFiniteNumber(value.createdAt, 'snapshot.createdAt', registryPath),
+    fileCount,
+    totalBytes,
+    fingerprint: requireString(value.fingerprint, 'snapshot.fingerprint', registryPath),
+    policyVersion: requireFiniteNumber(value.policyVersion, 'snapshot.policyVersion', registryPath),
+    previewFingerprint: requireString(value.previewFingerprint, 'snapshot.previewFingerprint', registryPath),
+  }
+}
+
+const CLEANUP_OUTCOMES = new Set(['succeeded', 'blocked', 'failed', 'skipped'])
+
+function validateCleanupResult(value: unknown, registryPath: string): WorktreeCleanupResult {
+  if (!isObject(value)) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry cleanup result must be an object.', registryPath)
+  }
+  const outcome = value.outcome
+  if (typeof outcome !== 'string' || !CLEANUP_OUTCOMES.has(outcome)) {
+    throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry cleanup result has an invalid outcome.', registryPath)
+  }
+  const result: WorktreeCleanupResult = {
+    at: requireFiniteNumber(value.at, 'cleanup.at', registryPath),
+    outcome: outcome as WorktreeCleanupResult['outcome'],
+    policyVersion: requireFiniteNumber(value.policyVersion, 'cleanup.policyVersion', registryPath),
+  }
+  if (value.removedWorktreeId !== undefined) {
+    result.removedWorktreeId = requireString(value.removedWorktreeId, 'cleanup.removedWorktreeId', registryPath)
+  }
+  if (value.reason !== undefined) {
+    result.reason = requireString(value.reason, 'cleanup.reason', registryPath)
+  }
+  return result
+}
+
 function validateV2Record(value: unknown, registryPath: string): ManagedWorktreeRecordV2 {
   if (!isObject(value)) {
     throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry record must be an object.', registryPath)
@@ -273,7 +355,7 @@ function validateV2Record(value: unknown, registryPath: string): ManagedWorktree
     )
   }
   const base = validateCommonRecord({ ...value, schemaVersion: undefined }, registryPath)
-  return {
+  const record: ManagedWorktreeRecordV2 = {
     ...base,
     schemaVersion: 2,
     workspaceId: requireString(value.workspaceId, 'workspaceId', registryPath),
@@ -283,6 +365,29 @@ function validateV2Record(value: unknown, registryPath: string): ManagedWorktree
     }),
     lastUsedAt: requireFiniteNumber(value.lastUsedAt, 'lastUsedAt', registryPath),
   }
+  if (value.snapshot !== undefined) {
+    record.snapshot = validateSnapshotMeta(value.snapshot, registryPath)
+  }
+  if (value.policyVersion !== undefined) {
+    const policyVersion = value.policyVersion
+    if (typeof policyVersion !== 'number' || !Number.isInteger(policyVersion) || policyVersion < 0) {
+      throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Registry policyVersion must be a non-negative integer.', registryPath)
+    }
+    record.policyVersion = policyVersion
+  }
+  if (value.archivedOwnerSessionIds !== undefined) {
+    record.archivedOwnerSessionIds = validateOwners(value.archivedOwnerSessionIds, registryPath)
+  }
+  if (value.lastCleanupResult !== undefined) {
+    record.lastCleanupResult = validateCleanupResult(value.lastCleanupResult, registryPath)
+  }
+  if (value.lastError !== undefined) {
+    record.lastError = requireString(value.lastError, 'lastError', registryPath)
+  }
+  if (value.stateChangedAt !== undefined) {
+    record.stateChangedAt = requireFiniteNumber(value.stateChangedAt, 'stateChangedAt', registryPath)
+  }
+  return record
 }
 
 function parseRegistry(raw: string, registryPath: string): RegistryFile {
@@ -455,6 +560,17 @@ export type WorktreeOwnerBindResult =
   | { status: 'already-owned' }
   | { status: 'missing' }
   | { status: 'not-ready'; state: ManagedWorktreeState }
+
+/**
+ * Read/commit surface inside {@link WorktreeRegistry.runExclusive}. Mutations
+ * are applied to the in-memory record map; only `commit()` persists them.
+ */
+export interface WorktreeRegistryTransaction {
+  get(id: string): ManagedWorktreeRecordV2 | undefined
+  list(): ManagedWorktreeRecordV2[]
+  /** Atomically persist the current in-memory records under the held lock. */
+  commit(): void
+}
 
 export type WorktreeRemovalBeginResult =
   | { status: 'started' }
@@ -1166,8 +1282,86 @@ export class WorktreeRegistry {
     })
   }
 
+  /** Server-authored activity update (creation, restore, attach, unarchive, message). */
+  updateLastUsedAt(id: string, at: number): void {
+    this.mutate((records) => {
+      const rec = records.get(id)
+      if (!rec || rec.lastUsedAt === at) return false
+      rec.lastUsedAt = at
+      return true
+    })
+  }
+
   remove(id: string): void {
     this.mutate((records) => records.delete(id))
+  }
+
+  /**
+   * Exclusive registry transaction. Holds the cross-process registry lock for
+   * the whole callback, so a lifecycle transaction (capture → commit) cannot be
+   * interleaved by another registry writer. The callback mutates the in-memory
+   * record map and calls `commit()` to persist atomically; uncommitted changes
+   * are discarded when the callback returns.
+   */
+  async runExclusive<T>(
+    fn: (tx: WorktreeRegistryTransaction) => Promise<T> | T,
+  ): Promise<T> {
+    // Errors thrown by the callback are domain errors (e.g. a lifecycle state
+    // guard) and must reach the caller unchanged; only lock acquisition and
+    // registry I/O failures are lock failures.
+    let callbackFailed = false
+    let callbackError: unknown
+    try {
+      return await this.lock.run(async () => {
+        let source = this.readSource()
+        if (!source.exists) {
+          this.recoverMissingSourceLocked()
+          source = this.readSource()
+        }
+        let records = new Map<string, ManagedWorktreeRecordV2>()
+        let authoritativeHash = source.hash
+        let authoritativeIdentity = source.identity
+        if (source.exists) {
+          const parsed = parseRegistry(source.raw, this.registryPath)
+          const authoritative = this.upgradeLocked(source, parsed)
+          const authoritativeSource = this.readSource()
+          authoritativeHash = authoritativeSource.hash
+          authoritativeIdentity = authoritativeSource.identity
+          records = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
+        }
+        const tx: WorktreeRegistryTransaction = {
+          // The transaction owns the in-memory map: callers mutate the returned
+          // record directly and `commit()` persists it. No clone here, so the
+          // mutation is not silently discarded.
+          get: (id) => records.get(id),
+          list: () => cloneRecords(records.values()),
+          commit: () => {
+            this.hooks.beforePersist?.()
+            this.persistLocked(records.values(), {
+              exists: source.exists,
+              hash: authoritativeHash,
+              identity: authoritativeIdentity,
+            })
+          },
+        }
+        try {
+          return await fn(tx)
+        } catch (error) {
+          callbackFailed = true
+          callbackError = error
+          throw error
+        }
+      })
+    } catch (error) {
+      if (callbackFailed) throw callbackError
+      if (error instanceof WorktreeRegistryError) throw error
+      throw wrapError(
+        error,
+        'REGISTRY_LOCK_FAILED',
+        'Unable to acquire the managed-worktree registry lock for an exclusive transaction.',
+        this.registryPath,
+      )
+    }
   }
 
   /** Find a record by its checkout path (normalized). */
@@ -1222,5 +1416,4 @@ export function removeDir(path: string): boolean {
     return false
   }
 }
-
 export { join as joinPath }

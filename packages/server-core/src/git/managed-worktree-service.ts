@@ -195,6 +195,8 @@ export class ManagedWorktreeService {
             version: 0,
             materializationRoot: resolvePath(worktreeRoot),
             capturedAt: Date.now(),
+            autoDeleteEnabled: false,
+            retentionLimit: 15,
           }),
           getDefaultRoot: () => resolvePath(worktreeRoot),
         }
@@ -215,6 +217,8 @@ export class ManagedWorktreeService {
         version: 0,
         materializationRoot: resolvePath(defaultRoot),
         capturedAt: Date.now(),
+        autoDeleteEnabled: false,
+        retentionLimit: 15,
       }
     }
     return this.worktreeRootProvider.getSnapshot()
@@ -414,6 +418,7 @@ export class ManagedWorktreeService {
               materializationRoot,
               createdAt,
               lastUsedAt: createdAt,
+              policyVersion: rootSnapshot.version,
               ownerSessionIds: [sessionId],
               state: 'preparing',
             }
@@ -906,35 +911,12 @@ export class ManagedWorktreeService {
         }
       }
 
-      // Remove the worktree registration + directory.
-      try {
-        await runGit(['worktree', 'remove', '--force', rec.checkoutPath], {
-          cwd: rec.repositoryRoot,
-          okExitCodes: [128],
-        })
-      } catch {
-        /* fall through to manual cleanup */
-      }
-      removeDir(rec.checkoutPath)
-      try {
-        await runGit(['worktree', 'prune'], { cwd: rec.repositoryRoot, okExitCodes: [128] })
-      } catch {
-        /* ignore */
-      }
-
-      // Removal is only complete when the checkout is actually gone. Both the
-      // git command and the manual fallback can fail — a locked worktree, a
-      // permission problem, a process holding the directory — and neither
-      // surfaces as a throw here.
-      //
-      // Dropping the registry record in that case would be the worst outcome
-      // available: reconciliation reclaims leaked checkouts *from registry
-      // records*, so a directory with no record is invisible to every recovery
-      // path and leaks permanently. Keep the record, mark it for attention, and
-      // report the failure honestly instead of claiming a removal that did not
-      // happen. The temporary branch is left alone too — it is still checked out
-      // in the surviving worktree.
-      if (existsSync(rec.checkoutPath)) {
+      // Remove the worktree registration + directory. V2 lifecycle callers use
+      // the exported low-level `removeCheckoutFiles` (which always preserves
+      // the branch); this V1 path prunes the branch afterwards when it has no
+      // unique work.
+      const released = await removeCheckoutFiles(rec.repositoryRoot, rec.checkoutPath)
+      if (!released) {
         this.registry.setState(managedWorktreeId, 'blocked')
         return {
           removed: false,
@@ -1029,6 +1011,45 @@ export class ManagedWorktreeService {
         ownerSessionIds: [...rec.ownerSessionIds],
       }
 
+      // Phase 2 lifecycle states are owned by the lifecycle service: startup
+      // reconciliation must never reclassify an in-flight or snapshot-backed
+      // transaction (a removed checkout of a snapshotted record is evidence of
+      // a completed removal, not a `missing` path). The lifecycle service
+      // classifies those records from the journal. These states exist only in
+      // V2, so no feature-flag gate is needed. Owner references are still
+      // repaired in place: a dead owner would otherwise fence the snapshot
+      // from permanent deletion forever.
+      if (
+        rec.state === 'snapshotting' ||
+        rec.state === 'snapshotted' ||
+        rec.state === 'restoring' ||
+        rec.state === 'cleanup-failed' ||
+        rec.state === 'restore-failed'
+      ) {
+        const beforeOwners = rec.ownerSessionIds.length
+        const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
+        report.droppedOwnerRefs += beforeOwners - liveOwners.length
+        if (liveOwners.length !== beforeOwners) {
+          rec.ownerSessionIds = liveOwners
+          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+        }
+        continue
+      }
+      // V2 unowned records are owned by the lifecycle service (automatic
+      // cleanup); the V1 reclamation path below must not prune their
+      // branches.
+      if (rec.state === 'unowned') {
+        // Still reconcile owner references for the record itself.
+        const beforeOwners = rec.ownerSessionIds.length
+        const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
+        report.droppedOwnerRefs += beforeOwners - liveOwners.length
+        if (liveOwners.length !== beforeOwners) {
+          rec.ownerSessionIds = liveOwners
+          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+        }
+        continue
+      }
+
       // 1. Drop dead owner references.
       const beforeOwners = rec.ownerSessionIds.length
       const liveOwners = rec.ownerSessionIds.filter((s) => params.knownSessionIds.has(s))
@@ -1057,22 +1078,33 @@ export class ManagedWorktreeService {
       const listedEntry =
         list?.get(resolvePath(rec.checkoutPath)) ?? list?.get(safeRealpath(rec.checkoutPath))
 
+      // Lifecycle-visible recovery text lives on the V2 shape; the registry
+      // upgrades every record in place, so this view is safe.
+      const recV2 = rec as ManagedWorktreeRecordV2
       let nextState = rec.state
       if (!worktreePresentOnDisk && !listedEntry) {
         nextState = 'missing'
         report.markedMissing += 1
+        // Actionable recovery text for the inventory row (spec: AC2, AC14).
+        recV2.lastError =
+          'The checkout is no longer on disk. Remove this record from Worktrees settings, or delete the sessions that own it.'
       } else if (listedEntry && listedEntry.branch && listedEntry.branch !== rec.expectedBranch) {
         // The checkout exists but is on an unexpected branch — ambiguous.
         nextState = 'blocked'
         report.markedBlocked += 1
+        recV2.lastError =
+          'The checkout is on an unexpected branch. Restore the expected branch, or delete the sessions that own it.'
       } else if (worktreePresentOnDisk && !listedEntry) {
         // On disk but not a registered worktree — ambiguous, do not touch it.
         nextState = 'blocked'
         report.markedBlocked += 1
+        recV2.lastError =
+          'The checkout directory exists but Git no longer tracks it as a worktree. Inspect it on the server before removing it.'
       } else if (listedEntry && rec.state !== 'ready' && rec.state !== 'removing') {
         // Healthy again after being marked missing/preparing/blocked. An
         // in-flight removal is never reopened by reconciliation.
         nextState = 'ready'
+        recV2.lastError = undefined
       }
       rec.state = nextState
       if (!this.registry.upsertIfUnchanged(observed, rec)) {
@@ -1085,7 +1117,8 @@ export class ManagedWorktreeService {
       // reached through any session, and nothing else removes one — so without
       // this it would sit on disk forever. Reachable when the removal step of a
       // session deletion is blocked or interrupted after the session is already
-      // gone (see the deletion ordering in SessionManager).
+      // gone (see the deletion ordering in SessionManager). V2 never uses this
+      // path: the lifecycle service owns unowned records and automatic cleanup.
       //
       // `removeWorktree` is reused rather than reimplemented so identity safety
       // cannot diverge between the two callers, and `force` is deliberately NOT
@@ -1469,4 +1502,33 @@ export function safeRealpath(p: string): string {
   } catch {
     return resolvePath(p)
   }
+}
+
+/**
+ * Low-level checkout release used by V1 removal and every V2 lifecycle
+ * transaction. Removes the Git worktree registration and directory, then
+ * prunes stale registrations. The branch is always preserved. Returns true
+ * only when the checkout is provably gone.
+ */
+export async function removeCheckoutFiles(repositoryRoot: string, checkoutPath: string): Promise<boolean> {
+  try {
+    await runGit(['worktree', 'remove', '--force', checkoutPath], {
+      cwd: repositoryRoot,
+      okExitCodes: [128],
+    })
+  } catch {
+    /* fall through to manual cleanup */
+  }
+  removeDir(checkoutPath)
+  try {
+    await runGit(['worktree', 'prune'], { cwd: repositoryRoot, okExitCodes: [128] })
+  } catch {
+    /* ignore */
+  }
+  // Removal is only complete when the checkout is actually gone. Both the git
+  // command and the manual fallback can fail — a locked worktree, a permission
+  // problem, a process holding the directory — and neither surfaces as a
+  // throw. Callers keep the registry record and report honestly instead of
+  // claiming a removal that did not happen.
+  return !existsSync(checkoutPath)
 }

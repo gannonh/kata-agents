@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from 'bun:test'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices } from '../index'
 import { WorktreeRegistry } from '../worktree-registry'
@@ -64,9 +64,76 @@ describe('WorktreeSettingsService', () => {
       version: 0,
       materializationRoot: settings.expandPath(defaultRoot),
       capturedAt: expect.any(Number),
+      autoDeleteEnabled: false,
+      retentionLimit: 15,
     })
     expect(Object.isFrozen(snapshot)).toBe(true)
     expect(existsSync(defaultRoot)).toBe(true)
+  })
+
+  test('persists auto-delete policy and retention limit per server', () => {
+    const { root, settings } = makeSettings()
+
+    const updated = settings.update({
+      materializationRoot: join(root, 'custom-worktrees'),
+      autoDeleteEnabled: false,
+      retentionLimit: 3,
+    })
+
+    expect(updated.autoDeleteEnabled).toBe(false)
+    expect(updated.retentionLimit).toBe(3)
+    expect(updated.version).toBe(1)
+
+    const reloaded = new WorktreeSettingsService({
+      serverId: 'server-a',
+      defaultRoot: join(root, 'worktrees'),
+      settingsPath: join(root, 'worktrees', 'settings.json'),
+      registry: new WorktreeRegistry(join(root, 'worktrees', 'registry.json')),
+    })
+    const snapshot = reloaded.getSnapshot()
+    expect(snapshot.autoDeleteEnabled).toBe(false)
+    expect(snapshot.retentionLimit).toBe(3)
+    expect(snapshot.version).toBe(1)
+  })
+
+  test('rejects out-of-range retention limits and non-boolean auto-delete policy', () => {
+    const { settings } = makeSettings()
+
+    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 0 })).toThrow(
+      WorktreeSettingsError,
+    )
+    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 1001 })).toThrow(
+      WorktreeSettingsError,
+    )
+    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 2.5 })).toThrow(
+      WorktreeSettingsError,
+    )
+    expect(() =>
+      settings.update({ materializationRoot: '~/x', autoDeleteEnabled: 'yes' as never }),
+    ).toThrow(WorktreeSettingsError)
+  })
+
+  test('loads policy defaults when an existing settings file lacks them', () => {
+    const { root, defaultRoot, settings } = makeSettings()
+    mkdirSync(defaultRoot, { recursive: true })
+    writeFileSync(
+      join(defaultRoot, 'settings.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        version: 4,
+        materializationRoot: settings.expandPath(defaultRoot),
+      }),
+      'utf8',
+    )
+    const reloaded = new WorktreeSettingsService({
+      serverId: 'server-a',
+      defaultRoot,
+      settingsPath: join(defaultRoot, 'settings.json'),
+      registry: new WorktreeRegistry(join(defaultRoot, 'registry.json')),
+    })
+    const snapshot = reloaded.getSnapshot()
+    expect(snapshot.autoDeleteEnabled).toBe(false)
+    expect(snapshot.retentionLimit).toBe(15)
   })
 
   test('persists canonical absolute roots and increments the revision', () => {

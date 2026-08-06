@@ -14,8 +14,12 @@ import {
   WORKTREE_BRANCH_COLLISION_CODE,
   WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
   WORKTREE_DESTINATION_UNSAFE_CODE,
+  WORKTREE_LIFECYCLE_ERROR_CODE,
   WORKTREE_NAME_INVALID_CODE,
+  WORKTREE_OWNERS_PRESENT_CODE,
+  WORKTREE_PREVIEW_STALE_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
+  WORKTREE_STATE_UNMANAGEABLE_CODE,
   WorktreeV2CapabilityError,
 } from '@kata-sh/shared/protocol'
 import type {
@@ -30,14 +34,20 @@ import type {
   ManagedWorktreeRecordVersioned,
   RepositoryContext,
   SessionCheckout,
+  WorktreeArchiveInput,
+  WorktreeDeleteInput,
+  WorktreePermanentDeleteInput,
+  WorktreeRetryInput,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
+import { i18n } from '@kata-sh/shared/i18n'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import { pushTyped } from '../../transport/push'
 import {
   getDefaultGitServices,
   GitStatusSubscription,
   WorktreeCreationError,
+  WorktreeLifecycleError,
   WorktreeSettingsError,
 } from '../../git'
 import type { GitServices } from '../../git'
@@ -53,6 +63,14 @@ export const GIT_HANDLED_CHANNELS = [
   RPC_CHANNELS.git.UPDATE_WORKTREE_SETTINGS,
   RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL,
   RPC_CHANNELS.git.REMOVE_WORKTREE,
+  RPC_CHANNELS.git.WORKTREE_INVENTORY,
+  RPC_CHANNELS.git.WORKTREE_PREVIEW,
+  RPC_CHANNELS.git.WORKTREE_DELETE,
+  RPC_CHANNELS.git.WORKTREE_RESTORE,
+  RPC_CHANNELS.git.WORKTREE_RETRY,
+  RPC_CHANNELS.git.WORKTREE_PERMANENT_DELETE,
+  RPC_CHANNELS.git.WORKTREE_ARCHIVE,
+  RPC_CHANNELS.git.WORKTREE_UNARCHIVE,
   RPC_CHANNELS.git.GET_STATUS,
   RPC_CHANNELS.git.GET_DIFF,
   RPC_CHANNELS.git.SUBSCRIBE_STATUS,
@@ -91,12 +109,45 @@ const WORKTREE_CREATION_WIRE_CODES: Readonly<Record<string, ErrorCode>> = {
   WORKTREE_BRANCH_OWNERSHIP_UNKNOWN: WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
 }
 
+const WORKTREE_LIFECYCLE_WIRE_CODES: Readonly<Record<string, ErrorCode>> = {
+  LIFECYCLE_PREVIEW_STALE: WORKTREE_PREVIEW_STALE_CODE,
+  LIFECYCLE_STATE_UNMANAGEABLE: WORKTREE_STATE_UNMANAGEABLE_CODE,
+  LIFECYCLE_OWNERS_PRESENT: WORKTREE_OWNERS_PRESENT_CODE,
+}
+
+function throwTypedWorktreeLifecycleError(error: unknown): never {
+  if (error instanceof WorktreeLifecycleError) {
+    const wireCode = WORKTREE_LIFECYCLE_WIRE_CODES[error.code]
+    throw new CodedError(wireCode ?? WORKTREE_LIFECYCLE_ERROR_CODE, error.message)
+  }
+  throw error
+}
+
 function throwTypedWorktreeCreationError(error: unknown): never {
   if (error instanceof WorktreeCreationError) {
     const wireCode = WORKTREE_CREATION_WIRE_CODES[error.code]
     if (wireCode) throw new CodedError(wireCode, error.message)
   }
   throw error
+}
+
+/**
+ * Fence Git work on a session whose managed-worktree record is not `ready`:
+ * Send, agent creation, Git actions, and further lifecycle actions stay fenced
+ * until reconciliation, restore, or an explicit allowed resolution succeeds
+ * (spec: recovery fencing). Sessions without a managed checkout are unaffected.
+ */
+function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void {
+  if (!isWorktreeV2Enabled()) return
+  git.lifecycle.assertReady()
+  const { state } = git.lifecycle.recordStateForSession(sessionId)
+  if (state !== 'ready') {
+    throw new Error(
+      i18n.t('git.worktree.usableFence', {
+        state,
+      }),
+    )
+  }
 }
 
 interface ResolvedSession {
@@ -246,9 +297,12 @@ export function registerGitHandlers(
 
   // Startup reconciliation: once the session manager has finished loading
   // sessions, compare the managed-worktree registry against persisted session
-  // ownership and `git worktree list --porcelain`. Best-effort — a failure must
-  // not block handler registration or server startup, and it never deletes.
-  void (async () => {
+  // ownership and `git worktree list --porcelain`, classify interrupted
+  // lifecycle transactions from the journal, lease every live checkout path,
+  // and only then mark lifecycle readiness. A failure must not block server
+  // startup; the readiness gate keeps lifecycle RPCs fenced until this
+  // completes (spec: awaited startup reconciliation).
+  const startupReconciliation = (async () => {
     try {
       await deps.sessionManager.waitForInit?.()
       const sessions = deps.sessionManager.getSessions()
@@ -258,9 +312,26 @@ export function registerGitHandlers(
           .filter((s) => s.checkout)
           .map((s) => [s.id, s.checkout!] as const),
       )
+      // Every live session leases its checkout path — including sessions not
+      // yet reflected in registry owners — so lifecycle decisions see the full
+      // fence set from the first instant.
+      for (const session of sessions) {
+        const checkout = session.checkout
+        if (checkout?.mode === 'managed-worktree' && checkout.checkoutPath) {
+          git.pathLeases.lease(session.id, checkout.checkoutPath)
+        }
+      }
       await git.worktrees.reconcile({ knownSessionIds, sessionCheckouts })
-    } catch {
-      /* best-effort startup reconciliation */
+      const journalReport = await git.lifecycle.reconcileJournal()
+      git.journal.compact()
+      git.lifecycle.markReady()
+      if (journalReport.resumed > 0 || journalReport.recovered > 0) {
+        console.info(
+          `[worktree] startup reconciliation resumed ${journalReport.resumed} and recovered ${journalReport.recovered} interrupted lifecycle transaction(s).`,
+        )
+      }
+    } catch (error) {
+      console.error('[worktree] startup reconciliation failed; lifecycle work stays fenced.', error)
     }
   })()
 
@@ -289,12 +360,100 @@ export function registerGitHandlers(
       assertWorktreeV2Enabled()
       if (!worktreeSettings) throw new WorktreeV2CapabilityError()
       try {
-        return worktreeSettings.update(input, serverId)
+        const next = worktreeSettings.update(input, serverId)
+        // A policy change fences new cleanup candidates at the new version.
+        if (input.autoDeleteEnabled !== undefined || input.retentionLimit !== undefined) {
+          void git.lifecycle.enqueueCleanup()
+        }
+        return next
       } catch (error) {
         throwTypedWorktreeSettingsError(error)
       }
     },
   )
+
+  // --- Phase 2: snapshot-backed lifecycle management ---
+
+  // Inventory, preview, delete, restore, retry, permanent-delete, and
+  // archive/unarchive RPCs. Identity is server-issued (opaque record IDs);
+  // traversal strings, client paths, and foreign server IDs carry no deletion
+  // or extraction authority (spec: opaque IDs + server-issued fingerprints).
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_INVENTORY, async () => {
+    assertWorktreeV2Enabled()
+    git.lifecycle.assertReady()
+    return git.lifecycle.inventory()
+  })
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_PREVIEW, async (_ctx, managedWorktreeId: string) => {
+    assertWorktreeV2Enabled()
+    git.lifecycle.assertReady()
+    if (typeof managedWorktreeId !== 'string' || !managedWorktreeId) {
+      throw new CodedError(WORKTREE_LIFECYCLE_ERROR_CODE, i18n.t('git.worktree.idRequired'))
+    }
+    try {
+      return await git.lifecycle.preview(managedWorktreeId)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_DELETE, async (_ctx, input: WorktreeDeleteInput) => {
+    assertWorktreeV2Enabled()
+    try {
+      return await git.lifecycle.deleteWorktree(input.managedWorktreeId, input.previewFingerprint)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_RESTORE, async (_ctx, managedWorktreeId: string) => {
+    assertWorktreeV2Enabled()
+    try {
+      return await git.lifecycle.restoreWorktree(managedWorktreeId)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_RETRY, async (_ctx, input: WorktreeRetryInput) => {
+    assertWorktreeV2Enabled()
+    try {
+      return await git.lifecycle.retryWorktree(input.managedWorktreeId)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
+
+  server.handle(
+    RPC_CHANNELS.git.WORKTREE_PERMANENT_DELETE,
+    async (_ctx, input: WorktreePermanentDeleteInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.lifecycle.permanentDelete(input.managedWorktreeId, input.confirmIrreversible)
+      } catch (error) {
+        throwTypedWorktreeLifecycleError(error)
+      }
+    },
+  )
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_ARCHIVE, async (_ctx, input: WorktreeArchiveInput) => {
+    assertWorktreeV2Enabled()
+    try {
+      return await git.lifecycle.setArchived(input.managedWorktreeId, input.sessionId, true)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
+
+  server.handle(RPC_CHANNELS.git.WORKTREE_UNARCHIVE, async (_ctx, input: WorktreeArchiveInput) => {
+    assertWorktreeV2Enabled()
+    try {
+      return await git.lifecycle.setArchived(input.managedWorktreeId, input.sessionId, false)
+    } catch (error) {
+      throwTypedWorktreeLifecycleError(error)
+    }
+  })
 
   // --- Repository context and ref listing (Phase 1, read-only) ---
 
@@ -370,6 +529,7 @@ export function registerGitHandlers(
   // server-side; the path is validated against the current status snapshot
   // before any file is read (spec: Changes panel data flow, path safety).
   server.handle(RPC_CHANNELS.git.GET_DIFF, async (_ctx, sessionId: string, path: string) => {
+    assertSessionWorktreeUsable(git, sessionId)
     const resolved = resolveSession(sessionId)
     if (!resolved) throw new Error('Session checkout could not be resolved.')
     const status = await git.repository.getStatus(resolved.checkoutPath)
@@ -424,6 +584,7 @@ export function registerGitHandlers(
     op: (dir: string) => Promise<GitActionResult>,
   ): Promise<GitActionResult> {
     assertFeatureEnabled()
+    assertSessionWorktreeUsable(git, sessionId)
     const resolved = resolveSession(sessionId)
     if (!resolved) throw new Error('Session checkout could not be resolved.')
     const ctx = await resolveMutationContext(git, resolved)

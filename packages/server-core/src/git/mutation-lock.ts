@@ -76,7 +76,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function processIsAlive(pid: number): boolean | null {
+/** True when a process with the given PID is alive; null when unverifiable. */
+export function processIsAlive(pid: number): boolean | null {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)

@@ -65,18 +65,18 @@ current checkout.
 
 Worktree V2 is controlled by the workspace-owning server, not by the desktop
 client. In **Settings → Worktrees**, select a capable local or connected server
-to view and change its materialization root. The page labels remote roots with
+to view and change its Worktree root. The page labels remote roots with
 their server identity; a local directory picker is available only for the local
 server.
 
-The default root is `<CONFIG_DIR>/worktrees`. A saved absolute root (or `~/…`
-path) is canonicalized and validated by the owning server before it is stored.
+The default Worktree root is `<CONFIG_DIR>/worktrees`. A saved absolute root (or
+`~/…` path) is canonicalized and validated by the owning server before it is stored.
 It cannot overlap server configuration, snapshot storage, a registered
 repository, or an existing managed checkout. A root change affects only new
 worktrees; every existing checkout retains the canonical root recorded when it
 was created. The fixed registry remains at
 `<CONFIG_DIR>/worktrees/registry.json`, independently of the selected
-materialization root.
+Worktree root.
 
 Names are branch suffixes, not filesystem paths. In the composer, uppercase
 letters, spaces, and underscores are normalized to lowercase kebab-case before
@@ -86,6 +86,36 @@ case-colliding are rejected without changing the repository. Nested valid names
 such as `team/auth-refresh` are allowed. If a request fails after creating a
 branch, the server removes it only when it can prove that the failed transaction
 still owns the original branch OID.
+
+## Worktree root and managed worktrees
+
+In **Settings → Worktrees**, select the server that owns the workspace files. The
+root setting is labeled **Worktree root** with the description **Directory where
+Kata Agents creates managed worktrees**. Changing it affects only new
+worktrees; existing checkouts stay where they were created.
+
+The **Managed worktrees** list intentionally stays simple. Each active worktree
+shows its name, branch, server path, and one **Delete** button. After a worktree
+is deleted, it disappears from the active list. Lifecycle recovery data remains
+server-side rather than adding restore, archive, retry, or snapshot controls to
+this list.
+
+Deletion still uses a fresh server-side inspection and snapshot-first removal so
+Kata Agents can fail safely if the checkout changes while it is being deleted.
+The local branch is retained, and snapshots stay on the owning server for
+lifecycle recovery; snapshot payload bytes never leave that server.
+
+## Automatic deletion
+
+Automatic deletion is **off by default**.
+
+- **Automatically delete old worktrees** — Recommended for most users. Turn this off only if you want to manage old worktrees and disk usage yourself.
+- **Auto-delete limit** — Number of managed worktrees to keep before older ones are pruned automatically. Kata Agents snapshots worktrees before deleting, so pruned worktrees should always be restorable.
+
+The limit is configurable from 1–1000 per server and counts materialized
+worktrees only. Cleanup is event-driven; it does not run a background daemon or
+use age or disk-size policies. Active or otherwise protected worktrees are
+skipped, and in-flight removals complete their journaled transaction.
 
 ## Reviewing and sharing work
 
@@ -114,10 +144,17 @@ until you restore the expected branch or delete the session.
 
 ## Archiving and deleting sessions
 
-- **Archiving** a session never removes its worktree.
+- **Archiving** a session never removes its worktree, but with Worktree V2 the
+  archived session's claim is recorded: when **every** owner of a worktree is
+  archived (and none is active), the worktree is removed snapshot-first and its
+  recovery data remains on the owning server.
 - **Deleting** a session drops that session's claim on the worktree but does not
-  remove the checkout on its own. Removing the managed worktree is a separate,
-  explicit choice in the delete dialog. It is blocked while another session still
-  shares the worktree, and removing a worktree with uncommitted or unpushed work
-  requires an extra destructive confirmation that names what would be lost. The
-  temporary branch is pruned only when it has no unique work.
+  remove the checkout on its own (the final-owner deletion leaves the worktree
+  `unowned` and schedules it for automatic cleanup). Removing the managed
+  worktree is a separate, explicit choice in the delete dialog. It is blocked
+  while another session still shares the worktree, and removing a worktree with
+  uncommitted or unpushed work requires an extra destructive confirmation that
+  names what would be lost. With Worktree V2, **Delete session and worktree**
+  captures a verified snapshot first and restores the session if removal fails;
+  the local branch is always retained. Without V2, the temporary branch is
+  pruned only when it has no unique work.

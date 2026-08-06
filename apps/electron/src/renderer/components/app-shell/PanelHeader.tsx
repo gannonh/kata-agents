@@ -161,7 +161,7 @@ export function PanelHeader({
   // consumers can render a Drawer-based menu instead of a Radix popover that
   // would otherwise get clipped by the panel container query.
   const desktopTitleNode = titleMenu ? (
-    <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+    <DropdownMenu modal={false} open={dropdownOpen} onOpenChange={setDropdownOpen}>
       {/* Wrapper button for the whole clickable area */}
       <button
         onClick={() => setDropdownOpen(true)}

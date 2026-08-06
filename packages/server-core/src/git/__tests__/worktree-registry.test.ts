@@ -1,7 +1,8 @@
 import { describe, test, expect, afterEach } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
 import {
   WorktreeRegistry,
   WorktreeRegistryError,
@@ -279,5 +280,160 @@ describe('WorktreeRegistry', () => {
       })
       registry.setState(record.managedWorktreeId, 'ready')
     }
+  })
+
+  test('accepts and persists Phase 2 lifecycle states', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    registry.upsert(record)
+
+    const states = [
+      'snapshotting',
+      'snapshotted',
+      'restoring',
+      'cleanup-failed',
+      'restore-failed',
+      'unowned',
+    ] as const
+    for (const state of states) {
+      registry.setState(record.managedWorktreeId, state)
+      const reloaded = new WorktreeRegistry(path)
+      expect(reloaded.get(record.managedWorktreeId)?.state).toBe(state)
+    }
+    // Invalid states stay rejected.
+    expect(() => registry.setState(record.managedWorktreeId, 'not-a-state' as never)).toThrow(
+      WorktreeRegistryError,
+    )
+  })
+
+  test('persists and validates Phase 2 record fields (snapshot, policy, archive, errors)', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const baseRecord = legacyRecord(root)
+    const record: ManagedWorktreeRecordV2 = {
+      ...baseRecord,
+      schemaVersion: 2,
+      workspaceId: 'workspace-1',
+      displayName: 'feature-x',
+      materializationRoot: root,
+      lastUsedAt: 123,
+      state: 'snapshotted',
+      policyVersion: 7,
+      archivedOwnerSessionIds: ['session-1'],
+      lastError: 'snapshot verification failed (sanitized)',
+      stateChangedAt: 456,
+      lastCleanupResult: {
+        at: 789,
+        outcome: 'succeeded',
+        policyVersion: 7,
+        removedWorktreeId: baseRecord.managedWorktreeId,
+      },
+      snapshot: {
+        snapshotId: '0123456789abcdef',
+        schemaVersion: 1,
+        hiddenRef: 'refs/kata/worktree-snapshots/0123456789abcdef',
+        headOid: 'a'.repeat(40),
+        branch: 'kata-agent/feature-x',
+        manifestHash: 'b'.repeat(64),
+        payloadPath: join(root, 'snapshots', '0123456789abcdef'),
+        createdAt: 456,
+        fileCount: 3,
+        totalBytes: 1024,
+        fingerprint: 'fp-capture',
+        policyVersion: 7,
+        previewFingerprint: 'fp-preview',
+      },
+    }
+    registry.upsert(record)
+
+    const reloaded = new WorktreeRegistry(path)
+    expect(reloaded.get(record.managedWorktreeId)).toEqual(record)
+
+    // Invalid optional shapes fail closed.
+    for (const invalid of [
+      { snapshot: { ...record.snapshot!, headOid: 'xyz' } },
+      { snapshot: { ...record.snapshot!, manifestHash: 'short' } },
+      { snapshot: { ...record.snapshot!, payloadPath: 'relative/path' } },
+      { policyVersion: -1 },
+      { archivedOwnerSessionIds: ['a', 'a'] },
+      { lastError: '' },
+      { lastCleanupResult: { at: 1, outcome: 'mystery', policyVersion: 0 } },
+      { stateChangedAt: Number.NaN },
+    ] as Array<Partial<ManagedWorktreeRecordV2>>) {
+      expect(() => registry.upsert({ ...record, ...invalid })).toThrow(WorktreeRegistryError)
+    }
+  })
+
+  test('runExclusive holds the cross-process lock across a transaction', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    registry.upsert(record)
+
+    const modulePath = resolve(import.meta.dir, '../worktree-registry.ts')
+    const signal = join(root, 'tx-started')
+    const blocked = await registry.runExclusive(async (tx) => {
+      const current = tx.get(record.managedWorktreeId)!
+      writeFileSync(signal, 'entered')
+      // A separate process must not be able to mutate while the transaction
+      // holds the registry lock: give it a short timeout and expect failure.
+      const script = `
+        import { WorktreeRegistry } from ${JSON.stringify(modulePath)}
+        import { writeFileSync } from 'node:fs'
+        const registry = new WorktreeRegistry(${JSON.stringify(path)}, { timeoutMs: 400, retryDelayMs: 5 })
+        // Signal BEFORE the attempt: a load/parse failure must not pass the
+        // test as a lock-induced block.
+        writeFileSync(${JSON.stringify(join(root, 'racer-attempted'))}, 'entered')
+        try {
+          registry.addOwnerIfReady(${JSON.stringify(record.managedWorktreeId)}, 'racer')
+          writeFileSync(${JSON.stringify(join(root, 'racer-won'))}, 'won')
+        } catch (error) {
+          writeFileSync(${JSON.stringify(join(root, 'racer-failed'))}, error instanceof Error ? error.message : String(error))
+        }
+      `
+      const child = spawn(process.execPath, ['-e', script], {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+      })
+      let childOutput = ''
+      child.stdout.on('data', (chunk) => { childOutput += String(chunk) })
+      child.stderr.on('data', (chunk) => { childOutput += String(chunk) })
+      await new Promise<void>((done) => child.on('exit', () => done()))
+      // The child loaded the module and reached the acquisition attempt; it
+      // must have been blocked by the held registry lock, not by a child-side
+      // failure.
+      expect(existsSync(join(root, 'racer-attempted'))).toBe(true)
+      expect(existsSync(join(root, 'racer-won'))).toBe(false)
+      expect(existsSync(join(root, 'racer-failed'))).toBe(true)
+      expect(readFileSync(join(root, 'racer-failed'), 'utf8')).toContain('registry lock')
+      expect(childOutput).toBe('')
+      current.state = 'snapshotting'
+      tx.commit()
+      return current.state
+    })
+
+    expect(blocked).toBe('snapshotting')
+    expect(registry.get(record.managedWorktreeId)?.state).toBe('snapshotting')
+    // A second instance sees the committed state.
+    expect(new WorktreeRegistry(path).get(record.managedWorktreeId)?.state).toBe('snapshotting')
+  })
+
+  test('runExclusive discards uncommitted changes', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    registry.upsert(record)
+
+    await registry.runExclusive(async (tx) => {
+      tx.get(record.managedWorktreeId)!.state = 'removing'
+      // No commit: the mutation must not persist.
+    })
+    expect(registry.get(record.managedWorktreeId)?.state).toBe('ready')
   })
 })

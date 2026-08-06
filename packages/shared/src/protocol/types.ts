@@ -84,6 +84,14 @@ export const WORKTREE_BRANCH_COLLISION_CODE = 'WORKTREE_BRANCH_COLLISION' as con
 export const WORKTREE_DESTINATION_UNSAFE_CODE = 'WORKTREE_DESTINATION_UNSAFE' as const
 /** Wire error returned when compensation cannot prove branch ownership. */
 export const WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE = 'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN' as const
+/** Wire error returned when a lifecycle transaction fails safety validation. */
+export const WORKTREE_LIFECYCLE_ERROR_CODE = 'WORKTREE_LIFECYCLE_FAILED' as const
+/** Wire error returned when a preview fingerprint is stale before capture. */
+export const WORKTREE_PREVIEW_STALE_CODE = 'WORKTREE_PREVIEW_STALE' as const
+/** Wire error returned when a record is not in a manageable state. */
+export const WORKTREE_STATE_UNMANAGEABLE_CODE = 'WORKTREE_STATE_UNMANAGEABLE' as const
+/** Wire error returned when a lifecycle action requires zero owners. */
+export const WORKTREE_OWNERS_PRESENT_CODE = 'WORKTREE_OWNERS_PRESENT' as const
 
 export type ErrorCode =
   | 'HANDLER_ERROR'
@@ -104,6 +112,10 @@ export type ErrorCode =
   | typeof WORKTREE_BRANCH_COLLISION_CODE
   | typeof WORKTREE_DESTINATION_UNSAFE_CODE
   | typeof WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE
+  | typeof WORKTREE_LIFECYCLE_ERROR_CODE
+  | typeof WORKTREE_PREVIEW_STALE_CODE
+  | typeof WORKTREE_STATE_UNMANAGEABLE_CODE
+  | typeof WORKTREE_OWNERS_PRESENT_CODE
   | 'CLIENT_DISCONNECTED'
   | 'CLIENT_REQUEST_TIMEOUT'
   | 'BROWSER_NO_CAPABLE_CLIENT'
@@ -130,6 +142,10 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   WORKTREE_BRANCH_COLLISION_CODE,
   WORKTREE_DESTINATION_UNSAFE_CODE,
   WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
+  WORKTREE_LIFECYCLE_ERROR_CODE,
+  WORKTREE_PREVIEW_STALE_CODE,
+  WORKTREE_STATE_UNMANAGEABLE_CODE,
+  WORKTREE_OWNERS_PRESENT_CODE,
   'CLIENT_DISCONNECTED',
   'CLIENT_REQUEST_TIMEOUT',
   'BROWSER_NO_CAPABLE_CLIENT',

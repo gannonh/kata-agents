@@ -137,6 +137,7 @@ async function deleteSession(
   }
   await page.getByTestId("git-delete-confirm").click();
   await expect(deleteDialog).toBeHidden();
+  await expect(page.locator('[data-slot="dialog-overlay"][data-state="closed"]')).toHaveCount(0);
 }
 
 test.describe(`Existing managed worktree sharing ${E2E_TAGS.git}`, () => {

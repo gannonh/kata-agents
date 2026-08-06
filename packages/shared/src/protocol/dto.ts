@@ -181,6 +181,10 @@ export type SessionEvent =
   | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete'; level?: 'info' | 'warning' | 'error' | 'success'; timestamp?: number }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'title_regenerating'; sessionId: string; isRegenerating: boolean }
+  // Phase 2 lifecycle: the server mutated this session's checkout DTO (recovery
+  // state, restored path). The renderer must re-fetch the session so owner
+  // sessions of a removed/restored worktree show accurate recovery state (AC14).
+  | { type: 'session_updated'; sessionId: string }
   | { type: 'async_operation'; sessionId: string; isOngoing: boolean }
   | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }

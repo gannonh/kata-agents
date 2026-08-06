@@ -485,36 +485,49 @@ function WorkspaceCheckoutBadgeInner(
           ? recovery.found ?? t('git.workspace.detached')
           : ''
       const label =
-        recovery.kind === 'missing'
-          ? t('git.workspace.recovery.missing')
-          : recovery.kind === 'blocked'
-            ? t('git.workspace.recovery.blocked')
-            : t('git.workspace.recovery.drift')
+        recovery.kind === 'lifecycle'
+          ? t(`settings.worktrees.state.${recovery.state}`)
+          : recovery.kind === 'missing'
+            ? t('git.workspace.recovery.missing')
+            : recovery.kind === 'blocked'
+              ? t('git.workspace.recovery.blocked')
+              : t('git.workspace.recovery.drift')
       const note =
-        recovery.kind === 'missing'
-          ? t('git.workspace.recovery.missingNote')
-          : recovery.kind === 'blocked'
-            ? t('git.workspace.recovery.blockedNote')
-            : t('git.workspace.recovery.driftNote', {
-                expected: recovery.kind === 'branch-drift' ? recovery.expected : '',
-                found: foundLabel,
-              })
+        recovery.kind === 'lifecycle'
+          ? t(`git.workspace.recovery.lifecycle.${recovery.state}`)
+          : recovery.kind === 'missing'
+            ? t('git.workspace.recovery.missingNote')
+            : recovery.kind === 'blocked'
+              ? t('git.workspace.recovery.blockedNote')
+              : t('git.workspace.recovery.driftNote', {
+                  expected: recovery.kind === 'branch-drift' ? recovery.expected : '',
+                  found: foundLabel,
+                })
       return (
-        <FreeFormInputContextBadge
-          icon={<AlertTriangle className="h-4 w-4" />}
-          label={label}
-          isExpanded
-          hasSelection
-          showChevron={false}
-          className="text-destructive"
-          tooltip={
-            <span className="flex flex-col gap-0.5">
-              <span className="font-medium">{label}</span>
-              <span className="text-xs opacity-70">{note}</span>
-            </span>
-          }
-          disabled
-        />
+        <span data-testid="git-workspace-recovery" data-recovery-kind={recovery.kind}>
+          <FreeFormInputContextBadge
+            icon={<AlertTriangle className="h-4 w-4" />}
+            label={label}
+            isExpanded
+            hasSelection
+            showChevron={false}
+            className="text-destructive"
+            tooltip={
+              <span className="flex flex-col gap-0.5">
+                {/* The fenced session still names the worktree it is bound to. */}
+                <span className="font-medium">{displayName}</span>
+                {identity.branch && (
+                  <span className="text-xs opacity-70">
+                    {t('chat.onBranch', { branch: identity.branch })}
+                  </span>
+                )}
+                <span className="text-xs opacity-70">{label}</span>
+                <span className="text-xs opacity-70">{note}</span>
+              </span>
+            }
+            disabled
+          />
+        </span>
       )
     }
     return (

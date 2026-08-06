@@ -386,6 +386,11 @@ export default function App() {
 
   // Ref for sessionOptions to access current value in event handlers without re-registering
   const sessionOptionsRef = useRef(sessionOptions)
+  // Per-session event revision: every session event bumps it, so an async
+  // getSessionMessages refresh that resolves after a newer event (notably
+  // session_deleted) can be detected and discarded instead of resurrecting a
+  // deleted session in renderer state.
+  const sessionEventRevisionsRef = useRef<Map<string, number>>(new Map())
   // Keep ref in sync with state
   useEffect(() => {
     sessionOptionsRef.current = sessionOptions
@@ -923,26 +928,37 @@ export default function App() {
       const workspaceId = windowWorkspaceId ?? ''
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
-      if (event.type === 'session_created') {
+      if (event.type === 'session_created' || event.type === 'session_updated') {
+        const revisions = sessionEventRevisionsRef.current
+        // Bump BEFORE the fetch so the refresh below observes this event.
+        revisions.set(sessionId, (revisions.get(sessionId) ?? 0) + 1)
+        const revision = revisions.get(sessionId)!
         window.electronAPI.getSessionMessages(sessionId)
-          .then((createdSession: Session | null) => {
-            if (createdSession) {
+          .then((updatedSession: Session | null) => {
+            // A newer session event (session_deleted, a re-created session, or
+            // another refresh) superseded this fetch: applying it could restore
+            // a deleted session or clobber fresher state.
+            if ((revisions.get(sessionId) ?? 0) !== revision) return
+            if (updatedSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)
               if (existingMeta) {
-                replaceLoadedSession(createdSession)
+                replaceLoadedSession(updatedSession)
               } else {
-                addSession(createdSession)
+                addSession(updatedSession)
               }
-              syncSessionOptionsFromSession(createdSession)
+              syncSessionOptionsFromSession(updatedSession)
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
           })
-          .catch((error: unknown) => console.error('Failed to handle session_created event:', error))
+          .catch((error: unknown) => console.error('Failed to handle session event:', error))
         return
       }
 
       if (event.type === 'session_deleted') {
+        // Tombstone the session so any in-flight refresh for it is discarded.
+        const revisions = sessionEventRevisionsRef.current
+        revisions.set(sessionId, (revisions.get(sessionId) ?? 0) + 1)
         removeSession(sessionId)
         return
       }

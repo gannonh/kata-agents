@@ -17,6 +17,10 @@ import { WorktreeRegistry } from './worktree-registry'
 import { MutationLock } from './mutation-lock'
 import { GitActionService } from './action-service'
 import { GitHubCliService } from './github-cli-service'
+import { WorktreeSnapshotService } from './worktree-snapshot-service'
+import { WorktreeLifecycleService, type WorktreeLifecycleDeps } from './worktree-lifecycle-service'
+import { PathLeaseManager } from './path-leases'
+import { WorktreeJournal, journalPathFor } from './worktree-journal'
 
 export * from './command-runner'
 export * from './repository-service'
@@ -29,6 +33,10 @@ export * from './diff-language'
 export * from './status-subscription'
 export * from './action-service'
 export * from './github-cli-service'
+export * from './worktree-snapshot-service'
+export * from './worktree-lifecycle-service'
+export * from './path-leases'
+export * from './worktree-journal'
 
 export interface GitServices {
   repository: RepositoryService
@@ -42,6 +50,14 @@ export interface GitServices {
   /** Current server-owned materialization root (registry remains fixed). */
   worktreeRoot: string
   worktreeSettings: WorktreeSettingsService
+  /** Phase 2: snapshot-backed lifecycle (management, sweeps, recovery). */
+  lifecycle: WorktreeLifecycleService
+  /** Phase 2: snapshot capture/restore/verification. */
+  snapshots: WorktreeSnapshotService
+  /** Phase 2: canonical checkout-path leases. */
+  pathLeases: PathLeaseManager
+  /** Phase 2: durable lifecycle journal. */
+  journal: WorktreeJournal
 }
 
 export interface GitServicesConfig {
@@ -57,6 +73,15 @@ export interface GitServicesConfig {
   protectedWorktreePaths?: string[]
   /** Inject an already-owned settings service when composing a host. */
   worktreeSettings?: WorktreeSettingsService
+  /** Optional snapshot storage root (defaults to <config>/snapshots). */
+  snapshotsRoot?: string
+  /** Optional lifecycle host lock directory (defaults to <config>/locks). */
+  lockDirectory?: string
+  /** Optional lifecycle hooks (quiescence/activity), wired by the host. */
+  lifecycleHooks?: Pick<
+    WorktreeLifecycleDeps,
+    'quiesceRuntimes' | 'isSessionActive' | 'isSessionFlagged' | 'applyOwnerSessionState' | 'touchSessionCheckout'
+  >
 }
 
 export function createGitServices(config: GitServicesConfig): GitServices {
@@ -75,7 +100,7 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     throw new Error('Injected worktree settings must be bound to the active worktree registry.')
   }
   const repository = new RepositoryService()
-  const mutationLock = new MutationLock()
+  const mutationLock = new MutationLock(config.lockDirectory ? join(config.lockDirectory, 'git') : undefined)
   const worktrees = new ManagedWorktreeService(
     worktreeSettings,
     registry,
@@ -84,6 +109,22 @@ export function createGitServices(config: GitServicesConfig): GitServices {
   )
   const actions = new GitActionService(repository)
   const github = new GitHubCliService(repository)
+  const lockBase = config.lockDirectory ?? join(CONFIG_DIR, 'locks')
+  const snapshots = new WorktreeSnapshotService(config.snapshotsRoot ?? join(CONFIG_DIR, 'snapshots'))
+  const pathLeases = new PathLeaseManager(join(lockBase, 'path-leases'))
+  const journal = new WorktreeJournal(journalPathFor(config.registryPath))
+  const lifecycle = new WorktreeLifecycleService({
+    registry,
+    snapshots,
+    settings: worktreeSettings,
+    worktrees,
+    mutationLock,
+    leases: pathLeases,
+    journal,
+    hostLockPath: join(lockBase, 'worktree-lifecycle.lock'),
+    cleanupStatePath: join(lockBase, 'worktree-cleanup-state.json'),
+    ...config.lifecycleHooks,
+  })
   return {
     repository,
     worktrees,
@@ -92,6 +133,10 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     actions,
     github,
     worktreeSettings,
+    lifecycle,
+    snapshots,
+    pathLeases,
+    journal,
     get worktreeRoot() {
       return worktrees.getWorktreeRoot()
     },

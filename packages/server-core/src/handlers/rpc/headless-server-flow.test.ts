@@ -286,4 +286,58 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     expect(existsSync(checkoutPath)).toBe(false)
     expect(services.registry.get(managedWorktreeId)).toBeUndefined()
   })
+
+  test('emits session_updated when lifecycle mutates an owner session checkout (AC14 sync)', async () => {
+    process.env[V2_FLAG] = '1'
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services, handlers, ctx } = makeServer()
+    injectSession(sm, 'evt-owner', tmp())
+
+    // Capture session events the manager would send to the renderer.
+    const events: Array<{ type: string; sessionId: string }> = []
+    sm.setEventSink((_channel, _target, payload: unknown) => {
+      const event = payload as { type: string; sessionId: string }
+      if (event?.type === 'session_updated' || event?.type === 'session_created') {
+        events.push({ type: event.type, sessionId: event.sessionId })
+      }
+    })
+    services.lifecycle.markReady()
+
+    const prep = (await handlers.get(RPC_CHANNELS.git.PREPARE_CHECKOUT)!(ctx, 'evt-owner', {
+      schemaVersion: 2,
+      mode: 'managed-worktree',
+      workingDirectory: repo,
+      baseRef: 'main',
+      worktreeNameSuffix: 'event-owner',
+    })) as { checkout: { managedWorktreeId: string; checkoutPath: string } }
+    const { managedWorktreeId, checkoutPath } = prep.checkout
+    events.length = 0
+
+    const preview = (await handlers.get(RPC_CHANNELS.git.WORKTREE_PREVIEW)!(ctx, managedWorktreeId)) as {
+      previewFingerprint: string
+    }
+    await handlers.get(RPC_CHANNELS.git.WORKTREE_DELETE)!(ctx, {
+      managedWorktreeId,
+      previewFingerprint: preview.previewFingerprint,
+    })
+
+    // The owner session's checkout DTO changed server-side; the renderer must
+    // be told to re-fetch it (this is what surfaces the recovery badge).
+    expect(events).toContainEqual({ type: 'session_updated', sessionId: 'evt-owner' })
+    const session = sm.getSessions().find((s) => s.id === 'evt-owner')!
+    expect(session.checkout).toMatchObject({
+      mode: 'managed-worktree',
+      managedWorktreeId,
+      recoveryState: 'snapshotted',
+    })
+    expect(existsSync(checkoutPath)).toBe(false)
+
+    // Restore clears the recovery state and re-emits.
+    await handlers.get(RPC_CHANNELS.git.WORKTREE_RESTORE)!(ctx, managedWorktreeId)
+    expect(events.filter((e) => e.type === 'session_updated')).toHaveLength(2)
+    const restored = sm.getSessions().find((s) => s.id === 'evt-owner')!
+    expect(restored.checkout?.recoveryState).toBeUndefined()
+    expect(restored.checkout?.checkoutPath).not.toBe(checkoutPath)
+  })
 })
