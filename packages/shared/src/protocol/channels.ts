@@ -376,6 +376,11 @@ export const RPC_CHANNELS = {
     GITHUB_STATUS: 'git:githubStatus',
     FIND_PULL_REQUEST: 'git:findPullRequest',
     CREATE_PULL_REQUEST: 'git:createPullRequest',
+    // Phase 3: conflict-safe checkout handoff
+    HANDOFF_PREVIEW: 'git:handoffPreview',
+    HANDOFF_CONFIRM: 'git:handoffConfirm',
+    HANDOFF_STATUS: 'git:handoffStatus',
+    HANDOFF_RECOVER: 'git:handoffRecover',
   },
   gitbash: {
     CHECK: 'gitbash:check',
