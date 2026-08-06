@@ -29,6 +29,9 @@ export { AbortReason, type RecoveryMessage };
 
 import type { ModelProvider } from '../../config/models.ts';
 
+// Import the sanitized provider capability DTO used by the handoff gate.
+import type { WorktreeHandoffProviderCapability } from '../../protocol/index.ts';
+
 // Import LLM connection types for auth
 import type { LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
 export type { LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
@@ -326,6 +329,50 @@ export type SdkMcpServerConfig =
     };
 
 /**
+ * Concrete proof that a backend's file, shell, MCP, and provider tools resolve
+ * a destination checkout. Returned by {@link ExecutionCwdRebindCapability}.
+ * The handoff flow treats Send as locked until this proof covers the
+ * destination (spec: a recreated runtime must prove every file, shell, MCP,
+ * and provider tool resolves the destination before Send unlocks).
+ */
+export interface ExecutionCwdProof {
+  adapterId: string;
+  destinationPath: string;
+  verifiedAt: number;
+  /** Concrete checks performed, e.g. `file:read`, `shell:cwd`, `mcp:list`, `provider:cwd`. */
+  checks: string[];
+}
+
+/**
+ * Optional backend capability for conflict-safe checkout handoff.
+ *
+ * A backend implements this ONLY when it can recreate or rebind its execution
+ * so every file, shell, MCP, and provider tool resolves the destination while
+ * the immutable transcript/session identity (the transcript CWD) is preserved.
+ * Adapters that cannot separate transcript storage from execution (Claude's
+ * current use of `sdkCwd` for both transcript lookup and process CWD) must NOT
+ * implement this; their sessions stay typed-blocked with V1 behavior.
+ */
+export interface ExecutionCwdRebindCapability {
+  readonly adapterId: string;
+
+  /** Sanitized capability DTO shown in previews and used for the gate. */
+  handoffCapability(): WorktreeHandoffProviderCapability;
+
+  /**
+   * Recreate or rebind execution to the destination checkout. Never touches
+   * transcript identity (`sdkCwd` / provider identity).
+   */
+  rebindExecutionCwd(destinationPath: string): Promise<void>;
+
+  /**
+   * Prove actual tool CWD resolution for the destination. Send stays locked
+   * until this returns proof with concrete checks.
+   */
+  verifyExecutionCwd(destinationPath: string): Promise<ExecutionCwdProof>;
+}
+
+/**
  * Core backend interface - all AI providers must implement this.
  *
  * The interface is designed to:
@@ -566,6 +613,18 @@ export interface AgentBackend {
    * Get a bound summarize callback for passing to API tool builders.
    */
   getSummarizeCallback(): (prompt: string) => Promise<string | null>;
+
+  // ============================================================
+  // Handoff execution-CWD rebinding (Phase 3)
+  // ============================================================
+
+  /**
+   * Optional handoff capability. Present only when this backend can safely
+   * rebind execution CWD while preserving immutable transcript identity.
+   * Handoff controls appear only when this resolves supported; otherwise the
+   * session returns a typed `unsupported-provider` blocker and keeps V1.
+   */
+  executionCwdRebind?: ExecutionCwdRebindCapability;
 
   // ============================================================
   // Session & Workspace State
