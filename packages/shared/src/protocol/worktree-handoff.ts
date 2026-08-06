@@ -32,7 +32,14 @@ export {
 // ---------------------------------------------------------------------------
 
 /** The three supported single-owner, same-repository handoff directions. */
-export type WorktreeHandoffDirection = 'current-to-managed' | 'managed-to-current' | 'hand-back'
+export const WORKTREE_HANDOFF_DIRECTIONS = [
+  'current-to-managed',
+  'managed-to-current',
+  'hand-back',
+] as const
+
+/** A supported single-owner, same-repository handoff direction. */
+export type WorktreeHandoffDirection = (typeof WORKTREE_HANDOFF_DIRECTIONS)[number]
 
 /**
  * Sanitized provider capability DTO. Never carries secrets, paths beyond the
@@ -58,39 +65,45 @@ export interface WorktreeHandoffProviderCapability {
 
 /**
  * Typed handoff blockers. Each corresponds to a precondition the server
- * checks before any mutation; a blocked handoff claims no mutation.
+ * checks before any mutation; a blocked handoff claims no mutation. The
+ * tuple is the single source of truth: the union is derived from it so a
+ * code can never be added to the type without being listed here.
  */
-export type WorktreeHandoffBlockerCode =
+export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   /** Provider adapter cannot safely rebind execution CWD (V1 preserved). */
-  | 'unsupported-provider'
+  'unsupported-provider',
   /** Snapshot service cannot capture the current state. */
-  | 'unsupported-snapshot'
+  'unsupported-snapshot',
   /** Destination checkout has tracked/index/eligible-untracked state. */
-  | 'destination-dirty'
+  'destination-dirty',
   /** Destination checkout path is not materialized. */
-  | 'destination-missing'
+  'destination-missing',
   /** Destination checkout is on a detached HEAD. */
-  | 'destination-detached'
+  'destination-detached',
   /** The branch is checked out by another worktree not recorded in the journal. */
-  | 'branch-occupied-outside-journal'
+  'branch-occupied-outside-journal',
   /** A foreign session/runtime leases either canonical path. */
-  | 'another-path-user'
+  'another-path-user',
   /** Handoff requires exactly one owner; the checkout is shared. */
-  | 'shared-owners'
+  'shared-owners',
   /** An active turn or unquiesceable runtime occupies the source. */
-  | 'runtime-active'
+  'runtime-active',
   /** Lifecycle cleanup is in progress for either path. */
-  | 'cleanup-in-progress'
+  'cleanup-in-progress',
   /** A Git operation is in progress or the index is unmerged. */
-  | 'git-operation-in-progress'
+  'git-operation-in-progress',
   /** Captured state exceeds snapshot limits. */
-  | 'oversized-capture'
+  'oversized-capture',
   /** Live identity/fingerprints drifted from the preview. */
-  | 'identity-drift'
+  'identity-drift',
   /** Required feature flags are disabled. */
-  | 'flags-disabled'
+  'flags-disabled',
   /** A pending/recovery handoff exists for either path. */
-  | 'handoff-in-progress'
+  'handoff-in-progress',
+] as const
+
+/** A typed handoff blocker code. */
+export type WorktreeHandoffBlockerCode = (typeof WORKTREE_HANDOFF_BLOCKER_CODES)[number]
 
 /** Typed blocker payload carried by previews and confirm results. */
 export interface WorktreeHandoffBlocked {
@@ -103,16 +116,6 @@ export interface WorktreeHandoffBlocked {
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
-
-/** Sanitized lease summary for one canonical path. */
-export interface WorktreeHandoffPathSummary {
-  /** Server-local canonical path (never a client-nominated path). */
-  path: string
-  /** Server identity that owns this path. */
-  serverId: string
-  /** Live lease owners held by sessions/runtimes other than the handoff session. */
-  foreignLeaseOwnerIds: string[]
-}
 
 /** Exact source cleanup the server will perform on confirmation. */
 export interface WorktreeHandoffCleanupSummary {
@@ -160,6 +163,8 @@ export interface WorktreeHandoffPreview {
   direction: WorktreeHandoffDirection
   providerCapability: WorktreeHandoffProviderCapability
   source: {
+    /** Server identity that owns the source checkout. */
+    serverId: string
     /** Branch name, or null when detached. */
     branch: string | null
     /** HEAD SHA at preview time. */

@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  WORKTREE_HANDOFF_BLOCKER_CODES,
   WORKTREE_HANDOFF_BLOCKED_CODE,
+  WORKTREE_HANDOFF_DIRECTIONS,
   WORKTREE_HANDOFF_ERROR_CODE,
   WORKTREE_HANDOFF_PENDING_CODE,
   WORKTREE_HANDOFF_PREVIEW_STALE_CODE,
   RPC_CHANNELS,
   type WorktreeHandoffBlockerCode,
   type WorktreeHandoffConfirmInput,
-  type WorktreeHandoffDirection,
   type WorktreeHandoffPreview,
   type WorktreeHandoffProviderCapability,
   type WorktreeHandoffResult,
@@ -15,36 +16,10 @@ import {
 } from '../index'
 import { isErrorCode } from '../types'
 
-const DOCUMENTED_BLOCKER_CODES: readonly WorktreeHandoffBlockerCode[] = [
-  'unsupported-provider',
-  'unsupported-snapshot',
-  'destination-dirty',
-  'destination-missing',
-  'destination-detached',
-  'branch-occupied-outside-journal',
-  'another-path-user',
-  'shared-owners',
-  'runtime-active',
-  'cleanup-in-progress',
-  'git-operation-in-progress',
-  'oversized-capture',
-  'identity-drift',
-  'flags-disabled',
-  'handoff-in-progress',
-]
-
 describe('Worktree handoff protocol contracts', () => {
   it('defines exactly the three supported handoff directions', () => {
-    const directions: readonly WorktreeHandoffDirection[] = [
-      'current-to-managed',
-      'managed-to-current',
-      'hand-back',
-    ]
-    // Every documented direction exists and carries no extra variants.
-    for (const direction of directions) {
-      expect(direction).toBe(direction)
-    }
-    expect(new Set(directions).size).toBe(3)
+    expect(WORKTREE_HANDOFF_DIRECTIONS).toHaveLength(3)
+    expect(new Set(WORKTREE_HANDOFF_DIRECTIONS).size).toBe(3)
   })
 
   it('keeps the provider capability DTO free of paths, payloads, and secrets', () => {
@@ -87,6 +62,7 @@ describe('Worktree handoff protocol contracts', () => {
       direction: 'managed-to-current',
       providerCapability: { adapterId: 'pi', executionCwdRebindable: true },
       source: {
+        serverId: 'server-a',
         branch: 'kata-agent/ab12cd34',
         headSha: 'deadbeef',
         state: 'clean',
@@ -122,13 +98,11 @@ describe('Worktree handoff protocol contracts', () => {
   })
 
   it('models every documented blocker code and typed wire errors', () => {
-    const allCodes: WorktreeHandoffBlockerCode[] = [
-      ...DOCUMENTED_BLOCKER_CODES,
-    ]
-    expect(allCodes.length).toBe(15)
-    for (const code of allCodes) {
-      expect(code).toBe(code)
-    }
+    // The tuple is the single source of truth for the union: a code added to
+    // the type must be listed here, and removing one breaks the length gate.
+    const allCodes: readonly WorktreeHandoffBlockerCode[] = WORKTREE_HANDOFF_BLOCKER_CODES
+    expect(allCodes).toHaveLength(15)
+    expect(new Set(allCodes).size).toBe(15)
     expect(isErrorCode(WORKTREE_HANDOFF_ERROR_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_BLOCKED_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_PREVIEW_STALE_CODE)).toBe(true)
