@@ -144,6 +144,7 @@ test.describe(`Managed worktree Git flow ${E2E_TAGS.git}`, () => {
         .fill("test(git): validate managed worktree flow");
       await page.getByTestId("git-commit-submit").click();
       await expect(commitDialog).toBeHidden();
+      await expect(page.locator('[data-slot="dialog-overlay"][data-state="closed"]')).toHaveCount(0);
       await expect(changesAffordance).toContainText("No changes", {
         timeout: 7_000,
       });
@@ -198,6 +199,7 @@ test.describe(`Managed worktree Git flow ${E2E_TAGS.git}`, () => {
       );
       await page.getByTestId("git-delete-confirm").click();
       await expect(deleteDialog).toBeHidden();
+      await expect(page.locator('[data-slot="dialog-overlay"][data-state="closed"]')).toHaveCount(0);
 
       await expect
         .poll(async () => {

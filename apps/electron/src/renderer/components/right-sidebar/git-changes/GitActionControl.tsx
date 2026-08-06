@@ -380,7 +380,7 @@ export function GitActionControl({ sessionId }: GitActionControlProps) {
         </Tooltip>
 
         {hasMenu && (
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"

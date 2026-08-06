@@ -90,6 +90,7 @@ async function removeSessionWorktree(
   await page.getByTestId("git-delete-remove-worktree").check();
   await page.getByTestId("git-delete-confirm").click();
   await expect(deleteDialog).toBeHidden();
+  await expect(page.locator('[data-slot="dialog-overlay"][data-state="closed"]')).toHaveCount(0);
 
   await expect
     .poll(
