@@ -539,6 +539,10 @@ export class WorktreeLifecycleService {
           policyVersion: policy.version,
         })
         let committed = false
+        // Owners observed at the ready-commit: session stamping and lease
+        // rebinding use this set so a session that detached during the restore
+        // is never re-associated with the restored checkout.
+        let currentOwners: string[] = []
         try {
           this.deps.journal.step(journalEntry.journalId, 'locks-acquired')
           // Durable in-flight marker before any checkout mutation, so a crash
@@ -576,15 +580,20 @@ export class WorktreeLifecycleService {
             current.stateChangedAt = Date.now()
             tx.commit()
             committed = true
+            // The session updates and lease rebinding below must use the
+            // CURRENT owner set: an owner may have detached while the restore
+            // awaited snapshot I/O, and must not be re-associated with the
+            // restored checkout.
+            currentOwners = [...current.ownerSessionIds]
           })
-          await this.deps.applyOwnerSessionState?.(record.ownerSessionIds, {
+          await this.deps.applyOwnerSessionState?.(currentOwners, {
             managedWorktreeId: record.managedWorktreeId,
             state: 'ready',
             checkoutPath: restored.checkoutPath,
           })
           // Re-lease every owner to the restored path so lifecycle decisions see
           // the full fence set at the live checkout.
-          for (const owner of record.ownerSessionIds) {
+          for (const owner of currentOwners) {
             this.deps.leases.releaseSession(owner)
             this.deps.leases.lease(owner, restored.checkoutPath)
           }

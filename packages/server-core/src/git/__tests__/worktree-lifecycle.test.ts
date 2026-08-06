@@ -1039,6 +1039,31 @@ describe('UAT regressions', () => {
     expect(stamped.flat()).not.toContain('session-1')
   })
 
+  test('restore never re-associates an owner that detached mid-restore', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x', ['session-1'])
+    writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    // The owner detaches while the restore awaits snapshot I/O: the restored
+    // record and its lease rebinding must use the CURRENT owner set, so the
+    // detached session is not re-associated with the restored checkout.
+    const originalRestore = svc.snapshots.restore.bind(svc.snapshots)
+    svc.snapshots.restore = (async (input: Parameters<typeof originalRestore>[0]) => {
+      await svc.lifecycle.detachSession('session-1')
+      return originalRestore(input)
+    }) as typeof originalRestore
+
+    const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
+
+    expect(restored.restored).toBe(true)
+    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    expect(after.ownerSessionIds).toEqual([])
+    expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
+  })
+
   test('startup reconciliation prunes stale lease markers', async () => {
     const { svc, root } = harness
     await makeManagedWorktree('feature-x')
