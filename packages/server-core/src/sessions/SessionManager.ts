@@ -1102,9 +1102,18 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
       /* registry unavailable — omit */
     }
   }
+  // Client-visible handoff capability: actions appear only when the session's
+  // provider adapter advertises safe execution-CWD rebinding (AC-1). The agent
+  // is lazy-loaded, so the flag is absent until the runtime exists; the server
+  // keeps the typed blocker as the authoritative backstop.
+  let handoffCapable: boolean | undefined
+  if (m.agent) {
+    handoffCapable = resolveHandoffCapability(m.agent).supported
+  }
   return {
     ...pickSessionFields(m),
     sharedOwnerCount,
+    handoffCapable,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,

@@ -147,7 +147,7 @@ function PreviewBody({
           </div>
         </div>
       )}
-      {state.phase === 'preview' && preview.direction === 'current-to-managed' && (
+      {(state.phase === 'preview' || state.phase === 'preview-blocked') && preview.direction === 'current-to-managed' && (
         <div className="flex flex-col gap-1.5">
           <label className="text-[12px] font-medium text-muted-foreground">{t('git.handoff.nameLabel')}</label>
           <Input
@@ -220,7 +220,8 @@ function RecoveryBody({
 }) {
   const { t } = useTranslation()
   const result = state.result
-  const canRecover = canRecoverHandoff(state.phase, result)
+  // Keep the button mounted while recovery is in flight so the spinner shows.
+  const canRecover = state.phase === 'recovering' || canRecoverHandoff(state.phase, result)
   return (
     <div className="flex flex-col gap-3">
       <div
@@ -368,7 +369,9 @@ export function HandoffDialog({
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange])
 
   const busy = state.phase === 'loading' || state.phase === 'confirming' || state.phase === 'recovering'
-  const confirmable = canConfirmHandoff(state.phase, state.preview) && !busy
+  // Keep the confirm button mounted while the request is in flight so the
+  // spinner state is visible; the click handler guards on the phase itself.
+  const confirmable = state.phase === 'confirming' || (canConfirmHandoff(state.phase, state.preview) && !busy)
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
@@ -430,7 +433,7 @@ export function HandoffDialog({
             <Button
               data-testid="handoff-confirm-button"
               onClick={() => void handleConfirm()}
-              disabled={state.phase !== 'preview'}
+              disabled={state.phase !== 'preview' && state.phase !== 'confirming'}
             >
               {state.phase === 'confirming' ? (
                 <>

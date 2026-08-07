@@ -254,6 +254,7 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
             sessionId={sessionId}
             checkout={session?.checkout ? { mode: session.checkout.mode } : undefined}
             handoffRuntimeState={session?.handoffRuntimeState}
+            handoffCapable={session?.handoffCapable}
             isRemoteWorkspace={isRemoteWorkspace}
           />
           <span className="flex-1" />

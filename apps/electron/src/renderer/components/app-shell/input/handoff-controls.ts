@@ -11,7 +11,7 @@
  */
 
 import type {
-  SessionCheckout,
+  CheckoutMode,
   WorktreeHandoffDirection,
   WorktreeHandoffPreview,
   WorktreeHandoffResult,
@@ -35,7 +35,7 @@ import { normalizeWorktreeName, normalizeWorktreeNameInput, generateDefaultWorkt
  *   `handoffRuntimeState` is armed) may hand back to its released worktree.
  */
 export function handoffDirectionsForCheckout(
-  checkout: SessionCheckout | undefined,
+  checkout: { mode: CheckoutMode } | undefined,
   handoffRuntimeState?: string | null,
 ): WorktreeHandoffDirection[] {
   if (!checkout) return ['current-to-managed']
@@ -46,7 +46,7 @@ export function handoffDirectionsForCheckout(
 }
 
 /** Whether a handoff surface should render at all for a session. */
-export function canOfferHandoff(checkout: SessionCheckout | undefined, handoffRuntimeState?: string | null): boolean {
+export function canOfferHandoff(checkout: { mode: CheckoutMode } | undefined, handoffRuntimeState?: string | null): boolean {
   return handoffDirectionsForCheckout(checkout, handoffRuntimeState).length > 0
 }
 
@@ -193,8 +193,10 @@ export function reduceHandoffDialog(state: HandoffDialogState, action: HandoffDi
       return { ...state, phase: 'error', message: action.message, result: null }
     case 'name-changed': {
       // Editing the name invalidates the fingerprint; the component re-previews
-      // with the new suffix before confirm is re-enabled.
-      if (state.phase !== 'preview') return state
+      // with the new suffix before confirm is re-enabled. Allowed while a
+      // blocker (e.g. invalid-name or a destination collision) keeps the
+      // preview unusable so the user can fix the name inline.
+      if (state.phase !== 'preview' && state.phase !== 'preview-blocked') return state
       return { ...state, phase: 'loading', nameInput: action.value }
     }
     case 'confirm':

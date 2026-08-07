@@ -112,6 +112,12 @@ export interface Session {
    * means the proof failed and Send stays blocked. Absent for V1 sessions.
    */
   handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required'
+  /**
+   * Server-derived: true when this session's provider adapter advertises safe
+   * execution-CWD rebinding (handoff actions may be offered). Absent while
+   * the agent runtime has not been created yet.
+   */
+  handoffCapable?: boolean
 }
 
 export interface CreateSessionOptions {

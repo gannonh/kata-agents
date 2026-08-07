@@ -35,6 +35,8 @@ export interface HandoffActionProps {
   checkout: { mode: 'current' | 'managed-worktree' } | undefined
   /** Persisted handoff runtime state (armed → a prior handoff completed). */
   handoffRuntimeState?: string | null
+  /** Server-derived: provider advertises safe execution-CWD rebinding (AC-1). */
+  handoffCapable?: boolean
   /** True when the session's workspace is owned by a remote server. */
   isRemoteWorkspace?: boolean
 }
@@ -44,17 +46,17 @@ export function HandoffButton({
   sessionId,
   checkout,
   handoffRuntimeState,
+  handoffCapable,
   isRemoteWorkspace,
 }: HandoffActionProps) {
   const { t } = useTranslation()
   const [direction, setDirection] = React.useState<WorktreeHandoffDirection | null>(null)
 
-  const directions = handoffDirectionsForCheckout(
-    checkout
-      ? ({ mode: checkout.mode } as Parameters<typeof handoffDirectionsForCheckout>[0])
-      : undefined,
-    handoffRuntimeState,
-  )
+  // AC-1: handoff controls appear only for a provider adapter advertising safe
+  // execution-CWD rebinding. The server's typed blocker remains the backstop.
+  if (handoffCapable !== true) return null
+
+  const directions = handoffDirectionsForCheckout(checkout, handoffRuntimeState)
   if (directions.length === 0) return null
 
   const directionLabel = (dir: WorktreeHandoffDirection): string => {

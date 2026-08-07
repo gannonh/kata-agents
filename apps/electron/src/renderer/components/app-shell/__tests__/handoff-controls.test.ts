@@ -239,6 +239,19 @@ describe('handoff dialog state machine', () => {
     expect(canConfirmHandoff(state.phase, state.preview)).toBe(false)
   })
 
+  it('lets the user fix the name inline while a blocker keeps the preview unusable', () => {
+    let state = reduceHandoffDialog(initialHandoffDialogState(), { type: 'open', direction: 'current-to-managed' })
+    state = reduceHandoffDialog(state, {
+      type: 'preview-ready',
+      preview: previewFor({ blocked: { blocked: true, code: 'invalid-name', reason: 'not a valid branch suffix' } }),
+    })
+    expect(state.phase).toBe('preview-blocked')
+    state = reduceHandoffDialog(state, { type: 'name-changed', value: 'valid-name' })
+    expect(state.phase).toBe('loading')
+    expect(state.nameInput).toBe('valid-name')
+    expect(canConfirmHandoff(state.phase, state.preview)).toBe(false)
+  })
+
   it('renders the committed summary after a successful confirm', () => {
     const committed: WorktreeHandoffResult = {
       outcome: 'committed',
