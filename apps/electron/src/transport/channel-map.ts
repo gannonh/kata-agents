@@ -343,6 +343,11 @@ export const CHANNEL_MAP = {
   onGitStatusChanged: listener(RPC_CHANNELS.git.STATUS_CHANGED),
   inspectGitWorktreeRemoval: invoke(RPC_CHANNELS.git.INSPECT_WORKTREE_REMOVAL),
   removeGitWorktree: invoke(RPC_CHANNELS.git.REMOVE_WORKTREE),
+  // Git / GitHub V1 — conflict-safe checkout handoff (Phase 3)
+  handoffPreview: invoke(RPC_CHANNELS.git.HANDOFF_PREVIEW),
+  handoffConfirm: invoke(RPC_CHANNELS.git.HANDOFF_CONFIRM),
+  handoffStatus: invoke(RPC_CHANNELS.git.HANDOFF_STATUS),
+  handoffRecover: invoke(RPC_CHANNELS.git.HANDOFF_RECOVER),
 
   // Git / GitHub V1 — commit / pull / push + pull requests (Phase 3)
   commitGit: invoke(RPC_CHANNELS.git.COMMIT),

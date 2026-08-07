@@ -227,6 +227,13 @@ import type {
   GitStatusChangedEvent,
   WorktreeRemovalRisk,
   WorktreeRemovalResult,
+  WorktreeHandoffPreviewInput,
+  WorktreeHandoffPreview,
+  WorktreeHandoffConfirmInput,
+  WorktreeHandoffResult,
+  WorktreeHandoffStatusInput,
+  WorktreeHandoffStatus,
+  WorktreeHandoffRecoverInput,
   SessionDeleteOptions,
   SessionDeleteResult,
   GitCommitInput,
@@ -643,6 +650,19 @@ export interface ElectronAPI {
   // callers pass only the session ID (never a worktree path or ID).
   inspectGitWorktreeRemoval(sessionId: string): Promise<WorktreeRemovalRisk>
   removeGitWorktree(sessionId: string, force?: boolean): Promise<WorktreeRemovalResult>
+
+  // Git / GitHub V1 — conflict-safe checkout handoff (Phase 3). Clients submit
+  // session ID / direction / name and opaque transaction IDs + preview
+  // fingerprints — never paths or patches; the workspace-owning server owns
+  // every Git mutation and revalidates the fingerprint under lock.
+  /** Preview a handoff; the server binds every decision-relevant fact into the fingerprint. */
+  handoffPreview(input: WorktreeHandoffPreviewInput): Promise<WorktreeHandoffPreview>
+  /** Confirm a previewed handoff by transaction ID + exact preview fingerprint. */
+  handoffConfirm(input: WorktreeHandoffConfirmInput): Promise<WorktreeHandoffResult>
+  /** Report whether a session has an active (pending/recovery) handoff. */
+  handoffStatus(input: WorktreeHandoffStatusInput): Promise<WorktreeHandoffStatus>
+  /** Continue/recover an interrupted handoff (idempotent, snapshot-backed). */
+  handoffRecover(input: WorktreeHandoffRecoverInput): Promise<WorktreeHandoffResult>
 
   // Git / GitHub V1 — commit / pull / push + GitHub pull requests (Phase 3).
   // Identity is resolved server-side from the session's persisted checkout;
