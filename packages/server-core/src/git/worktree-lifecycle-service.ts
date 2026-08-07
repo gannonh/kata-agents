@@ -1479,6 +1479,14 @@ export class WorktreeLifecycleService {
           .map((record) => record.snapshot?.snapshotId)
           .filter((id): id is string => !!id),
       )
+      // A pending/failed handoff retains its snapshot as the recovery
+      // authority even after the managed source record was removed
+      // (managed-to-current release). Never GC a payload recovery needs.
+      for (const entry of this.deps.journal.entries()) {
+        if (entry.op !== 'handoff' || (entry.status !== 'in-progress' && entry.status !== 'failed')) continue
+        const retained = entry.metadata?.retainedSnapshotId
+        if (typeof retained === 'string' && retained) referenced.add(retained)
+      }
       for (const name of entries) {
         if (name.startsWith('.tmp-')) {
           // Owner-only capture staging; never referenced by any record. Hidden

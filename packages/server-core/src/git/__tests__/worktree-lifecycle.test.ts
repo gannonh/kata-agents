@@ -876,6 +876,36 @@ describe('orphan and pending-restore cleanup', () => {
     expect(restored.restored).toBe(true)
   })
 
+  test('gc retains a payload referenced only by an in-progress handoff journal', async () => {
+    const { svc } = harness
+    const record = await makeManagedWorktree('feature-x')
+    await svc.lifecycle.deleteWorktree(
+      record.managedWorktreeId,
+      (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
+    )
+    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const payloadPath = snapshotted.snapshot!.payloadPath
+    // The managed source record is removed exactly like a managed-to-current
+    // release; only the handoff journal retains the snapshot authority.
+    svc.registry.remove(record.managedWorktreeId)
+    const journal = svc.journal.begin({
+      op: 'handoff',
+      recordId: 'deadbeefdeadbeef',
+      sessionIds: ['session-1'],
+      policyVersion: 1,
+      metadata: { retainedSnapshotId: snapshotted.snapshot!.snapshotId },
+    })
+    svc.journal.fail(journal.journalId, 'simulated post-release failure')
+    const orphanPath = join(harness.root, 'snapshots', 'deadbeefdeadbeef')
+    mkdirSync(orphanPath, { recursive: true })
+    writeFileSync(join(orphanPath, 'manifest.json'), JSON.stringify({ snapshotId: 'deadbeefdeadbeef' }))
+
+    await svc.lifecycle.reconcileJournal()
+
+    expect(existsSync(join(payloadPath, 'manifest.json'))).toBe(true)
+    expect(existsSync(orphanPath)).toBe(false)
+  })
+
   test('pending restore cleanup removes payload and ref of a ready record', async () => {
     const { repo, svc } = harness
     const record = await makeManagedWorktree('feature-x')

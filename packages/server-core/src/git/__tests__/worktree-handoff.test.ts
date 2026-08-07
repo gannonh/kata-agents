@@ -370,6 +370,73 @@ describe('handoff preview — managed-to-current', () => {
     expect(p.recoveryBehavior).toBe('source-authoritative')
   })
 
+  test('confirms managed state into the current checkout and releases the source worktree', async () => {
+    const record = await managedSession()
+    writeFile(harness.repo, '.gitignore', 'secret.env\n')
+    await git(harness.repo, ['add', '.gitignore'])
+    await git(harness.repo, ['commit', '-m', 'ignore secret'])
+    writeFile(record.checkoutPath, 'managed-change.txt', 'managed state\n')
+    writeFile(record.checkoutPath, 'secret.env', 'included\n')
+    writeFile(record.checkoutPath, '.worktreeinclude', 'secret.env\n')
+
+    const p = await preview('managed-to-current')
+    expect(p.blocked).toBeUndefined()
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'managed-to-current',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+    expect(existsSync(record.checkoutPath)).toBe(false)
+    expect(await headOf(harness.repo)).toBe(record.expectedBranch ? await git(harness.repo, ['rev-parse', record.expectedBranch]) .then((value) => value.trim()) : '')
+    expect(readFileSync(join(harness.repo, 'managed-change.txt'), 'utf8')).toBe('managed state\n')
+    expect(readFileSync(join(harness.repo, 'secret.env'), 'utf8')).toBe('included\n')
+    expect(harness.bindings.at(-1)).toMatchObject({
+      sessionId: 'session-1',
+      executionCwd: harness.repo,
+      checkout: { mode: 'current', checkoutPath: harness.repo, managedWorktreeId: null },
+    })
+    expect(harness.rebinds.at(-1)).toBe(harness.repo)
+  })
+
+  test('retains a snapshot-backed recovery state when runtime rebinding fails after source release', async () => {
+    const record = await managedSession('runtime-failure')
+    harness.adapters.set('session-1', {
+      adapterId: 'pi-test',
+      handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
+      rebindExecutionCwd: async () => {
+        throw new Error('runtime refused current checkout')
+      },
+      verifyExecutionCwd: async (destinationPath) => ({
+        adapterId: 'pi-test',
+        destinationPath,
+        verifiedAt: Date.now(),
+        checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
+      }),
+    })
+
+    const p = await preview('managed-to-current', 'runtime-failure')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'managed-to-current',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+
+    expect(result.outcome).toBe('recovery-required')
+    if (result.outcome !== 'recovery-required') return
+    expect(result.retainedSnapshotId).toBeTruthy()
+    expect(existsSync(record.checkoutPath)).toBe(false)
+    expect(await harness.svc.handoff.status('session-1')).toMatchObject({
+      active: true,
+      state: 'recovery-required',
+      retainedSnapshotId: result.retainedSnapshotId,
+    })
+  })
+
   test('blocks a shared managed worktree (shared-owners)', async () => {
     await managedSession()
     const record = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/demo')!
