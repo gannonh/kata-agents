@@ -29,7 +29,7 @@
  * commit point, and the immutable transcript CWD never changes.
  */
 
-import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import type {
@@ -64,7 +64,7 @@ import type { WorktreeLifecycleService } from './worktree-lifecycle-service'
 import type { RepositoryService } from './repository-service'
 import type { WorktreeSettingsService } from './worktree-settings-service'
 import { listWorktreeIncludeFiles } from './worktree-include'
-import { runGit, splitNul } from './command-runner'
+import { runGit, runGitBuffer, splitNul } from './command-runner'
 
 export type WorktreeHandoffErrorCode =
   | 'HANDOFF_SESSION_UNKNOWN'
@@ -181,7 +181,7 @@ function newPathToken(): string {
   return randomBytes(4).toString('hex')
 }
 
-function sha256(value: string): string {
+function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
@@ -609,7 +609,6 @@ export class WorktreeHandoffService {
         await this.removeCapturedState(
           facts.source.checkoutPath,
           captured.manifest,
-          sourceRecord,
           txn.capturedIncludedFiles ?? [],
         )
         txn.steps.push('source-cleaned')
@@ -1097,7 +1096,6 @@ export class WorktreeHandoffService {
         await this.removeCapturedState(
           facts.source.checkoutPath,
           captured.manifest,
-          sourceRecord,
           txn.capturedIncludedFiles ?? [],
         )
         txn.steps.push('source-cleaned')
@@ -1296,7 +1294,6 @@ export class WorktreeHandoffService {
   private async removeCapturedState(
     checkoutPath: string,
     manifest: WorktreeSnapshotManifest,
-    record: import('@kata-sh/shared/protocol').ManagedWorktreeRecordV2,
     capturedIncludedFiles: string[],
   ): Promise<void> {
     await runGit(['reset', '--hard', 'HEAD'], { cwd: checkoutPath })
@@ -1310,7 +1307,7 @@ export class WorktreeHandoffService {
       }
       rmSync(absolute, { force: true, recursive: false })
     }
-    const remaining = await this.transferableStateCounts(record.checkoutPath)
+    const remaining = await this.transferableStateCounts(checkoutPath)
     if (remaining.trackedFileCount || remaining.stagedFileCount || remaining.eligibleUntrackedFileCount) {
       throw new Error('Source cleanup did not remove the exact captured transferable state.')
     }
@@ -1338,12 +1335,291 @@ export class WorktreeHandoffService {
         reason: 'The preview transaction expired before confirmation; preview again.',
       }
     }
-    return {
-      outcome: 'recovery-required',
-      transactionId: input.transactionId,
-      recovery: txn.state,
-      ...(txn.retainedSnapshotId ? { retainedSnapshotId: txn.retainedSnapshotId } : {}),
-      reason: 'Handoff reconciliation is not available yet; the retained snapshot is the recovery authority.',
+    // A durable binding without a journal commit is ambiguous (the binding
+    // cannot be revoked through this service); only explicit recovery applies.
+    if (txn.state === 'binding-committed' || txn.steps.includes('binding-committed')) {
+      return {
+        outcome: 'recovery-required',
+        transactionId: input.transactionId,
+        recovery: txn.state,
+        ...(txn.retainedSnapshotId ? { retainedSnapshotId: txn.retainedSnapshotId } : {}),
+        reason: 'The session binding committed before the journal commit marker; resolve the binding before retrying.',
+      }
+    }
+
+    // Snapshot-backed rollback: undo exactly the steps the journal records,
+    // using the retained snapshot as the authority. Idempotent so a crash
+    // during rollback can safely re-run it.
+    return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
+      try {
+        await this.rollbackTransaction(txn)
+        this.deps.journal.updateMetadata(txn.journalId, { state: 'rolled-back', rolledBackAt: Date.now() })
+        this.deps.journal.recover(txn.journalId, 'rolled-back')
+        this.transactions.delete(input.sessionId)
+        return {
+          outcome: 'blocked',
+          transactionId: input.transactionId,
+          code: 'handoff-rolled-back',
+          reason: 'The interrupted handoff was rolled back to its previous checkout state; preview again to retry.',
+        }
+      } catch (error) {
+        this.deps.journal.updateMetadata(txn.journalId, {
+          state: 'recovery-required',
+          retainedSnapshotId: txn.retainedSnapshotId,
+        })
+        this.deps.journal.fail(txn.journalId, sanitizeError(error))
+        return {
+          outcome: 'recovery-required',
+          transactionId: input.transactionId,
+          recovery: txn.state,
+          ...(txn.retainedSnapshotId ? { retainedSnapshotId: txn.retainedSnapshotId } : {}),
+          reason: sanitizeError(error),
+        }
+      }
+    }).catch((error) => {
+      if (error instanceof WorktreeHandoffError) throw error
+      this.transactions.delete(input.sessionId)
+      return this.blockedResult(txn, 'git-operation-in-progress', sanitizeError(error))
+    })
+  }
+
+  /**
+   * Undo an interrupted handoff from its journal steps and retained snapshot
+   * authority. Never touches a binding that already committed; ambiguous
+   * states stay recovery-required. Idempotent: re-running after a crash only
+   * completes unfinished undo steps.
+   */
+  private async rollbackTransaction(txn: HandoffTransaction): Promise<void> {
+    if (txn.direction === 'current-to-managed') {
+      await this.rollbackCurrentToManaged(txn)
+      return
+    }
+    if (txn.direction === 'managed-to-current') {
+      await this.rollbackManagedToCurrent(txn)
+      return
+    }
+    await this.rollbackHandBack(txn)
+  }
+
+  /** c2m: remove the created target, delete its branch when still txn-owned, restore source from the retained snapshot if it was cleaned. */
+  private async rollbackCurrentToManaged(txn: HandoffTransaction): Promise<void> {
+    const targetCreated = txn.steps.includes('target-created')
+    const sourceCleaned = txn.steps.includes('source-cleaned')
+    if (targetCreated) {
+      const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      if (!record || record.schemaVersion !== 2) {
+        // A prior rollback attempt may have removed the record before its
+        // crash. When the target checkout is provably gone too, treat the
+        // removal as already complete and continue to source restore.
+        const targetPath = txn.destinationPath
+        if (existsSync(targetPath) || lstatSyncSafe(targetPath) === 'symlink') {
+          throw new Error('The interrupted target record is missing; explicit recovery is required.')
+        }
+      } else {
+        const owners = record.ownerSessionIds
+        if (owners.length !== 1 || owners[0] !== txn.sessionId) {
+          throw new Error('The interrupted target gained other owners; explicit recovery is required.')
+        }
+        const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
+        if (!released) throw new Error('The interrupted target checkout could not be removed for rollback.')
+        this.deps.registry.remove(record.managedWorktreeId)
+      }
+      // The branch is txn-owned only while it still points at the captured
+      // source HEAD; anything else may be external work and is preserved.
+      // Runs in both the first rollback and idempotent re-entry.
+      const branchOid = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${txn.expectedBranch}`], {
+        cwd: txn.repositoryRoot,
+        okExitCodes: [1, 128],
+      })
+      if (txn.retainedSnapshotId && branchOid.exitCode === 0 && branchOid.stdout.trim() !== '') {
+        const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+        if (authority && branchOid.stdout.trim() === authority.headOid) {
+          await runGit(['branch', '-D', txn.expectedBranch], { cwd: txn.repositoryRoot, okExitCodes: [1, 128] })
+        }
+      }
+    }
+    if (sourceCleaned) {
+      if (!txn.retainedSnapshotId) throw new Error('The cleaned source has no retained snapshot authority.')
+      const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+      if (!authority) throw new Error('The retained snapshot authority is missing; source restore is impossible.')
+      if (!(await this.checkoutMatchesSnapshot(txn.sourcePath, authority))) {
+        await this.deps.snapshots.applySnapshotToCheckout({ meta: authority, checkoutPath: txn.sourcePath })
+      }
+    }
+    if (txn.retainedSnapshotId) {
+      const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+      if (authority) {
+        try {
+          await this.deps.snapshots.permanentDelete(txn.repositoryRoot, authority)
+        } catch {
+          /* best-effort; GC covers stragglers */
+        }
+      }
+    }
+  }
+
+  /** m2c: re-materialize the released managed target from its retained snapshot, after freeing the branch in current. */
+  private async rollbackManagedToCurrent(txn: HandoffTransaction): Promise<void> {
+    const released = txn.steps.includes('source-released')
+    const branchSwitched = txn.steps.includes('branch-switched')
+    if (!released) {
+      // Only a capture happened; nothing to undo beyond dropping the snapshot.
+      if (txn.retainedSnapshotId) {
+        const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+        if (authority) {
+          try {
+            await this.deps.snapshots.permanentDelete(txn.repositoryRoot, authority)
+          } catch {
+            /* best-effort; GC covers stragglers */
+          }
+        }
+      }
+      return
+    }
+    const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+    if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
+      throw new Error('The released managed record is missing; explicit recovery is required.')
+    }
+    if (record.ownerSessionIds.length !== 1 || record.ownerSessionIds[0] !== txn.sessionId) {
+      throw new Error('The released managed record gained other owners; explicit recovery is required.')
+    }
+    let authority = record.snapshot ?? null
+    if (!authority && txn.retainedSnapshotId) {
+      authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+    }
+    if (!authority) throw new Error('The managed rollback snapshot authority is missing.')
+    const currentPath = txn.destinationPath
+    const currentContext = await this.deps.repository.getContext(currentPath)
+    if (!currentContext.isGitRepository) throw new Error('The current checkout is unreadable during rollback.')
+    if (branchSwitched && currentContext.currentBranch === txn.expectedBranch) {
+      // The interrupted confirm already projected the captured state into the
+      // current checkout. Remove exactly that state before switching back so
+      // no duplicate copy remains and the destination stays clean.
+      const manifest = this.deps.snapshots.verifyPayload(authority)
+      await this.removeCapturedState(currentPath, manifest, txn.capturedIncludedFiles ?? [])
+      const returnRef = txn.returnRef
+      if (!returnRef) throw new Error('The recorded return ref is missing; explicit recovery is required.')
+      await runGit(['switch', returnRef.branch], { cwd: currentPath })
+      const after = await this.deps.repository.getContext(currentPath)
+      if (after.currentBranch !== returnRef.branch || after.headSha !== returnRef.headSha) {
+        throw new Error('The current checkout did not return to the recorded ref during rollback.')
+      }
+    }
+    if (existsSync(record.checkoutPath) || lstatSyncSafe(record.checkoutPath) === 'symlink') {
+      // A partial rollback already re-materialized the target; verify it
+      // byte-for-byte so a stale or foreign checkout is never trusted.
+      const context = await this.deps.repository.getContext(record.checkoutPath)
+      if (
+        !context.isGitRepository ||
+        context.currentBranch !== record.expectedBranch ||
+        context.headSha !== authority.headOid ||
+        !(await this.checkoutMatchesSnapshot(record.checkoutPath, authority))
+      ) {
+        throw new Error('A pre-existing path occupies the managed target; explicit recovery is required.')
+      }
+    } else {
+      await this.deps.snapshots.restore({ record, meta: authority, checkoutPath: record.checkoutPath })
+    }
+    this.deps.registry.upsert({ ...record, state: 'ready', snapshot: undefined })
+    try {
+      await this.deps.snapshots.permanentDelete(record.repositoryRoot, authority)
+    } catch {
+      /* best-effort; GC covers stragglers */
+    }
+  }
+
+  /** hand-back: remove the materialized target, return current to the handed branch, restore it from the retained snapshot. */
+  private async rollbackHandBack(txn: HandoffTransaction): Promise<void> {
+    const sourceCleaned = txn.steps.includes('source-cleaned')
+    if (!sourceCleaned) {
+      // Only a capture happened; nothing to undo beyond dropping the snapshot.
+      if (txn.retainedSnapshotId) {
+        const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+        if (authority) {
+          try {
+            await this.deps.snapshots.permanentDelete(txn.repositoryRoot, authority)
+          } catch {
+            /* best-effort; GC covers stragglers */
+          }
+        }
+      }
+      return
+    }
+    if (!txn.retainedSnapshotId) throw new Error('The handed source has no retained snapshot authority.')
+    const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
+    if (!authority) throw new Error('The retained snapshot authority is missing; current restore is impossible.')
+    const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+    if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
+      throw new Error('The released managed record is missing; explicit recovery is required.')
+    }
+    if (record.ownerSessionIds.length !== 1 || record.ownerSessionIds[0] !== txn.sessionId) {
+      throw new Error('The released managed record gained other owners; explicit recovery is required.')
+    }
+    // Free the handed branch before current can return to it: remove the
+    // materialized target (restore ran during the interrupted confirm).
+    if (existsSync(record.checkoutPath) || lstatSyncSafe(record.checkoutPath) === 'symlink') {
+      const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
+      if (!released) throw new Error('The materialized target could not be removed for rollback.')
+    }
+    const currentPath = txn.sourcePath
+    const currentContext = await this.deps.repository.getContext(currentPath)
+    if (!currentContext.isGitRepository) throw new Error('The current checkout is unreadable during rollback.')
+    if (currentContext.currentBranch !== authority.branch) {
+      await runGit(['switch', authority.branch], { cwd: currentPath })
+      const after = await this.deps.repository.getContext(currentPath)
+      if (after.currentBranch !== authority.branch || after.headSha !== authority.headOid) {
+        throw new Error('The current checkout did not return to the handed branch during rollback.')
+      }
+    }
+    if (!(await this.checkoutMatchesSnapshot(currentPath, authority))) {
+      await this.deps.snapshots.applySnapshotToCheckout({ meta: authority, checkoutPath: currentPath })
+    }
+    try {
+      await this.deps.snapshots.permanentDelete(currentPath, authority)
+    } catch {
+      /* best-effort; GC covers stragglers */
+    }
+  }
+
+  /** True when a checkout already reproduces a snapshot exactly (idempotent re-entry). */
+  private async checkoutMatchesSnapshot(
+    checkoutPath: string,
+    meta: import('@kata-sh/shared/protocol').ManagedWorktreeSnapshotMeta,
+  ): Promise<boolean> {
+    const manifest = this.deps.snapshots.verifyPayload(meta)
+    const maxBufferBytes = this.deps.snapshots.getMaxBytes() + 16 * 1024
+    try {
+      const staged = (
+        await runGitBuffer(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], {
+          cwd: checkoutPath,
+          maxBufferBytes,
+        })
+      ).stdout
+      if (sha256(staged) !== manifest.stagedPatch.sha256) return false
+      const unstaged = (
+        await runGitBuffer(['diff', '--binary', '--no-color', '--no-ext-diff'], {
+          cwd: checkoutPath,
+          maxBufferBytes,
+        })
+      ).stdout
+      if (sha256(unstaged) !== manifest.unstagedPatch.sha256) return false
+      for (const entry of manifest.files) {
+        const dest = join(checkoutPath, entry.path)
+        const kind = lstatSyncSafe(dest)
+        if (kind === null) return false
+        if (entry.mode === '120000') {
+          if (kind !== 'symlink' || readFileSync(dest, 'utf8') !== entry.linkText) return false
+          continue
+        }
+        if (kind !== 'other') return false
+        const actual = statSync(dest)
+        if (!actual.isFile() || (actual.mode & 0o777) !== parseInt(entry.mode.slice(-3), 8) || sha256(readFileSync(dest)) !== entry.sha256) {
+          return false
+        }
+      }
+      return true
+    } catch {
+      return false
     }
   }
 

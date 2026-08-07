@@ -102,6 +102,8 @@ export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   'handoff-in-progress',
   /** The requested generated/display name is not a valid branch suffix. */
   'invalid-name',
+  /** Recovery completed a snapshot-backed rollback of an interrupted handoff. */
+  'handoff-rolled-back',
 ] as const
 
 /** A typed handoff blocker code. */

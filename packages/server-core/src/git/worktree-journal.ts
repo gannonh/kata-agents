@@ -172,7 +172,7 @@ export class WorktreeJournal {
     this.lock.runSync(() => {
       const entries = this.readAll()
       const entry = entries.find((candidate) => candidate.journalId === journalId)
-      if (!entry || entry.status !== 'in-progress') return
+      if (!entry || (entry.status !== 'in-progress' && entry.status !== 'failed')) return
       entry.metadata = { ...(entry.metadata ?? {}), ...metadata }
       this.writeAll(entries)
     })
@@ -202,12 +202,12 @@ export class WorktreeJournal {
     })
   }
 
-  /** Reconciliation marks an interrupted entry as resolved. */
+  /** Reconciliation marks an interrupted or failed entry as resolved. */
   recover(journalId: string, marker: string): void {
     this.lock.runSync(() => {
       const entries = this.readAll()
       const entry = entries.find((candidate) => candidate.journalId === journalId)
-      if (!entry || entry.status !== 'in-progress') return
+      if (!entry || (entry.status !== 'in-progress' && entry.status !== 'failed')) return
       entry.status = 'recovered'
       entry.commitMarker = marker
       this.writeAll(entries)

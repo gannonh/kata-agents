@@ -184,12 +184,60 @@ export class WorktreeSnapshotService {
     return this.snapshotsRoot
   }
 
+  /** Max payload bytes this service captures (buffer sizing for diff re-verification). */
+  getMaxBytes(): number {
+    return this.limits.maxBytes
+  }
+
   snapshotIdFor(meta: Pick<ManagedWorktreeSnapshotMeta, 'snapshotId'>): string {
     return meta.snapshotId
   }
 
   hiddenRefFor(snapshotId: string): string {
     return `${WORKTREE_SNAPSHOT_REF_PREFIX}${snapshotId}`
+  }
+
+  /**
+   * Reconstruct verified snapshot metadata from an opaque snapshot ID alone
+   * (journal-referenced authority, e.g. a handoff retained snapshot whose
+   * registry record was already released). Returns null when the payload is
+   * absent or the ID is not an opaque snapshot identity.
+   */
+  loadSnapshotMeta(snapshotId: string): ManagedWorktreeSnapshotMeta | null {
+    if (!/^[0-9a-f]{16}$/.test(snapshotId)) return null
+    const payloadPath = join(this.snapshotsRoot, snapshotId)
+    let manifest: WorktreeSnapshotManifest
+    try {
+      manifest = JSON.parse(readFileSync(join(payloadPath, 'manifest.json'), 'utf8')) as WorktreeSnapshotManifest
+    } catch {
+      return null
+    }
+    if (
+      manifest.snapshotId !== snapshotId ||
+      typeof manifest.branch !== 'string' ||
+      !isHexOid(manifest.headOid) ||
+      !Array.isArray(manifest.files) ||
+      !Number.isFinite(manifest.capturedAt) ||
+      !Number.isInteger(manifest.fileCount) ||
+      manifest.fileCount !== manifest.files.length + 2
+    ) {
+      return null
+    }
+    return {
+      snapshotId,
+      schemaVersion: WORKTREE_SNAPSHOT_SCHEMA_VERSION,
+      hiddenRef: this.hiddenRefFor(snapshotId),
+      headOid: manifest.headOid,
+      branch: manifest.branch,
+      manifestHash: this.manifestHash(manifest),
+      payloadPath,
+      createdAt: manifest.capturedAt,
+      fileCount: manifest.fileCount,
+      totalBytes: manifest.totalBytes,
+      fingerprint: '',
+      policyVersion: 0,
+      previewFingerprint: '',
+    }
   }
 
   /** SHA-256 of the manifest bytes (the verification anchor in record.snapshot). */
