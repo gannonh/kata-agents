@@ -382,6 +382,12 @@ export const RPC_CHANNELS = {
     HANDOFF_STATUS: 'git:handoffStatus',
     HANDOFF_RECOVER: 'git:handoffRecover',
     HANDOFF_CANCEL: 'git:handoffCancel',
+    // Phase 4: isolated conversation forks
+    FORK_PREVIEW: 'git:forkPreview',
+    FORK_CONFIRM: 'git:forkConfirm',
+    FORK_STATUS: 'git:forkStatus',
+    FORK_RECOVER: 'git:forkRecover',
+    FORK_CANCEL: 'git:forkCancel',
   },
   gitbash: {
     CHECK: 'gitbash:check',

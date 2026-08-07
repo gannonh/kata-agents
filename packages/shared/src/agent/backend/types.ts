@@ -30,7 +30,7 @@ export { AbortReason, type RecoveryMessage };
 import type { ModelProvider } from '../../config/models.ts';
 
 // Import the sanitized provider capability DTO used by the handoff gate.
-import type { WorktreeHandoffProviderCapability } from '../../protocol/index.ts';
+import type { ConversationForkProviderCapability, WorktreeHandoffProviderCapability } from '../../protocol/index.ts';
 
 // Import LLM connection types for auth
 import type { LlmAuthType, LlmProviderType } from '../../config/llm-connections.ts';
@@ -377,6 +377,69 @@ export interface ExecutionCwdRebindCapability {
   verifyExecutionCwd(destinationPath: string): Promise<ExecutionCwdProof>;
 }
 
+// ---------------------------------------------------------------------------
+// Strict cross-CWD native conversation fork (Worktree V2 Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Input consumed by a strict conversation-fork adapter on the child's first
+ * Send. Carries the idempotency-keyed pending parent/message identity, the
+ * immutable transcript lookup identity, and the destination execution CWD.
+ */
+export interface ConversationForkEstablishInput {
+  /** Parent provider SDK session identity (anchor lineage). */
+  parentSdkSessionId: string;
+  /** Parent provider turn anchor at the branch point. */
+  parentSdkTurnId: string;
+  /** Idempotency key: retries must never duplicate the native child. */
+  idempotencyKey: string;
+  /** Destination execution CWD every file/shell/MCP/provider tool must use. */
+  executionCwd: string;
+  /** Immutable transcript lookup identity — never rewritten by the fork. */
+  transcriptCwd: string;
+}
+
+/**
+ * Result of a strict native-fork establishment: the provider-created child
+ * ID plus concrete proof that tool CWD resolution is exclusively the
+ * destination. Persisted exactly once (idempotency-keyed).
+ */
+export interface ConversationForkEstablishResult {
+  /** Provider-created child SDK session ID (claimed only now, not before). */
+  childSdkSessionId: string;
+  /** Proof that every file/shell/MCP/provider tool resolves the destination. */
+  proof: ExecutionCwdProof;
+}
+
+/**
+ * Optional backend capability for Worktree V2 Phase 4 isolated conversation
+ * forks.
+ *
+ * A backend implements this ONLY when it can establish a provider-native fork
+ * at the recorded source conversation head with every file, shell, MCP, and
+ * provider tool executing in the destination execution CWD while preserving
+ * the immutable transcript lookup identity (the transcript CWD). Adapters
+ * that cannot separate transcript storage from execution (Claude's current
+ * use of `sdkCwd` for both) or cannot prove destination-only tool CWD must
+ * NOT implement this; their sessions stay typed-blocked with no fallback.
+ */
+export interface StrictConversationForkCapability {
+  readonly adapterId: string;
+
+  /** Sanitized capability DTO shown in previews and used for the gate. */
+  forkCapability(): ConversationForkProviderCapability;
+
+  /**
+   * Establish the native child fork at the recorded source head on first
+   * Send. Consumes the idempotency-keyed pending parent/message identity,
+   * guarantees destination execution, and persists the child provider ID
+   * exactly once. A missing or malformed native anchor is a typed error —
+   * the existing full-history/fresh fallback is never used for isolated
+   * forks.
+   */
+  establishNativeFork(input: ConversationForkEstablishInput): Promise<ConversationForkEstablishResult>;
+}
+
 /**
  * Core backend interface - all AI providers must implement this.
  *
@@ -630,6 +693,14 @@ export interface AgentBackend {
    * session returns a typed `unsupported-provider` blocker and keeps V1.
    */
   executionCwdRebind?: ExecutionCwdRebindCapability;
+
+  /**
+   * Optional Worktree V2 Phase 4 capability: strict cross-CWD native
+   * conversation fork. Present only for adapters that can establish a
+   * provider-native child fork at the source head while proving every tool
+   * executes in the destination and transcript identity is preserved.
+   */
+  conversationFork?: StrictConversationForkCapability;
 
   // ============================================================
   // Session & Workspace State
