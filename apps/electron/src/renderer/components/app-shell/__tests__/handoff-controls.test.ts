@@ -6,7 +6,6 @@ import type {
   WorktreeHandoffResult,
 } from '@kata-sh/shared/protocol'
 import {
-  canOfferHandoff,
   canConfirmHandoff,
   canConfirmHandoffForName,
   canRecoverHandoff,
@@ -97,12 +96,6 @@ describe('handoff direction availability', () => {
     expect(handoffDirectionsForCheckout(managedCheckout())).toEqual(['managed-to-current'])
   })
 
-  it('canOfferHandoff is false only when no direction applies', () => {
-    expect(canOfferHandoff(undefined)).toBe(true)
-    expect(canOfferHandoff(currentCheckout())).toBe(true)
-    expect(canOfferHandoff(managedCheckout())).toBe(true)
-  })
-
   it('defaults the name only for current-to-managed', () => {
     expect(defaultNameForDirection('current-to-managed')).toMatch(/^[0-9a-f]{8}$/)
     expect(defaultNameForDirection('managed-to-current')).toBe('')
@@ -117,8 +110,8 @@ describe('handoff direction availability', () => {
 
 describe('handoff preview helpers', () => {
   it('labels previews as remote only when the workspace is remote', () => {
-    expect(isRemoteOwnedPreview(previewFor(), false)).toBe(false)
-    expect(isRemoteOwnedPreview(previewFor(), true)).toBe(true)
+    expect(isRemoteOwnedPreview(false)).toBe(false)
+    expect(isRemoteOwnedPreview(true)).toBe(true)
   })
 
   it('maps source states to i18n keys', () => {
@@ -166,6 +159,21 @@ describe('handoff preview helpers', () => {
       retainedSnapshotId: 'abcd1234abcd1234',
       reason: 'The handoff was interrupted.',
     })
+  })
+
+  it('omits retainedSnapshotId when the active status does not carry one', () => {
+    const result = recoveryResultFromStatus(
+      {
+        active: true,
+        transactionId: 'txn-status',
+        direction: 'managed-to-current',
+        state: 'pending',
+        since: 123,
+      },
+      'The handoff was interrupted.',
+    )
+    expect(result.outcome).toBe('recovery-required')
+    expect('retainedSnapshotId' in result).toBe(false)
   })
 
   it('opens directly into recovery from a status without preview', () => {
@@ -354,5 +362,59 @@ describe('handoff dialog state machine', () => {
 
     state = reduceHandoffDialog(state, { type: 'reset' })
     expect(state).toEqual(initialHandoffDialogState())
+  })
+
+  it('keeps the recovery surface mounted when recover itself fails', () => {
+    const recovery: WorktreeHandoffResult = {
+      outcome: 'recovery-required',
+      transactionId: 'txn-abc',
+      recovery: 'source-released',
+      reason: 'interrupted',
+    }
+    let state = reduceHandoffDialog(initialHandoffDialogState(), { type: 'open', direction: 'managed-to-current' })
+    state = reduceHandoffDialog(state, { type: 'preview-ready', preview: previewFor() })
+    state = reduceHandoffDialog(state, { type: 'confirm' })
+    state = reduceHandoffDialog(state, { type: 'confirm-ready', result: recovery })
+    state = reduceHandoffDialog(state, { type: 'recover' })
+
+    state = reduceHandoffDialog(state, { type: 'recover-error', message: 'IPC unreachable' })
+
+    // A transient failure must not drop the user out of the recovery surface.
+    expect(state.phase).toBe('recovery-required')
+    expect(state.message).toBe('IPC unreachable')
+    expect(canRecoverHandoff(state.phase, state.result)).toBe(true)
+  })
+
+  it('ignores guard-violating actions', () => {
+    // confirm from a non-preview phase.
+    let state = reduceHandoffDialog(initialHandoffDialogState(), { type: 'open', direction: 'current-to-managed' })
+    const loadingState = state
+    expect(reduceHandoffDialog(state, { type: 'confirm' })).toBe(loadingState)
+    // confirm with a blocked preview.
+    state = reduceHandoffDialog(state, {
+      type: 'preview-ready',
+      preview: previewFor({ blocked: { blocked: true, code: 'destination-dirty', reason: 'dirty' } }),
+    })
+    const blockedState = state
+    expect(reduceHandoffDialog(state, { type: 'confirm' })).toBe(blockedState)
+    // name-changed from error.
+    state = reduceHandoffDialog(state, { type: 'preview-error', message: 'server unreachable' })
+    expect(reduceHandoffDialog(state, { type: 'name-changed', value: 'x' })).toBe(state)
+    // recover outside recovery-required.
+    expect(reduceHandoffDialog(state, { type: 'recover' })).toBe(state)
+    // recovery-from-status with a non-recovery result.
+    const committed: WorktreeHandoffResult = {
+      outcome: 'committed',
+      transactionId: 'txn-abc',
+      summary: {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        checkout: managedCheckout(),
+        executionCwd: '/srv/worktrees/repo/ab12cd34',
+        transcriptCwd: '/repo/.kata/sessions/s1',
+        committedAt: 1,
+      },
+    }
+    expect(reduceHandoffDialog(state, { type: 'recovery-from-status', result: committed })).toBe(state)
   })
 })

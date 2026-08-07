@@ -109,7 +109,7 @@ function PreviewBody({
   const { t } = useTranslation()
   const preview = state.preview
   if (!preview) return null
-  const remote = isRemoteOwnedPreview(preview, isRemoteWorkspace)
+  const remote = isRemoteOwnedPreview(isRemoteWorkspace)
   const sourceState = sourceStateKey(preview.source.state)
 
   return (
@@ -197,6 +197,7 @@ function CleanupSummary({ preview }: { preview: NonNullable<HandoffDialogState['
 
 function CommittedBody({ result }: { result: Extract<WorktreeHandoffResult, { outcome: 'committed' }> }) {
   const { t } = useTranslation()
+  const branch = result.summary.checkout.expectedBranch
   return (
     <div
       data-testid="handoff-committed"
@@ -207,6 +208,7 @@ function CommittedBody({ result }: { result: Extract<WorktreeHandoffResult, { ou
         {t('git.handoff.committedTitle')}
       </span>
       <span className="text-foreground/80">{t('git.handoff.committedDetail')}</span>
+      {branch && <span className="font-mono text-[11px] text-muted-foreground">{t('git.handoff.committedBranch', { branch })}</span>}
       <span className="text-muted-foreground">{t('git.handoff.transcriptPreserved')}</span>
     </div>
   )
@@ -280,7 +282,23 @@ export function HandoffDialog({
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const previewSeqRef = React.useRef(0)
 
-  useRegisterModal(open, () => onOpenChange(false))
+  // Dismissing the dialog without confirming must release the pending preview
+  // transaction, or the session stays fenced (and re-previews are blocked)
+  // until recovery. The server no-ops unless the transaction is still pending.
+  const releasePendingPreview = React.useCallback(() => {
+    const preview = state.preview
+    if (!preview || state.phase === 'recovery-required' || state.phase === 'recovering') return
+    void window.electronAPI.handoffCancel({ sessionId, transactionId: preview.transactionId }).catch(() => {
+      /* best-effort; a confirm may have started, in which case cancel no-ops */
+    })
+  }, [state.preview, state.phase, sessionId])
+
+  const close = React.useCallback(() => {
+    releasePendingPreview()
+    onOpenChange(false)
+  }, [releasePendingPreview, onOpenChange])
+
+  useRegisterModal(open, close)
 
   const runPreview = React.useCallback(
     async (nameSuffix: string) => {
@@ -309,7 +327,7 @@ export function HandoffDialog({
     if (!open || !sessionId) return
     const initialName = direction === 'current-to-managed' ? generateDefaultWorktreeName() : ''
     dispatch({ type: 'open', direction, initialName })
-    previewSeqRef.current = 0
+    previewSeqRef.current += 1 // invalidate any in-flight preview from a previous open
     if (initialRecovery) {
       dispatch({ type: 'recovery-from-status', result: initialRecovery })
       return () => {
@@ -322,7 +340,7 @@ export function HandoffDialog({
       if (debounceRef.current) clearTimeout(debounceRef.current)
       previewSeqRef.current += 1 // invalidate any in-flight preview on close
     }
-  }, [open, sessionId, direction, runPreview, initialRecovery])
+  }, [open, sessionId, direction, runPreview, initialRecovery?.transactionId])
 
   const handleNameChange = React.useCallback(
     (value: string) => {
@@ -363,11 +381,9 @@ export function HandoffDialog({
       })
       dispatch({ type: 'recover-ready', result: recovered })
     } catch (error) {
-      dispatch({ type: 'preview-error', message: error instanceof Error ? error.message : String(error) })
+      dispatch({ type: 'recover-error', message: error instanceof Error ? error.message : String(error) })
     }
   }, [state.phase, state.result, sessionId])
-
-  const close = React.useCallback(() => onOpenChange(false), [onOpenChange])
 
   const busy = state.phase === 'loading' || state.phase === 'confirming' || state.phase === 'recovering'
   // Keep the confirm button mounted while the request is in flight so the
@@ -428,7 +444,7 @@ export function HandoffDialog({
         </div>
 
         <DialogFooter className={cn('mt-2 gap-2')}>
-          <Button variant="ghost" onClick={close} disabled={busy}>
+          <Button variant="ghost" data-testid="handoff-cancel-button" onClick={close} disabled={busy}>
             {t('git.handoff.cancel')}
           </Button>
           {confirmable && (

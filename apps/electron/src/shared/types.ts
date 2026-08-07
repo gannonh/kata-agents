@@ -234,6 +234,7 @@ import type {
   WorktreeHandoffStatusInput,
   WorktreeHandoffStatus,
   WorktreeHandoffRecoverInput,
+  WorktreeHandoffCancelInput,
   SessionDeleteOptions,
   SessionDeleteResult,
   GitCommitInput,
@@ -663,6 +664,7 @@ export interface ElectronAPI {
   handoffStatus(input: WorktreeHandoffStatusInput): Promise<WorktreeHandoffStatus>
   /** Continue/recover an interrupted handoff (idempotent, snapshot-backed). */
   handoffRecover(input: WorktreeHandoffRecoverInput): Promise<WorktreeHandoffResult>
+  handoffCancel(input: WorktreeHandoffCancelInput): Promise<WorktreeHandoffStatus>
 
   // Git / GitHub V1 — commit / pull / push + GitHub pull requests (Phase 3).
   // Identity is resolved server-side from the session's persisted checkout;

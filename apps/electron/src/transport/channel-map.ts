@@ -348,6 +348,7 @@ export const CHANNEL_MAP = {
   handoffConfirm: invoke(RPC_CHANNELS.git.HANDOFF_CONFIRM),
   handoffStatus: invoke(RPC_CHANNELS.git.HANDOFF_STATUS),
   handoffRecover: invoke(RPC_CHANNELS.git.HANDOFF_RECOVER),
+  handoffCancel: invoke(RPC_CHANNELS.git.HANDOFF_CANCEL),
 
   // Git / GitHub V1 — commit / pull / push + pull requests (Phase 3)
   commitGit: invoke(RPC_CHANNELS.git.COMMIT),

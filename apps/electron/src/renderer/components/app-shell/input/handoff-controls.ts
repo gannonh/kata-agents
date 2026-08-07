@@ -15,6 +15,7 @@ import type {
   WorktreeHandoffDirection,
   WorktreeHandoffPreview,
   WorktreeHandoffResult,
+  WorktreeHandoffStatus,
 } from '@kata-sh/shared/protocol'
 
 import { normalizeWorktreeName, normalizeWorktreeNameInput, generateDefaultWorktreeName } from './checkout-controls'
@@ -45,11 +46,6 @@ export function handoffDirectionsForCheckout(
   return directions
 }
 
-/** Whether a handoff surface should render at all for a session. */
-export function canOfferHandoff(checkout: { mode: CheckoutMode } | undefined, handoffRuntimeState?: string | null): boolean {
-  return handoffDirectionsForCheckout(checkout, handoffRuntimeState).length > 0
-}
-
 /** Initial editable name for a direction (only current-to-managed names a target). */
 export function defaultNameForDirection(direction: WorktreeHandoffDirection): string {
   return direction === 'current-to-managed' ? generateDefaultWorktreeName() : ''
@@ -72,8 +68,8 @@ export function finalizeHandoffName(value: string): string {
 // Preview helpers
 // ---------------------------------------------------------------------------
 
-/** True when a preview/result originates from a remote owning server. */
-export function isRemoteOwnedPreview(preview: WorktreeHandoffPreview, isRemoteWorkspace: boolean): boolean {
+/** True when the session workspace is owned by a remote server. */
+export function isRemoteOwnedPreview(isRemoteWorkspace: boolean): boolean {
   return isRemoteWorkspace
 }
 
@@ -111,7 +107,7 @@ export function canRecoverHandoff(phase: HandoffDialogPhase, result: WorktreeHan
  * (e.g. discovered by HANDOFF_STATUS polling after a restart).
  */
 export function recoveryResultFromStatus(
-  status: Extract<import('@kata-sh/shared/protocol').WorktreeHandoffStatus, { active: true }>,
+  status: Extract<WorktreeHandoffStatus, { active: true }>,
   reason: string,
 ): Extract<WorktreeHandoffResult, { outcome: 'recovery-required' }> {
   return {
@@ -168,6 +164,7 @@ export type HandoffDialogAction =
   | { type: 'recovery-from-status'; result: WorktreeHandoffResult }
   | { type: 'recover' }
   | { type: 'recover-ready'; result: WorktreeHandoffResult }
+  | { type: 'recover-error'; message: string }
   | { type: 'reset' }
 
 function resultPhase(result: WorktreeHandoffResult): HandoffDialogPhase {
@@ -249,6 +246,11 @@ export function reduceHandoffDialog(state: HandoffDialogState, action: HandoffDi
         result: action.result,
         message: action.result.outcome === 'committed' ? '' : action.result.reason,
       }
+    case 'recover-error':
+      // Keep the recovery surface mounted so a transient IPC/network failure
+      // cannot strand the interrupted transaction unrecoverable from the
+      // open dialog; the Recover control stays available to retry.
+      return { ...state, phase: 'recovery-required', message: action.message }
     case 'reset':
       return initialHandoffDialogState()
   }

@@ -729,6 +729,9 @@ export class WorktreeSnapshotService {
       const existing = lstatSafe(dest)
       if (existing !== null) {
         if (entry.mode === '120000') {
+          if (typeof entry.linkText !== 'string') {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Symlink entry has no link text: ${entry.path}`)
+          }
           if (existing !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
             throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Destination file differs: ${entry.path}`)
           }

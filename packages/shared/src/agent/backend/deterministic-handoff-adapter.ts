@@ -10,6 +10,8 @@
 
 import type { ExecutionCwdProof, ExecutionCwdRebindCapability } from './types'
 
+const PROOF_CATEGORIES = ['file', 'shell', 'mcp', 'provider'] as const
+
 export interface DeterministicHandoffAdapterOptions {
   /** Adapter identity stamped into capabilities and proofs. */
   adapterId?: string
@@ -18,12 +20,10 @@ export interface DeterministicHandoffAdapterOptions {
   /** verifyExecutionCwd throws when true (proof acquisition fails). */
   failVerify?: boolean
   /** Proof categories to omit; the handoff gate requires all four. */
-  missingChecks?: Array<'file' | 'shell' | 'mcp' | 'provider'>
+  missingChecks?: (typeof PROOF_CATEGORIES)[number][]
   /** Rebind destinations recorded for later assertions (shared array). */
   rebindLog?: string[]
 }
-
-const PROOF_CATEGORIES = ['file', 'shell', 'mcp', 'provider'] as const
 
 /**
  * Build a deterministic adapter whose rebind/verify succeed unless failure

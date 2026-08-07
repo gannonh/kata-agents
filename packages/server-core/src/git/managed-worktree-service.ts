@@ -388,17 +388,23 @@ export class ManagedWorktreeService {
           'WORKTREE_DESTINATION_UNSAFE',
         )
       }
+      if (pathToken !== undefined && !/^[0-9a-f]{8}$/.test(pathToken)) {
+        // The token becomes the final path leaf below; reject anything that
+        // could escape the destination root (separators, `..`, traversal) or
+        // that is not an internally issued token.
+        throw new WorktreeCreationError(
+          'Managed-worktree path token is not a safe path component.',
+          'WORKTREE_DESTINATION_UNSAFE',
+        )
+      }
       const destinationRoot = this.prepareDestinationRoot(materializationRoot, workspaceId, repoKey)
-      const displayFragment = named
-        ? filesystemSafeDisplayFragment(worktreeNameSuffix!)
-        : null
 
       let lastError: unknown
       const maxAttempts = pathToken ? 1 : MAX_TOKEN_RETRIES
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const token = pathToken ?? generateToken()
         const branch = requestedBranch ?? `kata-agent/${token}`
-        const leaf = displayFragment ? `${displayFragment}-${token}` : token
+        const leaf = this.deriveWorktreeLeaf(worktreeNameSuffix, token)
         const worktreePath = join(destinationRoot, leaf)
 
         // Collision check: both branch and path must be free. A broken
@@ -549,7 +555,7 @@ export class ManagedWorktreeService {
       }
 
       throw new WorktreeCreationError(
-        `Failed to create a managed worktree after ${MAX_TOKEN_RETRIES} attempts${lastError instanceof Error ? `: ${lastError.message}` : ''}`,
+        `Failed to create a managed worktree after ${maxAttempts} attempt${maxAttempts === 1 ? '' : 's'}${lastError instanceof Error ? `: ${lastError.message}` : ''}`,
         'WORKTREE_TOKEN_COLLISION',
       )
     }
@@ -570,11 +576,18 @@ export class ManagedWorktreeService {
   }): string {
     const materializationRoot = resolvePath(this.getEffectiveRootSnapshot().materializationRoot)
     const repoKey = computeRepoKey(safeRealpath(input.gitCommonDir))
-    const fragment = input.worktreeNameSuffix
-      ? filesystemSafeDisplayFragment(input.worktreeNameSuffix)
-      : null
-    const leaf = fragment ? `${fragment}-${input.pathToken}` : input.pathToken
+    const leaf = this.deriveWorktreeLeaf(input.worktreeNameSuffix, input.pathToken)
     return join(materializationRoot, input.workspaceId, repoKey, leaf)
+  }
+
+  /**
+   * Derive the destination path leaf for a named display fragment + token.
+   * Shared by {@link createWorktree} and {@link resolveWorktreePath} so the
+   * preview-bound path and the actually created path can never drift.
+   */
+  private deriveWorktreeLeaf(worktreeNameSuffix: string | undefined, token: string): string {
+    const fragment = worktreeNameSuffix ? filesystemSafeDisplayFragment(worktreeNameSuffix) : null
+    return fragment ? `${fragment}-${token}` : token
   }
 
   addOwner(managedWorktreeId: string, sessionId: string): void {

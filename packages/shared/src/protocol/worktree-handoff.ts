@@ -64,10 +64,12 @@ export interface WorktreeHandoffProviderCapability {
 // ---------------------------------------------------------------------------
 
 /**
- * Typed handoff blockers. Each corresponds to a precondition the server
- * checks before any mutation; a blocked handoff claims no mutation. The
- * tuple is the single source of truth: the union is derived from it so a
- * code can never be added to the type without being listed here.
+ * Typed handoff blockers. Most correspond to a precondition the server checks
+ * before any mutation; a blocked handoff claims no mutation. The tuple also
+ * carries post-recovery outcomes (`handoff-rolled-back` reports a completed
+ * rollback after a mutation attempt). The tuple is the single source of
+ * truth: the union is derived from it so a code can never be added to the
+ * type without being listed here.
  */
 export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   /** Provider adapter cannot safely rebind execution CWD (V1 preserved). */
@@ -313,3 +315,11 @@ export interface WorktreeHandoffRecoverInput {
 }
 
 export type WorktreeHandoffRecoverResult = WorktreeHandoffResult
+
+/** Cancel a pending preview transaction (dialog dismissed without confirming). */
+export interface WorktreeHandoffCancelInput {
+  sessionId: string
+  transactionId: string
+}
+
+export type WorktreeHandoffCancelResult = WorktreeHandoffStatus

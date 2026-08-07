@@ -124,10 +124,12 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)
   const [diffStyle, setDiffStyle] = React.useState<'unified' | 'split'>('unified')
 
-  // Reset the selected file whenever the bound session changes so status and
-  // feedback never leak between sessions.
+  // Reset the selected file and any recovery dialog whenever the bound
+  // session changes so status, feedback, and a prior session's handoff
+  // transaction never leak between sessions.
   React.useEffect(() => {
     setSelectedPath(null)
+    setRecoveryDialog(null)
   }, [sessionId])
 
   const entries = React.useMemo(

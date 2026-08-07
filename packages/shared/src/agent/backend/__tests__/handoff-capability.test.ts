@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'bun:test'
 import { resolveHandoffCapability, type HandoffCapabilityResolution } from '../handoff-capability'
-import type { AgentBackend, ExecutionCwdRebindCapability } from '../types'
+import type { AgentBackend, ExecutionCwdProof, ExecutionCwdRebindCapability } from '../types'
 import type { WorktreeHandoffProviderCapability } from '../../../protocol'
 
 /** Deterministic adapter that advertises, rebinds, and verifies. */
@@ -28,7 +28,7 @@ class RecordingHandoffAdapter implements ExecutionCwdRebindCapability {
     this.rebindCalls.push(destinationPath)
   }
 
-  async verifyExecutionCwd(destinationPath: string) {
+  async verifyExecutionCwd(destinationPath: string): Promise<ExecutionCwdProof> {
     this.verifyCalls.push(destinationPath)
     return {
       adapterId: this.adapterId,

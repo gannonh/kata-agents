@@ -441,6 +441,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.git.HANDOFF_CONFIRM,
   RPC_CHANNELS.git.HANDOFF_STATUS,
   RPC_CHANNELS.git.HANDOFF_RECOVER,
+  RPC_CHANNELS.git.HANDOFF_CANCEL,
 
   // resources — workspace resource export/import
   RPC_CHANNELS.resources.EXPORT,

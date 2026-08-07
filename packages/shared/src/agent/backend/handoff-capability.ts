@@ -36,7 +36,14 @@ export function resolveHandoffCapability(
   if (!adapter || !isCompleteCapability(adapter)) {
     return { supported: false, blocker: 'unsupported-provider' }
   }
-  const capability = adapter.handoffCapability()
+  let capability: WorktreeHandoffProviderCapability | undefined
+  try {
+    capability = adapter.handoffCapability()
+  } catch {
+    // A degraded adapter may throw inside the capability callback; the
+    // documented typed blocker beats a generic error escaping the gate.
+    return { supported: false, blocker: 'unsupported-provider' }
+  }
   if (!capability || capability.executionCwdRebindable !== true) {
     return { supported: false, blocker: 'unsupported-provider' }
   }

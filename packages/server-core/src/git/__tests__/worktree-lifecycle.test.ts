@@ -876,7 +876,7 @@ describe('orphan and pending-restore cleanup', () => {
     expect(restored.restored).toBe(true)
   })
 
-  test('gc retains a payload referenced only by an in-progress handoff journal', async () => {
+  test('gc retains a payload referenced only by a failed handoff journal', async () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x')
     await svc.lifecycle.deleteWorktree(

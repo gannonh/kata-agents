@@ -20,6 +20,13 @@ describe('Worktree handoff protocol contracts', () => {
   it('defines exactly the three supported handoff directions', () => {
     expect(WORKTREE_HANDOFF_DIRECTIONS).toHaveLength(3)
     expect(new Set(WORKTREE_HANDOFF_DIRECTIONS).size).toBe(3)
+    // Wire values are part of the RPC contract with the renderer and server;
+    // pin them so a rename breaks the contract test.
+    expect([...WORKTREE_HANDOFF_DIRECTIONS].sort()).toEqual([
+      'current-to-managed',
+      'hand-back',
+      'managed-to-current',
+    ])
   })
 
   it('keeps the provider capability DTO free of paths, payloads, and secrets', () => {

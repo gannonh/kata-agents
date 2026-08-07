@@ -381,6 +381,7 @@ export const RPC_CHANNELS = {
     HANDOFF_CONFIRM: 'git:handoffConfirm',
     HANDOFF_STATUS: 'git:handoffStatus',
     HANDOFF_RECOVER: 'git:handoffRecover',
+    HANDOFF_CANCEL: 'git:handoffCancel',
   },
   gitbash: {
     CHECK: 'gitbash:check',

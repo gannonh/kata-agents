@@ -1108,7 +1108,11 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
   // keeps the typed blocker as the authoritative backstop.
   let handoffCapable: boolean | undefined
   if (m.agent) {
-    handoffCapable = resolveHandoffCapability(m.agent).supported
+    try {
+      handoffCapable = resolveHandoffCapability(m.agent).supported
+    } catch {
+      /* adapter capability unavailable — omit; the server blocker remains authoritative */
+    }
   }
   return {
     ...pickSessionFields(m),
@@ -2612,6 +2616,13 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
+      // Deferred-load field: the metadata load already restored
+      // handoffRuntimeState through createManagedSession, but a session
+      // created in this process must also pick it up from disk so an
+      // unverified/recovery-required state survives a restart.
+      if (managed.handoffRuntimeState === undefined) {
+        managed.handoffRuntimeState = storedSession.handoffRuntimeState
+      }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
       // Queue recovery: find orphaned queued messages from crash/restart and re-queue them
@@ -3334,9 +3345,7 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
-    if (this.getGitServices().handoff?.isSessionFenced?.(managed.id)) {
-      throw new Error('Session handoff is pending or requires recovery.')
-    }
+    this.assertSessionHandoffNotFenced(managed.id)
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -3613,7 +3622,14 @@ export class SessionManager implements ISessionManager {
       // the real Electron app exercise preview/confirm/recovery without a
       // live provider. Off by default; production adapters remain disabled
       // until credentialed UAT proves context continuity.
-      if (process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' && managed.agent) {
+      if (
+        process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' &&
+        process.env.NODE_ENV !== 'production' &&
+        managed.agent
+      ) {
+        sessionLog.warn(
+          `Session ${managed.id}: deterministic handoff adapter is active. Execution-CWD proofs are synthetic and prove nothing about the live runtime.`,
+        )
         const { createDeterministicHandoffAdapter } = await import('@kata-sh/shared/agent/backend')
         managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
       }
@@ -5403,9 +5419,13 @@ export class SessionManager implements ISessionManager {
     managed: ManagedSession,
     agent: AgentInstance,
   ): Promise<void> {
-    // Verified runtimes need no re-proof within this process. `unverified`
-    // (armed at commit and after every restart) and `recovery-required` both
-    // (re-)prove here: success clears recovery, failure keeps Send blocked.
+    // The gate is armed only by a handoff commit (or by a restart of a session
+    // that had one). A session that never performed a handoff has no
+    // destination to prove, so it must not be blocked. A `verified` runtime
+    // needs no re-proof within this process. `unverified` (armed at commit and
+    // after every restart) and `recovery-required` both (re-)prove here:
+    // success clears recovery, failure keeps Send blocked.
+    if (managed.handoffRuntimeState === undefined) return
     if (managed.handoffRuntimeState === 'verified') return
     const adapter = agent.executionCwdRebind
     const destination = managed.workingDirectory
@@ -5446,6 +5466,17 @@ export class SessionManager implements ISessionManager {
       this.gitServicesInstance = getDefaultGitServices()
     }
     return this.gitServicesInstance
+  }
+
+  /**
+   * Fence an action while a handoff transaction is pending or requires
+   * recovery: the session's checkout identity is not safe to act on until the
+   * transaction commits, rolls back, or the session is deleted.
+   */
+  private assertSessionHandoffNotFenced(sessionId: string): void {
+    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
+      throw new Error(i18n.t('git.handoff.pendingFence'))
+    }
   }
 
   /**
@@ -6587,8 +6618,22 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
       return { deleted: false }
     }
+    // A pending handoff must be resolved first, but a transaction stuck in
+    // recovery-required must not remove session deletion as the escape hatch
+    // (spec: recovery fencing). Deleting the session rolls the interrupted
+    // handoff back best-effort and releases the fence.
     if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
-      throw new Error('Session handoff is pending or requires recovery.')
+      const handoffStatus = await this.getGitServices().handoff?.status(sessionId)
+      if (handoffStatus?.active && handoffStatus.state !== 'recovery-required') {
+        throw new Error(i18n.t('git.handoff.pendingFence'))
+      }
+      if (handoffStatus?.active) {
+        try {
+          await this.getGitServices().handoff?.cancelForSessionDeletion?.(sessionId)
+        } catch (err) {
+          sessionLog.warn(`Failed to release interrupted handoff for deleted session ${sessionId}:`, err)
+        }
+      }
     }
 
     return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
@@ -6853,9 +6898,7 @@ export class SessionManager implements ISessionManager {
     if (this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
     }
-    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
-      throw new Error('Session handoff is pending or requires recovery.')
-    }
+    this.assertSessionHandoffNotFenced(sessionId)
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
     this.assertSessionCheckoutReady(sessionId)

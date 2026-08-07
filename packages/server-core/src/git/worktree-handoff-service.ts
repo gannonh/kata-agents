@@ -49,6 +49,8 @@ import type {
   WorktreeHandoffResult,
   WorktreeHandoffReturnRef,
   WorktreeHandoffStatus,
+  WorktreeHandoffCancelInput,
+  WorktreeHandoffCancelResult,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type { ExecutionCwdProof, ExecutionCwdRebindCapability } from '@kata-sh/shared/agent/backend'
@@ -372,6 +374,52 @@ export class WorktreeHandoffService {
       ...(txn.retainedSnapshotId ? { retainedSnapshotId: txn.retainedSnapshotId } : {}),
       since: txn.startedAt,
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Cancel
+  // -------------------------------------------------------------------------
+
+  /**
+   * Cancel a pending preview transaction (dialog dismissed without
+   * confirming). No-op when the transaction no longer exists or has already
+   * left `pending` (a confirm may have started). A preview-only transaction
+   * has not created or cleaned anything, so nothing is rolled back.
+   */
+  async cancel(input: WorktreeHandoffCancelInput): Promise<WorktreeHandoffCancelResult> {
+    const txn = this.transactions.get(input.sessionId)
+    if (!txn || txn.transactionId !== input.transactionId) return { active: false }
+    if (txn.state !== 'pending') return this.status(input.sessionId)
+    this.deps.journal.updateMetadata(txn.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
+    this.deps.journal.recover(txn.journalId, 'preview-cancelled')
+    this.transactions.delete(input.sessionId)
+    return { active: false }
+  }
+
+  /**
+   * Release the fence of an interrupted handoff whose session is being
+   * deleted. Best-effort rollback of any partial work; a failing rollback
+   * must never block the destructive deletion (deletion is the recovery
+   * escape hatch). The journal is recovered so the retained snapshot becomes
+   * GC-eligible. Never touches a committed binding.
+   */
+  async cancelForSessionDeletion(sessionId: string): Promise<void> {
+    const txn = this.transactions.get(sessionId)
+    if (!txn) return
+    if (!txn.steps.includes('binding-committed')) {
+      try {
+        await this.rollbackTransaction(txn)
+      } catch (error) {
+        this.deps.journal.fail(txn.journalId, sanitizeError(error))
+      }
+    }
+    try {
+      this.deps.journal.updateMetadata(txn.journalId, { state: 'rolled-back', rolledBackAt: Date.now() })
+      this.deps.journal.recover(txn.journalId, 'rolled-back')
+    } catch {
+      /* best-effort; startup reconciliation covers stragglers */
+    }
+    this.transactions.delete(sessionId)
   }
 
   // -------------------------------------------------------------------------
@@ -1392,13 +1440,23 @@ export class WorktreeHandoffService {
   private async rollbackTransaction(txn: HandoffTransaction): Promise<void> {
     if (txn.direction === 'current-to-managed') {
       await this.rollbackCurrentToManaged(txn)
-      return
-    }
-    if (txn.direction === 'managed-to-current') {
+    } else if (txn.direction === 'managed-to-current') {
       await this.rollbackManagedToCurrent(txn)
-      return
+    } else {
+      await this.rollbackHandBack(txn)
     }
-    await this.rollbackHandBack(txn)
+    // A confirm that already rebound the provider runtime must rebind it back
+    // to the source checkout, or the adapter keeps executing against the
+    // rolled-back destination (which may no longer exist). Failing this keeps
+    // the transaction recovery-required so the runtime cannot be left bound
+    // to a stale path.
+    if (txn.steps.includes('runtime-rebound')) {
+      const adapter = this.hooks.resolveCapabilityAdapter?.(txn.sessionId)
+      if (!adapter) {
+        throw new Error('The provider runtime could not be resolved to rebind the rolled-back checkout.')
+      }
+      await adapter.rebindExecutionCwd(txn.sourcePath)
+    }
   }
 
   /** c2m: remove the created target, delete its branch when still txn-owned, restore source from the retained snapshot if it was cleaned. */

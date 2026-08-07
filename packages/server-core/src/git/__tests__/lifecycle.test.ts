@@ -13,10 +13,13 @@ import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { createGitServices } from '../index'
+import { setupI18n } from '@kata-sh/shared/i18n/setupI18n'
 import { runGit } from '../command-runner'
 import type { WorktreeRemovalRisk } from '@kata-sh/shared/protocol'
 import { listSessions as listStoredSessions } from '@kata-sh/shared/sessions'
 import { initRepo, makeTmpDir, cleanup } from './test-helpers'
+
+setupI18n()
 
 const cleanups: string[] = []
 function tmp(): string {
@@ -134,6 +137,86 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
     const rec = services.registry.get(id)!
     expect(rec.ownerSessionIds).toEqual(['child'])
+  })
+})
+
+describe('SessionManager.deleteSession — handoff fence (AC-7 recovery fencing)', () => {
+  let previousV2: string | undefined
+  beforeEach(() => {
+    previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '1'
+  })
+  afterEach(() => {
+    if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+    else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+  })
+
+  test('blocks deletion while a handoff is pending (preview not resolved)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'fenced', wsRoot)
+
+    services.handoff.setHooks({
+      resolveSession: () => ({
+        checkoutPath: repo,
+        workspaceId: 'ws_test',
+        checkout: null,
+        transcriptCwd: join(wsRoot, 'sessions', 'fenced'),
+      }),
+      resolveCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
+      resolveCapabilityAdapter: () => null,
+    })
+    const preview = await services.handoff.preview({
+      sessionId: 'fenced',
+      direction: 'current-to-managed',
+      worktreeNameSuffix: 'fence-demo',
+    })
+    if (preview.blocked) throw new Error(`preview blocked: ${preview.blocked.code}`)
+    expect(services.handoff.isSessionFenced('fenced')).toBe(true)
+
+    await expect(sm.deleteSession('fenced')).rejects.toThrow('Session handoff is pending or requires recovery.')
+
+    // The pending transaction is untouched by the blocked deletion.
+    expect(services.handoff.isSessionFenced('fenced')).toBe(true)
+  })
+
+  test('deletes a session whose handoff is stuck in recovery-required (escape hatch)', async () => {
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, services } = makeManager()
+    const wsRoot = tmp()
+    injectSession(sm, 'stuck', wsRoot)
+
+    services.handoff.setHooks({
+      resolveSession: () => ({
+        checkoutPath: repo,
+        workspaceId: 'ws_test',
+        checkout: null,
+        transcriptCwd: join(wsRoot, 'sessions', 'stuck'),
+      }),
+      resolveCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
+      resolveCapabilityAdapter: () => null,
+    })
+    const preview = await services.handoff.preview({
+      sessionId: 'stuck',
+      direction: 'current-to-managed',
+      worktreeNameSuffix: 'escape-demo',
+    })
+    if (preview.blocked) throw new Error(`preview blocked: ${preview.blocked.code}`)
+    // Simulate a confirm that failed after mutation: the transaction is stuck
+    // in recovery-required (the state deleteSession must not fence on).
+    const txn = (services.handoff as any).transactions.get('stuck')
+    txn.state = 'recovery-required'
+
+    const result = await sm.deleteSession('stuck')
+
+    expect(result.deleted).toBe(true)
+    // The escape hatch released the fence and recovered the journal.
+    expect(services.handoff.isSessionFenced('stuck')).toBe(false)
+    expect(services.handoff.status('stuck')).resolves.toEqual({ active: false })
+    expect(services.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('recovered')
   })
 })
 

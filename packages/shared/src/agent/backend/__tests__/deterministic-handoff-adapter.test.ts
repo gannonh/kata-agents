@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { createDeterministicHandoffAdapter } from '../deterministic-handoff-adapter'
+import { resolveHandoffCapability } from '../handoff-capability'
 
 describe('deterministic handoff adapter factory', () => {
   test('produces a complete capability with all four proof categories', async () => {
@@ -39,8 +40,7 @@ describe('deterministic handoff adapter factory', () => {
     expect(proof.checks).toEqual(['file:read', 'shell:cwd'])
   })
 
-  test('an adapter with missing categories fails the handoff gate', async () => {
-    const { resolveHandoffCapability } = await import('../handoff-capability')
+  test('an adapter with missing categories still passes the capability gate but yields an incomplete proof', async () => {
     const adapter = createDeterministicHandoffAdapter({ missingChecks: ['shell'] })
     const capability = adapter.handoffCapability()
     // The capability advertises support; the live proof gate (checks) is what

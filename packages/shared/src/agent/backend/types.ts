@@ -328,6 +328,11 @@ export type SdkMcpServerConfig =
       cwd?: string;
     };
 
+/** Proof categories the handoff gate requires for a destination checkout. */
+export const EXECUTION_CWD_PROOF_CATEGORIES = ['file', 'shell', 'mcp', 'provider'] as const
+
+export type ExecutionCwdProofCategory = (typeof EXECUTION_CWD_PROOF_CATEGORIES)[number]
+
 /**
  * Concrete proof that a backend's file, shell, MCP, and provider tools resolve
  * a destination checkout. Returned by {@link ExecutionCwdRebindCapability}.
@@ -340,7 +345,7 @@ export interface ExecutionCwdProof {
   destinationPath: string;
   verifiedAt: number;
   /** Concrete checks performed, e.g. `file:read`, `shell:cwd`, `mcp:list`, `provider:cwd`. */
-  checks: string[];
+  checks: `${ExecutionCwdProofCategory}:${string}`[];
 }
 
 /**

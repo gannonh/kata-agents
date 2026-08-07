@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   RPC_CHANNELS,
   WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_HANDOFF_ERROR_CODE,
   WORKTREE_LIFECYCLE_ERROR_CODE,
   WORKTREE_OWNERS_PRESENT_CODE,
   WORKTREE_PREVIEW_STALE_CODE,
@@ -18,7 +19,7 @@ import type {
   SessionCheckoutV1,
 } from '@kata-sh/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '@kata-sh/server-core/transport'
-import { WorktreeCreationError, WorktreeSettingsError } from '../../git'
+import { WorktreeCreationError, WorktreeHandoffError, WorktreeSettingsError } from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 import { registerGitHandlers, checkManagedCheckoutIdentity } from './git'
@@ -43,6 +44,8 @@ interface MockOverrides {
   pullRequest?: PullRequestSummary | null
   registryRecord?: ManagedWorktreeRecord | null
   createdPr?: PullRequestSummary
+  /** Make every handoff mock method throw (typed or plain) to exercise the error mapping. */
+  handoffError?: 'typed' | 'plain'
 }
 
 interface MockGit {
@@ -189,19 +192,29 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
     handoff: {
       preview: async (input: { sessionId: string; direction: string; worktreeNameSuffix?: string }) => {
         calls.push(`handoff.preview:${input.sessionId}:${input.direction}`)
+        if (overrides?.handoffError === 'typed') throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'Unknown handoff transaction.')
+        if (overrides?.handoffError === 'plain') throw new Error('boom')
         return { transactionId: 'txn-1', previewFingerprint: 'fp-handoff', direction: input.direction }
       },
       confirm: async (input: { sessionId: string; transactionId: string }) => {
         calls.push(`handoff.confirm:${input.sessionId}:${input.transactionId}`)
+        if (overrides?.handoffError) throw new Error('boom')
         return { outcome: 'committed', transactionId: input.transactionId }
       },
       status: async (sessionId: string) => {
         calls.push(`handoff.status:${sessionId}`)
+        if (overrides?.handoffError) throw new Error('boom')
         return { active: false }
       },
       recover: async (input: { sessionId: string; transactionId: string }) => {
         calls.push(`handoff.recover:${input.sessionId}:${input.transactionId}`)
+        if (overrides?.handoffError) throw new Error('boom')
         return { outcome: 'blocked', transactionId: input.transactionId, code: 'identity-drift', reason: 'stale' }
+      },
+      cancel: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.cancel:${input.sessionId}:${input.transactionId}`)
+        if (overrides?.handoffError) throw new Error('boom')
+        return { active: false }
       },
     },
     worktreeSettings: {
@@ -506,6 +519,65 @@ describe('registerGitHandlers', () => {
       'handoff.status:s1',
       'handoff.recover:s1:txn-1',
     ])
+  })
+
+  it('rejects every handoff RPC when the V2 flag is disabled', async () => {
+    process.env[FLAG] = '1'
+    delete process.env[V2_FLAG]
+    const { git } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CONFIRM)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        transactionId: 'txn-1',
+        previewFingerprint: 'fp',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_STATUS)!(ctx, { sessionId: 's1' }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_RECOVER)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CANCEL)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+  })
+
+  it('maps WorktreeHandoffError to the typed wire code and rethrows unrelated errors unchanged', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+
+    const typed = makeHarness(makeGitServices({ handoffError: 'typed' }).git)
+    await expect(
+      typed.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(typed.ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_HANDOFF_ERROR_CODE })
+
+    const plain = makeHarness(makeGitServices({ handoffError: 'plain' }).git)
+    await expect(
+      plain.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(plain.ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+      }),
+    ).rejects.toMatchObject({ message: 'boom' })
   })
 
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {

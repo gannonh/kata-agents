@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGitServices } from '../index'
 import type { GitServices } from '../index'
@@ -10,7 +10,6 @@ import type {
 } from '@kata-sh/shared/protocol'
 import type { ExecutionCwdRebindCapability } from '@kata-sh/shared/agent/backend'
 import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/backend'
-import type { WorktreeHandoffBlockerCode } from '@kata-sh/shared/protocol'
 import { initRepo, makeTmpDir, cleanup, git, writeFile } from './test-helpers'
 
 const cleanups: string[] = []
@@ -39,6 +38,7 @@ interface Harness {
   adapters: Map<string, ExecutionCwdRebindCapability | null>
   activeSessions: Set<string>
   quiesceResult: boolean
+  failBinding: boolean
   bindings: Array<{ sessionId: string; checkout: SessionCheckout; executionCwd: string }>
   rebinds: string[]
 }
@@ -55,7 +55,7 @@ function makeHarness(): Harness {
   const activeSessions = new Set<string>()
   const bindings: Harness['bindings'] = []
   const rebinds: string[] = []
-  const state = { quiesceResult: true }
+  const state = { quiesceResult: true, failBinding: false }
   const svc = createGitServices({
     worktreeRoot: join(root, 'worktrees'),
     registryPath: join(root, 'worktrees', 'registry.json'),
@@ -84,6 +84,7 @@ function makeHarness(): Harness {
       },
       commitSessionBinding: async (input) => {
         bindings.push(input)
+        if (state.failBinding) throw new Error('simulated durable binding failure')
       },
     },
   })
@@ -105,6 +106,12 @@ function makeHarness(): Harness {
     },
     set quiesceResult(v: boolean) {
       state.quiesceResult = v
+    },
+    get failBinding() {
+      return state.failBinding
+    },
+    set failBinding(v: boolean) {
+      state.failBinding = v
     },
     bindings,
     rebinds,
@@ -315,7 +322,7 @@ describe('handoff preview — current-to-managed', () => {
 
   test('canonicalizes a nested legacy current working directory to the repository root', async () => {
     const nested = join(harness.repo, 'nested', 'folder')
-    await import('node:fs').then(({ mkdirSync }) => mkdirSync(nested, { recursive: true }))
+    mkdirSync(nested, { recursive: true })
     currentSession({ checkoutPath: nested, checkout: null })
 
     const p = await preview('current-to-managed', 'nested-demo')
@@ -475,7 +482,8 @@ describe('handoff preview — managed-to-current', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     expect(existsSync(record.checkoutPath)).toBe(false)
-    expect(await headOf(harness.repo)).toBe(record.expectedBranch ? await git(harness.repo, ['rev-parse', record.expectedBranch]) .then((value) => value.trim()) : '')
+    const handedSha = (await git(harness.repo, ['rev-parse', record.expectedBranch!])).trim()
+    expect(await headOf(harness.repo)).toBe(handedSha)
     expect(readFileSync(join(harness.repo, 'managed-change.txt'), 'utf8')).toBe('managed state\n')
     expect(readFileSync(join(harness.repo, 'secret.env'), 'utf8')).toBe('included\n')
     expect(harness.bindings.at(-1)).toMatchObject({
@@ -549,7 +557,6 @@ describe('handoff preview — managed-to-current', () => {
   test('blocks when a Git operation is in progress on the source (git-operation-in-progress)', async () => {
     const record = await managedSession('git-op')
     const wtGitDir = (await git(record.checkoutPath, ['rev-parse', '--path-format=absolute', '--git-dir'])).trim()
-    const { writeFileSync } = await import('node:fs')
     // A merge marker makes the repository report an in-progress operation.
     writeFileSync(join(wtGitDir, 'MERGE_HEAD'), (await git(harness.repo, ['rev-parse', 'HEAD'])).trim())
 
@@ -561,14 +568,12 @@ describe('handoff preview — managed-to-current', () => {
   test('blocks when the managed worktree is missing', async () => {
     const record = await managedSession()
     harness.svc.pathLeases.release('session-1', record.checkoutPath)
-    const { rmSync } = await import('node:fs')
     rmSync(record.checkoutPath, { recursive: true, force: true })
 
     const p = await preview('managed-to-current')
 
     // The missing checkout is detected at the source-context inspection first.
-    expect(p.blocked).toBeDefined()
-    expect((p.blocked?.code as WorktreeHandoffBlockerCode) ?? '').toBeTruthy()
+    expect(p.blocked?.code).toBe('unsupported-snapshot')
   })
 })
 
@@ -772,7 +777,6 @@ describe('handoff confirm — current-to-managed', () => {
     currentSession()
     // Binary tracked file + executable + a tracked file to rename/delete.
     const binary = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00, 0x42])
-    const { writeFileSync, chmodSync } = await import('node:fs')
     writeFileSync(join(harness.repo, 'blob.bin'), binary)
     writeFileSync(join(harness.repo, 'run.sh'), '#!/bin/sh\necho hi\n')
     chmodSync(join(harness.repo, 'run.sh'), 0o755)
@@ -843,7 +847,7 @@ describe('handoff confirm — current-to-managed', () => {
 })
 
 describe('handoff recover — snapshot-backed rollback', () => {
-  async function failingAdapter(): Promise<ExecutionCwdRebindCapability> {
+  function failingAdapter(): ExecutionCwdRebindCapability {
     return createDeterministicHandoffAdapter({ adapterId: 'pi-test', failRebind: true })
   }
 
@@ -889,7 +893,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
   test('re-materializes the managed target when an interrupted m2c is recovered', async () => {
     const record = await managedSession('recover-m2c')
     writeFile(record.checkoutPath, 'managed.txt', 'managed state\n')
-    harness.adapters.set('session-1', await failingAdapter())
+    harness.adapters.set('session-1', failingAdapter())
 
     const p = await preview('managed-to-current', 'recover-m2c')
     const result = await harness.svc.handoff.confirm({
@@ -918,7 +922,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
 
   test('returns current to the handed branch when an interrupted hand-back is recovered', async () => {
     const record = await handBackFixture('recover-handback')
-    harness.adapters.set('session-1', await failingAdapter())
+    harness.adapters.set('session-1', failingAdapter())
 
     const p = await preview('hand-back', 'recover-handback')
     const result = await harness.svc.handoff.confirm({
@@ -980,6 +984,104 @@ describe('handoff recover — snapshot-backed rollback', () => {
     expect(await restarted.handoff.status('session-1')).toEqual({ active: false })
     expect(restarted.handoff.isSessionFenced('session-1')).toBe(false)
     expect(restarted.handoff.isPathFenced(harness.repo)).toBe(false)
+  })
+
+  test('rebinds the provider runtime back to the source when rollback undoes a post-rebind failure', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'add tracked'])
+    writeFile(harness.repo, 'tracked.txt', 'changed\n')
+    writeFile(harness.repo, 'new.txt', 'new file\n')
+    harness.failBinding = true
+
+    const p = await preview('current-to-managed', 'rebind-back')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'current-to-managed',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    // The runtime rebound to the destination before the durable binding
+    // failed, so the transaction records runtime-rebound.
+    expect(result.outcome).toBe('recovery-required')
+    if (result.outcome !== 'recovery-required') return
+    expect(harness.rebinds.at(-1)).not.toBe(harness.repo)
+
+    const rec = await harness.svc.handoff.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(rec).toMatchObject({ outcome: 'blocked', code: 'handoff-rolled-back' })
+    // The provider runtime is rebound to the source checkout, not left bound
+    // to the rolled-back (deleted) destination. Git reports the canonical
+    // realpath, so compare normalized paths.
+    expect(realpathSync(harness.rebinds.at(-1)!)).toBe(realpathSync(harness.repo))
+    expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
+  })
+})
+
+describe('handoff cancel', () => {
+  test('releases a pending preview transaction without mutating anything', async () => {
+    currentSession()
+    const p = await preview('current-to-managed', 'cancel-demo')
+    expect(harness.svc.handoff.isSessionFenced('session-1')).toBe(true)
+
+    const cancelled = await harness.svc.handoff.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(cancelled).toEqual({ active: false })
+    expect(harness.svc.handoff.isSessionFenced('session-1')).toBe(false)
+    expect(harness.svc.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('recovered')
+    // A fresh preview works immediately after the cancel.
+    const again = await preview('current-to-managed', 'cancel-demo')
+    expect(again.transactionId).not.toBe(p.transactionId)
+  })
+
+  test('is a no-op for a transaction that already left pending', async () => {
+    currentSession()
+    const p = await preview('current-to-managed', 'cancel-demo')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'current-to-managed',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    expect(result.outcome).toBe('committed')
+
+    const cancelled = await harness.svc.handoff.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(cancelled).toEqual({ active: false })
+    expect(harness.svc.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('committed')
+  })
+
+  test('cancelForSessionDeletion rolls back an interrupted handoff and releases the fence', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'add tracked'])
+    writeFile(harness.repo, 'tracked.txt', 'changed\n')
+    harness.failBinding = true
+
+    const p = await preview('current-to-managed', 'delete-demo')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'current-to-managed',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    expect(result.outcome).toBe('recovery-required')
+    if (result.outcome !== 'recovery-required') return
+    const targetRecord = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/delete-demo')
+    expect(targetRecord).toBeDefined()
+    expect(existsSync(targetRecord!.checkoutPath)).toBe(true)
+
+    await harness.svc.handoff.cancelForSessionDeletion('session-1')
+
+    // The destructive escape hatch releases the fence and undoes partial work.
+    expect(harness.svc.handoff.isSessionFenced('session-1')).toBe(false)
+    expect(harness.svc.handoff.isPathFenced(harness.repo)).toBe(false)
+    expect(existsSync(targetRecord!.checkoutPath)).toBe(false)
+    expect(harness.svc.registry.get(targetRecord!.managedWorktreeId)).toBeUndefined()
+    expect(readFileSync(join(harness.repo, 'tracked.txt'), 'utf8')).toBe('changed\n')
+    expect(harness.svc.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('recovered')
   })
 })
 

@@ -15,8 +15,14 @@ function tmp(): string {
 afterEach(() => {
   while (cleanups.length) cleanup(cleanups.pop()!)
 })
+let previousGitWorkspaceV1: string | undefined
 beforeEach(() => {
+  previousGitWorkspaceV1 = process.env.KATA_FEATURE_GIT_WORKSPACE_V1
   process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
+})
+afterEach(() => {
+  if (previousGitWorkspaceV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
+  else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousGitWorkspaceV1
 })
 
 function makeManager(): { sm: SessionManager } {
@@ -88,15 +94,16 @@ describe('SessionManager.verifyHandoffRuntimeBeforeSend', () => {
   test('is a no-op for verified sessions; recovery-required re-attempts the proof', async () => {
     const { sm } = makeManager()
     const wsRoot = tmp()
-    // Verified: never re-proven within the process.
+    // Verified: never re-proven within the process — the failing adapter
+    // proves the verified state short-circuits the proof.
     const verified = injectSession(sm, 's-verified', wsRoot, { workingDirectory: '/srv/dest', handoffRuntimeState: 'verified' })
-    const healthyAgent = { executionCwdRebind: createDeterministicHandoffAdapter({ adapterId: 'det', failVerify: true }) }
-    await (sm as any).verifyHandoffRuntimeBeforeSend(verified.id, verified, healthyAgent)
+    const failingAgent = { executionCwdRebind: createDeterministicHandoffAdapter({ adapterId: 'det', failVerify: true }) }
+    await (sm as any).verifyHandoffRuntimeBeforeSend(verified.id, verified, failingAgent)
     expect(verified.handoffRuntimeState).toBe('verified')
 
     // Recovery-required with a still-broken adapter: Send stays blocked.
     const broken = injectSession(sm, 's-broken', wsRoot, { workingDirectory: '/srv/dest', handoffRuntimeState: 'recovery-required' })
-    await expect((sm as any).verifyHandoffRuntimeBeforeSend(broken.id, broken, healthyAgent)).rejects.toThrow(
+    await expect((sm as any).verifyHandoffRuntimeBeforeSend(broken.id, broken, failingAgent)).rejects.toThrow(
       'Handoff runtime verification failed',
     )
     expect(broken.handoffRuntimeState).toBe('recovery-required')
@@ -107,6 +114,19 @@ describe('SessionManager.verifyHandoffRuntimeBeforeSend', () => {
       executionCwdRebind: createDeterministicHandoffAdapter({ adapterId: 'det' }),
     })
     expect(fixed.handoffRuntimeState).toBe('verified')
+  })
+
+  test('is a no-op for sessions that never performed a handoff (no gate armed)', async () => {
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    // A session without handoffRuntimeState has no destination to prove; it
+    // must not be blocked or marked recovery-required even without an adapter.
+    const managed = injectSession(sm, 's-never-handoff', wsRoot, { workingDirectory: '/srv/dest' })
+
+    await (sm as any).verifyHandoffRuntimeBeforeSend(managed.id, managed, { executionCwdRebind: undefined })
+
+    expect(managed.handoffRuntimeState).toBeUndefined()
+    expect(loadStoredSession(wsRoot, 's-never-handoff')?.handoffRuntimeState).toBeUndefined()
   })
 
   test('blocks every send while the runtime stays broken (second-send blocking)', async () => {
