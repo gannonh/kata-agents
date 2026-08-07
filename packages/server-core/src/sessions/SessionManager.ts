@@ -3609,6 +3609,15 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
+      // Credential-free UI UAT seam (AC-15): the deterministic adapter lets
+      // the real Electron app exercise preview/confirm/recovery without a
+      // live provider. Off by default; production adapters remain disabled
+      // until credentialed UAT proves context continuity.
+      if (process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' && managed.agent) {
+        const { createDeterministicHandoffAdapter } = await import('@kata-sh/shared/agent/backend')
+        managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
+      }
+
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
       // ============================================================
