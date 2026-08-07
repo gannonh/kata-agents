@@ -73,10 +73,11 @@ export interface ConversationForkProviderCapability {
 /**
  * Typed conversation-fork blockers: every entry corresponds to a precondition
  * the server checks before any mutation, and a blocked fork claims no
- * mutation. Post-recovery outcomes are NOT blockers and stay out of this
- * tuple — they report the completed result of explicit recovery. Each tuple
- * is the single source of truth: its union is derived from it so a code can
- * never be added to the type without being listed here.
+ * mutation. Unlike handoff there is no separate outcome-code set: post-/
+ * mid-recovery outcomes surface through `recovery-required` results and the
+ * `ConversationForkRecoveryState` union, never through this blocker tuple.
+ * Each tuple is the single source of truth: its union is derived from it so
+ * a code can never be added to the type without being listed here.
  */
 export const CONVERSATION_FORK_BLOCKER_CODES = [
   /** Provider adapter cannot establish a strict cross-CWD native fork. */
@@ -239,8 +240,12 @@ export interface ConversationForkConfirmInput {
   transactionId: string
   /** Exact preview fingerprint the user was shown. */
   previewFingerprint: string
-  /** Editable suffix for a new managed worktree (isolated only). */
-  worktreeNameSuffix: string
+  /**
+   * Editable suffix for the new managed worktree. Required when `strategy` is
+   * `isolated-worktree`; absent for `shared-worktree` (no new worktree name
+   * exists). The server enforces required-for-isolated.
+   */
+  worktreeNameSuffix?: string
 }
 
 // ---------------------------------------------------------------------------

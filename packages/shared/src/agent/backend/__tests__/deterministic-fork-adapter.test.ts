@@ -64,7 +64,10 @@ describe('deterministic strict fork adapter factory', () => {
     expect(result.proof.checks.some((check) => check.startsWith('shell:'))).toBe(false)
   })
 
-  test('idempotency is honored: a second establish with the same key does not duplicate', async () => {
+  // Retrying the same idempotency key never produces a different child ID;
+  // persist-exactly-once dedupe itself is the fork service's responsibility
+  // (the fixture records every call and does not dedupe).
+  test('retrying establish with the same key returns the same child provider ID', async () => {
     const establishLog: Array<{ input: ConversationForkEstablishInput; childSdkSessionId: string }> = []
     const adapter = createDeterministicStrictForkAdapter({ establishLog })
     await adapter.establishNativeFork(INPUT)

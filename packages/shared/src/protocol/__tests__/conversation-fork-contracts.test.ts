@@ -285,6 +285,8 @@ describe('Conversation fork protocol contracts', () => {
       'cleanup-failed',
       'recovery-required',
     ]
+    // Pin the length so adding a state is a deliberate contract change.
+    expect(states).toHaveLength(13)
     for (const state of states) {
       expect(state).toBeTruthy()
     }
