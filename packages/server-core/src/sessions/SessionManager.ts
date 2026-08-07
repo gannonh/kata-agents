@@ -3620,6 +3620,11 @@ export class SessionManager implements ISessionManager {
 
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
+      // The renderer's session DTO now carries capabilities that only exist
+      // with a live agent (supportsBranching, handoffCapable). Push a refresh
+      // so the composer/checkout UI stops gating on stale session state.
+      this.sendEvent({ type: 'session_updated', sessionId: managed.id }, managed.workspace.id)
+
       // ============================================================
       // Post-construction: debug callback, auth callback, postInit()
       // ============================================================

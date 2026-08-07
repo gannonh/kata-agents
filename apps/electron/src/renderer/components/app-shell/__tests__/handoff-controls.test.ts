@@ -8,6 +8,7 @@ import type {
 import {
   canOfferHandoff,
   canConfirmHandoff,
+  canConfirmHandoffForName,
   canRecoverHandoff,
   defaultNameForDirection,
   finalizeHandoffName,
@@ -237,6 +238,32 @@ describe('handoff dialog state machine', () => {
     expect(state.phase).toBe('loading')
     expect(state.nameInput).toBe('auth-refresh')
     expect(canConfirmHandoff(state.phase, state.preview)).toBe(false)
+  })
+
+  it('keeps confirm disabled until the preview matches the edited name', () => {
+    let state = reduceHandoffDialog(initialHandoffDialogState(), { type: 'open', direction: 'current-to-managed' })
+    // The generated default name does not match the fixed preview branch → the
+    // mismatch guard protects confirm (default-name transaction after edit).
+    state = reduceHandoffDialog(state, { type: 'preview-ready', preview: previewFor() })
+    expect(canConfirmHandoffForName(state)).toBe(false)
+    // Align the input with the previewed branch suffix → confirmable.
+    state = reduceHandoffDialog(state, { type: 'name-changed', value: 'ab12cd34' })
+    state = reduceHandoffDialog(state, { type: 'preview-ready', preview: previewFor() })
+    expect(canConfirmHandoffForName(state)).toBe(true)
+    // An edit re-previews; until the new preview lands, a stale preview with
+    // the OLD name must not be confirmable even if a stale render re-enables
+    // the button (E2E flake: default-name transaction confirmed after edit).
+    state = reduceHandoffDialog(state, { type: 'name-changed', value: 'new-name' })
+    state = reduceHandoffDialog(state, { type: 'preview-ready', preview: previewFor() })
+    expect(canConfirmHandoffForName(state)).toBe(false)
+    // The re-preview for the edited name re-enables confirm.
+    state = reduceHandoffDialog(state, {
+      type: 'preview-ready',
+      preview: previewFor({
+        destination: { ...previewFor().destination, branch: 'kata-agent/new-name' },
+      }),
+    })
+    expect(canConfirmHandoffForName(state)).toBe(true)
   })
 
   it('lets the user fix the name inline while a blocker keeps the preview unusable', () => {

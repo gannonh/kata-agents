@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils'
 
 import {
   canConfirmHandoff,
+  canConfirmHandoffForName,
   canRecoverHandoff,
   finalizeHandoffName,
   initialHandoffDialogState,
@@ -336,7 +337,7 @@ export function HandoffDialog({
 
   const handleConfirm = React.useCallback(async () => {
     const preview = state.preview
-    if (!canConfirmHandoff(state.phase, preview) || preview === null) return
+    if (!canConfirmHandoffForName(state) || preview === null) return
     dispatch({ type: 'confirm' })
     try {
       const result = await window.electronAPI.handoffConfirm({
@@ -371,7 +372,8 @@ export function HandoffDialog({
   const busy = state.phase === 'loading' || state.phase === 'confirming' || state.phase === 'recovering'
   // Keep the confirm button mounted while the request is in flight so the
   // spinner state is visible; the click handler guards on the phase itself.
-  const confirmable = state.phase === 'confirming' || (canConfirmHandoff(state.phase, state.preview) && !busy)
+  const confirmable =
+    state.phase === 'confirming' || (canConfirmHandoffForName(state) && !busy)
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>

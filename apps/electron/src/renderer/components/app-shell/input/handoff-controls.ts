@@ -87,6 +87,19 @@ export function canConfirmHandoff(phase: HandoffDialogPhase, preview: WorktreeHa
   return phase === 'preview' && preview !== null && preview.blocked === undefined
 }
 
+/**
+ * Whether confirm is safe for the currently edited name: the preview must have
+ * been issued for exactly the suffix in the input, otherwise a stale preview
+ * (name edit's re-preview still in flight) could confirm the previous name.
+ */
+export function canConfirmHandoffForName(
+  state: HandoffDialogState,
+): boolean {
+  if (!canConfirmHandoff(state.phase, state.preview)) return false
+  if (state.preview?.direction !== 'current-to-managed') return true
+  return finalizeHandoffName(state.nameInput) === state.previewedName
+}
+
 /** Whether recovery can be attempted for the current phase. */
 export function canRecoverHandoff(phase: HandoffDialogPhase, result: WorktreeHandoffResult | null): boolean {
   return phase === 'recovery-required' && result?.outcome === 'recovery-required'
@@ -131,6 +144,8 @@ export interface HandoffDialogState {
   phase: HandoffDialogPhase
   /** Server-issued transaction + fingerprint; confirm reuses the exact preview. */
   preview: WorktreeHandoffPreview | null
+  /** Branch suffix the current preview was issued for ('' for non-named directions). */
+  previewedName: string
   /** Editable suffix for current-to-managed; normalized for the wire. */
   nameInput: string
   /** Sanitized server detail for blocked / error / recovery phases. */
@@ -140,7 +155,7 @@ export interface HandoffDialogState {
 }
 
 export function initialHandoffDialogState(): HandoffDialogState {
-  return { phase: 'idle', preview: null, nameInput: '', message: '', result: null }
+  return { phase: 'idle', preview: null, previewedName: '', nameInput: '', message: '', result: null }
 }
 
 export type HandoffDialogAction =
@@ -181,13 +196,20 @@ export function reduceHandoffDialog(state: HandoffDialogState, action: HandoffDi
       }
     case 'preview-ready': {
       const blocked = action.preview.blocked
+      // Track the branch suffix this preview was issued for so confirm stays
+      // disabled while a name edit's re-preview is still in flight (a stale
+      // preview could otherwise confirm the previous name).
+      const previewedName =
+        action.preview.direction === 'current-to-managed'
+          ? action.preview.destination.branch.replace(/^kata-agent\//, '')
+          : ''
       if (blocked?.code === 'unsupported-provider') {
-        return { ...state, phase: 'unsupported', preview: action.preview, message: blocked.reason, result: null }
+        return { ...state, phase: 'unsupported', preview: action.preview, previewedName, message: blocked.reason, result: null }
       }
       if (blocked) {
-        return { ...state, phase: 'preview-blocked', preview: action.preview, message: blocked.reason, result: null }
+        return { ...state, phase: 'preview-blocked', preview: action.preview, previewedName, message: blocked.reason, result: null }
       }
-      return { ...state, phase: 'preview', preview: action.preview, message: '', result: null }
+      return { ...state, phase: 'preview', preview: action.preview, previewedName, message: '', result: null }
     }
     case 'preview-error':
       return { ...state, phase: 'error', message: action.message, result: null }

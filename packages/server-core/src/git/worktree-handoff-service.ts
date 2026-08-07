@@ -1825,7 +1825,17 @@ export class WorktreeHandoffService {
     }
     const existingTransaction = this.transactions.get(input.sessionId)
     if (existingTransaction && existingTransaction.transactionId !== transactionIdToAllow) {
-      return { ...fail('handoff-in-progress', 'A handoff transaction is already in progress for this session.'), ...this.emptyFacts(sourcePath, repositoryRoot) }
+      if (existingTransaction.state === 'pending') {
+        // A fresh preview supersedes a stale pending preview. A pending
+        // transaction has never mutated anything (quiescence happens at
+        // confirm), so cancelling it is safe and keeps StrictMode double-mounts
+        // and dialog re-opens from stranding the session with a fenced
+        // transaction the user never confirmed.
+        this.deps.journal.recover(existingTransaction.journalId, 'preview-superseded')
+        this.transactions.delete(input.sessionId)
+      } else {
+        return { ...fail('handoff-in-progress', 'A handoff transaction is already in progress for this session.'), ...this.emptyFacts(sourcePath, repositoryRoot) }
+      }
     }
     if (this.hooks.isSessionActive?.(input.sessionId)) {
       return { ...fail('runtime-active', 'The session has an active turn; handoff requires an idle session.'), ...this.emptyFacts(sourcePath, repositoryRoot) }

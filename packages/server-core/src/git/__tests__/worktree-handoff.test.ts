@@ -276,13 +276,33 @@ describe('handoff preview — current-to-managed', () => {
     expect(p.blocked?.code).toBe('runtime-active')
   })
 
-  test('blocks while a handoff transaction is already in progress', async () => {
+  test('a new preview supersedes a stale pending preview', async () => {
     currentSession()
     const first = await preview('current-to-managed')
     expect(first.blocked).toBeUndefined()
 
     const second = await preview('current-to-managed')
-    expect(second.blocked?.code).toBe('handoff-in-progress')
+
+    expect(second.blocked).toBeUndefined()
+    expect(second.transactionId).not.toBe(first.transactionId)
+    const status = await harness.svc.handoff.status('session-1')
+    expect(status.active).toBe(true)
+    if (status.active) expect(status.transactionId).toBe(second.transactionId)
+    // The superseded preview was journal-cancelled, never left as a fence.
+    expect(
+      harness.svc.journal.entries().some((entry) => entry.status === 'recovered'),
+    ).toBe(true)
+  })
+
+  test('blocks a second handoff while a real (non-pending) transaction is in flight', async () => {
+    currentSession()
+    // A quiesced transaction has mutated state; a second preview must block.
+    ;(harness.svc.handoff as unknown as { transactions: Map<string, { transactionId: string; state: string }> })
+      .transactions.set('session-1', { transactionId: 'a'.repeat(16), state: 'quiesced' })
+
+    const p = await preview('current-to-managed')
+
+    expect(p.blocked?.code).toBe('handoff-in-progress')
   })
 
   test('blocks when the source is not a Git repository', async () => {
