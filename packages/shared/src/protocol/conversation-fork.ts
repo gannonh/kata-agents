@@ -331,11 +331,15 @@ export type ConversationForkStatus =
       /** Server timestamp of the last state transition. */
       since: number
       /**
-       * Child provider identity display state. Before first Send this must
-       * display as PENDING rather than claiming a child provider ID — so the
-       * status surface intentionally carries no `childProviderId` field.
+       * Child provider identity display state. Before first Send this is
+       * `pending` — the surface displays provider identity as PENDING rather
+       * than claiming a child provider ID. After the strict adapter
+       * establishes the native fork, the persisted child provider ID is
+       * exposed as `established` and pending metadata is retired.
        */
-      pendingProviderIdentity: true
+      providerIdentity:
+        | { status: 'pending' }
+        | { status: 'established'; childSdkSessionId: string }
     }
 
 /** Continue an interrupted fork transaction (idempotent steps). */

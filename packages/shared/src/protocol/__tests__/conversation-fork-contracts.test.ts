@@ -237,14 +237,34 @@ describe('Conversation fork protocol contracts', () => {
       strategy: 'isolated-worktree',
       state: 'published',
       since: 1,
-      pendingProviderIdentity: true,
+      providerIdentity: { status: 'pending' },
     }
     expect(idle.active).toBe(false)
     if (active.active) {
       expect(active.strategy).toBe('isolated-worktree')
       expect(active.state).toBe('published')
-      // The status surface never claims a child provider ID before first Send.
-      expect('childProviderId' in active).toBe(false)
+      // Before first Send the surface displays provider identity as pending
+      // rather than claiming a child provider ID.
+      expect(active.providerIdentity).toEqual({ status: 'pending' })
+      expect('childSdkSessionId' in active.providerIdentity).toBe(false)
+    }
+  })
+
+  it('exposes the persisted child provider ID only after first-Send establishment', () => {
+    const established: ConversationForkStatus = {
+      active: true,
+      transactionId: 'txn-abc',
+      strategy: 'isolated-worktree',
+      state: 'established',
+      since: 2,
+      providerIdentity: { status: 'established', childSdkSessionId: 'sdk-child-1' },
+    }
+    if (established.active) {
+      expect(established.state).toBe('established')
+      expect(established.providerIdentity.status).toBe('established')
+      if (established.providerIdentity.status === 'established') {
+        expect(established.providerIdentity.childSdkSessionId).toBe('sdk-child-1')
+      }
     }
   })
 
