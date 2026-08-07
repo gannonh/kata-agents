@@ -200,6 +200,12 @@ function isContainedPath(parent: string, child: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
+/** True when a porcelain worktree list checks out exactly `branch`. */
+function branchCheckedOutInWorktree(porcelain: string, branch: string): boolean {
+  const expected = `branch refs/heads/${branch}`
+  return porcelain.split('\n').some((line) => line.trim() === expected)
+}
+
 const HANDOFF_RECOVERY_STATES = new Set<WorktreeHandoffRecoveryState>([
   'pending', 'quiesced', 'snapshotted', 'source-released', 'target-created',
   'branch-switched', 'binding-committed', 'runtime-rebuilding', 'restore-failed',
@@ -380,13 +386,6 @@ export class WorktreeHandoffService {
     if (txn.direction !== input.direction) {
       throw new WorktreeHandoffError('HANDOFF_DIRECTION_MISMATCH', 'Handoff direction does not match the transaction.')
     }
-    if (txn.direction === 'hand-back') {
-      throw new WorktreeHandoffError(
-        'HANDOFF_NOT_IMPLEMENTED',
-        `Handoff direction ${txn.direction} is not implemented yet.`,
-      )
-    }
-
     const session = this.hooks.resolveSession?.(input.sessionId)
     if (!session) throw new WorktreeHandoffError('HANDOFF_SESSION_UNKNOWN', 'Unknown session for handoff confirmation.')
     const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
@@ -406,6 +405,9 @@ export class WorktreeHandoffService {
 
     if (txn.direction === 'managed-to-current') {
       return this.confirmManagedToCurrent(txn, input, session, capability)
+    }
+    if (txn.direction === 'hand-back') {
+      return this.confirmHandBack(txn, input, session, capability)
     }
 
     return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
@@ -821,7 +823,15 @@ export class WorktreeHandoffService {
 
         const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
         if (!released) throw new Error('The managed source checkout could not be released safely.')
-        this.deps.registry.remove(record.managedWorktreeId)
+        // Retain the record as the hand-back target: snapshotted state plus
+        // the captured snapshot meta. Git can no longer check out the branch
+        // twice, and hand-back re-materializes this record from the journal
+        // return ref. The orphan GC treats the snapshot as referenced.
+        this.deps.registry.upsert({
+          ...record,
+          state: 'snapshotted',
+          snapshot: captured.meta,
+        })
         txn.state = 'source-released'
         txn.steps.push('source-released')
         this.deps.journal.updateMetadata(journalId, { state: txn.state })
@@ -917,6 +927,297 @@ export class WorktreeHandoffService {
             direction: txn.direction,
             checkout,
             executionCwd: facts.destination.checkoutPath,
+            transcriptCwd: session.transcriptCwd,
+            retainedSnapshotId: captured.meta.snapshotId,
+            committedAt: Date.now(),
+          },
+        }
+      } catch (error) {
+        if (transactionLeaseId) this.deps.leases.release(transactionLeaseId, facts.destination.checkoutPath)
+        txn.state = 'recovery-required'
+        this.deps.journal.updateMetadata(journalId, {
+          state: txn.state,
+          retainedSnapshotId: txn.retainedSnapshotId,
+          runtimeProof: txn.runtimeProof,
+        })
+        this.deps.journal.fail(journalId, sanitizeError(error))
+        return {
+          outcome: 'recovery-required',
+          transactionId: txn.transactionId,
+          recovery: txn.state,
+          ...(txn.retainedSnapshotId ? { retainedSnapshotId: txn.retainedSnapshotId } : {}),
+          reason: sanitizeError(error),
+        }
+      }
+    })
+  }
+
+  private async confirmHandBack(
+    txn: HandoffTransaction,
+    input: WorktreeHandoffConfirmInput,
+    session: HandoffSessionInfo,
+    capability: WorktreeHandoffProviderCapability,
+  ): Promise<WorktreeHandoffResult> {
+    return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
+      const facts = await this.gatherFacts(
+        {
+          sessionId: input.sessionId,
+          direction: txn.direction,
+          worktreeNameSuffix: txn.nameSuffix,
+        },
+        session,
+        capability,
+        txn.transactionId,
+      )
+      if (facts.blocker) {
+        this.deps.journal.fail(txn.journalId, facts.blockerReason ?? 'Handoff precondition failed.')
+        this.transactions.delete(input.sessionId)
+        return this.blockedResult(txn, facts.blocker, facts.blockerReason ?? 'Handoff precondition failed.')
+      }
+      const freshFingerprint = await this.computeFingerprint(
+        input.sessionId,
+        txn.direction,
+        session,
+        facts,
+        capability,
+        txn.transactionId,
+      )
+      if (freshFingerprint !== txn.fingerprint || input.previewFingerprint !== txn.fingerprint) {
+        this.deps.journal.fail(txn.journalId, 'The checkout changed after the preview.')
+        this.transactions.delete(input.sessionId)
+        return this.blockedResult(txn, 'identity-drift', 'The checkout changed after the preview; inspect it again.')
+      }
+
+      const journalId = txn.journalId || this.deps.journal.begin({
+        op: 'handoff',
+        recordId: txn.transactionId,
+        sessionIds: [input.sessionId],
+        policyVersion: this.deps.settings.getSnapshot(this.deps.serverId).version,
+        metadata: this.transactionMetadata(txn),
+      }).journalId
+      txn.journalId = journalId
+      txn.steps.push('locks-acquired')
+      this.deps.journal.step(journalId, 'locks-acquired')
+      let transactionLeaseId: string | null = null
+      try {
+        if (this.hooks.isSessionActive?.(input.sessionId)) {
+          this.deps.journal.fail(journalId, 'The session runtime is active.')
+          this.transactions.delete(input.sessionId)
+          return this.blockedResult(txn, 'runtime-active', 'The session runtime could not be quiesced.')
+        }
+        const quiesced = this.hooks.quiesceRuntimes ? await this.hooks.quiesceRuntimes([input.sessionId]) : true
+        if (!quiesced) {
+          this.deps.journal.fail(journalId, 'The session runtime could not be quiesced.')
+          this.transactions.delete(input.sessionId)
+          return this.blockedResult(txn, 'runtime-active', 'The session runtime could not be quiesced.')
+        }
+        txn.state = 'quiesced'
+        txn.steps.push('quiesced')
+        this.deps.journal.updateMetadata(journalId, { state: txn.state })
+        this.deps.journal.step(journalId, 'quiesced')
+
+        const record = this.deps.registry.get(txn.managedWorktreeId ?? '')
+        if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
+          throw new Error('The released managed target record changed before capture.')
+        }
+        if (record.ownerSessionIds.length !== 1 || record.ownerSessionIds[0] !== input.sessionId) {
+          throw new Error('The released managed target owner changed before capture.')
+        }
+        const returnRef = txn.returnRef ?? facts.returnRef
+        if (!returnRef) throw new Error('The recorded return ref is unavailable for the hand-back.')
+        const settings = this.deps.settings.getSnapshot(this.deps.serverId)
+        const sourceBranch = facts.source.branch
+        if (!sourceBranch) throw new Error('The current checkout is detached; it cannot hand back.')
+        const sourceRecord = this.currentSnapshotRecord(
+          input.sessionId,
+          session,
+          facts,
+          sourceBranch,
+          settings.version,
+          settings.materializationRoot,
+        )
+        const sourceFingerprint = await computeWorktreeFingerprint({
+          managedWorktreeId: sourceRecord.managedWorktreeId,
+          checkoutPath: sourceRecord.checkoutPath,
+          gitCommonDir: sourceRecord.gitCommonDir,
+          expectedBranch: sourceRecord.expectedBranch,
+          baseRef: sourceRecord.baseRef,
+          ownerSessionIds: sourceRecord.ownerSessionIds,
+          policyVersion: settings.version,
+          archivedOwnerSessionIds: [],
+        })
+        let captured: Awaited<ReturnType<WorktreeSnapshotService['capture']>>
+        try {
+          captured = await this.deps.snapshots.capture({
+            record: sourceRecord,
+            finalFingerprint: sourceFingerprint,
+            previewFingerprint: txn.fingerprint,
+            policyVersion: settings.version,
+          })
+        } catch (error) {
+          const code = error instanceof SnapshotError && error.code === 'SNAPSHOT_LIMIT'
+            ? 'oversized-capture'
+            : error instanceof SnapshotError && error.code === 'SNAPSHOT_UNSUPPORTED_STATE'
+              ? 'git-operation-in-progress'
+              : 'unsupported-snapshot'
+          this.deps.journal.fail(journalId, sanitizeError(error))
+          this.transactions.delete(input.sessionId)
+          return this.blockedResult(txn, code, sanitizeError(error))
+        }
+        const afterCaptureFingerprint = await computeWorktreeFingerprint({
+          managedWorktreeId: sourceRecord.managedWorktreeId,
+          checkoutPath: sourceRecord.checkoutPath,
+          gitCommonDir: sourceRecord.gitCommonDir,
+          expectedBranch: sourceRecord.expectedBranch,
+          baseRef: sourceRecord.baseRef,
+          ownerSessionIds: sourceRecord.ownerSessionIds,
+          policyVersion: settings.version,
+          archivedOwnerSessionIds: [],
+        })
+        if (afterCaptureFingerprint !== captured.meta.fingerprint) {
+          throw new Error('The current checkout changed during snapshot capture.')
+        }
+        this.assertLeaseStability(txn)
+        txn.capturedIncludedFiles = await listWorktreeIncludeFiles(sourceRecord.checkoutPath)
+        txn.retainedSnapshotId = captured.meta.snapshotId
+        txn.state = 'snapshotted'
+        txn.steps.push('captured')
+        this.deps.journal.updateMetadata(journalId, {
+          state: txn.state,
+          retainedSnapshotId: txn.retainedSnapshotId,
+          capturedIncludedFiles: txn.capturedIncludedFiles,
+        })
+        this.deps.journal.step(journalId, 'captured')
+
+        transactionLeaseId = `handoff:${txn.transactionId}`
+        this.deps.leases.lease(transactionLeaseId, facts.destination.checkoutPath)
+        txn.steps.push('destination-leased')
+        this.deps.journal.step(journalId, 'destination-leased')
+
+        await this.removeCapturedState(
+          facts.source.checkoutPath,
+          captured.manifest,
+          sourceRecord,
+          txn.capturedIncludedFiles ?? [],
+        )
+        txn.steps.push('source-cleaned')
+        this.deps.journal.step(journalId, 'source-cleaned')
+
+        // Free the handed branch: current returns to the recorded ref so the
+        // managed target can materialize the same branch again.
+        await runGit(['switch', returnRef.branch], { cwd: facts.source.checkoutPath })
+        const switchedContext = await this.deps.repository.getContext(facts.source.checkoutPath)
+        if (switchedContext.currentBranch !== returnRef.branch || switchedContext.headSha !== returnRef.headSha) {
+          throw new Error('The current checkout did not return to the recorded ref.')
+        }
+        const worktrees = await runGit(['worktree', 'list', '--porcelain'], { cwd: facts.source.checkoutPath })
+        if (branchCheckedOutInWorktree(worktrees.stdout, record.expectedBranch)) {
+          throw new Error('The handed branch is still checked out elsewhere; it cannot be materialized again.')
+        }
+        txn.state = 'branch-switched'
+        txn.steps.push('branch-switched')
+        this.deps.journal.updateMetadata(journalId, { state: txn.state })
+        this.deps.journal.step(journalId, 'branch-switched')
+
+        const restored = await this.deps.snapshots.restore({
+          record,
+          meta: captured.meta,
+          checkoutPath: record.checkoutPath,
+        })
+        const targetContext = await this.deps.repository.getContext(restored.checkoutPath)
+        if (
+          !targetContext.isGitRepository ||
+          targetContext.currentBranch !== record.expectedBranch ||
+          targetContext.headSha !== captured.meta.headOid
+        ) {
+          throw new Error('The managed target failed identity verification after hand-back restore.')
+        }
+        txn.steps.push('target-verified')
+        this.deps.journal.step(journalId, 'target-verified')
+
+        const adapter = this.hooks.resolveCapabilityAdapter?.(input.sessionId)
+        if (!adapter) throw new Error('The provider runtime could not be resolved for execution-CWD rebinding.')
+        await adapter.rebindExecutionCwd(restored.checkoutPath)
+        const proof = await adapter.verifyExecutionCwd(restored.checkoutPath)
+        if (
+          proof.adapterId !== capability.adapterId ||
+          resolvePath(proof.destinationPath) !== resolvePath(restored.checkoutPath) ||
+          proof.checks.length === 0 ||
+          !proof.checks.some((check) => check.startsWith('file:')) ||
+          !proof.checks.some((check) => check.startsWith('shell:')) ||
+          !proof.checks.some((check) => check.startsWith('mcp:')) ||
+          !proof.checks.some((check) => check.startsWith('provider:'))
+        ) {
+          throw new Error('The provider runtime did not prove execution in the managed target.')
+        }
+        txn.runtimeProof = proof
+        txn.state = 'runtime-rebuilding'
+        txn.steps.push('runtime-rebound')
+        this.deps.journal.updateMetadata(journalId, {
+          state: txn.state,
+          executionCwd: restored.checkoutPath,
+          runtimeProof: proof,
+        })
+        this.deps.journal.step(journalId, 'runtime-rebound')
+        this.assertLeaseStability(txn, transactionLeaseId)
+
+        const checkout: SessionCheckoutV2 = {
+          schemaVersion: 2,
+          mode: 'managed-worktree',
+          repositoryRoot: record.repositoryRoot,
+          checkoutPath: record.checkoutPath,
+          branchAtPreparation: record.expectedBranch,
+          baseRef: record.baseRef,
+          managedWorktreeId: record.managedWorktreeId,
+          displayName: record.displayName,
+          expectedBranch: record.expectedBranch,
+          materializationRoot: record.materializationRoot,
+        }
+        await this.hooks.commitSessionBinding!({
+          sessionId: input.sessionId,
+          checkout,
+          executionCwd: record.checkoutPath,
+        })
+        this.deps.registry.upsert({
+          ...record,
+          state: 'ready',
+          snapshot: undefined,
+        })
+        txn.state = 'binding-committed'
+        txn.steps.push('binding-committed')
+        this.deps.journal.step(journalId, 'binding-committed')
+        this.deps.journal.updateMetadata(journalId, {
+          state: txn.state,
+          binding: { checkout, executionCwd: record.checkoutPath, transcriptCwd: session.transcriptCwd },
+        })
+        this.deps.journal.commit(journalId, txn.transactionId)
+        // Post-commit snapshot hygiene: the projected snapshot and the
+        // superseded managed-to-current authority are no longer recoverable
+        // sources, so remove their payloads/refs best-effort (GC handles
+        // stragglers).
+        try {
+          this.deps.snapshots.removePayload(captured.meta)
+          await this.deps.snapshots.casDeleteRef(record.repositoryRoot, captured.meta)
+        } catch {
+          /* best-effort; GC covers stragglers */
+        }
+        if (record.snapshot) {
+          try {
+            await this.deps.snapshots.permanentDelete(record.repositoryRoot, record.snapshot)
+          } catch {
+            /* best-effort; GC covers stragglers */
+          }
+        }
+        if (transactionLeaseId) this.deps.leases.release(transactionLeaseId, facts.destination.checkoutPath)
+        this.transactions.delete(input.sessionId)
+        return {
+          outcome: 'committed',
+          transactionId: txn.transactionId,
+          summary: {
+            sessionId: input.sessionId,
+            direction: txn.direction,
+            checkout,
+            executionCwd: record.checkoutPath,
             transcriptCwd: session.transcriptCwd,
             retainedSnapshotId: captured.meta.snapshotId,
             committedAt: Date.now(),
@@ -1383,6 +1684,9 @@ export class WorktreeHandoffService {
       if (!returnRef) {
         return { ...fail('unsupported-snapshot', 'No recorded return ref authorizes the hand-back.'), ...this.factsFor(sourcePath, record.repositoryRoot, gitCommonDir, destination, expectedBranch, managedWorktreeId, recoveryBehavior) }
       }
+      if (!sourceCtx.currentBranch || sourceCtx.currentBranch !== record.expectedBranch) {
+        return { ...fail('unsupported-snapshot', 'The current checkout is not on the handed branch.'), ...this.factsFor(sourcePath, record.repositoryRoot, gitCommonDir, destination, expectedBranch, managedWorktreeId, recoveryBehavior, returnRef) }
+      }
     }
 
     // Git operation / unmerged index on either side.
@@ -1423,7 +1727,9 @@ export class WorktreeHandoffService {
       blocker: null,
       source: {
         serverId: this.deps.serverId,
-        branch: input.direction === 'current-to-managed' ? (sourceCtx.currentBranch ?? null) : expectedBranch,
+        branch: input.direction === 'current-to-managed' || input.direction === 'hand-back'
+          ? (sourceCtx.currentBranch ?? null)
+          : expectedBranch,
         headSha: sourceCtx.headSha,
         state: sourceCtx.detached
           ? 'detached'
@@ -1544,7 +1850,7 @@ export class WorktreeHandoffService {
     })
     if (ref.exitCode === 0) return true
     const worktrees = await runGit(['worktree', 'list', '--porcelain'], { cwd: repositoryRoot })
-    return worktrees.stdout.includes(`refs/heads/${branch}`)
+    return branchCheckedOutInWorktree(worktrees.stdout, branch)
   }
 
   private lastReturnRefFor(sessionId: string, managedWorktreeId: string): WorktreeHandoffReturnRef | undefined {

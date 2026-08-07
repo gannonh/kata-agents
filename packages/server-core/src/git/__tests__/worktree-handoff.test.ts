@@ -316,34 +316,35 @@ describe('handoff preview — current-to-managed', () => {
   })
 })
 
-describe('handoff preview — managed-to-current', () => {
-  async function managedSession(name = 'demo') {
-    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
-    const { record } = await harness.svc.worktrees.createWorktree({
-      workspaceId: 'ws1',
-      sessionId: 'session-1',
-      repositoryRoot: harness.repo,
-      gitCommonDir,
-      baseRef: 'main',
-      worktreeNameSuffix: name,
-    })
-    if (record.schemaVersion !== 2) throw new Error('expected a V2 named record')
-    const checkout: SessionCheckout = {
-      schemaVersion: 2,
-      mode: 'managed-worktree',
-      repositoryRoot: record.repositoryRoot,
-      checkoutPath: record.checkoutPath,
-      branchAtPreparation: record.expectedBranch,
-      baseRef: record.baseRef,
-      managedWorktreeId: record.managedWorktreeId,
-      displayName: record.displayName,
-      expectedBranch: record.expectedBranch,
-      materializationRoot: record.materializationRoot,
-    }
-    currentSession({ checkoutPath: record.checkoutPath, checkout })
-    harness.svc.pathLeases.lease('session-1', record.checkoutPath)
-    return record
+async function managedSession(name = 'demo') {
+  const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+  const { record } = await harness.svc.worktrees.createWorktree({
+    workspaceId: 'ws1',
+    sessionId: 'session-1',
+    repositoryRoot: harness.repo,
+    gitCommonDir,
+    baseRef: 'main',
+    worktreeNameSuffix: name,
+  })
+  if (record.schemaVersion !== 2) throw new Error('expected a V2 named record')
+  const checkout: SessionCheckout = {
+    schemaVersion: 2,
+    mode: 'managed-worktree',
+    repositoryRoot: record.repositoryRoot,
+    checkoutPath: record.checkoutPath,
+    branchAtPreparation: record.expectedBranch,
+    baseRef: record.baseRef,
+    managedWorktreeId: record.managedWorktreeId,
+    displayName: record.displayName,
+    expectedBranch: record.expectedBranch,
+    materializationRoot: record.materializationRoot,
   }
+  currentSession({ checkoutPath: record.checkoutPath, checkout })
+  harness.svc.pathLeases.lease('session-1', record.checkoutPath)
+  return record
+}
+
+describe('handoff preview — managed-to-current', () => {
 
   test('previews an eligible managed session with return-ref metadata', async () => {
     const record = await managedSession()
@@ -485,6 +486,148 @@ describe('handoff preview — hand-back', () => {
     const p = await preview('hand-back')
 
     expect(p.blocked?.code).toBe('destination-missing')
+  })
+
+  test('blocks hand-back when the current checkout is not on the handed branch', async () => {
+    const record = await managedSession('wrong-branch')
+    writeFile(record.checkoutPath, 'handback.txt', 'roundtrip\n')
+    const p = await preview('managed-to-current', 'wrong-branch')
+    const m2c = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'managed-to-current',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    if (m2c.outcome !== 'committed') throw new Error('m2c fixture handoff did not commit')
+    // Session drifts to main (e.g. an external checkout switch).
+    await git(harness.repo, ['switch', 'main'])
+    currentSession({
+      checkoutPath: harness.repo,
+      checkout: {
+        schemaVersion: 1,
+        mode: 'current',
+        repositoryRoot: harness.repo,
+        checkoutPath: harness.repo,
+        branchAtPreparation: null,
+        baseRef: null,
+        managedWorktreeId: null,
+        expectedBranch: null,
+      },
+    })
+    harness.svc.pathLeases.lease('session-1', harness.repo)
+
+    const hb = await preview('hand-back', 'wrong-branch')
+
+    expect(hb.blocked?.code).toBe('unsupported-snapshot')
+  })
+})
+
+describe('handoff confirm — hand-back', () => {
+  /** Move a session into the current checkout exactly like a committed m2c. */
+  async function handBackFixture(name = 'demo'): Promise<Awaited<ReturnType<typeof managedSession>>> {
+    const record = await managedSession(name)
+    writeFile(record.checkoutPath, 'handback.txt', 'roundtrip\n')
+    const p = await preview('managed-to-current', name)
+    const m2c = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'managed-to-current',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    if (m2c.outcome !== 'committed') throw new Error('m2c fixture handoff did not commit')
+    // Mirror the durable binding a real SessionManager persists: session now
+    // lives in the current checkout and leases it (replacing the old lease).
+    currentSession({
+      checkoutPath: harness.repo,
+      checkout: {
+        schemaVersion: 1,
+        mode: 'current',
+        repositoryRoot: harness.repo,
+        checkoutPath: harness.repo,
+        branchAtPreparation: null,
+        baseRef: null,
+        managedWorktreeId: null,
+        expectedBranch: null,
+      },
+    })
+    harness.svc.pathLeases.lease('session-1', harness.repo)
+    return record
+  }
+
+  test('round-trips managed → current → managed with the branch returned to the recorded ref', async () => {
+    const record = await handBackFixture('roundtrip')
+    const mainHead = (await git(harness.repo, ['rev-parse', 'main'])).trim()
+    writeFile(harness.repo, 'extra.txt', 'from current\n')
+
+    const p = await preview('hand-back', 'roundtrip')
+    expect(p.blocked).toBeUndefined()
+    expect(p.returnRef).toEqual({ branch: 'main', headSha: mainHead })
+    expect(p.recoveryBehavior).toBe('source-authoritative')
+
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'hand-back',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+    // Current returned to the recorded ref; the managed target is re-materialized
+    // on the handed branch with the exact handed state.
+    expect((await git(harness.repo, ['branch', '--show-current'])).trim()).toBe('main')
+    expect((await git(harness.repo, ['rev-parse', 'HEAD'])).trim()).toBe(mainHead)
+    expect(existsSync(record.checkoutPath)).toBe(true)
+    expect((await git(record.checkoutPath, ['branch', '--show-current'])).trim()).toBe(record.expectedBranch)
+    expect(readFileSync(join(record.checkoutPath, 'handback.txt'), 'utf8')).toBe('roundtrip\n')
+    expect(readFileSync(join(record.checkoutPath, 'extra.txt'), 'utf8')).toBe('from current\n')
+    expect(harness.bindings.at(-1)).toMatchObject({
+      sessionId: 'session-1',
+      executionCwd: record.checkoutPath,
+      checkout: { mode: 'managed-worktree', managedWorktreeId: record.managedWorktreeId },
+    })
+    expect(harness.rebinds.at(-1)).toBe(record.checkoutPath)
+    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('ready')
+    expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
+    expect(
+      harness.svc.journal.entries().filter((entry) => entry.op === 'handoff' && entry.status === 'committed').length,
+    ).toBe(2)
+  })
+
+  test('leaves current on the recorded ref with a retained snapshot when hand-back rebinding fails', async () => {
+    const record = await handBackFixture('recover-handback')
+    harness.adapters.set('session-1', {
+      adapterId: 'pi-test',
+      handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
+      rebindExecutionCwd: async () => {
+        throw new Error('runtime refused managed target')
+      },
+      verifyExecutionCwd: async (destinationPath) => ({
+        adapterId: 'pi-test',
+        destinationPath,
+        verifiedAt: Date.now(),
+        checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
+      }),
+    })
+
+    const p = await preview('hand-back', 'recover-handback')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'hand-back',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+
+    expect(result.outcome).toBe('recovery-required')
+    if (result.outcome !== 'recovery-required') return
+    expect(result.retainedSnapshotId).toBeTruthy()
+    expect((await git(harness.repo, ['branch', '--show-current'])).trim()).toBe('main')
+    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('snapshotted')
+    expect(await harness.svc.handoff.status('session-1')).toMatchObject({
+      active: true,
+      state: 'recovery-required',
+      retainedSnapshotId: result.retainedSnapshotId,
+    })
   })
 })
 
