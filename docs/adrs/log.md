@@ -1,5 +1,9 @@
 # ADR Update Log
 
+## 2026-08-07
+
+* **Conflict-safe handoff ADR accepted**: [2026-08-07-conflict-safe-checkout-handoff.md](2026-08-07-conflict-safe-checkout-handoff.md) records the server-owned handoff engine for Worktree V2 Phase 3 ([#42](https://github.com/gannonh/kata-agents/issues/42)): fingerprint-bound previews with typed blockers, journal-first durability with idempotent steps, direction-specific snapshot-backed rollback, managed-to-current release retaining the `snapshotted` record as the hand-back target, immutable transcript vs. execution-CWD separation, the provider capability gate with production adapters disabled until credentialed UAT, the session runtime reconstruction proof gate, and the deterministic adapter for credential-free state-machine coverage.
+
 ## 2026-08-05
 
 * **Worktree lifecycle presentation simplified**: the accepted Phase 2 decision now defaults automatic cleanup off and keeps snapshot/recovery records server-side while the settings inventory exposes only active checkouts with a single Delete action.
