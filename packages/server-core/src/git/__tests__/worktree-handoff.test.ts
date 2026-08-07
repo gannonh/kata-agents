@@ -9,6 +9,7 @@ import type {
   WorktreeHandoffProviderCapability,
 } from '@kata-sh/shared/protocol'
 import type { ExecutionCwdRebindCapability } from '@kata-sh/shared/agent/backend'
+import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/backend'
 import type { WorktreeHandoffBlockerCode } from '@kata-sh/shared/protocol'
 import { initRepo, makeTmpDir, cleanup, git, writeFile } from './test-helpers'
 
@@ -117,19 +118,7 @@ beforeEach(async () => {
   await initRepo(harness.repo)
   harness.svc.lifecycle.markReady()
   harness.capabilities.set('session-1', { adapterId: 'pi-test', executionCwdRebindable: true })
-  harness.adapters.set('session-1', {
-    adapterId: 'pi-test',
-    handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
-    rebindExecutionCwd: async (destinationPath) => {
-      harness.rebinds.push(destinationPath)
-    },
-    verifyExecutionCwd: async (destinationPath) => ({
-      adapterId: 'pi-test',
-      destinationPath,
-      verifiedAt: Date.now(),
-      checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
-    }),
-  })
+  harness.adapters.set('session-1', createDeterministicHandoffAdapter({ adapterId: 'pi-test', rebindLog: harness.rebinds }))
 })
 
 afterEach(() => {
@@ -436,19 +425,7 @@ describe('handoff preview — managed-to-current', () => {
 
   test('retains a snapshot-backed recovery state when runtime rebinding fails after source release', async () => {
     const record = await managedSession('runtime-failure')
-    harness.adapters.set('session-1', {
-      adapterId: 'pi-test',
-      handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
-      rebindExecutionCwd: async () => {
-        throw new Error('runtime refused current checkout')
-      },
-      verifyExecutionCwd: async (destinationPath) => ({
-        adapterId: 'pi-test',
-        destinationPath,
-        verifiedAt: Date.now(),
-        checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
-      }),
-    })
+    harness.adapters.set('session-1', createDeterministicHandoffAdapter({ adapterId: 'pi-test', failRebind: true }))
 
     const p = await preview('managed-to-current', 'runtime-failure')
     const result = await harness.svc.handoff.confirm({
@@ -596,19 +573,7 @@ describe('handoff confirm — hand-back', () => {
 
   test('leaves current on the recorded ref with a retained snapshot when hand-back rebinding fails', async () => {
     const record = await handBackFixture('recover-handback')
-    harness.adapters.set('session-1', {
-      adapterId: 'pi-test',
-      handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
-      rebindExecutionCwd: async () => {
-        throw new Error('runtime refused managed target')
-      },
-      verifyExecutionCwd: async (destinationPath) => ({
-        adapterId: 'pi-test',
-        destinationPath,
-        verifiedAt: Date.now(),
-        checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
-      }),
-    })
+    harness.adapters.set('session-1', createDeterministicHandoffAdapter({ adapterId: 'pi-test', failRebind: true }))
 
     const p = await preview('hand-back', 'recover-handback')
     const result = await harness.svc.handoff.confirm({
@@ -756,19 +721,7 @@ describe('handoff confirm — current-to-managed', () => {
 
 describe('handoff recover — snapshot-backed rollback', () => {
   async function failingAdapter(): Promise<ExecutionCwdRebindCapability> {
-    return {
-      adapterId: 'pi-test',
-      handoffCapability: () => ({ adapterId: 'pi-test', executionCwdRebindable: true }),
-      rebindExecutionCwd: async () => {
-        throw new Error('runtime refused destination')
-      },
-      verifyExecutionCwd: async (destinationPath) => ({
-        adapterId: 'pi-test',
-        destinationPath,
-        verifiedAt: Date.now(),
-        checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
-      }),
-    }
+    return createDeterministicHandoffAdapter({ adapterId: 'pi-test', failRebind: true })
   }
 
   test('rolls back an interrupted c2m: removes the target and restores the cleaned source', async () => {

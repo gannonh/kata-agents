@@ -843,6 +843,8 @@ interface ManagedSession {
   sdkCwd?: string
   // Git checkout metadata (managed worktree / current checkout), when bound.
   checkout?: import('@kata-sh/shared/protocol').SessionCheckout
+  // Handoff runtime reconstruction state ('unverified' arms the Send proof gate).
+  handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required'
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -2156,6 +2158,11 @@ export class SessionManager implements ISessionManager {
 
       const storedSession: StoredSession = {
         ...pickSessionFields(managed),
+        // A `verified` runtime proof is process-local: a recreated runtime
+        // after restart must prove the destination again before Send unlocks.
+        // Normalize so the durable state never skips that proof.
+        handoffRuntimeState:
+          managed.handoffRuntimeState === 'verified' ? 'unverified' : managed.handoffRuntimeState,
         workspaceRootPath: managed.workspace.rootPath,
         createdAt: managed.createdAt ?? Date.now(),
         lastUsedAt: Date.now(),
@@ -5339,6 +5346,10 @@ export class SessionManager implements ISessionManager {
     managed.checkout = input.checkout
     managed.workingDirectory = input.executionCwd
     managed.agent?.updateWorkingDirectory(input.executionCwd)
+    // Arm the first-Send runtime proof: the recreated runtime must prove every
+    // file/shell/MCP/provider tool resolves the destination before Send unlocks.
+    // Persisted as `unverified` so a recreated runtime after restart re-proves.
+    managed.handoffRuntimeState = 'unverified'
     invalidateContextFileCache(input.executionCwd)
     invalidateSkillsCache()
 
@@ -5353,6 +5364,56 @@ export class SessionManager implements ISessionManager {
       { type: 'working_directory_changed', sessionId: input.sessionId, workingDirectory: input.executionCwd },
       managed.workspace.id,
     )
+  }
+
+  /**
+   * Prove the destination checkout through the live adapter before the first
+   * Send after a handoff commit (or a restart). The proof must cover file,
+   * shell, MCP, and provider tool resolution for the exact destination path.
+   * Success marks the runtime verified for this process only — a recreated
+   * runtime must prove again, so `verified` is never persisted. Failure
+   * persists recovery-required and blocks Send; a later Send re-attempts the
+   * proof, so a fixed runtime resumes without re-running the handoff.
+   */
+  private async verifyHandoffRuntimeBeforeSend(
+    sessionId: string,
+    managed: ManagedSession,
+    agent: AgentInstance,
+  ): Promise<void> {
+    // Verified runtimes need no re-proof within this process. `unverified`
+    // (armed at commit and after every restart) and `recovery-required` both
+    // (re-)prove here: success clears recovery, failure keeps Send blocked.
+    if (managed.handoffRuntimeState === 'verified') return
+    const adapter = agent.executionCwdRebind
+    const destination = managed.workingDirectory
+    if (!adapter || !destination) {
+      managed.handoffRuntimeState = 'recovery-required'
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      throw new Error(
+        'Handoff runtime reconstruction is unavailable: the provider adapter cannot prove the destination checkout.',
+      )
+    }
+    try {
+      const proof = await adapter.verifyExecutionCwd(destination)
+      const categories = ['file:', 'shell:', 'mcp:', 'provider:']
+      const complete =
+        proof.adapterId === adapter.adapterId &&
+        proof.checks.length > 0 &&
+        resolve(proof.destinationPath) === resolve(destination) &&
+        categories.every((category) => proof.checks.some((check) => check.startsWith(category)))
+      if (!complete) throw new Error('The adapter proof did not cover every tool category for the destination.')
+      // Verified in this process only; a recreated runtime must prove again.
+      managed.handoffRuntimeState = 'verified'
+      sessionLog.info(`Session ${sessionId}: handoff runtime verified in ${destination}`)
+    } catch (error) {
+      managed.handoffRuntimeState = 'recovery-required'
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      throw new Error(
+        `Handoff runtime verification failed; Send stays blocked: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 
   /** Lazily-resolved Git domain services (managed worktrees, repository ops). */
@@ -7100,6 +7161,12 @@ export class SessionManager implements ISessionManager {
     // ensureFreshToken mirrors the disk write to source.config in-memory).
     const agent = await this.getOrCreateAgent(managed)
     sendSpan.mark('agent.ready')
+
+    // Handoff runtime reconstruction gate: the first Send after a handoff
+    // commit (and after every restart) requires the live adapter to prove the
+    // destination checkout before any tool may run. Failure blocks Send with
+    // recovery-required until the runtime is fixed or the binding resolved.
+    await this.verifyHandoffRuntimeBeforeSend(sessionId, managed, agent)
 
     // Always set all sources for context (even if none are enabled), including built-ins
     const allSources = loadAllSources(workspaceRootPath)

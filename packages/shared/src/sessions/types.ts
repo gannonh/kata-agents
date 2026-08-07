@@ -56,6 +56,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'triggeredBy',
   // Git checkout metadata (managed worktrees / current checkout)
   'checkout',
+  // Handoff runtime reconstruction state (unverified arms the Send proof gate)
+  'handoffRuntimeState',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -206,6 +208,12 @@ export interface SessionConfig {
    * Absent on legacy sessions, which continue with working-directory behavior.
    */
   checkout?: SessionCheckout;
+  /**
+   * Handoff runtime reconstruction state. `unverified` arms the first-Send
+   * proof gate; `verified` means the live adapter proved the destination in
+   * this process; `recovery-required` blocks Send until the runtime is fixed.
+   */
+  handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required';
 }
 
 /**
