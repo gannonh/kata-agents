@@ -92,6 +92,14 @@ export const WORKTREE_PREVIEW_STALE_CODE = 'WORKTREE_PREVIEW_STALE' as const
 export const WORKTREE_STATE_UNMANAGEABLE_CODE = 'WORKTREE_STATE_UNMANAGEABLE' as const
 /** Wire error returned when a lifecycle action requires zero owners. */
 export const WORKTREE_OWNERS_PRESENT_CODE = 'WORKTREE_OWNERS_PRESENT' as const
+/** Wire error returned when a handoff RPC fails during execution. */
+export const WORKTREE_HANDOFF_ERROR_CODE = 'WORKTREE_HANDOFF_FAILED' as const
+/** Wire error returned when a handoff RPC is rejected by a typed blocker. */
+export const WORKTREE_HANDOFF_BLOCKED_CODE = 'WORKTREE_HANDOFF_BLOCKED' as const
+/** Wire error returned when a handoff preview fingerprint is stale. */
+export const WORKTREE_HANDOFF_PREVIEW_STALE_CODE = 'WORKTREE_HANDOFF_PREVIEW_STALE' as const
+/** Wire error returned when a pending/recovery handoff fences an action. */
+export const WORKTREE_HANDOFF_PENDING_CODE = 'WORKTREE_HANDOFF_PENDING' as const
 
 export type ErrorCode =
   | 'HANDLER_ERROR'
@@ -116,6 +124,10 @@ export type ErrorCode =
   | typeof WORKTREE_PREVIEW_STALE_CODE
   | typeof WORKTREE_STATE_UNMANAGEABLE_CODE
   | typeof WORKTREE_OWNERS_PRESENT_CODE
+  | typeof WORKTREE_HANDOFF_ERROR_CODE
+  | typeof WORKTREE_HANDOFF_BLOCKED_CODE
+  | typeof WORKTREE_HANDOFF_PREVIEW_STALE_CODE
+  | typeof WORKTREE_HANDOFF_PENDING_CODE
   | 'CLIENT_DISCONNECTED'
   | 'CLIENT_REQUEST_TIMEOUT'
   | 'BROWSER_NO_CAPABLE_CLIENT'
@@ -146,6 +158,10 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   WORKTREE_PREVIEW_STALE_CODE,
   WORKTREE_STATE_UNMANAGEABLE_CODE,
   WORKTREE_OWNERS_PRESENT_CODE,
+  WORKTREE_HANDOFF_ERROR_CODE,
+  WORKTREE_HANDOFF_BLOCKED_CODE,
+  WORKTREE_HANDOFF_PREVIEW_STALE_CODE,
+  WORKTREE_HANDOFF_PENDING_CODE,
   'CLIENT_DISCONNECTED',
   'CLIENT_REQUEST_TIMEOUT',
   'BROWSER_NO_CAPABLE_CLIENT',

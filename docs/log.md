@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-07
+
+* **Worktree V2 Phase 3 implemented**: [#42](https://github.com/gannonh/kata-agents/issues/42) adds conflict-safe checkout handoff — server-owned previews/confirmation/recovery for current → managed, managed → current, and hand-back; fingerprint-bound previews with typed blockers; durable journaling of idempotent steps; snapshot-backed rollback; path/transaction fencing; provider execution-CWD rebinding with proof and immutable transcript identity; session runtime reconstruction before Send; and the Electron handoff preview/confirm/recovery UI. ADR: [adrs/2026-08-07-conflict-safe-checkout-handoff.md](adrs/2026-08-07-conflict-safe-checkout-handoff.md). Updated the roadmap, online Git/worktree documentation, ADR index/log, and this log.
+
 ## 2026-08-05
 
 * **Worktree V2 Phase 2 management simplified**: [#41](https://github.com/gannonh/kata-agents/issues/41) now defaults automatic deletion off, uses the requested Worktree root and cleanup copy, and presents a compact active-worktree list with one Delete action while retaining server-side snapshot safety.

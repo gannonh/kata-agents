@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 import { readAgentProviderConfig } from "../harness/env.ts";
@@ -76,21 +76,87 @@ export async function sendAgentPrompt(page: Page, text: string): Promise<void> {
 }
 
 /**
- * Assert the agent replied with the deterministic token.
+ * Wait for the agent's reply and assert it matches the deterministic token.
  *
- * The prompt itself contains the token (it instructs the model to echo it), so
- * the user's own message bubble matches once immediately. A genuine assistant
- * reply produces a SECOND occurrence. Polling for >= 2 matching elements avoids
- * a false pass on the echoed prompt and does not depend on assistant-bubble DOM
- * internals (which would need headed validation, adoption guide learning #7).
+ * The prompt asks the LLM to reply with exactly the token, so the assertion is
+ * an exact match on the assistant response content. A global text count is
+ * not enough: the user's own message bubble and session-list previews render
+ * the prompt (which contains the token), so two global matches can occur
+ * without any model reply — a failed send would pass.
+ *
+ * `match: 'exact'` (default) requires the response content to equal the token
+ * exactly; anything else (extra text, wrapping, an error echo) fails.
+ * `match: 'contains'` only requires the token inside an assistant response,
+ * for flows that just need the turn to complete. A chat error bubble fails
+ * fast with the error text instead of waiting out the timeout.
  */
 export async function expectAssistantReply(
   page: Page,
   turn: DeterministicAgentTurn,
   timeoutMs = E2E_TIMEOUTS.agentReplyMs,
+  opts: { match?: "exact" | "contains" } = {},
 ): Promise<void> {
-  const matches = page.getByText(turn.expected, { exact: false });
-  await expect
-    .poll(async () => await matches.count(), { timeout: timeoutMs })
-    .toBeGreaterThanOrEqual(2);
+  const match = opts.match ?? "exact";
+  const response = page
+    .getByTestId("assistant-turn")
+    .last()
+    .locator('[data-search-root="response"]')
+    .first();
+  const chatError = page.getByTestId("chat-error-message");
+
+  const deadline = Date.now() + timeoutMs;
+  let idleSince: number | null = null;
+  let sawProcessing = false;
+  let lastText = "";
+  while (Date.now() < deadline) {
+    // count() never auto-waits; textContent() would stall each poll when the
+    // element does not exist yet.
+    if ((await chatError.count()) > 0) {
+      const errorText = (await chatError.first().textContent()) ?? "";
+      throw new Error(`Agent send failed: ${errorText.trim().slice(0, 300)}`);
+    }
+
+    let text = "";
+    if ((await response.count()) > 0) {
+      text = ((await response.textContent().catch(() => null)) ?? "").trim();
+    }
+    if (text === turn.expected) return;
+    if (match === "contains" && text.includes(turn.expected)) return;
+    if (text !== "") lastText = text;
+
+    const idle = await readTurnIdle(page);
+    // Idle observed before the session ever flipped to processing is not a
+    // finished turn — the send may still be starting up. Only arm the
+    // idle timer after at least one active-processing observation.
+    if (idle) {
+      if (sawProcessing) {
+        if (idleSince === null) idleSince = Date.now();
+        // The turn is complete; give the DOM a moment to flush, then judge.
+        if (Date.now() - idleSince > 2_000) {
+          const got = text || lastText || "(empty reply)";
+          throw new Error(
+            `Assistant reply did not match. Expected ${match === "exact" ? "exactly" : "to contain"} "${turn.expected}", got "${got.slice(0, 300)}"`,
+          );
+        }
+      }
+    } else {
+      sawProcessing = true;
+      idleSince = null;
+    }
+    await page.waitForTimeout(300);
+  }
+  throw new Error(
+    `Timed out after ${timeoutMs}ms waiting for an assistant reply matching "${turn.expected}"${lastText ? ` (last text: "${lastText.slice(0, 200)}")` : ""}`,
+  );
+}
+
+/** True when no session is processing a turn (the reply has finished streaming). */
+async function readTurnIdle(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const api = (window as unknown as {
+      electronAPI: { getSessions(): Promise<Array<{ isProcessing?: boolean }>> };
+    }).electronAPI;
+    const sessions = await api.getSessions();
+    return sessions.every((session) => !session.isProcessing);
+  });
 }

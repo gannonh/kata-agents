@@ -142,6 +142,69 @@ removed outside the app, or its branch is switched externally, the composer badg
 shows a visible **recovery** or **blocked** state and Git actions are refused
 until you restore the expected branch or delete the session.
 
+## Handoff between checkouts
+
+A single-owner, idle session can move between your current checkout and a
+managed worktree without losing its work or breaking the conversation. Handoff
+appears only when the session's provider can safely rebind its execution
+working directory while keeping the transcript and provider identity untouched;
+otherwise the session keeps its current checkout behavior.
+
+Three directions are available from the handoff menu in the Changes panel:
+
+<Steps>
+  <Step title="Hand off to new worktree">
+    Moves the session from your current checkout into a new managed worktree on
+    a `kata-agent/<name>` branch at the current HEAD. Your current checkout
+    stays on its original branch with its included and other ignored files
+    intact.
+  </Step>
+  <Step title="Hand off to current checkout">
+    Moves the session from a managed worktree back into your current checkout.
+    The managed worktree is released first — Git cannot check out one branch
+    twice — then the branch is checked out in current and the state is
+    restored and verified from a snapshot.
+  </Step>
+  <Step title="Hand back to worktree">
+    Returns the session to the managed worktree it came from. Your current
+    checkout returns to the branch it was on before the handoff, and the
+    managed worktree is re-created and restored from the retained snapshot.
+  </Step>
+</Steps>
+
+Before confirming, a preview shows the source branch and HEAD, the destination
+server/root/branch, who currently leases both paths, which `.worktreeinclude`
+files would be copied (and any that already differ in the destination), the
+ignored-file policy (only include-listed files transfer, by copy), and the exact
+source cleanup. If anything is wrong — a dirty destination, another session
+using a path, an active turn, a shared worktree, an unmerged index, or a branch
+already checked out elsewhere — the preview reports a typed blocker and nothing
+changes.
+
+<Note>
+  Handoff requires the destination to be clean and exclusively yours, and
+  snapshot capture must stay within size limits. `.worktreeinclude` files
+  transfer by copy and remain in the source; ignored files outside
+  `.worktreeinclude` stay where they are. Differs-in-the-destination include
+  files block rather than overwrite.
+</Note>
+
+If a handoff is interrupted — a crash, a failed provider rebind, or a restart
+mid-transaction — the session stays fenced and the Changes panel shows a
+recovery state with the retained snapshot as the authority. **Recover** rolls
+back exactly the steps the server journaled: it removes a half-created target,
+restores a cleaned source from the snapshot, or returns your current checkout
+and the managed worktree to their pre-handoff branches. A completed rollback
+reports `handoff-rolled-back` and you can preview again.
+
+<Warning>
+  Handoff never mixes work between two checkouts at once, never overwrites
+  differing destination files, and never switches branches while the target
+  branch is checked out elsewhere. If a recovery cannot prove the exact
+  expected state, it stays in an explicit recovery-required state instead of
+  guessing.
+</Warning>
+
 ## Archiving and deleting sessions
 
 - **Archiving** a session never removes its worktree, but with Worktree V2 the

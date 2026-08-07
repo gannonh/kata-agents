@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   RPC_CHANNELS,
   WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_HANDOFF_ERROR_CODE,
   WORKTREE_LIFECYCLE_ERROR_CODE,
   WORKTREE_OWNERS_PRESENT_CODE,
   WORKTREE_PREVIEW_STALE_CODE,
@@ -18,7 +19,7 @@ import type {
   SessionCheckoutV1,
 } from '@kata-sh/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '@kata-sh/server-core/transport'
-import { WorktreeCreationError, WorktreeSettingsError } from '../../git'
+import { WorktreeCreationError, WorktreeHandoffError, WorktreeSettingsError } from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 import { registerGitHandlers, checkManagedCheckoutIdentity } from './git'
@@ -43,6 +44,8 @@ interface MockOverrides {
   pullRequest?: PullRequestSummary | null
   registryRecord?: ManagedWorktreeRecord | null
   createdPr?: PullRequestSummary
+  /** Make every handoff mock method throw (typed or plain) to exercise the error mapping. */
+  handoffError?: 'typed' | 'plain'
 }
 
 interface MockGit {
@@ -54,6 +57,12 @@ interface MockGit {
 function makeGitServices(overrides?: MockOverrides): MockGit {
   const calls: string[] = []
   const createPrArgs: Array<{ baseRef: string }> = []
+  const maybeThrow = () => {
+    if (overrides?.handoffError === 'typed') {
+      throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'Unknown handoff transaction.')
+    }
+    if (overrides?.handoffError === 'plain') throw new Error('boom')
+  }
   const defaultContext: RepositoryContext = {
     isGitRepository: false,
     repositoryRoot: null,
@@ -143,7 +152,13 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
         )
       },
     },
-    worktrees: {},
+    worktrees: {
+      reconcile: async () => ({ repaired: 0, removed: 0 }),
+    },
+    pathLeases: {
+      lease: () => undefined,
+      pruneStale: () => 0,
+    },
     lifecycle: {
       assertReady: () => undefined,
       markReady: () => undefined,
@@ -175,6 +190,37 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       permanentDelete: async () => ({ deleted: true }),
       setArchived: async () => ({ archived: true, state: 'ready', cleanupEnqueued: false }),
       enqueueCleanup: async () => ({ at: 1, outcome: 'skipped', policyVersion: 0 }),
+      reconcileJournal: async () => ({ resumed: 0, recovered: 0 }),
+    },
+    journal: {
+      compact: () => undefined,
+    },
+    handoff: {
+      preview: async (input: { sessionId: string; direction: string; worktreeNameSuffix?: string }) => {
+        calls.push(`handoff.preview:${input.sessionId}:${input.direction}`)
+        maybeThrow()
+        return { transactionId: 'txn-1', previewFingerprint: 'fp-handoff', direction: input.direction }
+      },
+      confirm: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.confirm:${input.sessionId}:${input.transactionId}`)
+        maybeThrow()
+        return { outcome: 'committed', transactionId: input.transactionId }
+      },
+      status: async (sessionId: string) => {
+        calls.push(`handoff.status:${sessionId}`)
+        maybeThrow()
+        return { active: false }
+      },
+      recover: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.recover:${input.sessionId}:${input.transactionId}`)
+        maybeThrow()
+        return { outcome: 'blocked', transactionId: input.transactionId, code: 'identity-drift', reason: 'stale' }
+      },
+      cancel: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.cancel:${input.sessionId}:${input.transactionId}`)
+        maybeThrow()
+        return { active: false }
+      },
     },
     worktreeSettings: {
       getCapability: (serverId = 'mock-server') => ({ serverId, worktreeV2: true }),
@@ -439,6 +485,108 @@ describe('registerGitHandlers', () => {
         { materializationRoot: '/custom-worktrees' },
       ),
     ).resolves.toMatchObject({ materializationRoot: '/custom-worktrees', version: 1 })
+  })
+
+  it('routes handoff preview, confirm, status, and recovery through shared contracts', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+    const { git, calls } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        worktreeNameSuffix: 'demo',
+      }),
+    ).resolves.toMatchObject({ transactionId: 'txn-1', previewFingerprint: 'fp-handoff' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CONFIRM)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        transactionId: 'txn-1',
+        previewFingerprint: 'fp-handoff',
+      }),
+    ).resolves.toMatchObject({ outcome: 'committed', transactionId: 'txn-1' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_STATUS)!(ctx, { sessionId: 's1' }),
+    ).resolves.toEqual({ active: false })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_RECOVER)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).resolves.toMatchObject({ outcome: 'blocked', code: 'identity-drift' })
+    expect(calls.filter((call) => call.startsWith('handoff.'))).toEqual([
+      'handoff.preview:s1:current-to-managed',
+      'handoff.confirm:s1:txn-1',
+      'handoff.status:s1',
+      'handoff.recover:s1:txn-1',
+    ])
+  })
+
+  it('rejects every handoff RPC when the V2 flag is disabled', async () => {
+    process.env[FLAG] = '1'
+    delete process.env[V2_FLAG]
+    const { git } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CONFIRM)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        transactionId: 'txn-1',
+        previewFingerprint: 'fp',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_STATUS)!(ctx, { sessionId: 's1' }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_RECOVER)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CANCEL)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).rejects.toMatchObject({ code: WORKTREE_V2_CAPABILITY_ERROR_CODE })
+  })
+
+  it('maps WorktreeHandoffError to the typed wire code and rethrows unrelated errors unchanged', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+
+    const handoffInputs = {
+      [RPC_CHANNELS.git.HANDOFF_PREVIEW]: { sessionId: 's1', direction: 'current-to-managed' },
+      [RPC_CHANNELS.git.HANDOFF_CONFIRM]: { sessionId: 's1', direction: 'current-to-managed', transactionId: 'txn-1', previewFingerprint: 'fp' },
+      [RPC_CHANNELS.git.HANDOFF_STATUS]: { sessionId: 's1' },
+      [RPC_CHANNELS.git.HANDOFF_RECOVER]: { sessionId: 's1', transactionId: 'txn-1' },
+      [RPC_CHANNELS.git.HANDOFF_CANCEL]: { sessionId: 's1', transactionId: 'txn-1' },
+    } as const
+
+    const typed = makeHarness(makeGitServices({ handoffError: 'typed' }).git)
+    for (const [channel, input] of Object.entries(handoffInputs)) {
+      await expect(typed.handlers.get(channel)!(typed.ctx, input as never)).rejects.toMatchObject({
+        code: WORKTREE_HANDOFF_ERROR_CODE,
+      })
+    }
+
+    const plain = makeHarness(makeGitServices({ handoffError: 'plain' }).git)
+    for (const [channel, input] of Object.entries(handoffInputs)) {
+      await expect(plain.handlers.get(channel)!(plain.ctx, input as never)).rejects.toMatchObject({ message: 'boom' })
+    }
   })
 
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {

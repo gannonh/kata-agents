@@ -44,7 +44,21 @@ export type {
   LlmAuthType,
   LlmProviderType,
   PostInitResult,
+  ExecutionCwdProof,
+  ExecutionCwdRebindCapability,
 } from './types.ts';
+
+// Handoff capability gate
+export {
+  resolveHandoffCapability,
+  type HandoffCapabilityResolution,
+} from './handoff-capability.ts';
+
+// Credential-free deterministic handoff adapter (state-machine coverage)
+export {
+  createDeterministicHandoffAdapter,
+  type DeterministicHandoffAdapterOptions,
+} from './deterministic-handoff-adapter.ts';
 
 // Enums need to be exported as values, not just types
 export { AbortReason } from './types.ts';

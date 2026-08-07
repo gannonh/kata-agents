@@ -184,12 +184,60 @@ export class WorktreeSnapshotService {
     return this.snapshotsRoot
   }
 
+  /** Max payload bytes this service captures (buffer sizing for diff re-verification). */
+  getMaxBytes(): number {
+    return this.limits.maxBytes
+  }
+
   snapshotIdFor(meta: Pick<ManagedWorktreeSnapshotMeta, 'snapshotId'>): string {
     return meta.snapshotId
   }
 
   hiddenRefFor(snapshotId: string): string {
     return `${WORKTREE_SNAPSHOT_REF_PREFIX}${snapshotId}`
+  }
+
+  /**
+   * Reconstruct verified snapshot metadata from an opaque snapshot ID alone
+   * (journal-referenced authority, e.g. a handoff retained snapshot whose
+   * registry record was already released). Returns null when the payload is
+   * absent or the ID is not an opaque snapshot identity.
+   */
+  loadSnapshotMeta(snapshotId: string): ManagedWorktreeSnapshotMeta | null {
+    if (!/^[0-9a-f]{16}$/.test(snapshotId)) return null
+    const payloadPath = join(this.snapshotsRoot, snapshotId)
+    let manifest: WorktreeSnapshotManifest
+    try {
+      manifest = JSON.parse(readFileSync(join(payloadPath, 'manifest.json'), 'utf8')) as WorktreeSnapshotManifest
+    } catch {
+      return null
+    }
+    if (
+      manifest.snapshotId !== snapshotId ||
+      typeof manifest.branch !== 'string' ||
+      !isHexOid(manifest.headOid) ||
+      !Array.isArray(manifest.files) ||
+      !Number.isFinite(manifest.capturedAt) ||
+      !Number.isInteger(manifest.fileCount) ||
+      manifest.fileCount !== manifest.files.length + 2
+    ) {
+      return null
+    }
+    return {
+      snapshotId,
+      schemaVersion: WORKTREE_SNAPSHOT_SCHEMA_VERSION,
+      hiddenRef: this.hiddenRefFor(snapshotId),
+      headOid: manifest.headOid,
+      branch: manifest.branch,
+      manifestHash: this.manifestHash(manifest),
+      payloadPath,
+      createdAt: manifest.capturedAt,
+      fileCount: manifest.fileCount,
+      totalBytes: manifest.totalBytes,
+      fingerprint: '',
+      policyVersion: 0,
+      previewFingerprint: '',
+    }
   }
 
   /** SHA-256 of the manifest bytes (the verification anchor in record.snapshot). */
@@ -653,6 +701,80 @@ export class WorktreeSnapshotService {
   removeStagingDir(name: string): void {
     if (!name.startsWith('.tmp-')) return
     this.removeDir(join(this.snapshotsRoot, name))
+  }
+
+  /**
+   * Apply a verified snapshot projection to an existing clean checkout.
+   *
+   * Handoff creates and registers the destination through
+   * ManagedWorktreeService first, so the normal `restore()` path (which owns
+   * `git worktree add`) cannot be used. This method deliberately reuses the
+   * same payload verification, binary patch application, mode preservation,
+   * and exact post-apply checks as restore. Existing files are accepted only
+   * when their bytes/mode match the captured entry; a differing file blocks
+   * rather than overwriting it.
+   */
+  async applySnapshotToCheckout(input: { meta: ManagedWorktreeSnapshotMeta; checkoutPath: string }): Promise<void> {
+    const { meta, checkoutPath } = input
+    const manifest = this.verifyPayload(meta)
+    await this.applyPatch(checkoutPath, join(meta.payloadPath, 'staged.patch'), ['--index'])
+    await this.applyPatch(checkoutPath, join(meta.payloadPath, 'unstaged.patch'), [])
+
+    for (const entry of manifest.files) {
+      if (!entry.path || entry.path.includes('\0') || entry.path.startsWith('/') || /(^|\/)\.\.(\/|$)/.test(entry.path)) {
+        throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', `Snapshot path escapes the checkout: ${entry.path}`)
+      }
+      const dest = join(checkoutPath, entry.path)
+      this.assertNoSymlinkParents(checkoutPath, dest)
+      const existing = lstatSafe(dest)
+      if (existing !== null) {
+        if (entry.mode === '120000') {
+          if (typeof entry.linkText !== 'string') {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Symlink entry has no link text: ${entry.path}`)
+          }
+          if (existing !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Destination file differs: ${entry.path}`)
+          }
+        } else {
+          if (existing !== 'file' || (statSync(dest).mode & 0o777) !== modePermissions(entry.mode) || hashFile(dest) !== entry.sha256) {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Destination file differs: ${entry.path}`)
+          }
+        }
+        continue
+      }
+      this.restoreFileEntry(checkoutPath, meta, entry)
+    }
+
+    const restoredStaged = (
+      await runGitBuffer(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes: this.limits.maxBytes + 16 * 1024,
+      })
+    ).stdout
+    if (sha256(restoredStaged) !== manifest.stagedPatch.sha256) {
+      throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', 'Applied index differs from the captured staged state.')
+    }
+    const restoredUnstaged = (
+      await runGitBuffer(['diff', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes: this.limits.maxBytes + 16 * 1024,
+      })
+    ).stdout
+    if (sha256(restoredUnstaged) !== manifest.unstagedPatch.sha256) {
+      throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', 'Applied worktree differs from the captured unstaged state.')
+    }
+    for (const entry of manifest.files) {
+      const dest = join(checkoutPath, entry.path)
+      const stat = lstatSafe(dest)
+      if (stat === null) throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied file is missing: ${entry.path}`)
+      if (entry.mode === '120000') {
+        if (stat !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
+          throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied symlink differs: ${entry.path}`)
+        }
+      } else if (stat !== 'file' || (statSync(dest).mode & 0o777) !== modePermissions(entry.mode) || hashFile(dest) !== entry.sha256) {
+        throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied file content or mode differs: ${entry.path}`)
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

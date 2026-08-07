@@ -15,6 +15,8 @@ import {
   WORKTREE_BRANCH_OWNERSHIP_UNKNOWN_CODE,
   WORKTREE_DESTINATION_UNSAFE_CODE,
   WORKTREE_LIFECYCLE_ERROR_CODE,
+  WORKTREE_HANDOFF_ERROR_CODE,
+  WORKTREE_HANDOFF_PENDING_CODE,
   WORKTREE_NAME_INVALID_CODE,
   WORKTREE_OWNERS_PRESENT_CODE,
   WORKTREE_PREVIEW_STALE_CODE,
@@ -38,6 +40,11 @@ import type {
   WorktreeDeleteInput,
   WorktreePermanentDeleteInput,
   WorktreeRetryInput,
+  WorktreeHandoffConfirmInput,
+  WorktreeHandoffPreviewInput,
+  WorktreeHandoffRecoverInput,
+  WorktreeHandoffCancelInput,
+  WorktreeHandoffStatusInput,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import { i18n } from '@kata-sh/shared/i18n'
@@ -49,6 +56,7 @@ import {
   WorktreeCreationError,
   WorktreeLifecycleError,
   WorktreeSettingsError,
+  WorktreeHandoffError,
 } from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
@@ -81,6 +89,11 @@ export const GIT_HANDLED_CHANNELS = [
   RPC_CHANNELS.git.GITHUB_STATUS,
   RPC_CHANNELS.git.FIND_PULL_REQUEST,
   RPC_CHANNELS.git.CREATE_PULL_REQUEST,
+  RPC_CHANNELS.git.HANDOFF_PREVIEW,
+  RPC_CHANNELS.git.HANDOFF_CONFIRM,
+  RPC_CHANNELS.git.HANDOFF_STATUS,
+  RPC_CHANNELS.git.HANDOFF_RECOVER,
+  RPC_CHANNELS.git.HANDOFF_CANCEL,
 ] as const
 
 function assertFeatureEnabled(): void {
@@ -131,6 +144,13 @@ function throwTypedWorktreeCreationError(error: unknown): never {
   throw error
 }
 
+function throwTypedWorktreeHandoffError(error: unknown): never {
+  if (error instanceof WorktreeHandoffError) {
+    throw new CodedError(WORKTREE_HANDOFF_ERROR_CODE, error.message)
+  }
+  throw error
+}
+
 /**
  * Fence Git work on a session whose managed-worktree record is not `ready`:
  * Send, agent creation, Git actions, and further lifecycle actions stay fenced
@@ -139,6 +159,9 @@ function throwTypedWorktreeCreationError(error: unknown): never {
  */
 function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void {
   if (!isWorktreeV2Enabled()) return
+  if (git.handoff?.isSessionFenced?.(sessionId)) {
+    throw new CodedError(WORKTREE_HANDOFF_PENDING_CODE, i18n.t('git.handoff.pendingFence'))
+  }
   git.lifecycle.assertReady()
   const { state } = git.lifecycle.recordStateForSession(sessionId)
   if (state !== 'ready') {
@@ -315,10 +338,26 @@ export function registerGitHandlers(
       // Every live session leases its checkout path — including sessions not
       // yet reflected in registry owners — so lifecycle decisions see the full
       // fence set from the first instant.
+      const repositoryRootCache = new Map<string, string>()
       for (const session of sessions) {
-        const checkout = session.checkout
-        if (checkout?.mode === 'managed-worktree' && checkout.checkoutPath) {
-          git.pathLeases.lease(session.id, checkout.checkoutPath)
+        const checkoutPath = session.checkout?.checkoutPath ?? session.workingDirectory
+        if (!checkoutPath) continue
+        // Every live session fences its canonical checkout, including the
+        // repository's registered current checkout. Resolve legacy nested
+        // working directories to the repository root before leasing. A single
+        // unreadable directory must not fence the whole subsystem; lease the
+        // raw path as the fallback so reconciliation still sees the fence.
+        try {
+          let root = repositoryRootCache.get(checkoutPath)
+          if (root === undefined) {
+            const context = await git.repository.getContext(checkoutPath)
+            root = context.repositoryRoot ?? checkoutPath
+            repositoryRootCache.set(checkoutPath, root)
+          }
+          git.pathLeases.lease(session.id, root)
+        } catch (error) {
+          console.warn(`[worktree] could not resolve checkout for session ${session.id}; leasing the raw path.`, error)
+          git.pathLeases.lease(session.id, checkoutPath)
         }
       }
       await git.worktrees.reconcile({ knownSessionIds, sessionCheckouts })
@@ -455,6 +494,68 @@ export function registerGitHandlers(
     }
   })
 
+  // --- Conflict-safe checkout handoff (Phase 3) ---
+
+  server.handle(
+    RPC_CHANNELS.git.HANDOFF_PREVIEW,
+    async (_ctx, input: WorktreeHandoffPreviewInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.handoff.preview(input)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.HANDOFF_CONFIRM,
+    async (_ctx, input: WorktreeHandoffConfirmInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.handoff.confirm(input)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.HANDOFF_STATUS,
+    async (_ctx, input: WorktreeHandoffStatusInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.handoff.status(input.sessionId)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.HANDOFF_RECOVER,
+    async (_ctx, input: WorktreeHandoffRecoverInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.handoff.recover(input)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.HANDOFF_CANCEL,
+    async (_ctx, input: WorktreeHandoffCancelInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.handoff.cancel(input)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
   // --- Repository context and ref listing (Phase 1, read-only) ---
 
   server.handle(RPC_CHANNELS.git.GET_CONTEXT, async (_ctx, dir: string) => {
@@ -584,14 +685,28 @@ export function registerGitHandlers(
     op: (dir: string) => Promise<GitActionResult>,
   ): Promise<GitActionResult> {
     assertFeatureEnabled()
-    assertSessionWorktreeUsable(git, sessionId)
-    const resolved = resolveSession(sessionId)
-    if (!resolved) throw new Error('Session checkout could not be resolved.')
-    const ctx = await resolveMutationContext(git, resolved)
+    const initialResolved = resolveSession(sessionId)
+    if (!initialResolved) throw new Error('Session checkout could not be resolved.')
+    const initialContext = await resolveMutationContext(git, initialResolved)
     try {
-      return await git.mutationLock.withLock(ctx.gitCommonDir, () =>
-        op(ctx.repositoryRoot ?? resolved.checkoutPath),
-      )
+      return await git.mutationLock.withLock(initialContext.gitCommonDir, async () => {
+        // Re-resolve identity and fences after acquiring the common-directory
+        // lock. A mutation that was queued behind a handoff must never act on
+        // the pre-handoff checkout path.
+        assertSessionWorktreeUsable(git, sessionId)
+        const resolved = resolveSession(sessionId)
+        if (!resolved) throw new Error('Session checkout could not be resolved.')
+        const ctx = await resolveMutationContext(git, resolved)
+        // The lock key is the repository identity captured before the lock.
+        // If the session's repository drifted while the action was queued,
+        // the mutation would run against one repository while holding
+        // another repository's serialization lock. This mirrors the guard
+        // ManagedWorktreeService.removeWorktree applies.
+        if (ctx.gitCommonDir !== initialContext.gitCommonDir) {
+          throw new Error('Session repository identity changed while the Git action was queued. Try the action again.')
+        }
+        return op(ctx.repositoryRoot ?? resolved.checkoutPath)
+      })
     } finally {
       await statusSubscription.refresh(sessionId, 'app-action')
     }

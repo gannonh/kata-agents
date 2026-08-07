@@ -105,6 +105,19 @@ export interface Session {
   checkout?: import('./git').SessionCheckout
   /** Number of sessions sharing this session's managed worktree (derived, >=1). */
   sharedOwnerCount?: number
+  /**
+   * Runtime reconstruction state after a handoff commit. `unverified` arms
+   * the first-Send proof gate; `verified` means the live adapter proved every
+   * file/shell/MCP/provider tool resolves the destination; `recovery-required`
+   * means the proof failed and Send stays blocked. Absent for V1 sessions.
+   */
+  handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required'
+  /**
+   * Server-derived: true when this session's provider adapter advertises safe
+   * execution-CWD rebinding (handoff actions may be offered). Absent while
+   * the agent runtime has not been created yet.
+   */
+  handoffCapable?: boolean
 }
 
 export interface CreateSessionOptions {

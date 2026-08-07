@@ -22,6 +22,7 @@ import {
   createBackendFromConnection,
   resolveBackendContext,
   createBackendFromResolvedContext,
+  resolveHandoffCapability,
   cleanupSourceRuntimeArtifacts,
   providerTypeToAgentProvider,
   type AgentBackend,
@@ -91,7 +92,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -842,6 +843,8 @@ interface ManagedSession {
   sdkCwd?: string
   // Git checkout metadata (managed worktree / current checkout), when bound.
   checkout?: import('@kata-sh/shared/protocol').SessionCheckout
+  // Handoff runtime reconstruction state ('unverified' arms the Send proof gate).
+  handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required'
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -1099,9 +1102,22 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
       /* registry unavailable — omit */
     }
   }
+  // Client-visible handoff capability: actions appear only when the session's
+  // provider adapter advertises safe execution-CWD rebinding (AC-1). The agent
+  // is lazy-loaded, so the flag is absent until the runtime exists; the server
+  // keeps the typed blocker as the authoritative backstop.
+  let handoffCapable: boolean | undefined
+  if (m.agent) {
+    try {
+      handoffCapable = resolveHandoffCapability(m.agent).supported
+    } catch {
+      /* adapter capability unavailable — omit; the server blocker remains authoritative */
+    }
+  }
   return {
     ...pickSessionFields(m),
     sharedOwnerCount,
+    handoffCapable,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
@@ -2155,6 +2171,11 @@ export class SessionManager implements ISessionManager {
 
       const storedSession: StoredSession = {
         ...pickSessionFields(managed),
+        // A `verified` runtime proof is process-local: a recreated runtime
+        // after restart must prove the destination again before Send unlocks.
+        // Normalize so the durable state never skips that proof.
+        handoffRuntimeState:
+          managed.handoffRuntimeState === 'verified' ? 'unverified' : managed.handoffRuntimeState,
         workspaceRootPath: managed.workspace.rootPath,
         createdAt: managed.createdAt ?? Date.now(),
         lastUsedAt: Date.now(),
@@ -2595,6 +2616,13 @@ export class SessionManager implements ISessionManager {
       // Sync transferred session summary state from disk
       managed.transferredSessionSummary = storedSession.transferredSessionSummary
       managed.transferredSessionSummaryApplied = storedSession.transferredSessionSummaryApplied
+      // Deferred-load field: the metadata load already restored
+      // handoffRuntimeState through createManagedSession, but a session
+      // created in this process must also pick it up from disk so an
+      // unverified/recovery-required state survives a restart.
+      if (managed.handoffRuntimeState === undefined) {
+        managed.handoffRuntimeState = storedSession.handoffRuntimeState
+      }
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
 
       // Queue recovery: find orphaned queued messages from crash/restart and re-queue them
@@ -3317,6 +3345,7 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    this.assertSessionHandoffNotFenced(managed.id)
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -3589,7 +3618,28 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
+      // Credential-free UI UAT seam (AC-15): the deterministic adapter lets
+      // the real Electron app exercise preview/confirm/recovery without a
+      // live provider. Off by default; production adapters remain disabled
+      // until credentialed UAT proves context continuity.
+      if (
+        process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' &&
+        process.env.NODE_ENV !== 'production' &&
+        managed.agent
+      ) {
+        sessionLog.warn(
+          `Session ${managed.id}: deterministic handoff adapter is active. Execution-CWD proofs are synthetic and prove nothing about the live runtime.`,
+        )
+        const { createDeterministicHandoffAdapter } = await import('@kata-sh/shared/agent/backend')
+        managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
+      }
+
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
+
+      // The renderer's session DTO now carries capabilities that only exist
+      // with a live agent (supportsBranching, handoffCapable). Push a refresh
+      // so the composer/checkout UI stops gating on stale session state.
+      this.sendEvent({ type: 'session_updated', sessionId: managed.id }, managed.workspace.id)
 
       // ============================================================
       // Post-construction: debug callback, auth callback, postInit()
@@ -5314,6 +5364,101 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Commit a handoff binding without changing the immutable transcript CWD.
+   *
+   * `bindCheckout` is intentionally not reused here: its historical contract
+   * updates `sdkCwd` because empty-session checkout preparation uses the
+   * working directory as transcript storage. Handoff is only valid when the
+   * provider has a separate execution-CWD capability, so this method changes
+   * the persisted checkout/working directory and leaves `sdkCwd` untouched.
+   */
+  async commitHandoffBinding(input: {
+    sessionId: string
+    checkout: SessionCheckout
+    executionCwd: string
+  }): Promise<void> {
+    const managed = this.sessions.get(input.sessionId)
+    if (!managed) throw new Error(`Session ${input.sessionId} not found`)
+    if (!input.executionCwd) throw new Error(i18n.t('git.handoff.executionCwdRequired'))
+
+    managed.checkout = input.checkout
+    managed.workingDirectory = input.executionCwd
+    managed.agent?.updateWorkingDirectory(input.executionCwd)
+    // Arm the first-Send runtime proof: the recreated runtime must prove every
+    // file/shell/MCP/provider tool resolves the destination before Send unlocks.
+    // Persisted as `unverified` so a recreated runtime after restart re-proves.
+    managed.handoffRuntimeState = 'unverified'
+    invalidateContextFileCache(input.executionCwd)
+    invalidateSkillsCache()
+
+    const git = this.getGitServices()
+    // Acquiring the new lease replaces the old session lease atomically within
+    // the lease manager. The handoff transaction lease protects the target
+    // until this durable commit point.
+    git.pathLeases.lease(input.sessionId, input.executionCwd)
+    this.persistSession(managed)
+    await this.flushSession(input.sessionId)
+    this.sendEvent(
+      { type: 'working_directory_changed', sessionId: input.sessionId, workingDirectory: input.executionCwd },
+      managed.workspace.id,
+    )
+  }
+
+  /**
+   * Prove the destination checkout through the live adapter before the first
+   * Send after a handoff commit (or a restart). The proof must cover file,
+   * shell, MCP, and provider tool resolution for the exact destination path.
+   * Success marks the runtime verified for this process only — a recreated
+   * runtime must prove again, so `verified` is never persisted. Failure
+   * persists recovery-required and blocks Send; a later Send re-attempts the
+   * proof, so a fixed runtime resumes without re-running the handoff.
+   */
+  private async verifyHandoffRuntimeBeforeSend(
+    sessionId: string,
+    managed: ManagedSession,
+    agent: AgentInstance,
+  ): Promise<void> {
+    // The gate is armed only by a handoff commit (or by a restart of a session
+    // that had one). A session that never performed a handoff has no
+    // destination to prove, so it must not be blocked. A `verified` runtime
+    // needs no re-proof within this process. `unverified` (armed at commit and
+    // after every restart) and `recovery-required` both (re-)prove here:
+    // success clears recovery, failure keeps Send blocked.
+    if (managed.handoffRuntimeState === undefined) return
+    if (managed.handoffRuntimeState === 'verified') return
+    const adapter = agent.executionCwdRebind
+    const destination = managed.workingDirectory
+    if (!adapter || !destination) {
+      managed.handoffRuntimeState = 'recovery-required'
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      throw new Error(i18n.t('git.handoff.runtimeReconstructionUnavailable'))
+    }
+    try {
+      const proof = await adapter.verifyExecutionCwd(destination)
+      const categories = ['file:', 'shell:', 'mcp:', 'provider:']
+      const complete =
+        proof.adapterId === adapter.adapterId &&
+        proof.checks.length > 0 &&
+        resolve(proof.destinationPath) === resolve(destination) &&
+        categories.every((category) => proof.checks.some((check) => check.startsWith(category)))
+      if (!complete) throw new Error('The adapter proof did not cover every tool category for the destination.')
+      // Verified in this process only; a recreated runtime must prove again.
+      managed.handoffRuntimeState = 'verified'
+      sessionLog.info(`Session ${sessionId}: handoff runtime verified in ${destination}`)
+    } catch (error) {
+      managed.handoffRuntimeState = 'recovery-required'
+      this.persistSession(managed)
+      await this.flushSession(sessionId)
+      throw new Error(
+        i18n.t('git.handoff.runtimeVerificationFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+  }
+
   /** Lazily-resolved Git domain services (managed worktrees, repository ops). */
   private gitServicesInstance: GitServices | null = null
   private getGitServices(): GitServices {
@@ -5321,6 +5466,17 @@ export class SessionManager implements ISessionManager {
       this.gitServicesInstance = getDefaultGitServices()
     }
     return this.gitServicesInstance
+  }
+
+  /**
+   * Fence an action while a handoff transaction is pending or requires
+   * recovery: the session's checkout identity is not safe to act on until the
+   * transaction commits, rolls back, or the session is deleted.
+   */
+  private assertSessionHandoffNotFenced(sessionId: string): void {
+    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
+      throw new Error(i18n.t('git.handoff.pendingFence'))
+    }
   }
 
   /**
@@ -5395,6 +5551,49 @@ export class SessionManager implements ISessionManager {
         const managed = this.sessions.get(sessionId)
         if (managed) await this.flushSession(sessionId)
       },
+    })
+
+    // Phase 3: handoff resolves all session identity and provider capability
+    // server-side. Renderer/remote callers never provide a checkout path.
+    services.handoff.setHooks({
+      resolveSession: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed) return null
+        const checkoutPath = managed.checkout?.checkoutPath ?? managed.workingDirectory
+        if (!checkoutPath) return null
+        return {
+          checkoutPath,
+          workspaceId: managed.workspace.id,
+          checkout: managed.checkout ?? null,
+          transcriptCwd: managed.sdkCwd ?? checkoutPath,
+        }
+      },
+      resolveCapability: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed?.agent) return null
+        const resolution = resolveHandoffCapability(managed.agent)
+        return resolution.supported ? resolution.capability : null
+      },
+      resolveCapabilityAdapter: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        return managed?.agent?.executionCwdRebind ?? null
+      },
+      isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
+      quiesceRuntimes: async (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          const managed = this.sessions.get(sessionId)
+          if (!managed || !managed.isProcessing) continue
+          const quiesced = await this.awaitAgentTeardown(
+            sessionId,
+            managed,
+            60_000,
+            undefined,
+          )
+          if (!quiesced) return false
+        }
+        return true
+      },
+      commitSessionBinding: (input) => this.commitHandoffBinding(input),
     })
   }
 
@@ -5552,6 +5751,9 @@ export class SessionManager implements ISessionManager {
         expectedBranch: null,
       }
       this.bindCheckout(managed, checkout, workingDirectory)
+      // Current checkouts are canonical shared paths too; lease them from the
+      // first durable binding so handoff sees competing live sessions.
+      git.pathLeases.lease(sessionId, checkout.checkoutPath)
       // Prefer a durable persist before returning success: `bindCheckout`
       // enqueues a debounced write, so flush it so a restart/resume immediately
       // after preparation restores the same checkout (AC5).
@@ -6416,6 +6618,23 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
       return { deleted: false }
     }
+    // A pending handoff must be resolved first, but a transaction stuck in
+    // recovery-required must not remove session deletion as the escape hatch
+    // (spec: recovery fencing). Deleting the session rolls the interrupted
+    // handoff back best-effort and releases the fence.
+    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
+      const handoffStatus = await this.getGitServices().handoff?.status(sessionId)
+      if (handoffStatus?.active && handoffStatus.state !== 'recovery-required') {
+        throw new Error(i18n.t('git.handoff.pendingFence'))
+      }
+      if (handoffStatus?.active) {
+        try {
+          await this.getGitServices().handoff?.cancelForSessionDeletion?.(sessionId)
+        } catch (err) {
+          sessionLog.warn(`Failed to release interrupted handoff for deleted session ${sessionId}:`, err)
+        }
+      }
+    }
 
     return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
     // Get workspace slug before deleting
@@ -6679,6 +6898,7 @@ export class SessionManager implements ISessionManager {
     if (this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
     }
+    this.assertSessionHandoffNotFenced(sessionId)
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
     this.assertSessionCheckoutReady(sessionId)
@@ -7002,39 +7222,45 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      // Single fresh build — tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
-      }
-
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
-      }
-      sendSpan.mark('servers.applied')
-    }
-
     try {
+      // Get or create the agent (lazy loading). Its internal cold-session build at
+      // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
+      // ensureFreshToken mirrors the disk write to source.config in-memory).
+      const agent = await this.getOrCreateAgent(managed)
+      sendSpan.mark('agent.ready')
+
+      // Handoff runtime reconstruction gate: the first Send after a handoff
+      // commit (and after every restart) requires the live adapter to prove the
+      // destination checkout before any tool may run. Failure blocks Send with
+      // recovery-required until the runtime is fixed or the binding resolved.
+      await this.verifyHandoffRuntimeBeforeSend(sessionId, managed, agent)
+
+      // Always set all sources for context (even if none are enabled), including built-ins
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+      sendSpan.mark('sources.loaded')
+
+      // Apply source servers if any are enabled
+      if (hasSources) {
+        const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+        // Single fresh build — tokens already refreshed above.
+        const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        if (errors.length > 0) {
+          sessionLog.warn(`Source build errors:`, errors)
+        }
+
+        const mcpCount = Object.keys(mcpServers).length
+        const apiCount = Object.keys(apiServers).length
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+          const usableSources = sources.filter(isSourceUsable)
+          const intendedSlugs = usableSources.map(s => s.config.slug)
+          await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
+          sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+        }
+        sendSpan.mark('servers.applied')
+      }
+
       sessionLog.info('Starting chat for session:', sessionId)
       sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
       sessionLog.info('Message:', message)

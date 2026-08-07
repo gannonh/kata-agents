@@ -30,7 +30,7 @@ import {
   changeIndicator,
   summarizePendingComments,
 } from '@kata-sh/shared/git'
-import type { GitWorkingTreeEntry } from '@kata-sh/shared/protocol'
+import type { GitWorkingTreeEntry, WorktreeHandoffDirection, WorktreeHandoffResult } from '@kata-sh/shared/protocol'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
@@ -42,6 +42,9 @@ import {
 import { useGitStatusSubscription } from './useGitStatusSubscription'
 import { ChangesDiffView } from './ChangesDiffView'
 import { submitPendingFeedback } from './feedback-send'
+import { HandoffButton, HandoffRecoveryBadge } from '@/components/app-shell/handoff/HandoffAction'
+import { HandoffDialog } from '@/components/app-shell/handoff/HandoffDialog'
+import { recoveryResultFromStatus } from '@/components/app-shell/input/handoff-controls'
 
 export interface ChangesPanelProps {
   sessionId: string | null
@@ -102,8 +105,14 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
   const { t } = useTranslation()
   const flagEnabled = FEATURE_FLAGS.gitWorkspaceV1
   const { updateRightSidebar } = useNavigation()
-  const { onSendMessage } = useAppShellContext()
+  const { onSendMessage, workspaces, activeWorkspaceId } = useAppShellContext()
   const session = useSession(sessionId ?? '__no_session__')
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  const isRemoteWorkspace = !!activeWorkspace?.remoteServer
+  const [recoveryDialog, setRecoveryDialog] = React.useState<{
+    direction: WorktreeHandoffDirection
+    recovery: Extract<WorktreeHandoffResult, { outcome: 'recovery-required' }>
+  } | null>(null)
 
   const { status, loading, error, lastUpdatedAt } = useGitStatusSubscription(
     sessionId ?? undefined,
@@ -115,10 +124,12 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)
   const [diffStyle, setDiffStyle] = React.useState<'unified' | 'split'>('unified')
 
-  // Reset the selected file whenever the bound session changes so status and
-  // feedback never leak between sessions.
+  // Reset the selected file and any recovery dialog whenever the bound
+  // session changes so status, feedback, and a prior session's handoff
+  // transaction never leak between sessions.
   React.useEffect(() => {
     setSelectedPath(null)
+    setRecoveryDialog(null)
   }, [sessionId])
 
   const entries = React.useMemo(
@@ -239,6 +250,27 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
           </span>
         </div>
       )}
+      {summary.isGitRepository && sessionId && (
+        <div className="flex items-center gap-1 border-t border-border/50 px-3 py-1.5">
+          <HandoffButton
+            sessionId={sessionId}
+            checkout={session?.checkout ? { mode: session.checkout.mode } : undefined}
+            handoffRuntimeState={session?.handoffRuntimeState}
+            handoffCapable={session?.handoffCapable}
+            isRemoteWorkspace={isRemoteWorkspace}
+          />
+          <span className="flex-1" />
+          <HandoffRecoveryBadge
+            sessionId={sessionId}
+            onRecover={(status) =>
+              setRecoveryDialog({
+                direction: status.direction,
+                recovery: recoveryResultFromStatus(status, t('git.handoff.recoveryNote')),
+              })
+            }
+          />
+        </div>
+      )}
     </div>
   )
 
@@ -352,6 +384,18 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
       {header}
       <div className="min-h-0 flex-1 overflow-hidden">{body}</div>
       {feedbackBar}
+      {recoveryDialog && sessionId && (
+        <HandoffDialog
+          open
+          sessionId={sessionId}
+          direction={recoveryDialog.direction}
+          isRemoteWorkspace={isRemoteWorkspace}
+          initialRecovery={recoveryDialog.recovery}
+          onOpenChange={(open) => {
+            if (!open) setRecoveryDialog(null)
+          }}
+        />
+      )}
     </div>
   )
 }
