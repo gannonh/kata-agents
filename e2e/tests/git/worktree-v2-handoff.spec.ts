@@ -94,7 +94,9 @@ test.describe(`Worktree V2 handoff ${E2E_TAGS.worktreeV2}`, () => {
       // idle (handoff requires quiescence).
       const turn = buildDeterministicAgentTurn();
       await sendAgentPrompt(page, turn.prompt);
-      await expectAssistantReply(page, turn, E2E_TIMEOUTS.agentReplyMs);
+      // The handoff flow only needs the turn to complete (quiescence), not an
+      // exact token echo, so match by containment within an assistant reply.
+      await expectAssistantReply(page, turn, E2E_TIMEOUTS.agentReplyMs, { match: "contains" });
 
       // The reply can land before title generation finishes; handoff requires
       // a fully idle session (runtime-active blocker otherwise).

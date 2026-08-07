@@ -1701,6 +1701,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     return (
                       <div
                         key={turnKey}
+                        data-testid="assistant-turn"
                         ref={el => { if (el) turnRefs.current.set(turnKey, el); else turnRefs.current.delete(turnKey) }}
                         className={cn(
                           "pt-2",
@@ -2157,7 +2158,7 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
   })
 
   return (
-    <div className="flex justify-start mt-4">
+    <div className="flex justify-start mt-4" data-testid="chat-error-message">
       {/* Subtle bg (3% opacity) + tinted shadow for softer error appearance */}
       <div
         className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
