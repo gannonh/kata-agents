@@ -96,6 +96,15 @@ export interface CreateWorktreeParams {
   baseRef: string
   /** V2 branch suffix/display name. Omitted for the exact V1 token flow. */
   worktreeNameSuffix?: string
+  /**
+   * Pre-issued path token (handoff preview/confirm): pins the destination
+   * path to the value the preview fingerprint bound. When provided, the
+   * retry loop is skipped — a collision fails instead of silently relocating
+   * to a path the fingerprint never covered.
+   */
+  pathToken?: string
+  /** Internal handoff path: caller already owns the common-directory lock. */
+  lockAlreadyHeld?: boolean
 }
 
 export interface CreateWorktreeResult {
@@ -335,6 +344,7 @@ export class ManagedWorktreeService {
       gitCommonDir,
       baseRef,
       worktreeNameSuffix,
+      pathToken,
     } = params
     const named = worktreeNameSuffix !== undefined
     if (named && typeof worktreeNameSuffix !== 'string') {
@@ -353,7 +363,7 @@ export class ManagedWorktreeService {
     // Validate base ref exists before taking the lock.
     await this.assertRefExists(repositoryRoot, baseRef)
 
-    return this.mutationLock.withLock(gitCommonDir, async () => {
+    const create = async () => {
       // Capture one immutable root snapshot before deriving the destination.
       // A later settings update affects only subsequent materializations.
       const rootSnapshot = this.getEffectiveRootSnapshot()
@@ -384,8 +394,9 @@ export class ManagedWorktreeService {
         : null
 
       let lastError: unknown
-      for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
-        const token = generateToken()
+      const maxAttempts = pathToken ? 1 : MAX_TOKEN_RETRIES
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const token = pathToken ?? generateToken()
         const branch = requestedBranch ?? `kata-agent/${token}`
         const leaf = displayFragment ? `${displayFragment}-${token}` : token
         const worktreePath = join(destinationRoot, leaf)
@@ -541,7 +552,29 @@ export class ManagedWorktreeService {
         `Failed to create a managed worktree after ${MAX_TOKEN_RETRIES} attempts${lastError instanceof Error ? `: ${lastError.message}` : ''}`,
         'WORKTREE_TOKEN_COLLISION',
       )
-    })
+    }
+    return params.lockAlreadyHeld ? create() : this.mutationLock.withLock(gitCommonDir, create)
+  }
+
+  /**
+   * Compute the exact checkout path {@link createWorktree} would use for the
+   * given identity and pre-issued path token. Pure computation — no directory
+   * creation — so a handoff preview can bind the destination into its
+   * fingerprint and the confirm can pass the same token back.
+   */
+  resolveWorktreePath(input: {
+    workspaceId: string
+    gitCommonDir: string
+    worktreeNameSuffix?: string
+    pathToken: string
+  }): string {
+    const materializationRoot = resolvePath(this.getEffectiveRootSnapshot().materializationRoot)
+    const repoKey = computeRepoKey(safeRealpath(input.gitCommonDir))
+    const fragment = input.worktreeNameSuffix
+      ? filesystemSafeDisplayFragment(input.worktreeNameSuffix)
+      : null
+    const leaf = fragment ? `${fragment}-${input.pathToken}` : input.pathToken
+    return join(materializationRoot, input.workspaceId, repoKey, leaf)
   }
 
   addOwner(managedWorktreeId: string, sessionId: string): void {

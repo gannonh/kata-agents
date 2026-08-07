@@ -112,6 +112,8 @@ export interface WorktreeLifecycleDeps {
   isSessionActive?: (sessionId: string) => boolean
   /** Whether a session is flagged for attention. */
   isSessionFlagged?: (sessionId: string) => boolean
+  /** Whether a pending/recovery handoff owns this canonical path. */
+  isPathFenced?: (path: string) => boolean
   /** Persist owner-session recovery state before the journal commit marker. */
   applyOwnerSessionState?: (
     sessionIds: string[],
@@ -148,6 +150,11 @@ export class WorktreeLifecycleService {
     this.hostLock = new CrossProcessFileLock(deps.hostLockPath)
   }
 
+  /** True while an archive/retention sweep is running (handoff blocker). */
+  isCleanupInProgress(): boolean {
+    return this.sweepRunning !== null
+  }
+
   /**
    * Install runtime hooks late (the SessionManager wires them after the
    * services are constructed). Only the runtime-observation hooks are
@@ -157,12 +164,14 @@ export class WorktreeLifecycleService {
     quiesceRuntimes?: WorktreeLifecycleDeps['quiesceRuntimes']
     isSessionActive?: WorktreeLifecycleDeps['isSessionActive']
     isSessionFlagged?: WorktreeLifecycleDeps['isSessionFlagged']
+    isPathFenced?: WorktreeLifecycleDeps['isPathFenced']
     applyOwnerSessionState?: WorktreeLifecycleDeps['applyOwnerSessionState']
     touchSessionCheckout?: WorktreeLifecycleDeps['touchSessionCheckout']
   }): void {
     if (hooks.quiesceRuntimes) this.deps.quiesceRuntimes = hooks.quiesceRuntimes
     if (hooks.isSessionActive) this.deps.isSessionActive = hooks.isSessionActive
     if (hooks.isSessionFlagged) this.deps.isSessionFlagged = hooks.isSessionFlagged
+    if (hooks.isPathFenced) this.deps.isPathFenced = hooks.isPathFenced
     if (hooks.applyOwnerSessionState) this.deps.applyOwnerSessionState = hooks.applyOwnerSessionState
     if (hooks.touchSessionCheckout) this.deps.touchSessionCheckout = hooks.touchSessionCheckout
   }
@@ -1095,6 +1104,12 @@ export class WorktreeLifecycleService {
 
     try {
       this.deps.journal.step(journalEntry.journalId, 'locks-acquired')
+
+      // Handoff owns a stronger transaction fence than ordinary lifecycle
+      // ownership. Cleanup must never race a pending/recovery checkout move.
+      if (this.deps.isPathFenced?.(record.checkoutPath)) {
+        return fail('LIFECYCLE_FOREIGN_LEASE', 'A checkout handoff owns this path; retry after it commits or recovers.')
+      }
 
       // Path fences: every canonical checkout path must be leased only by the
       // transaction's owner set (sessions not yet in the registry still hold

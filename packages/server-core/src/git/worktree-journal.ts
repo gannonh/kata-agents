@@ -30,6 +30,7 @@ export type WorktreeJournalOp =
   | 'permanent-delete'
   | 'session-delete'
   | 'cleanup'
+  | 'handoff'
 
 export type WorktreeJournalStatus = 'in-progress' | 'committed' | 'failed' | 'recovered'
 
@@ -42,6 +43,8 @@ export interface WorktreeJournalEntry {
   startedAt: number
   /** Idempotent steps completed so far, in order. */
   steps: string[]
+  /** Sanitized transaction facts needed for restart reconciliation. */
+  metadata?: Record<string, unknown>
   status: WorktreeJournalStatus
   commitMarker?: string
   error?: string
@@ -96,6 +99,9 @@ export class WorktreeJournal {
           policyVersion: Number.isFinite(parsed.policyVersion) ? parsed.policyVersion! : 0,
           startedAt: Number.isFinite(parsed.startedAt) ? parsed.startedAt! : 0,
           steps: parsed.steps,
+          metadata: parsed.metadata && typeof parsed.metadata === 'object' && !Array.isArray(parsed.metadata)
+            ? parsed.metadata as Record<string, unknown>
+            : undefined,
           status: parsed.status,
           commitMarker: typeof parsed.commitMarker === 'string' ? parsed.commitMarker : undefined,
           error: typeof parsed.error === 'string' ? parsed.error : undefined,
@@ -129,6 +135,7 @@ export class WorktreeJournal {
     recordId: string
     sessionIds: string[]
     policyVersion: number
+    metadata?: Record<string, unknown>
   }): WorktreeJournalEntry {
     const entry: WorktreeJournalEntry = {
       journalId: newJournalId(),
@@ -138,6 +145,7 @@ export class WorktreeJournal {
       policyVersion: input.policyVersion,
       startedAt: Date.now(),
       steps: [],
+      metadata: input.metadata ? { ...input.metadata } : undefined,
       status: 'in-progress',
     }
     this.lock.runSync(() => {
@@ -155,6 +163,17 @@ export class WorktreeJournal {
       const entry = entries.find((candidate) => candidate.journalId === journalId)
       if (!entry || entry.status !== 'in-progress' || entry.steps.includes(step)) return
       entry.steps.push(step)
+      this.writeAll(entries)
+    })
+  }
+
+  /** Update restart-relevant transaction facts without changing its state. */
+  updateMetadata(journalId: string, metadata: Record<string, unknown>): void {
+    this.lock.runSync(() => {
+      const entries = this.readAll()
+      const entry = entries.find((candidate) => candidate.journalId === journalId)
+      if (!entry || entry.status !== 'in-progress') return
+      entry.metadata = { ...(entry.metadata ?? {}), ...metadata }
       this.writeAll(entries)
     })
   }

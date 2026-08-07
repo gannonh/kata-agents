@@ -101,8 +101,8 @@ describe('Worktree handoff protocol contracts', () => {
     // The tuple is the single source of truth for the union: a code added to
     // the type must be listed here, and removing one breaks the length gate.
     const allCodes: readonly WorktreeHandoffBlockerCode[] = WORKTREE_HANDOFF_BLOCKER_CODES
-    expect(allCodes).toHaveLength(15)
-    expect(new Set(allCodes).size).toBe(15)
+    expect(allCodes).toHaveLength(16)
+    expect(new Set(allCodes).size).toBe(16)
     expect(isErrorCode(WORKTREE_HANDOFF_ERROR_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_BLOCKED_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_PREVIEW_STALE_CODE)).toBe(true)

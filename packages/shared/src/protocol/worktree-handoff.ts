@@ -100,6 +100,8 @@ export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   'flags-disabled',
   /** A pending/recovery handoff exists for either path. */
   'handoff-in-progress',
+  /** The requested generated/display name is not a valid branch suffix. */
+  'invalid-name',
 ] as const
 
 /** A typed handoff blocker code. */
@@ -204,6 +206,14 @@ export interface WorktreeHandoffPreview {
 // ---------------------------------------------------------------------------
 // Confirmation
 // ---------------------------------------------------------------------------
+
+/** Server-resolved preview request; clients nominate a name, never a path. */
+export interface WorktreeHandoffPreviewInput {
+  sessionId: string
+  direction: WorktreeHandoffDirection
+  /** Editable suffix for a new managed worktree. */
+  worktreeNameSuffix?: string
+}
 
 /** Confirmation by transaction ID + preview fingerprint only — never paths. */
 export interface WorktreeHandoffConfirmInput {

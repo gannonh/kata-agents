@@ -655,6 +655,77 @@ export class WorktreeSnapshotService {
     this.removeDir(join(this.snapshotsRoot, name))
   }
 
+  /**
+   * Apply a verified snapshot projection to an existing clean checkout.
+   *
+   * Handoff creates and registers the destination through
+   * ManagedWorktreeService first, so the normal `restore()` path (which owns
+   * `git worktree add`) cannot be used. This method deliberately reuses the
+   * same payload verification, binary patch application, mode preservation,
+   * and exact post-apply checks as restore. Existing files are accepted only
+   * when their bytes/mode match the captured entry; a differing file blocks
+   * rather than overwriting it.
+   */
+  async applySnapshotToCheckout(input: { meta: ManagedWorktreeSnapshotMeta; checkoutPath: string }): Promise<void> {
+    const { meta, checkoutPath } = input
+    const manifest = this.verifyPayload(meta)
+    await this.applyPatch(checkoutPath, join(meta.payloadPath, 'staged.patch'), ['--index'])
+    await this.applyPatch(checkoutPath, join(meta.payloadPath, 'unstaged.patch'), [])
+
+    for (const entry of manifest.files) {
+      if (!entry.path || entry.path.includes('\0') || entry.path.startsWith('/') || /(^|\/)\.\.(\/|$)/.test(entry.path)) {
+        throw new WorktreeSnapshotError('SNAPSHOT_PATH_UNSAFE', `Snapshot path escapes the checkout: ${entry.path}`)
+      }
+      const dest = join(checkoutPath, entry.path)
+      this.assertNoSymlinkParents(checkoutPath, dest)
+      const existing = lstatSafe(dest)
+      if (existing !== null) {
+        if (entry.mode === '120000') {
+          if (existing !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Destination file differs: ${entry.path}`)
+          }
+        } else {
+          if (existing !== 'file' || (statSync(dest).mode & 0o777) !== modePermissions(entry.mode) || hashFile(dest) !== entry.sha256) {
+            throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Destination file differs: ${entry.path}`)
+          }
+        }
+        continue
+      }
+      this.restoreFileEntry(checkoutPath, meta, entry)
+    }
+
+    const restoredStaged = (
+      await runGitBuffer(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes: this.limits.maxBytes + 16 * 1024,
+      })
+    ).stdout
+    if (sha256(restoredStaged) !== manifest.stagedPatch.sha256) {
+      throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', 'Applied index differs from the captured staged state.')
+    }
+    const restoredUnstaged = (
+      await runGitBuffer(['diff', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes: this.limits.maxBytes + 16 * 1024,
+      })
+    ).stdout
+    if (sha256(restoredUnstaged) !== manifest.unstagedPatch.sha256) {
+      throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', 'Applied worktree differs from the captured unstaged state.')
+    }
+    for (const entry of manifest.files) {
+      const dest = join(checkoutPath, entry.path)
+      const stat = lstatSafe(dest)
+      if (stat === null) throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied file is missing: ${entry.path}`)
+      if (entry.mode === '120000') {
+        if (stat !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
+          throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied symlink differs: ${entry.path}`)
+        }
+      } else if (stat !== 'file' || (statSync(dest).mode & 0o777) !== modePermissions(entry.mode) || hashFile(dest) !== entry.sha256) {
+        throw new WorktreeSnapshotError('SNAPSHOT_RESTORE_FAILED', `Applied file content or mode differs: ${entry.path}`)
+      }
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Restore
   // -------------------------------------------------------------------------

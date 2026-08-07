@@ -21,6 +21,7 @@ import { WorktreeSnapshotService } from './worktree-snapshot-service'
 import { WorktreeLifecycleService, type WorktreeLifecycleDeps } from './worktree-lifecycle-service'
 import { PathLeaseManager } from './path-leases'
 import { WorktreeJournal, journalPathFor } from './worktree-journal'
+import { WorktreeHandoffService, type WorktreeHandoffHooks } from './worktree-handoff-service'
 
 export * from './command-runner'
 export * from './repository-service'
@@ -37,6 +38,7 @@ export * from './worktree-snapshot-service'
 export * from './worktree-lifecycle-service'
 export * from './path-leases'
 export * from './worktree-journal'
+export * from './worktree-handoff-service'
 
 export interface GitServices {
   repository: RepositoryService
@@ -58,6 +60,8 @@ export interface GitServices {
   pathLeases: PathLeaseManager
   /** Phase 2: durable lifecycle journal. */
   journal: WorktreeJournal
+  /** Phase 3: conflict-safe checkout handoff. */
+  handoff: WorktreeHandoffService
 }
 
 export interface GitServicesConfig {
@@ -80,8 +84,10 @@ export interface GitServicesConfig {
   /** Optional lifecycle hooks (quiescence/activity), wired by the host. */
   lifecycleHooks?: Pick<
     WorktreeLifecycleDeps,
-    'quiesceRuntimes' | 'isSessionActive' | 'isSessionFlagged' | 'applyOwnerSessionState' | 'touchSessionCheckout'
+    'quiesceRuntimes' | 'isSessionActive' | 'isSessionFlagged' | 'isPathFenced' | 'applyOwnerSessionState' | 'touchSessionCheckout'
   >
+  /** Optional handoff hooks (session/capability resolution), wired by the host. */
+  handoffHooks?: WorktreeHandoffHooks
 }
 
 export function createGitServices(config: GitServicesConfig): GitServices {
@@ -125,6 +131,20 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     cleanupStatePath: join(lockBase, 'worktree-cleanup-state.json'),
     ...config.lifecycleHooks,
   })
+  const handoff = new WorktreeHandoffService({
+    registry,
+    snapshots,
+    worktrees,
+    mutationLock,
+    leases: pathLeases,
+    journal,
+    lifecycle,
+    repository,
+    settings: worktreeSettings,
+    serverId: config.serverId ?? 'local',
+    hooks: config.handoffHooks,
+  })
+  lifecycle.setHooks({ isPathFenced: (path) => handoff.isPathFenced(path) })
   return {
     repository,
     worktrees,
@@ -137,6 +157,7 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     snapshots,
     pathLeases,
     journal,
+    handoff,
     get worktreeRoot() {
       return worktrees.getWorktreeRoot()
     },

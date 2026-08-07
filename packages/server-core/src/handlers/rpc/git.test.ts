@@ -143,7 +143,13 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
         )
       },
     },
-    worktrees: {},
+    worktrees: {
+      reconcile: async () => ({ repaired: 0, removed: 0 }),
+    },
+    pathLeases: {
+      lease: () => undefined,
+      pruneStale: () => 0,
+    },
     lifecycle: {
       assertReady: () => undefined,
       markReady: () => undefined,
@@ -175,6 +181,28 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       permanentDelete: async () => ({ deleted: true }),
       setArchived: async () => ({ archived: true, state: 'ready', cleanupEnqueued: false }),
       enqueueCleanup: async () => ({ at: 1, outcome: 'skipped', policyVersion: 0 }),
+      reconcileJournal: async () => ({ resumed: 0, recovered: 0 }),
+    },
+    journal: {
+      compact: () => undefined,
+    },
+    handoff: {
+      preview: async (input: { sessionId: string; direction: string; worktreeNameSuffix?: string }) => {
+        calls.push(`handoff.preview:${input.sessionId}:${input.direction}`)
+        return { transactionId: 'txn-1', previewFingerprint: 'fp-handoff', direction: input.direction }
+      },
+      confirm: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.confirm:${input.sessionId}:${input.transactionId}`)
+        return { outcome: 'committed', transactionId: input.transactionId }
+      },
+      status: async (sessionId: string) => {
+        calls.push(`handoff.status:${sessionId}`)
+        return { active: false }
+      },
+      recover: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`handoff.recover:${input.sessionId}:${input.transactionId}`)
+        return { outcome: 'blocked', transactionId: input.transactionId, code: 'identity-drift', reason: 'stale' }
+      },
     },
     worktreeSettings: {
       getCapability: (serverId = 'mock-server') => ({ serverId, worktreeV2: true }),
@@ -439,6 +467,45 @@ describe('registerGitHandlers', () => {
         { materializationRoot: '/custom-worktrees' },
       ),
     ).resolves.toMatchObject({ materializationRoot: '/custom-worktrees', version: 1 })
+  })
+
+  it('routes handoff preview, confirm, status, and recovery through shared contracts', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+    const { git, calls } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        worktreeNameSuffix: 'demo',
+      }),
+    ).resolves.toMatchObject({ transactionId: 'txn-1', previewFingerprint: 'fp-handoff' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_CONFIRM)!(ctx, {
+        sessionId: 's1',
+        direction: 'current-to-managed',
+        transactionId: 'txn-1',
+        previewFingerprint: 'fp-handoff',
+      }),
+    ).resolves.toMatchObject({ outcome: 'committed', transactionId: 'txn-1' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_STATUS)!(ctx, { sessionId: 's1' }),
+    ).resolves.toEqual({ active: false })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.HANDOFF_RECOVER)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'txn-1',
+      }),
+    ).resolves.toMatchObject({ outcome: 'blocked', code: 'identity-drift' })
+    expect(calls.filter((call) => call.startsWith('handoff.'))).toEqual([
+      'handoff.preview:s1:current-to-managed',
+      'handoff.confirm:s1:txn-1',
+      'handoff.status:s1',
+      'handoff.recover:s1:txn-1',
+    ])
   })
 
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {

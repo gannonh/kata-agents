@@ -22,6 +22,7 @@ import {
   createBackendFromConnection,
   resolveBackendContext,
   createBackendFromResolvedContext,
+  resolveHandoffCapability,
   cleanupSourceRuntimeArtifacts,
   providerTypeToAgentProvider,
   type AgentBackend,
@@ -91,7 +92,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -3317,6 +3318,9 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    if (this.getGitServices().handoff?.isSessionFenced?.(managed.id)) {
+      throw new Error('Session handoff is pending or requires recovery.')
+    }
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -5314,6 +5318,43 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Commit a handoff binding without changing the immutable transcript CWD.
+   *
+   * `bindCheckout` is intentionally not reused here: its historical contract
+   * updates `sdkCwd` because empty-session checkout preparation uses the
+   * working directory as transcript storage. Handoff is only valid when the
+   * provider has a separate execution-CWD capability, so this method changes
+   * the persisted checkout/working directory and leaves `sdkCwd` untouched.
+   */
+  async commitHandoffBinding(input: {
+    sessionId: string
+    checkout: SessionCheckout
+    executionCwd: string
+  }): Promise<void> {
+    const managed = this.sessions.get(input.sessionId)
+    if (!managed) throw new Error(`Session ${input.sessionId} not found`)
+    if (!input.executionCwd) throw new Error('Handoff execution CWD is required.')
+
+    managed.checkout = input.checkout
+    managed.workingDirectory = input.executionCwd
+    managed.agent?.updateWorkingDirectory(input.executionCwd)
+    invalidateContextFileCache(input.executionCwd)
+    invalidateSkillsCache()
+
+    const git = this.getGitServices()
+    // Acquiring the new lease replaces the old session lease atomically within
+    // the lease manager. The handoff transaction lease protects the target
+    // until this durable commit point.
+    git.pathLeases.lease(input.sessionId, input.executionCwd)
+    this.persistSession(managed)
+    await this.flushSession(input.sessionId)
+    this.sendEvent(
+      { type: 'working_directory_changed', sessionId: input.sessionId, workingDirectory: input.executionCwd },
+      managed.workspace.id,
+    )
+  }
+
   /** Lazily-resolved Git domain services (managed worktrees, repository ops). */
   private gitServicesInstance: GitServices | null = null
   private getGitServices(): GitServices {
@@ -5395,6 +5436,49 @@ export class SessionManager implements ISessionManager {
         const managed = this.sessions.get(sessionId)
         if (managed) await this.flushSession(sessionId)
       },
+    })
+
+    // Phase 3: handoff resolves all session identity and provider capability
+    // server-side. Renderer/remote callers never provide a checkout path.
+    services.handoff.setHooks({
+      resolveSession: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed) return null
+        const checkoutPath = managed.checkout?.checkoutPath ?? managed.workingDirectory
+        if (!checkoutPath) return null
+        return {
+          checkoutPath,
+          workspaceId: managed.workspace.id,
+          checkout: managed.checkout ?? null,
+          transcriptCwd: managed.sdkCwd ?? checkoutPath,
+        }
+      },
+      resolveCapability: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed?.agent) return null
+        const resolution = resolveHandoffCapability(managed.agent)
+        return resolution.supported ? resolution.capability : null
+      },
+      resolveCapabilityAdapter: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        return managed?.agent?.executionCwdRebind ?? null
+      },
+      isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
+      quiesceRuntimes: async (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          const managed = this.sessions.get(sessionId)
+          if (!managed || !managed.isProcessing) continue
+          const quiesced = await this.awaitAgentTeardown(
+            sessionId,
+            managed,
+            60_000,
+            undefined,
+          )
+          if (!quiesced) return false
+        }
+        return true
+      },
+      commitSessionBinding: (input) => this.commitHandoffBinding(input),
     })
   }
 
@@ -5552,6 +5636,9 @@ export class SessionManager implements ISessionManager {
         expectedBranch: null,
       }
       this.bindCheckout(managed, checkout, workingDirectory)
+      // Current checkouts are canonical shared paths too; lease them from the
+      // first durable binding so handoff sees competing live sessions.
+      git.pathLeases.lease(sessionId, checkout.checkoutPath)
       // Prefer a durable persist before returning success: `bindCheckout`
       // enqueues a debounced write, so flush it so a restart/resume immediately
       // after preparation restores the same checkout (AC5).
@@ -6416,6 +6503,9 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
       return { deleted: false }
     }
+    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
+      throw new Error('Session handoff is pending or requires recovery.')
+    }
 
     return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
     // Get workspace slug before deleting
@@ -6678,6 +6768,9 @@ export class SessionManager implements ISessionManager {
     }
     if (this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
+    }
+    if (this.getGitServices().handoff?.isSessionFenced?.(sessionId)) {
+      throw new Error('Session handoff is pending or requires recovery.')
     }
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
