@@ -654,13 +654,20 @@ export class WorktreeHandoffService {
         }
         this.assertLeaseStability(txn, transactionLeaseId)
 
+        // Durable cleanup intent, recorded BEFORE the destructive cleanup:
+        // removeCapturedState resets the index/worktree first, so an
+        // interruption mid-cleanup must still restore the source from the
+        // retained snapshot on rollback (the marker gates restoration). The
+        // restore is conditional on the source no longer matching the
+        // snapshot, so recording intent early is harmless when cleanup never
+        // mutated anything.
+        txn.steps.push('source-cleaned')
+        this.deps.journal.step(journalId, 'source-cleaned')
         await this.removeCapturedState(
           facts.source.checkoutPath,
           captured.manifest,
           txn.capturedIncludedFiles ?? [],
         )
-        txn.steps.push('source-cleaned')
-        this.deps.journal.step(journalId, 'source-cleaned')
 
         const checkout: SessionCheckoutV2 = {
           schemaVersion: 2,
@@ -1141,13 +1148,17 @@ export class WorktreeHandoffService {
         txn.steps.push('destination-leased')
         this.deps.journal.step(journalId, 'destination-leased')
 
+        // Durable cleanup intent, recorded BEFORE the destructive cleanup:
+        // removeCapturedState resets the index/worktree first, so an
+        // interruption mid-cleanup must still restore the source from the
+        // retained snapshot on rollback (the marker gates restoration).
+        txn.steps.push('source-cleaned')
+        this.deps.journal.step(journalId, 'source-cleaned')
         await this.removeCapturedState(
           facts.source.checkoutPath,
           captured.manifest,
           txn.capturedIncludedFiles ?? [],
         )
-        txn.steps.push('source-cleaned')
-        this.deps.journal.step(journalId, 'source-cleaned')
 
         // Free the handed branch: current returns to the recorded ref so the
         // managed target can materialize the same branch again.

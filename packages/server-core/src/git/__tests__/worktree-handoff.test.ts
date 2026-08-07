@@ -986,6 +986,46 @@ describe('handoff recover — snapshot-backed rollback', () => {
     expect(restarted.handoff.isPathFenced(harness.repo)).toBe(false)
   })
 
+  test('restores the source from the retained snapshot when cleanup is interrupted after its destructive reset', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'add tracked'])
+    writeFile(harness.repo, 'tracked.txt', 'changed\n')
+    writeFile(harness.repo, 'new.txt', 'new file\n')
+    // Inject a cleanup that performs the destructive reset and then dies, as
+    // if the process crashed mid-cleanup. The source-cleaned intent is
+    // journaled BEFORE the reset, so recovery must restore the captured state
+    // instead of discarding it.
+    const realRemoveCapturedState = (harness.svc.handoff as any).removeCapturedState
+    ;(harness.svc.handoff as any).removeCapturedState = async () => {
+      await git(harness.repo, ['reset', '--hard', 'HEAD'])
+      throw new Error('simulated cleanup failure after reset')
+    }
+
+    const p = await preview('current-to-managed', 'interrupted-cleanup')
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'current-to-managed',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+    expect(result.outcome).toBe('recovery-required')
+    if (result.outcome !== 'recovery-required') return
+    // The destructive reset already ran (tracked.txt is back at base), so the
+    // source no longer matches the snapshot; recovery restores it before
+    // dropping the snapshot authority.
+    expect(readFileSync(join(harness.repo, 'tracked.txt'), 'utf8')).toBe('base\n')
+
+    const rec = await harness.svc.handoff.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+    ;(harness.svc.handoff as any).removeCapturedState = realRemoveCapturedState
+
+    expect(rec).toMatchObject({ outcome: 'blocked', code: 'handoff-rolled-back' })
+    expect(readFileSync(join(harness.repo, 'tracked.txt'), 'utf8')).toBe('changed\n')
+    expect(readFileSync(join(harness.repo, 'new.txt'), 'utf8')).toBe('new file\n')
+    expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
+  })
+
   test('rebinds the provider runtime back to the source when rollback undoes a post-rebind failure', async () => {
     currentSession()
     writeFile(harness.repo, 'tracked.txt', 'base\n')
