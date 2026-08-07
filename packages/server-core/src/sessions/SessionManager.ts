@@ -5380,7 +5380,7 @@ export class SessionManager implements ISessionManager {
   }): Promise<void> {
     const managed = this.sessions.get(input.sessionId)
     if (!managed) throw new Error(`Session ${input.sessionId} not found`)
-    if (!input.executionCwd) throw new Error('Handoff execution CWD is required.')
+    if (!input.executionCwd) throw new Error(i18n.t('git.handoff.executionCwdRequired'))
 
     managed.checkout = input.checkout
     managed.workingDirectory = input.executionCwd
@@ -5433,9 +5433,7 @@ export class SessionManager implements ISessionManager {
       managed.handoffRuntimeState = 'recovery-required'
       this.persistSession(managed)
       await this.flushSession(sessionId)
-      throw new Error(
-        'Handoff runtime reconstruction is unavailable: the provider adapter cannot prove the destination checkout.',
-      )
+      throw new Error(i18n.t('git.handoff.runtimeReconstructionUnavailable'))
     }
     try {
       const proof = await adapter.verifyExecutionCwd(destination)
@@ -5454,7 +5452,9 @@ export class SessionManager implements ISessionManager {
       this.persistSession(managed)
       await this.flushSession(sessionId)
       throw new Error(
-        `Handoff runtime verification failed; Send stays blocked: ${error instanceof Error ? error.message : String(error)}`,
+        i18n.t('git.handoff.runtimeVerificationFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }),
       )
     }
   }
@@ -7222,45 +7222,45 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    // Get or create the agent (lazy loading). Its internal cold-session build at
-    // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
-    // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
-    sendSpan.mark('agent.ready')
-
-    // Handoff runtime reconstruction gate: the first Send after a handoff
-    // commit (and after every restart) requires the live adapter to prove the
-    // destination checkout before any tool may run. Failure blocks Send with
-    // recovery-required until the runtime is fixed or the binding resolved.
-    await this.verifyHandoffRuntimeBeforeSend(sessionId, managed, agent)
-
-    // Always set all sources for context (even if none are enabled), including built-ins
-    const allSources = loadAllSources(workspaceRootPath)
-    agent.setAllSources(allSources)
-    sendSpan.mark('sources.loaded')
-
-    // Apply source servers if any are enabled
-    if (hasSources) {
-      const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
-      // Single fresh build — tokens already refreshed above.
-      const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
-      if (errors.length > 0) {
-        sessionLog.warn(`Source build errors:`, errors)
-      }
-
-      const mcpCount = Object.keys(mcpServers).length
-      const apiCount = Object.keys(apiServers).length
-      if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
-        const usableSources = sources.filter(isSourceUsable)
-        const intendedSlugs = usableSources.map(s => s.config.slug)
-        await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
-        await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
-        sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
-      }
-      sendSpan.mark('servers.applied')
-    }
-
     try {
+      // Get or create the agent (lazy loading). Its internal cold-session build at
+      // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
+      // ensureFreshToken mirrors the disk write to source.config in-memory).
+      const agent = await this.getOrCreateAgent(managed)
+      sendSpan.mark('agent.ready')
+
+      // Handoff runtime reconstruction gate: the first Send after a handoff
+      // commit (and after every restart) requires the live adapter to prove the
+      // destination checkout before any tool may run. Failure blocks Send with
+      // recovery-required until the runtime is fixed or the binding resolved.
+      await this.verifyHandoffRuntimeBeforeSend(sessionId, managed, agent)
+
+      // Always set all sources for context (even if none are enabled), including built-ins
+      const allSources = loadAllSources(workspaceRootPath)
+      agent.setAllSources(allSources)
+      sendSpan.mark('sources.loaded')
+
+      // Apply source servers if any are enabled
+      if (hasSources) {
+        const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
+        // Single fresh build — tokens already refreshed above.
+        const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
+        if (errors.length > 0) {
+          sessionLog.warn(`Source build errors:`, errors)
+        }
+
+        const mcpCount = Object.keys(mcpServers).length
+        const apiCount = Object.keys(apiServers).length
+        if (mcpCount > 0 || apiCount > 0 || enabledSlugs.length > 0) {
+          const usableSources = sources.filter(isSourceUsable)
+          const intendedSlugs = usableSources.map(s => s.config.slug)
+          await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
+          await applyBridgeUpdates(agent, sessionPath, usableSources, mcpServers, sessionId, workspaceRootPath, 'send message', managed.poolServer?.url)
+          sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
+        }
+        sendSpan.mark('servers.applied')
+      }
+
       sessionLog.info('Starting chat for session:', sessionId)
       sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
       sessionLog.info('Message:', message)

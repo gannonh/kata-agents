@@ -64,12 +64,14 @@ export interface WorktreeHandoffProviderCapability {
 // ---------------------------------------------------------------------------
 
 /**
- * Typed handoff blockers. Most correspond to a precondition the server checks
- * before any mutation; a blocked handoff claims no mutation. The tuple also
- * carries post-recovery outcomes (`handoff-rolled-back` reports a completed
- * rollback after a mutation attempt). The tuple is the single source of
- * truth: the union is derived from it so a code can never be added to the
- * type without being listed here.
+ * Typed handoff blockers: every entry corresponds to a precondition the
+ * server checks before any mutation, and a blocked handoff claims no
+ * mutation. Post-recovery outcomes (`handoff-rolled-back`) are NOT blockers
+ * and live in {@link WORKTREE_HANDOFF_OUTCOME_CODES} — they report the
+ * completed result of an explicit recovery after a mutation attempt, so they
+ * can never appear in preview or confirmation blocker payloads. Each tuple
+ * is the single source of truth: its union is derived from it so a code can
+ * never be added to the type without being listed here.
  */
 export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   /** Provider adapter cannot safely rebind execution CWD (V1 preserved). */
@@ -104,12 +106,26 @@ export const WORKTREE_HANDOFF_BLOCKER_CODES = [
   'handoff-in-progress',
   /** The requested generated/display name is not a valid branch suffix. */
   'invalid-name',
+] as const
+
+/**
+ * Post-recovery outcomes reported by explicit recovery, not precondition
+ * blockers. Kept separate so they cannot appear in preview or confirmation
+ * blocker payloads, while remaining part of the valid result codes.
+ */
+export const WORKTREE_HANDOFF_OUTCOME_CODES = [
   /** Recovery completed a snapshot-backed rollback of an interrupted handoff. */
   'handoff-rolled-back',
 ] as const
 
-/** A typed handoff blocker code. */
+/** A typed handoff blocker code (precondition checks, never post-recovery outcomes). */
 export type WorktreeHandoffBlockerCode = (typeof WORKTREE_HANDOFF_BLOCKER_CODES)[number]
+
+/** A post-recovery outcome code reported by explicit recovery. */
+export type WorktreeHandoffOutcomeCode = (typeof WORKTREE_HANDOFF_OUTCOME_CODES)[number]
+
+/** Every code a handoff attempt can report: precondition blockers + post-recovery outcomes. */
+export type WorktreeHandoffCode = WorktreeHandoffBlockerCode | WorktreeHandoffOutcomeCode
 
 /** Typed blocker payload carried by previews and confirm results. */
 export interface WorktreeHandoffBlocked {
@@ -275,7 +291,7 @@ export type WorktreeHandoffResult =
   | {
       outcome: 'blocked'
       transactionId: string
-      code: WorktreeHandoffBlockerCode
+      code: WorktreeHandoffCode
       reason: string
     }
   | {

@@ -384,10 +384,10 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
       {header}
       <div className="min-h-0 flex-1 overflow-hidden">{body}</div>
       {feedbackBar}
-      {recoveryDialog && (
+      {recoveryDialog && sessionId && (
         <HandoffDialog
           open
-          sessionId={sessionId ?? ''}
+          sessionId={sessionId}
           direction={recoveryDialog.direction}
           isRemoteWorkspace={isRemoteWorkspace}
           initialRecovery={recoveryDialog.recovery}

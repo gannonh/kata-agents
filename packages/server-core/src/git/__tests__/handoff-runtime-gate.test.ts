@@ -3,8 +3,11 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/backend'
 import { loadSession as loadStoredSession } from '@kata-sh/shared/sessions'
+import { setupI18n } from '@kata-sh/shared/i18n/setupI18n'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'
 import { makeTmpDir, cleanup } from './test-helpers'
+
+setupI18n()
 
 const cleanups: string[] = []
 function tmp(): string {
@@ -124,7 +127,6 @@ describe('SessionManager.verifyHandoffRuntimeBeforeSend', () => {
     const managed = injectSession(sm, 's-never-handoff', wsRoot, { workingDirectory: '/srv/dest' })
 
     await (sm as any).verifyHandoffRuntimeBeforeSend(managed.id, managed, { executionCwdRebind: undefined })
-
     expect(managed.handoffRuntimeState).toBeUndefined()
     expect(loadStoredSession(wsRoot, 's-never-handoff')?.handoffRuntimeState).toBeUndefined()
   })
@@ -181,5 +183,28 @@ describe('SessionManager.verifyHandoffRuntimeBeforeSend', () => {
     expect(managed.handoffRuntimeState).toBe('unverified')
     expect(loadStoredSession(wsRoot, 's1')?.handoffRuntimeState).toBe('unverified')
     expect(loadStoredSession(wsRoot, 's1')?.workingDirectory).toBe('/srv/dest')
+  })
+
+  test('sendMessage preflight failure returns the session to idle (regression)', async () => {
+    const { sm } = makeManager()
+    const wsRoot = tmp()
+    const managed = injectSession(sm, 's-preflight', wsRoot, {
+      workingDirectory: '/srv/dest',
+      handoffRuntimeState: 'unverified',
+    })
+    // The agent build succeeds, but the execution-CWD proof fails, so
+    // verifyHandoffRuntimeBeforeSend throws after isProcessing was set.
+    ;(sm as any).getOrCreateAgent = async () => ({
+      executionCwdRebind: createDeterministicHandoffAdapter({ adapterId: 'det', failVerify: true }),
+    })
+
+    // The message was acked before the proof ran; the failure is routed via
+    // the event stream (error + complete) and sendMessage resolves normally.
+    await (sm as any).sendMessage('s-preflight', 'hello')
+
+    // The session must not stay stuck in isProcessing: a later send would
+    // otherwise enter the queue path with no active chat to drain.
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.handoffRuntimeState).toBe('recovery-required')
   })
 })

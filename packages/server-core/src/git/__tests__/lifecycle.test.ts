@@ -215,7 +215,7 @@ describe('SessionManager.deleteSession — handoff fence (AC-7 recovery fencing)
     expect(result.deleted).toBe(true)
     // The escape hatch released the fence and recovered the journal.
     expect(services.handoff.isSessionFenced('stuck')).toBe(false)
-    expect(services.handoff.status('stuck')).resolves.toEqual({ active: false })
+    await expect(services.handoff.status('stuck')).resolves.toEqual({ active: false })
     expect(services.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('recovered')
   })
 })

@@ -68,11 +68,6 @@ export function finalizeHandoffName(value: string): string {
 // Preview helpers
 // ---------------------------------------------------------------------------
 
-/** True when the session workspace is owned by a remote server. */
-export function isRemoteOwnedPreview(isRemoteWorkspace: boolean): boolean {
-  return isRemoteWorkspace
-}
-
 /** Human-readable source state label key for a preview source state. */
 export function sourceStateKey(state: WorktreeHandoffPreview['source']['state']): string {
   return state === 'clean' ? 'git.handoff.state.clean' : state === 'dirty' ? 'git.handoff.state.dirty' : 'git.handoff.state.detached'

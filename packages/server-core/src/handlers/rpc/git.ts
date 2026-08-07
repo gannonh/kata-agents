@@ -524,7 +524,11 @@ export function registerGitHandlers(
     RPC_CHANNELS.git.HANDOFF_STATUS,
     async (_ctx, input: WorktreeHandoffStatusInput) => {
       assertWorktreeV2Enabled()
-      return git.handoff.status(input.sessionId)
+      try {
+        return await git.handoff.status(input.sessionId)
+      } catch (error) {
+        throwTypedWorktreeHandoffError(error)
+      }
     },
   )
 

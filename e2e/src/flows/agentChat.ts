@@ -106,6 +106,7 @@ export async function expectAssistantReply(
 
   const deadline = Date.now() + timeoutMs;
   let idleSince: number | null = null;
+  let sawProcessing = false;
   let lastText = "";
   while (Date.now() < deadline) {
     // count() never auto-waits; textContent() would stall each poll when the
@@ -116,7 +117,7 @@ export async function expectAssistantReply(
     }
 
     let text = "";
-    if ((await page.getByTestId("assistant-turn").count()) > 0 && (await response.count()) > 0) {
+    if ((await response.count()) > 0) {
       text = ((await response.textContent().catch(() => null)) ?? "").trim();
     }
     if (text === turn.expected) return;
@@ -124,16 +125,22 @@ export async function expectAssistantReply(
     if (text !== "") lastText = text;
 
     const idle = await readTurnIdle(page);
+    // Idle observed before the session ever flipped to processing is not a
+    // finished turn — the send may still be starting up. Only arm the
+    // idle timer after at least one active-processing observation.
     if (idle) {
-      if (idleSince === null) idleSince = Date.now();
-      // The turn is complete; give the DOM a moment to flush, then judge.
-      if (Date.now() - idleSince > 2_000) {
-        const got = text || lastText || "(empty reply)";
-        throw new Error(
-          `Assistant reply did not match. Expected ${match === "exact" ? "exactly" : "to contain"} "${turn.expected}", got "${got.slice(0, 300)}"`,
-        );
+      if (sawProcessing) {
+        if (idleSince === null) idleSince = Date.now();
+        // The turn is complete; give the DOM a moment to flush, then judge.
+        if (Date.now() - idleSince > 2_000) {
+          const got = text || lastText || "(empty reply)";
+          throw new Error(
+            `Assistant reply did not match. Expected ${match === "exact" ? "exactly" : "to contain"} "${turn.expected}", got "${got.slice(0, 300)}"`,
+          );
+        }
       }
     } else {
+      sawProcessing = true;
       idleSince = null;
     }
     await page.waitForTimeout(300);

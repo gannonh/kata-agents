@@ -4,11 +4,13 @@ import {
   WORKTREE_HANDOFF_BLOCKED_CODE,
   WORKTREE_HANDOFF_DIRECTIONS,
   WORKTREE_HANDOFF_ERROR_CODE,
+  WORKTREE_HANDOFF_OUTCOME_CODES,
   WORKTREE_HANDOFF_PENDING_CODE,
   WORKTREE_HANDOFF_PREVIEW_STALE_CODE,
   RPC_CHANNELS,
   type WorktreeHandoffBlockerCode,
   type WorktreeHandoffConfirmInput,
+  type WorktreeHandoffOutcomeCode,
   type WorktreeHandoffPreview,
   type WorktreeHandoffProviderCapability,
   type WorktreeHandoffResult,
@@ -105,11 +107,16 @@ describe('Worktree handoff protocol contracts', () => {
   })
 
   it('models every documented blocker code and typed wire errors', () => {
-    // The tuple is the single source of truth for the union: a code added to
+    // Each tuple is the single source of truth for its union: a code added to
     // the type must be listed here, and removing one breaks the length gate.
     const allCodes: readonly WorktreeHandoffBlockerCode[] = WORKTREE_HANDOFF_BLOCKER_CODES
-    expect(allCodes).toHaveLength(17)
-    expect(new Set(allCodes).size).toBe(17)
+    expect(allCodes).toHaveLength(16)
+    expect(new Set(allCodes).size).toBe(16)
+    // Post-recovery outcomes are not precondition blockers and are listed
+    // separately, so they cannot appear in preview/confirm blocker payloads.
+    const outcomeCodes: readonly WorktreeHandoffOutcomeCode[] = WORKTREE_HANDOFF_OUTCOME_CODES
+    expect(outcomeCodes).toEqual(['handoff-rolled-back'])
+    expect(new Set(outcomeCodes).size).toBe(1)
     expect(isErrorCode(WORKTREE_HANDOFF_ERROR_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_BLOCKED_CODE)).toBe(true)
     expect(isErrorCode(WORKTREE_HANDOFF_PREVIEW_STALE_CODE)).toBe(true)

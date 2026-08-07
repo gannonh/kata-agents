@@ -57,6 +57,12 @@ interface MockGit {
 function makeGitServices(overrides?: MockOverrides): MockGit {
   const calls: string[] = []
   const createPrArgs: Array<{ baseRef: string }> = []
+  const maybeThrow = () => {
+    if (overrides?.handoffError === 'typed') {
+      throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'Unknown handoff transaction.')
+    }
+    if (overrides?.handoffError === 'plain') throw new Error('boom')
+  }
   const defaultContext: RepositoryContext = {
     isGitRepository: false,
     repositoryRoot: null,
@@ -192,28 +198,27 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
     handoff: {
       preview: async (input: { sessionId: string; direction: string; worktreeNameSuffix?: string }) => {
         calls.push(`handoff.preview:${input.sessionId}:${input.direction}`)
-        if (overrides?.handoffError === 'typed') throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'Unknown handoff transaction.')
-        if (overrides?.handoffError === 'plain') throw new Error('boom')
+        maybeThrow()
         return { transactionId: 'txn-1', previewFingerprint: 'fp-handoff', direction: input.direction }
       },
       confirm: async (input: { sessionId: string; transactionId: string }) => {
         calls.push(`handoff.confirm:${input.sessionId}:${input.transactionId}`)
-        if (overrides?.handoffError) throw new Error('boom')
+        maybeThrow()
         return { outcome: 'committed', transactionId: input.transactionId }
       },
       status: async (sessionId: string) => {
         calls.push(`handoff.status:${sessionId}`)
-        if (overrides?.handoffError) throw new Error('boom')
+        maybeThrow()
         return { active: false }
       },
       recover: async (input: { sessionId: string; transactionId: string }) => {
         calls.push(`handoff.recover:${input.sessionId}:${input.transactionId}`)
-        if (overrides?.handoffError) throw new Error('boom')
+        maybeThrow()
         return { outcome: 'blocked', transactionId: input.transactionId, code: 'identity-drift', reason: 'stale' }
       },
       cancel: async (input: { sessionId: string; transactionId: string }) => {
         calls.push(`handoff.cancel:${input.sessionId}:${input.transactionId}`)
-        if (overrides?.handoffError) throw new Error('boom')
+        maybeThrow()
         return { active: false }
       },
     },
@@ -563,21 +568,25 @@ describe('registerGitHandlers', () => {
     process.env[FLAG] = '1'
     process.env[V2_FLAG] = '1'
 
+    const handoffInputs = {
+      [RPC_CHANNELS.git.HANDOFF_PREVIEW]: { sessionId: 's1', direction: 'current-to-managed' },
+      [RPC_CHANNELS.git.HANDOFF_CONFIRM]: { sessionId: 's1', direction: 'current-to-managed', transactionId: 'txn-1', previewFingerprint: 'fp' },
+      [RPC_CHANNELS.git.HANDOFF_STATUS]: { sessionId: 's1' },
+      [RPC_CHANNELS.git.HANDOFF_RECOVER]: { sessionId: 's1', transactionId: 'txn-1' },
+      [RPC_CHANNELS.git.HANDOFF_CANCEL]: { sessionId: 's1', transactionId: 'txn-1' },
+    } as const
+
     const typed = makeHarness(makeGitServices({ handoffError: 'typed' }).git)
-    await expect(
-      typed.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(typed.ctx, {
-        sessionId: 's1',
-        direction: 'current-to-managed',
-      }),
-    ).rejects.toMatchObject({ code: WORKTREE_HANDOFF_ERROR_CODE })
+    for (const [channel, input] of Object.entries(handoffInputs)) {
+      await expect(typed.handlers.get(channel)!(typed.ctx, input as never)).rejects.toMatchObject({
+        code: WORKTREE_HANDOFF_ERROR_CODE,
+      })
+    }
 
     const plain = makeHarness(makeGitServices({ handoffError: 'plain' }).git)
-    await expect(
-      plain.handlers.get(RPC_CHANNELS.git.HANDOFF_PREVIEW)!(plain.ctx, {
-        sessionId: 's1',
-        direction: 'current-to-managed',
-      }),
-    ).rejects.toMatchObject({ message: 'boom' })
+    for (const [channel, input] of Object.entries(handoffInputs)) {
+      await expect(plain.handlers.get(channel)!(plain.ctx, input as never)).rejects.toMatchObject({ message: 'boom' })
+    }
   })
 
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {

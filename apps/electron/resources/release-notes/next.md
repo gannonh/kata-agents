@@ -12,7 +12,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Worktree handoff fence fixes** — Dismissing the handoff preview dialog now releases the pending transaction (the session no longer stays fenced after Cancel), a session whose handoff is stuck in recovery-required can be deleted as the escape hatch, and an interrupted handoff that already rebound the provider runtime is rebound back to the source checkout during recovery ([#42](https://github.com/gannonh/kata-agents/issues/42)).
+- **Worktree handoff fence fixes** — Dismissing the handoff preview dialog now releases the pending transaction (the session no longer stays fenced after Cancel), a session whose handoff is stuck in recovery-required can be deleted as the escape hatch, an interrupted handoff that already rebound the provider runtime is rebound back to the source checkout during recovery, and a failed execution-CWD proof no longer leaves the session stuck in a processing state ([#42](https://github.com/gannonh/kata-agents/issues/42)).
 
 - **Worktree V2 recovery and protection accuracy** — Sessions bound to a removed worktree now show the exact lifecycle recovery state (Snapshotted, Restoring, …) with the worktree name instead of a generic “missing” badge; manual deletion is rejected server-side while any owner is active or flagged; retries of failed removals are governed by the verified snapshot when the checkout is no longer inspectable; the inventory refresh control renders a translated label ([#41](https://github.com/gannonh/kata-agents/issues/41)).
 

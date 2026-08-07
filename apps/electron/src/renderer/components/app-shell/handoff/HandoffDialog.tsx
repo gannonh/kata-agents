@@ -34,7 +34,6 @@ import {
   canRecoverHandoff,
   finalizeHandoffName,
   initialHandoffDialogState,
-  isRemoteOwnedPreview,
   reduceHandoffDialog,
   sourceStateKey,
   type HandoffDialogState,
@@ -109,7 +108,7 @@ function PreviewBody({
   const { t } = useTranslation()
   const preview = state.preview
   if (!preview) return null
-  const remote = isRemoteOwnedPreview(isRemoteWorkspace)
+  const remote = isRemoteWorkspace
   const sourceState = sourceStateKey(preview.source.state)
 
   return (

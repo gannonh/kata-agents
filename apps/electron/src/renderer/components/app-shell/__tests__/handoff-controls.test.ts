@@ -13,7 +13,6 @@ import {
   finalizeHandoffName,
   handoffDirectionsForCheckout,
   initialHandoffDialogState,
-  isRemoteOwnedPreview,
   normalizeHandoffNameInput,
   recoveryResultFromStatus,
   reduceHandoffDialog,
@@ -109,11 +108,6 @@ describe('handoff direction availability', () => {
 })
 
 describe('handoff preview helpers', () => {
-  it('labels previews as remote only when the workspace is remote', () => {
-    expect(isRemoteOwnedPreview(false)).toBe(false)
-    expect(isRemoteOwnedPreview(true)).toBe(true)
-  })
-
   it('maps source states to i18n keys', () => {
     expect(sourceStateKey('clean')).toBe('git.handoff.state.clean')
     expect(sourceStateKey('dirty')).toBe('git.handoff.state.dirty')
