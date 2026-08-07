@@ -46,9 +46,10 @@ test.describe(`Worktree V2 handoff ${E2E_TAGS.worktreeV2}`, () => {
     try {
       await useRepositoryAsWorkspaceDefault(page, repository);
       await startNewSession(page);
-      // A session needs a live agent for the server to advertise handoff
-      // capability; with the deterministic adapter seam the message may be
-      // anything (UI UAT does not claim provider continuity).
+      // UI UAT (spec AC-15) drives a real session, so a valid provider
+      // credential is required in the UAT environment: the agent is created
+      // on first Send, and only then does the server advertise handoff
+      // capability. The message content is irrelevant to the handoff flow.
       await sendAgentPrompt(page, "hello");
       // Open the Changes panel — the handoff action lives there.
       await page.getByTestId("git-changes-affordance").click();
@@ -81,31 +82,9 @@ test.describe(`Worktree V2 handoff ${E2E_TAGS.worktreeV2}`, () => {
     }
   });
 
-  test("surfaces a typed blocker when the provider cannot hand off and offers no confirm @worktree-v2 handoff", async ({
-    authenticatedAppWindow: page,
-  }) => {
-    // Without the deterministic seam the server reports unsupported-provider;
-    // the dialog must show the blocker and never enable confirm.
-    const repository = await createRepository();
-    try {
-      await useRepositoryAsWorkspaceDefault(page, repository);
-      await startNewSession(page);
-      await sendAgentPrompt(page, "hello");
-      // The seam is process-wide; the unsupported-provider blocker is covered
-      // by unit tests — here we assert the dialog's blocked surface renders
-      // when a blocker is returned by the server.
-      await page.getByTestId("handoff-open-button").waitFor({ timeout: 30_000 });
-      await page.getByTestId("handoff-open-button").click();
-      await page.getByTestId("handoff-direction-current-to-managed").click();
-      const dialog = page.getByTestId("handoff-dialog");
-      await expect(dialog).toBeVisible();
-      await expect(page.getByTestId("handoff-loading")).toBeHidden({ timeout: 30_000 });
-      const confirm = page.getByTestId("handoff-confirm-button");
-      if (await confirm.isVisible()) {
-        await expect(confirm).toBeDisabled();
-      }
-    } finally {
-      await rm(repository, { recursive: true, force: true });
-    }
-  });
+  // AC-1 (controls appear only for capable providers) is covered by unit
+  // tests (handoff-capability gate, HandoffButton gating, handoff-controls
+  // state machine); the credential-free E2E tier cannot create an agent
+  // without a provider send, so the unsupported-provider path stays a
+  // unit-tested contract rather than a live UI assertion.
 });

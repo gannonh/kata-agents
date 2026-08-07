@@ -303,6 +303,49 @@ describe('handoff preview — current-to-managed', () => {
     expect(p.blocked).toBeUndefined()
     expect(p.source.checkoutPath).toBe(realpathSync(harness.repo))
   })
+
+  test('blocks an invalid generated name before any Git inspection', async () => {
+    currentSession()
+
+    const p = await preview('current-to-managed', 'bad..name')
+
+    expect(p.blocked?.code).toBe('invalid-name')
+  })
+
+  test('blocks when the branch is checked out by another worktree (branch-occupied-outside-journal)', async () => {
+    const record = await managedSession('occupied')
+    // A managed worktree already checks out kata-agent/occupied; a current
+    // session asking for the same name must be blocked.
+    currentSession()
+
+    const p = await preview('current-to-managed', 'occupied')
+
+    expect(p.blocked?.code).toBe('branch-occupied-outside-journal')
+    expect(record.expectedBranch).toBe('kata-agent/occupied')
+  })
+
+  test('blocks while lifecycle cleanup is in progress (cleanup-in-progress)', async () => {
+    currentSession()
+    // Simulate an active retention sweep by claiming the sweep slot.
+    ;(harness.svc.lifecycle as unknown as { sweepRunning: object }).sweepRunning = {}
+
+    const p = await preview('current-to-managed')
+
+    expect(p.blocked?.code).toBe('cleanup-in-progress')
+  })
+
+  test('blocks when feature flags are disabled (flags-disabled)', async () => {
+    currentSession()
+    const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '0'
+    try {
+      const p = await preview('current-to-managed')
+      expect(p.blocked?.code).toBe('flags-disabled')
+    } finally {
+      if (previousV2 === undefined) delete process.env.KATA_FEATURE_WORKTREE_V2
+      else process.env.KATA_FEATURE_WORKTREE_V2 = previousV2
+    }
+  })
 })
 
 async function managedSession(name = 'demo') {
@@ -474,7 +517,28 @@ describe('handoff preview — managed-to-current', () => {
     expect(p.blocked?.code).toBe('another-path-user')
   })
 
-  test('blocks when the managed worktree is missing (unsupported-snapshot)', async () => {
+  test('blocks when the current checkout is detached (destination-detached)', async () => {
+    await managedSession()
+    await git(harness.repo, ['switch', '--detach', 'HEAD'])
+
+    const p = await preview('managed-to-current')
+
+    expect(p.blocked?.code).toBe('destination-detached')
+  })
+
+  test('blocks when a Git operation is in progress on the source (git-operation-in-progress)', async () => {
+    const record = await managedSession('git-op')
+    const wtGitDir = (await git(record.checkoutPath, ['rev-parse', '--path-format=absolute', '--git-dir'])).trim()
+    const { writeFileSync } = await import('node:fs')
+    // A merge marker makes the repository report an in-progress operation.
+    writeFileSync(join(wtGitDir, 'MERGE_HEAD'), (await git(harness.repo, ['rev-parse', 'HEAD'])).trim())
+
+    const p = await preview('managed-to-current', 'git-op')
+
+    expect(p.blocked?.code).toBe('git-operation-in-progress')
+  })
+
+  test('blocks when the managed worktree is missing', async () => {
     const record = await managedSession()
     harness.svc.pathLeases.release('session-1', record.checkoutPath)
     const { rmSync } = await import('node:fs')
@@ -482,6 +546,7 @@ describe('handoff preview — managed-to-current', () => {
 
     const p = await preview('managed-to-current')
 
+    // The missing checkout is detected at the source-context inspection first.
     expect(p.blocked).toBeDefined()
     expect((p.blocked?.code as WorktreeHandoffBlockerCode) ?? '').toBeTruthy()
   })
@@ -681,6 +746,44 @@ describe('handoff confirm — current-to-managed', () => {
     if (result.outcome !== 'committed') return
     expect(readFileSync(join(harness.repo, 'secrets.env'), 'utf8')).toBe('keep this\n')
     expect(readFileSync(join(result.summary.executionCwd, 'secrets.env'), 'utf8')).toBe('keep this\n')
+  })
+
+  test('transfers binary, rename, deletion, and executable state byte-for-byte through c2m', async () => {
+    currentSession()
+    // Binary tracked file + executable + a tracked file to rename/delete.
+    const binary = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00, 0x42])
+    const { writeFileSync, chmodSync } = await import('node:fs')
+    writeFileSync(join(harness.repo, 'blob.bin'), binary)
+    writeFileSync(join(harness.repo, 'run.sh'), '#!/bin/sh\necho hi\n')
+    chmodSync(join(harness.repo, 'run.sh'), 0o755)
+    writeFileSync(join(harness.repo, 'old-name.txt'), 'rename me\n')
+    writeFileSync(join(harness.repo, 'delete-me.txt'), 'bye\n')
+    await git(harness.repo, ['add', '-A'])
+    await git(harness.repo, ['commit', '-m', 'fixture state'])
+    // Staged rename + staged deletion + unstaged binary modification.
+    await git(harness.repo, ['mv', 'old-name.txt', 'new-name.txt'])
+    await git(harness.repo, ['rm', 'delete-me.txt'])
+    writeFileSync(join(harness.repo, 'blob.bin'), Buffer.concat([binary, Buffer.from([0x99])]))
+
+    const p = await preview('current-to-managed', 'binary-state')
+    expect(p.blocked).toBeUndefined()
+    const result = await harness.svc.handoff.confirm({
+      sessionId: 'session-1',
+      direction: 'current-to-managed',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+    })
+
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+    const target = result.summary.executionCwd
+    expect(readFileSync(join(target, 'blob.bin'))).toEqual(Buffer.concat([binary, Buffer.from([0x99])]))
+    expect(readFileSync(join(target, 'new-name.txt'), 'utf8')).toBe('rename me\n')
+    expect(existsSync(join(target, 'old-name.txt'))).toBe(false)
+    expect(existsSync(join(target, 'delete-me.txt'))).toBe(false)
+    expect((await git(target, ['diff', '--cached', '--name-status'])).trim()).toContain('R100')
+    expect((await git(target, ['diff', '--cached', '--name-status'])).trim()).toContain('D\tdelete-me.txt')
+    expect((await git(target, ['ls-files', '-s', 'run.sh'])).trim()).toMatch(/100755/)
   })
 
   test('rejects a stale preview without creating a target or mutating source', async () => {
