@@ -148,6 +148,7 @@ describe('Conversation fork protocol contracts', () => {
     // Each tuple is the single source of truth for its union: a code added to
     // the type must be listed here, and removing one breaks the length gate.
     const allCodes: readonly ConversationForkBlockerCode[] = CONVERSATION_FORK_BLOCKER_CODES
+    expect(allCodes).toHaveLength(14)
     expect(new Set(allCodes).size).toBe(allCodes.length)
     const required: ConversationForkBlockerCode[] = [
       'unsupported-provider',
