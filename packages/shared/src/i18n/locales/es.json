@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "Se descartará {{count}} commit sin enviar",
   "git.delete.unpushedWarning_other": "Se descartarán {{count}} commits sin enviar",
   "git.delete.worktreeKeptNote": "De forma predeterminada, el worktree se conserva.",
+  "git.fork.pendingFence": "Una bifurcación de conversación está pendiente o requiere recuperación.",
   "git.github.authRequired": "Inicia sesión en GitHub",
   "git.github.installRequired": "Instalar GitHub CLI",
   "git.handoff.action": "Entregar",

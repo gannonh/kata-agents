@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "{{count}} nicht gepushter Commit wird verworfen",
   "git.delete.unpushedWarning_other": "{{count}} nicht gepushte Commits werden verworfen",
   "git.delete.worktreeKeptNote": "Standardmäßig bleibt der Worktree-Checkout erhalten.",
+  "git.fork.pendingFence": "Eine Gesprächs-Verzweigung ist ausstehend oder erfordert Wiederherstellung.",
   "git.github.authRequired": "Bei GitHub anmelden",
   "git.github.installRequired": "GitHub CLI installieren",
   "git.handoff.action": "Übergeben",

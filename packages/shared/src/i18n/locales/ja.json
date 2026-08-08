@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "未プッシュのコミット {{count}} 件が破棄されます",
   "git.delete.unpushedWarning_other": "未プッシュのコミット {{count}} 件が破棄されます",
   "git.delete.worktreeKeptNote": "既定ではワークツリーのチェックアウトは保持されます。",
+  "git.fork.pendingFence": "会話のフォークが保留中か、リカバリが必要です。",
   "git.github.authRequired": "GitHub にサインイン",
   "git.github.installRequired": "GitHub CLI をインストール",
   "git.handoff.action": "引き継ぐ",

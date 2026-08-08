@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "{{count}} nem beküldött commit elveszik",
   "git.delete.unpushedWarning_other": "{{count}} nem beküldött commit elveszik",
   "git.delete.worktreeKeptNote": "Alapértelmezés szerint a worktree checkout megmarad.",
+  "git.fork.pendingFence": "A beszélgetés-elágazás függőben van vagy helyreállítást igényel.",
   "git.github.authRequired": "Bejelentkezés a GitHubra",
   "git.github.installRequired": "GitHub CLI telepítése",
   "git.handoff.action": "Átadás",

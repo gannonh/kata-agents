@@ -540,6 +540,7 @@
   "git.delete.unpushedWarning_one": "{{count}} niewysłany commit zostanie odrzucony",
   "git.delete.unpushedWarning_other": "{{count}} niewysłanych commitów zostanie odrzuconych",
   "git.delete.worktreeKeptNote": "Domyślnie checkout worktree jest zachowywany.",
+  "git.fork.pendingFence": "Rozgałęzienie rozmowy jest w toku lub wymaga odzyskania.",
   "git.github.authRequired": "Zaloguj się do GitHub",
   "git.github.installRequired": "Zainstaluj GitHub CLI",
   "git.handoff.action": "Przekaż",

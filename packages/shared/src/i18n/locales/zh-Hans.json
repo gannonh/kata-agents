@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "将丢弃 {{count}} 个未推送的提交",
   "git.delete.unpushedWarning_other": "将丢弃 {{count}} 个未推送的提交",
   "git.delete.worktreeKeptNote": "默认情况下会保留工作区检出。",
+  "git.fork.pendingFence": "对话分支正在进行或需要恢复。",
   "git.github.authRequired": "登录 GitHub",
   "git.github.installRequired": "安装 GitHub CLI",
   "git.handoff.action": "交接",

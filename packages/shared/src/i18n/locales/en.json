@@ -534,6 +534,7 @@
   "git.delete.unpushedWarning_one": "{{count}} unpushed commit will be discarded",
   "git.delete.unpushedWarning_other": "{{count}} unpushed commits will be discarded",
   "git.delete.worktreeKeptNote": "By default the worktree checkout is preserved.",
+  "git.fork.pendingFence": "A conversation fork is pending or requires recovery.",
   "git.github.authRequired": "Sign in to GitHub",
   "git.github.installRequired": "Install GitHub CLI",
   "git.handoff.action": "Hand off",
