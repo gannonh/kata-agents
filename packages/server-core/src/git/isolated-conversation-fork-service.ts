@@ -376,6 +376,34 @@ export class IsolatedConversationForkService {
   }
 
   // -------------------------------------------------------------------------
+  // Establishment
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record the child's first-Send provider establishment on the committed
+   * fork journal entry (metadata-only; the entry status stays 'committed').
+   * The child session record is authoritative: returns false when the
+   * committed entry is missing (the caller logs-and-continues, never fails
+   * Send for a bookkeeping miss).
+   */
+  markEstablished(transactionId: string, childSdkSessionId: string): boolean {
+    const entry = this.deps.journal.entries().find(
+      (candidate) => candidate.op === 'fork' && candidate.recordId === transactionId,
+    )
+    if (!entry || entry.status !== 'committed') {
+      // Missing/not-yet-committed journal entry: the durable child session
+      // record is authoritative; skip without failing the establishment.
+      return false
+    }
+    this.deps.journal.updateMetadata(entry.journalId, {
+      state: 'established',
+      childSdkSessionId,
+      establishedAt: Date.now(),
+    })
+    return true
+  }
+
+  // -------------------------------------------------------------------------
   // Cancel
   // -------------------------------------------------------------------------
 

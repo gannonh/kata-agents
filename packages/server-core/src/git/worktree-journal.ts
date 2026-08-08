@@ -168,12 +168,17 @@ export class WorktreeJournal {
     })
   }
 
-  /** Update restart-relevant transaction facts without changing its state. */
+  /**
+   * Update restart-relevant transaction facts without changing its state.
+   * In-progress and failed entries always accept metadata; committed entries
+   * accept metadata-only updates too (e.g. the fork journal records the
+   * child provider identity on first-Send establishment after commit).
+   */
   updateMetadata(journalId: string, metadata: Record<string, unknown>): void {
     this.lock.runSync(() => {
       const entries = this.readAll()
       const entry = entries.find((candidate) => candidate.journalId === journalId)
-      if (!entry || (entry.status !== 'in-progress' && entry.status !== 'failed')) return
+      if (!entry || (entry.status !== 'in-progress' && entry.status !== 'failed' && entry.status !== 'committed')) return
       entry.metadata = { ...(entry.metadata ?? {}), ...metadata }
       this.writeAll(entries)
     })

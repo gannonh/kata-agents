@@ -23,6 +23,7 @@ import { PathLeaseManager } from './path-leases'
 import { WorktreeJournal, journalPathFor } from './worktree-journal'
 import { WorktreeHandoffService, type WorktreeHandoffHooks } from './worktree-handoff-service'
 import { IsolatedConversationForkService, type ConversationForkHooks } from './isolated-conversation-fork-service'
+import { ForkOrphanLedger, forkOrphanLedgerPathFor } from './fork-orphan-ledger'
 
 export * from './command-runner'
 export * from './repository-service'
@@ -41,6 +42,7 @@ export * from './path-leases'
 export * from './worktree-journal'
 export * from './worktree-handoff-service'
 export * from './isolated-conversation-fork-service'
+export * from './fork-orphan-ledger'
 
 export interface GitServices {
   repository: RepositoryService
@@ -66,6 +68,8 @@ export interface GitServices {
   handoff: WorktreeHandoffService
   /** Phase 4: isolated conversation forks (eligibility preview + seed capture). */
   fork: IsolatedConversationForkService
+  /** Phase 4: durable orphan ledger for failed/unverified fork establishments. */
+  forkOrphans: ForkOrphanLedger
 }
 
 export interface GitServicesConfig {
@@ -125,6 +129,7 @@ export function createGitServices(config: GitServicesConfig): GitServices {
   const snapshots = new WorktreeSnapshotService(config.snapshotsRoot ?? join(CONFIG_DIR, 'snapshots'))
   const pathLeases = new PathLeaseManager(join(lockBase, 'path-leases'))
   const journal = new WorktreeJournal(journalPathFor(config.registryPath))
+  const forkOrphans = new ForkOrphanLedger(forkOrphanLedgerPathFor(config.registryPath))
   const lifecycle = new WorktreeLifecycleService({
     registry,
     snapshots,
@@ -178,6 +183,7 @@ export function createGitServices(config: GitServicesConfig): GitServices {
     journal,
     handoff,
     fork,
+    forkOrphans,
     get worktreeRoot() {
       return worktrees.getWorktreeRoot()
     },

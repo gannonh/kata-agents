@@ -1835,4 +1835,33 @@ describe('IsolatedConversationForkService recover', () => {
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
     expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
   })
+
+  test('markEstablished records the child provider identity on the committed journal entry (metadata-only)', async () => {
+    currentSession()
+    const p = await preview('isolated-worktree', 'established-child')
+    expect(p.blocked).toBeUndefined()
+    const result = await confirmIsolated(p, 'established-child')
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)!
+    expect(entry.status).toBe('committed')
+    expect(entry.metadata?.state).not.toBe('established')
+
+    // First-Send establishment records the provider child ID on the same
+    // committed entry without changing its status.
+    harness.svc.fork.markEstablished(p.transactionId, 'sdk-child-xyz')
+
+    const updated = forkJournalEntries().find((e) => e.recordId === p.transactionId)!
+    expect(updated.status).toBe('committed')
+    expect(updated.metadata?.state).toBe('established')
+    expect(updated.metadata?.childSdkSessionId).toBe('sdk-child-xyz')
+    expect(typeof updated.metadata?.establishedAt).toBe('number')
+  })
+
+  test('markEstablished for an unknown/missing transaction is a no-op (child session record is authoritative)', async () => {
+    currentSession()
+    expect(() => harness.svc.fork.markEstablished('no-such-transaction', 'sdk-child-ghost')).not.toThrow()
+    expect(forkJournalEntries().some((e) => e.metadata?.state === 'established')).toBe(false)
+  })
 })
