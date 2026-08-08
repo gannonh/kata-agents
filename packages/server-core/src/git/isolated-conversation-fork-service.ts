@@ -530,6 +530,7 @@ export class IsolatedConversationForkService {
     capability: ConversationForkProviderCapability | null,
     transactionIdToAllow?: string,
     recordLookup?: (id: string) => ManagedWorktreeRecordV2 | undefined,
+    options?: { allowOwnedDestination?: boolean; ownedLeaseId?: string },
   ): Promise<ForkFacts> {
     const fail = (code: ConversationForkBlockerCode, reason: string, overrides: Partial<ForkFacts> = {}): ForkFacts =>
       ({ ...this.fallbackFacts(input.sessionId, session, this.deps.serverId), blocker: code, blockerReason: reason, currentHead, ...overrides })
@@ -657,13 +658,22 @@ export class IsolatedConversationForkService {
         worktreeNameSuffix: nameSuffix,
         pathToken,
       })
+      // An interrupted-transaction replay treats the transaction's own
+      // materialized destination as the as-of-preview value: the collision
+      // checks and the fingerprint then revalidate the ORIGINAL preview facts
+      // instead of the transaction's own effects, so a crash after target
+      // materialization stays resumable (name-collision would otherwise block
+      // the transaction's own destination forever).
+      const ownedDestination = options?.allowOwnedDestination === true
       destination = {
         serverId: this.deps.serverId,
         repositoryRoot: sourceCtx.repositoryRoot ?? sourcePath,
         branch: expectedBranch,
         checkoutPath: destinationPath,
-        exists: existsSync(destinationPath),
-        leases: this.deps.leases.leasedBy(destinationPath),
+        exists: ownedDestination ? false : existsSync(destinationPath),
+        leases: this.deps.leases
+          .leasedBy(destinationPath)
+          .filter((owner) => owner !== options?.ownedLeaseId),
       }
       const nameValid = nameSuffix.trim() === nameSuffix && nameSuffix.length > 0 && !nameSuffix.includes('\0')
       const refCheck = nameValid
@@ -672,10 +682,10 @@ export class IsolatedConversationForkService {
       if (!nameValid || !refCheck || refCheck.exitCode !== 0) {
         return { ...fail('invalid-name', 'The requested worktree name is not a valid Git branch suffix.'), destination, expectedBranch, nameSuffix, pathToken }
       }
-      if (destination.exists || lstatSyncSafe(destinationPath) === 'symlink') {
+      if (!ownedDestination && (destination.exists || lstatSyncSafe(destinationPath) === 'symlink')) {
         return { ...fail('name-collision', 'The requested worktree name resolves to an occupied destination.'), destination, expectedBranch, nameSuffix, pathToken }
       }
-      if (await this.branchOccupied(repositoryRoot, expectedBranch)) {
+      if (!ownedDestination && (await this.branchOccupied(repositoryRoot, expectedBranch))) {
         return { ...fail('name-collision', `The branch ${expectedBranch} is already in use.`), destination, expectedBranch, nameSuffix, pathToken }
       }
     } else {
@@ -883,6 +893,12 @@ export class IsolatedConversationForkService {
         capability,
         txn.transactionId,
         (id: string) => tx.get(id),
+        {
+          // A transaction that already materialized its target must not be
+          // blocked by its own destination when resuming after a crash.
+          allowOwnedDestination: txn.steps.includes('target-materialized'),
+          ownedLeaseId: `fork:${txn.transactionId}`,
+        },
       )
       if (gathered.blocker) {
         this.deps.journal.fail(txn.journalId, gathered.blockerReason ?? 'Fork precondition failed.')
@@ -920,6 +936,9 @@ export class IsolatedConversationForkService {
         gathered,
         capability,
         txn.transactionId,
+        // Exclude this transaction's own destination lease (if held) so the
+        // revalidation fingerprint matches the preview, not the txn's effects.
+        `fork:${txn.transactionId}`,
       )
       if (freshFingerprint !== txn.fingerprint || input.previewFingerprint !== txn.fingerprint) {
         this.deps.journal.fail(txn.journalId, 'The fork facts changed after the preview.')
@@ -1663,6 +1682,7 @@ export class IsolatedConversationForkService {
     facts: ForkFacts,
     capability: ConversationForkProviderCapability | null,
     transactionId: string,
+    excludeLeaseId?: string,
   ): Promise<string> {
     const hash = createHash('sha256')
     hash.update('kata-isolated-conversation-fork-v1\0')
@@ -1709,6 +1729,7 @@ export class IsolatedConversationForkService {
         ownerSessionIds: [...facts.ownerSessionIds].sort(),
         allPathLeases: [...this.deps.leases.allLeases().entries()]
           .map(([owner, paths]) => [owner, [...paths].sort()])
+          .filter(([owner]) => owner !== excludeLeaseId)
           .sort(([a], [b]) => String(a).localeCompare(String(b))),
       }),
     )

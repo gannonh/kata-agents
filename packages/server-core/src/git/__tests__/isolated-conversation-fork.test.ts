@@ -1090,6 +1090,120 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/forward-replay')).toHaveLength(1)
     expect(forkJournalEntries().filter((entry) => entry.recordId === p.transactionId && entry.status === 'committed')).toHaveLength(1)
   })
+
+  test('resumes a fork journal that crashed after target materialization (own destination is not a name-collision)', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+    const p = await preview('isolated-worktree', 'crash-materialized')
+    expect(p.blocked).toBeUndefined()
+    if (p.blocked) return
+
+    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const headOid = (await git(harness.repo, ['rev-parse', 'HEAD'])).trim()
+    const branch = (await git(harness.repo, ['branch', '--show-current'])).trim()
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)!
+    const journalId = entry.journalId
+    const pathToken = entry.metadata?.pathToken as string
+    const journal = harness.svc.journal
+
+    // Drive the durable journal to the exact post-materialization state a crash
+    // would leave: steps recorded through target-verified, a real target
+    // worktree materialized, a real seed captured and restored into it. The
+    // in-memory transaction is gone (server restarted).
+    journal.step(journalId, 'locks-acquired')
+    journal.step(journalId, 'source-quiesced')
+    const seed = await harness.svc.fork.captureForkSeed({
+      checkoutPath: realpathSync(harness.repo),
+      repositoryRoot: realpathSync(harness.repo),
+      gitCommonDir,
+      expectedBranch: branch,
+      baseRef: null,
+      ownerSessionIds: ['session-1'],
+      policyVersion: harness.svc.worktreeSettings.getSnapshot().version,
+      previewFingerprint: p.previewFingerprint,
+    })
+    journal.updateMetadata(journalId, {
+      state: 'seed-captured',
+      seedSnapshotId: seed.snapshotId,
+      seedFingerprint: seed.fingerprint,
+      headOid,
+    })
+    journal.step(journalId, 'seed-captured')
+
+    const created = await harness.svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'session-1',
+      repositoryRoot: realpathSync(harness.repo),
+      gitCommonDir,
+      baseRef: headOid,
+      worktreeNameSuffix: 'crash-materialized',
+      pathToken,
+      lockAlreadyHeld: true,
+    })
+    journal.updateMetadata(journalId, {
+      state: 'target-materialized',
+      managedWorktreeId: created.record.managedWorktreeId,
+    })
+    journal.step(journalId, 'target-materialized')
+
+    const seedMeta = harness.svc.snapshots.loadSnapshotMeta(seed.snapshotId)
+    expect(seedMeta).toBeTruthy()
+    if (!seedMeta) return
+    await harness.svc.snapshots.applySnapshotToCheckout({
+      meta: seedMeta,
+      checkoutPath: created.record.checkoutPath,
+    })
+    journal.step(journalId, 'target-restored')
+    journal.step(journalId, 'target-verified')
+
+    // A fresh server instance over the same roots must rehydrate the
+    // transaction and resume WITHOUT treating the transaction's own
+    // materialized destination as a name-collision, and without creating a
+    // second target/child/owner.
+    const freshChildCalls: ConversationForkChildSessionInput[] = []
+    const fresh = createGitServices({
+      worktreeRoot: join(harness.root, 'worktrees'),
+      registryPath: join(harness.root, 'worktrees', 'registry.json'),
+      snapshotsRoot: join(harness.root, 'snapshots'),
+      lockDirectory: join(harness.root, 'locks'),
+      forkHooks: {
+        resolveSession: (sessionId) => harness.sessions.get(sessionId) ?? null,
+        resolveCapability: () => ({ adapterId: 'pi-test', strictCrossCwdNativeFork: true }),
+        resolveCapabilityAdapter: () => createDeterministicStrictForkAdapter({ adapterId: 'pi-test' }),
+        isSessionActive: () => false,
+        createForkChildSession: async (input) => {
+          freshChildCalls.push(input)
+          return 'child-crash-resume'
+        },
+        deleteForkChildSession: async () => undefined,
+      },
+    })
+    fresh.lifecycle.markReady()
+
+    const result = await fresh.fork.confirm({
+      sessionId: 'session-1',
+      strategy: 'isolated-worktree',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+      worktreeNameSuffix: 'crash-materialized',
+    })
+
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+    expect(freshChildCalls).toHaveLength(1)
+    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.managedWorktreeId).toBe(created.record.managedWorktreeId)
+    expect(records[0]?.ownerSessionIds).toEqual(['child-crash-resume'])
+    expect(
+      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized'),
+    ).toHaveLength(1)
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
+    // The seed is released only after the durable commit.
+    expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
+  })
 })
 
 describe('IsolatedConversationForkService fork-journal GC retention', () => {
