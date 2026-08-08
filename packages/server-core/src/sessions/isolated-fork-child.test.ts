@@ -672,6 +672,36 @@ describe('SessionManager isolated fork child creation', () => {
     expect(services.forkOrphans.entries()[0]!.result).toBe('unverified')
   })
 
+  it('rejects a stale execution proof before attaching the provider child', async () => {
+    injectSession('source-stale-proof')
+    await persistSourceWithMessages('source-stale-proof')
+    armStrictAdapter('source-stale-proof')
+    const childId = await confirmChild('source-stale-proof', 'stale-proof-child')
+    expect(childId).toBeDefined()
+    if (!childId) throw new Error('Expected isolated child confirmation to succeed')
+
+    const chatCalls: string[] = []
+    armChildAgent(childId, {
+      adapterId: 'pi-test',
+      forkCapability: () => ({ adapterId: 'pi-test', strictCrossCwdNativeFork: true }),
+      establishNativeFork: async (input) => ({
+        childSdkSessionId: 'sdk-stale-child',
+        proof: {
+          adapterId: 'pi-test',
+          destinationPath: input.executionCwd,
+          verifiedAt: 0,
+          checks: ['file:read', 'shell:cwd', 'mcp:list', 'provider:cwd'],
+        },
+      }),
+    }, chatCalls)
+
+    await expect(sm.sendMessage(childId, 'stale proof test')).rejects.toMatchObject({
+      code: WORKTREE_FORK_ERROR_CODE,
+    })
+    expect(loadStoredSession(root, childId)!.sdkSessionId).toBeUndefined()
+    expect(chatCalls).toHaveLength(0)
+  })
+
   it('ordinary session sends are unaffected by the pending-fork establish flow', async () => {
     injectSession('plain-1')
     const chatCalls: string[] = []

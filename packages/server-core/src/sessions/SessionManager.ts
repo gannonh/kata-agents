@@ -998,6 +998,7 @@ interface ManagedSession {
 }
 
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
+const FORK_PROOF_MAX_AGE_MS = 5 * 60 * 1000
 
 export interface AutoRetryPendingHost {
   autoRetryPending?: {
@@ -5742,6 +5743,7 @@ export class SessionManager implements ISessionManager {
     // must come from the selected adapter, name the exact destination, and
     // cover every execution surface that an isolated child can use.
     const proof = result?.proof
+    const proofNow = Date.now()
     const requiredProofCategories = ['file:', 'shell:', 'mcp:', 'provider:'] as const
     const proofIsValid =
       !!result &&
@@ -5756,6 +5758,8 @@ export class SessionManager implements ISessionManager {
       isAbsolute(proof.destinationPath) &&
       resolve(proof.destinationPath) === resolve(pending.executionCwd) &&
       Number.isFinite(proof.verifiedAt) &&
+      proof.verifiedAt > proofNow - FORK_PROOF_MAX_AGE_MS &&
+      proof.verifiedAt <= proofNow &&
       Array.isArray(proof.checks) &&
       proof.checks.every((check) => typeof check === 'string') &&
       requiredProofCategories.every((category) => proof.checks.some((check) => check.startsWith(category)))
