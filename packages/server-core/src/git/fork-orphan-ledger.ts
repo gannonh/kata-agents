@@ -36,6 +36,38 @@ export interface ForkOrphanEntry {
   error?: string
 }
 
+/** Append-only resolution marker line written by reconcile (Task 5). */
+export interface ForkOrphanResolutionMarker {
+  type: 'resolution'
+  attemptId: string
+  result: 'resolved'
+  resolvedAt: number
+}
+
+export interface ForkOrphanReconcileInput {
+  /**
+   * True when the fork transaction is now durably established (the fork
+   * journal records the child session + established state under the same
+   * transaction id). The caller wires this to the journal.
+   */
+  isEstablished: (transactionId: string) => boolean
+  /** Injectable clock for deterministic retention tests (defaults to now). */
+  now?: number
+  /** Retention window for unresolved entries (defaults to 30 days). */
+  retentionMs?: number
+}
+
+export interface ForkOrphanReconcileReport {
+  /** Ledger entries retired because their transaction later established. */
+  resolved: number
+  /** Unresolved entries still within the retention window. */
+  retained: number
+  /** Unresolved entries older than the retention window (operator/UI decides). */
+  expiredUnresolved: number
+  /** Attempt ids of the expired unresolved entries (surfaced, never deleted). */
+  expiredAttemptIds: string[]
+}
+
 export class ForkOrphanLedger {
   private readonly path: string
   private readonly lock: CrossProcessFileLock
@@ -68,15 +100,26 @@ export class ForkOrphanLedger {
     return entry
   }
 
-  /** Every ledger entry, oldest first. Torn tail lines are crash artifacts. */
-  entries(): ForkOrphanEntry[] {
+  /**
+   * Every ledger entry, oldest first, excluding retired (resolved) entries.
+   * Pass `includeResolved: true` to also return entries that received a
+   * resolution marker. Torn tail lines are crash artifacts.
+   */
+  entries(options?: { includeResolved?: boolean }): ForkOrphanEntry[] {
     if (!existsSync(this.path)) return []
     const raw = readFileSync(this.path, 'utf8')
-    const entries: ForkOrphanEntry[] = []
+    const resolvedAttemptIds = new Set<string>()
+    const all: ForkOrphanEntry[] = []
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue
       try {
-        const parsed = JSON.parse(line) as Partial<ForkOrphanEntry>
+        const parsed = JSON.parse(line) as Partial<ForkOrphanEntry> & Partial<ForkOrphanResolutionMarker>
+        if (parsed.type === 'resolution') {
+          if (typeof parsed.attemptId === 'string' && parsed.result === 'resolved') {
+            resolvedAttemptIds.add(parsed.attemptId)
+          }
+          continue
+        }
         if (
           typeof parsed.attemptId !== 'string' ||
           typeof parsed.transactionId !== 'string' ||
@@ -84,7 +127,7 @@ export class ForkOrphanLedger {
         ) {
           continue
         }
-        entries.push({
+        all.push({
           attemptId: parsed.attemptId,
           transactionId: parsed.transactionId,
           idempotencyKey: parsed.idempotencyKey,
@@ -99,7 +142,59 @@ export class ForkOrphanLedger {
         // A torn tail line is a crash artifact, never a fatal read error.
       }
     }
-    return entries
+    // Resolution markers always follow their attempt line, so resolved
+    // attempts are excluded only after the full scan.
+    return options?.includeResolved ? all : all.filter((entry) => !resolvedAttemptIds.has(entry.attemptId))
+  }
+
+  /**
+   * Reconcile the ledger (Task 5). An entry is retired when its fork
+   * transaction is now durably established — the establish succeeded after
+   * the failed attempt, and the journal records the child session + established
+   * state under the same transaction id. Retirement is an append-only
+   * resolution marker line; entries are never rewritten or deleted, so the
+   * ledger stays a complete durable audit trail. Unresolved entries older than
+   * the retention window are surfaced in the report (never auto-deleted — the
+   * operator/UI decides; Task 8/UAT owns the surface). Reconciliation NEVER
+   * attaches an orphan to a session binding: the ledger has no session access
+   * and only annotates its own file.
+   */
+  reconcile(input: ForkOrphanReconcileInput): ForkOrphanReconcileReport {
+    const now = input.now ?? Date.now()
+    const retentionMs = input.retentionMs ?? 30 * 24 * 60 * 60 * 1000
+    const report: ForkOrphanReconcileReport = {
+      resolved: 0,
+      retained: 0,
+      expiredUnresolved: 0,
+      expiredAttemptIds: [],
+    }
+    const markers: string[] = []
+    for (const entry of this.entries()) {
+      if (input.isEstablished(entry.transactionId)) {
+        markers.push(
+          JSON.stringify({
+            type: 'resolution',
+            attemptId: entry.attemptId,
+            result: 'resolved',
+            resolvedAt: now,
+          } satisfies ForkOrphanResolutionMarker),
+        )
+        report.resolved += 1
+        continue
+      }
+      if (now - entry.attemptedAt > retentionMs) {
+        report.expiredUnresolved += 1
+        report.expiredAttemptIds.push(entry.attemptId)
+        continue
+      }
+      report.retained += 1
+    }
+    if (markers.length > 0) {
+      this.lock.runSync(() => {
+        appendFileSync(this.path, `${markers.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
+      })
+    }
+    return report
   }
 }
 

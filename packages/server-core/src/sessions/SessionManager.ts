@@ -5850,6 +5850,26 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Durable fork-child session state for startup reconciliation (Task 5): the
+   * managed session's provider identity, pending-fork intent, and checkout
+   * provenance. The pendingFork transaction id ties a journal entry to a live
+   * published-but-unestablished child; sdkSessionId + 'isolated' strategy + no
+   * pendingFork identify an established child whose journal marker a crash may
+   * have lost. Null for an unknown session. Wired into the fork service's
+   * `resolveSessionForkState` hook; the git.ts startup reconciliation also
+   * passes it explicitly.
+   */
+  resolveSessionForkState(sessionId: string): import('../git').SessionForkState | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    return {
+      sdkSessionId: managed.sdkSessionId,
+      pendingFork: managed.pendingFork ? { transactionId: managed.pendingFork.transactionId } : null,
+      checkoutStrategy: managed.checkoutStrategy,
+    }
+  }
+
   /** Last user/assistant message id + turn id of a session's conversation. */
   private resolveForkConversationHead(managed: ManagedSession): { messageId: string; turnId: string } {
     const findHead = (
@@ -6051,6 +6071,7 @@ export class SessionManager implements ISessionManager {
         const managed = this.sessions.get(sessionId)
         return managed?.agent?.conversationFork ?? null
       },
+      resolveSessionForkState: (sessionId) => this.resolveSessionForkState(sessionId),
       isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
       quiesceRuntimes: (sessionIds) => this.quiesceSessionRuntimes(sessionIds),
       createForkChildSession: (input) => this.createForkChildSession(input),

@@ -1865,3 +1865,295 @@ describe('IsolatedConversationForkService recover', () => {
     expect(forkJournalEntries().some((e) => e.metadata?.state === 'established')).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Startup reconciliation — fork journal classification + establish backfill
+// ---------------------------------------------------------------------------
+
+/** Begin a durable fork journal entry in an arbitrary crash-left state. */
+function journalFork(opts: {
+  recordId: string
+  childSessionId?: string
+  steps?: string[]
+  status?: 'in-progress' | 'committed' | 'failed'
+  state?: string
+}): void {
+  const entry = harness.svc.journal.begin({
+    op: 'fork',
+    recordId: opts.recordId,
+    sessionIds: ['session-1'],
+    policyVersion: harness.svc.worktreeSettings.getSnapshot('local').version,
+    metadata: {
+      transactionId: opts.recordId,
+      strategy: 'isolated-worktree',
+      state: opts.state ?? 'pending',
+      ...(opts.childSessionId ? { childSessionId: opts.childSessionId } : {}),
+    },
+  })
+  for (const step of opts.steps ?? []) harness.svc.journal.step(entry.journalId, step)
+  if (opts.status === 'committed') harness.svc.journal.commit(entry.journalId, opts.recordId)
+  if (opts.status === 'failed') harness.svc.journal.fail(entry.journalId, 'test failure')
+}
+
+const CHILD_CREATED_STEPS = [
+  'locks-acquired',
+  'source-quiesced',
+  'seed-captured',
+  'destination-leased',
+  'target-materialized',
+  'target-restored',
+  'target-verified',
+  'child-created',
+]
+
+function forkStateResolver(
+  states: Map<string, import('../isolated-conversation-fork-service').SessionForkState>,
+) {
+  return (sessionId: string) => states.get(sessionId) ?? null
+}
+
+describe('IsolatedConversationForkService startup reconciliation', () => {
+  test('classifies committed entries as committed and never touches them', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'a'.repeat(16),
+      steps: ['child-created', 'owner-committed'],
+      status: 'committed',
+      state: 'binding-committed',
+      childSessionId: 'child-a',
+    })
+
+    const report = await harness.svc.fork.reconcileForkJournal()
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'a'.repeat(16))
+    expect(entry?.status).toBe('committed')
+    expect(entry?.metadata?.state).toBe('binding-committed')
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+  })
+
+  test('classifies a child-created in-progress entry as recovery-required when no live pending child owns it', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'b'.repeat(16),
+      steps: CHILD_CREATED_STEPS,
+      state: 'target-materialized',
+      childSessionId: 'child-b',
+    })
+
+    const report = await harness.svc.fork.reconcileForkJournal()
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'b'.repeat(16))
+    expect(entry?.status).toBe('in-progress')
+    expect(entry?.metadata?.state).toBe('recovery-required')
+    expect(typeof entry?.metadata?.recoveryReason).toBe('string')
+    expect(report).toEqual({ resumed: 0, recovered: 1, recoveryRequired: 1 })
+  })
+
+  test('leaves a pre-child in-progress entry resumable (steps through target-verified, no child)', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'c'.repeat(16),
+      steps: CHILD_CREATED_STEPS.slice(0, -1),
+      state: 'target-verified',
+    })
+
+    const report = await harness.svc.fork.reconcileForkJournal()
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'c'.repeat(16))
+    expect(entry?.status).toBe('in-progress')
+    expect(entry?.metadata?.state).toBe('target-verified')
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+  })
+
+  test('leaves failed entries failed (not resumable) and reports pre-existing recovery-required state', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'd'.repeat(16),
+      steps: ['child-created'],
+      status: 'failed',
+      state: 'recovery-required',
+      childSessionId: 'child-d',
+    })
+
+    const report = await harness.svc.fork.reconcileForkJournal()
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'd'.repeat(16))
+    expect(entry?.status).toBe('failed')
+    expect(entry?.metadata?.state).toBe('recovery-required')
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 1 })
+  })
+
+  test('leaves a child-created in-progress entry untouched when the child is live and pending (establish flow owns it)', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'e'.repeat(16),
+      steps: CHILD_CREATED_STEPS,
+      state: 'target-materialized',
+      childSessionId: 'child-e',
+    })
+    const states = new Map<string, import('../isolated-conversation-fork-service').SessionForkState>([
+      ['child-e', { pendingFork: { transactionId: 'e'.repeat(16) }, checkoutStrategy: 'isolated' }],
+    ])
+
+    const report = await harness.svc.fork.reconcileForkJournal({
+      resolveSessionForkState: forkStateResolver(states),
+    })
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'e'.repeat(16))
+    expect(entry?.status).toBe('in-progress')
+    expect(entry?.metadata?.state).toBe('target-materialized')
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+  })
+
+  test('backfills the established marker on a committed entry whose child is durably established', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'f'.repeat(16),
+      steps: ['child-created', 'owner-committed'],
+      status: 'committed',
+      state: 'binding-committed',
+      childSessionId: 'child-f',
+    })
+    const states = new Map<string, import('../isolated-conversation-fork-service').SessionForkState>([
+      ['child-f', { sdkSessionId: 'sdk-child-f', pendingFork: null, checkoutStrategy: 'isolated' }],
+    ])
+
+    const report = await harness.svc.fork.reconcileForkJournal({
+      resolveSessionForkState: forkStateResolver(states),
+    })
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'f'.repeat(16))
+    expect(entry?.status).toBe('committed')
+    expect(entry?.metadata?.state).toBe('established')
+    expect(entry?.metadata?.childSdkSessionId).toBe('sdk-child-f')
+    expect(typeof entry?.metadata?.establishedAt).toBe('number')
+    expect(report).toEqual({ resumed: 1, recovered: 0, recoveryRequired: 0 })
+  })
+
+  test('does not backfill when the committed child session is still pending', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'g'.repeat(16),
+      steps: ['child-created', 'owner-committed'],
+      status: 'committed',
+      state: 'binding-committed',
+      childSessionId: 'child-g',
+    })
+    const states = new Map<string, import('../isolated-conversation-fork-service').SessionForkState>([
+      ['child-g', { pendingFork: { transactionId: 'g'.repeat(16) }, checkoutStrategy: 'isolated' }],
+    ])
+
+    const report = await harness.svc.fork.reconcileForkJournal({
+      resolveSessionForkState: forkStateResolver(states),
+    })
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'g'.repeat(16))
+    expect(entry?.status).toBe('committed')
+    expect(entry?.metadata?.state).toBe('binding-committed')
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+  })
+
+  test('leaves an already-established committed entry untouched', async () => {
+    currentSession()
+    journalFork({
+      recordId: 'h'.repeat(16),
+      steps: ['child-created', 'owner-committed'],
+      status: 'committed',
+      state: 'established',
+      childSessionId: 'child-h',
+    })
+    const states = new Map<string, import('../isolated-conversation-fork-service').SessionForkState>([
+      ['child-h', { sdkSessionId: 'sdk-child-h', pendingFork: null, checkoutStrategy: 'isolated' }],
+    ])
+
+    const report = await harness.svc.fork.reconcileForkJournal({
+      resolveSessionForkState: forkStateResolver(states),
+    })
+
+    const entry = forkJournalEntries().find((e) => e.recordId === 'h'.repeat(16))
+    expect(entry?.status).toBe('committed')
+    expect(entry?.metadata?.state).toBe('established')
+    expect(entry?.metadata?.childSdkSessionId).toBeUndefined()
+    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Orphan ledger reconciliation — the journal-backed startup wiring
+// ---------------------------------------------------------------------------
+
+describe('IsolatedConversationForkService orphan reconciliation', () => {
+  /** The startup `isEstablished` wiring: the fork journal records childSessionId
+   *  + established state under the same transaction id as the orphan attempt. */
+  function isEstablished(transactionId: string): boolean {
+    return harness.svc.journal
+      .entries()
+      .some(
+        (entry) =>
+          entry.op === 'fork' &&
+          entry.recordId === transactionId &&
+          entry.status === 'committed' &&
+          entry.metadata?.state === 'established',
+      )
+  }
+
+  test('resolves a failed orphan attempt once the same transaction establishes', async () => {
+    currentSession()
+    const transactionId = 'i'.repeat(16)
+    // The failed establishment attempt is on the ledger; the journal entry is
+    // still committed-but-unestablished (the establish window crash state).
+    const orphan = harness.svc.forkOrphans.recordAttempt({
+      transactionId,
+      idempotencyKey: 'idem-key-1',
+      parentSdkSessionId: 'parent',
+      parentSdkTurnId: 'turn-1',
+      executionCwd: '/wt/child',
+      result: 'failed',
+    })
+    journalFork({
+      recordId: transactionId,
+      steps: ['child-created', 'owner-committed'],
+      status: 'committed',
+      state: 'binding-committed',
+      childSessionId: 'child-i',
+    })
+
+    // Before establishment: the orphan is retained.
+    const before = harness.svc.forkOrphans.reconcile({ isEstablished })
+    expect(before).toEqual({ resolved: 0, retained: 1, expiredUnresolved: 0, expiredAttemptIds: [] })
+
+    // The transaction later establishes (first Send, journal marker durable).
+    harness.svc.fork.markEstablished(transactionId, 'sdk-child-i')
+
+    // Startup reconciliation resolves the orphan and never touches the entry.
+    const report = harness.svc.forkOrphans.reconcile({ isEstablished })
+    expect(report).toEqual({ resolved: 1, retained: 0, expiredUnresolved: 0, expiredAttemptIds: [] })
+    expect(harness.svc.forkOrphans.entries()).toHaveLength(0)
+    expect(harness.svc.forkOrphans.entries({ includeResolved: true })).toHaveLength(1)
+    expect(harness.svc.forkOrphans.entries({ includeResolved: true })[0]).toMatchObject({
+      attemptId: orphan.attemptId,
+      transactionId,
+      idempotencyKey: 'idem-key-1',
+    })
+  })
+
+  test('keeps unrelated orphans when their transaction never established', async () => {
+    currentSession()
+    harness.svc.forkOrphans.recordAttempt({
+      transactionId: 'unrelated-txn',
+      idempotencyKey: 'idem-key-2',
+      parentSdkSessionId: 'parent',
+      parentSdkTurnId: 'turn-1',
+      executionCwd: '/wt/other',
+      result: 'unverified',
+    })
+
+    const report = harness.svc.forkOrphans.reconcile({ isEstablished })
+
+    expect(report).toEqual({ resolved: 0, retained: 1, expiredUnresolved: 0, expiredAttemptIds: [] })
+    expect(harness.svc.forkOrphans.entries()).toHaveLength(1)
+    expect(harness.svc.forkOrphans.entries()[0]?.transactionId).toBe('unrelated-txn')
+    // No session was created or bound by the reconcile.
+    expect(harness.childCalls).toHaveLength(0)
+  })
+})

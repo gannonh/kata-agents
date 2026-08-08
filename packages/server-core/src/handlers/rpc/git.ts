@@ -66,7 +66,7 @@ import {
   WorktreeHandoffError,
   ConversationForkError,
 } from '../../git'
-import type { GitServices } from '../../git'
+import type { GitServices, SessionForkState } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
 export const GIT_HANDLED_CHANNELS = [
@@ -385,11 +385,48 @@ export function registerGitHandlers(
       }
       await git.worktrees.reconcile({ knownSessionIds, sessionCheckouts })
       const journalReport = await git.lifecycle.reconcileJournal()
+      // Fork reconciliation: classify interrupted fork journal entries
+      // (committed stay; pre-child in-progress stays resumable; child-created
+      // without a live pending child becomes recovery-required) and backfill
+      // the establish marker a crash between the child-session flush and
+      // markEstablished may have lost. The session lookup comes from the
+      // SessionManager (wired through the fork hooks by setGitServices above;
+      // passed explicitly here so reconciliation never depends on hook-wiring
+      // order).
+      const forkReport = await git.fork.reconcileForkJournal({
+        resolveSessionForkState: (sessionId: string) =>
+          (deps.sessionManager as {
+            resolveSessionForkState?: (sessionId: string) => SessionForkState | null
+          }).resolveSessionForkState?.(sessionId) ?? null,
+      })
+      // Orphan reconcile: retire ledger entries whose fork transaction later
+      // established; surface stale unresolved entries (never auto-deleted —
+      // the operator/UI decides). Never attaches an orphan to a session.
+      const orphanReport = await git.forkOrphans.reconcile({
+        isEstablished: (transactionId) =>
+          git.journal.entries().some(
+            (entry) =>
+              entry.op === 'fork' &&
+              entry.recordId === transactionId &&
+              entry.status === 'committed' &&
+              entry.metadata?.state === 'established',
+          ),
+      })
       git.journal.compact()
       git.lifecycle.markReady()
       if (journalReport.resumed > 0 || journalReport.recovered > 0) {
         console.info(
           `[worktree] startup reconciliation resumed ${journalReport.resumed} and recovered ${journalReport.recovered} interrupted lifecycle transaction(s).`,
+        )
+      }
+      if (forkReport.resumed > 0 || forkReport.recovered > 0 || forkReport.recoveryRequired > 0) {
+        console.info(
+          `[worktree] startup fork reconciliation backfilled ${forkReport.resumed}, recovered ${forkReport.recovered}, and flagged ${forkReport.recoveryRequired} fork transaction(s) as recovery-required.`,
+        )
+      }
+      if (orphanReport.resolved > 0 || orphanReport.expiredUnresolved > 0) {
+        console.info(
+          `[worktree] startup orphan reconciliation resolved ${orphanReport.resolved} and surfaced ${orphanReport.expiredUnresolved} expired unresolved fork establishment attempt(s).`,
         )
       }
     } catch (error) {

@@ -677,4 +677,62 @@ describe('SessionManager isolated fork child creation', () => {
     expect(managed.pendingFork).toBeUndefined()
     expect(managed.sdkSessionId).toBeTruthy()
   })
+
+  it('exposes the durable fork-child session state for startup reconciliation and backfills the lost established marker', async () => {
+    injectSession('source-hook')
+    await persistSourceWithMessages('source-hook')
+    armStrictAdapter('source-hook')
+    const childId = await confirmChild('source-hook', 'hook-child')
+    if (!childId) return
+    const pendingBefore = loadStoredSession(root, childId)!.pendingFork!
+
+    const smAny = sm as unknown as {
+      resolveSessionForkState?: (sessionId: string) => {
+        sdkSessionId?: string
+        pendingFork?: { transactionId: string } | null
+        checkoutStrategy?: string
+      } | null
+    }
+
+    // Published-but-unestablished child: no provider id, pending intent with
+    // the fork transaction id, 'isolated' checkout provenance.
+    const pending = smAny.resolveSessionForkState!(childId)
+    expect(pending).toMatchObject({
+      sdkSessionId: undefined,
+      checkoutStrategy: 'isolated',
+    })
+    expect(pending?.pendingFork?.transactionId).toBe(pendingBefore.transactionId)
+
+    // First Send establishes the child: the hook now reports the provider id
+    // and no pending intent.
+    const chatCalls: string[] = []
+    armChildAgent(
+      childId,
+      createDeterministicStrictForkAdapter({ adapterId: 'pi-test', childSdkSessionId: 'sdk-hook-child' }),
+      chatCalls,
+    )
+    await sm.sendMessage(childId, 'hello hook')
+    const established = smAny.resolveSessionForkState!(childId)
+    expect(established?.sdkSessionId).toBe('sdk-hook-child')
+    expect(established?.pendingFork).toBeNull()
+    expect(established?.checkoutStrategy).toBe('isolated')
+
+    // Simulate the establish-window crash: the session flushed and retired
+    // pendingFork, but markEstablished never ran on the committed journal
+    // entry. Startup reconciliation through the wired hook must backfill it.
+    const entry = services.journal
+      .entries()
+      .find((e) => e.op === 'fork' && e.recordId === pendingBefore.transactionId)!
+    expect(entry?.metadata?.state).toBe('established')
+    services.journal.updateMetadata(entry.journalId, { state: 'binding-committed' })
+
+    const report = await services.fork.reconcileForkJournal()
+
+    expect(report).toEqual({ resumed: 1, recovered: 0, recoveryRequired: 0 })
+    const after = services.journal
+      .entries()
+      .find((e) => e.op === 'fork' && e.recordId === pendingBefore.transactionId)!
+    expect(after.metadata?.state).toBe('established')
+    expect(after.metadata?.childSdkSessionId).toBe('sdk-hook-child')
+  })
 })

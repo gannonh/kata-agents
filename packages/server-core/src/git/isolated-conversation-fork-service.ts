@@ -194,6 +194,15 @@ export interface ConversationForkHooks {
   /** Quiesce the session's runtime; false when it cannot quiesce. */
   quiesceRuntimes?: (sessionIds: string[]) => Promise<boolean>
   /**
+   * Durable fork-child session state for startup reconciliation (Task 5);
+   * null for an unknown session. The pendingFork transaction id ties a
+   * journal entry to a live published-but-unestablished child; sdkSessionId +
+   * checkoutStrategy 'isolated' + no pendingFork identify an established child
+   * whose journal marker a crash may have lost. SessionManager implements
+   * this; the git.ts startup reconciliation may also pass it explicitly.
+   */
+  resolveSessionForkState?: (sessionId: string) => SessionForkState | null
+  /**
    * Create the durable child Kata session for an isolated fork target. The
    * service journals the returned child session id after the hook returns;
    * the child must not be visible to the client until the commit marker is
@@ -207,6 +216,30 @@ export interface ConversationForkHooks {
    * transaction stays recovery-required.
    */
   deleteForkChildSession?: (childSessionId: string) => Promise<void>
+}
+
+/**
+ * Durable fork-child session facts startup reconciliation classifies against
+ * (Task 5). Matches what SessionManager can read from the managed session
+ * without the provider adapter.
+ */
+export interface SessionForkState {
+  /** Durable child provider identity; present after first-Send establishment. */
+  sdkSessionId?: string
+  /** Durable pending-fork intent; present until establishment retires it. */
+  pendingFork?: { transactionId: string } | null
+  /** Checkout provenance recorded at fork creation ('isolated' for forks). */
+  checkoutStrategy?: string
+}
+
+/** Startup reconciliation report for interrupted fork journal entries. */
+export interface ForkJournalReconcileReport {
+  /** Committed entries whose lost established marker was backfilled. */
+  resumed: number
+  /** In-progress child-created entries classified recovery-required. */
+  recovered: number
+  /** Total entries surfacing recovery-required after reconciliation. */
+  recoveryRequired: number
 }
 
 export interface ConversationForkDeps {
@@ -401,6 +434,103 @@ export class IsolatedConversationForkService {
       establishedAt: Date.now(),
     })
     return true
+  }
+
+  /**
+   * Startup reconciliation of interrupted fork transactions. Classifies every
+   * durable 'fork' journal entry exactly once from journal evidence (never
+   * from a missing-path heuristic):
+   *
+   * - Committed entries stay committed. When a committed entry records a child
+   *   session that is durably established (sdkSessionId + 'isolated' strategy
+   *   + no pendingFork) but the journal lacks the established marker — a crash
+   *   between the child-session flush and markEstablished — the marker is
+   *   backfilled from the session record.
+   * - In-progress entries WITHOUT the child-created step stay in-progress:
+   *   recover() resumes them from the journal (never auto-compensated; the
+   *   child may have been created and only the durable steps decide).
+   * - In-progress entries WITH child-created are classified recovery-required:
+   *   the durable commit point may be ambiguous (the child session may or may
+   *   not exist; SessionManager restore from disk decides). The exception is
+   *   a live pending child whose pendingFork.transactionId matches the entry's
+   *   recordId: the first-Send establish flow owns it and the entry is left
+   *   untouched.
+   * - Failed entries stay failed (recover() throws the typed fork error).
+   *
+   * Reconciliation never edits the source and never fabricates a child.
+   */
+  async reconcileForkJournal(options?: {
+    resolveSessionForkState?: (sessionId: string) => SessionForkState | null
+  }): Promise<ForkJournalReconcileReport> {
+    const report: ForkJournalReconcileReport = { resumed: 0, recovered: 0, recoveryRequired: 0 }
+    const resolveSessionForkState = options?.resolveSessionForkState ?? this.hooks.resolveSessionForkState
+    for (const entry of this.deps.journal.entries()) {
+      if (entry.op !== 'fork') continue
+      const metadata = entry.metadata
+      const childSessionId = typeof metadata?.childSessionId === 'string' ? metadata.childSessionId : undefined
+
+      if (entry.status === 'committed') {
+        // Committed entries stay committed; only the lost established marker
+        // is backfilled from the durable child session record.
+        if (metadata?.state === 'recovery-required') {
+          report.recoveryRequired += 1
+          continue
+        }
+        if (metadata?.state !== 'established' && childSessionId && resolveSessionForkState) {
+          const sessionState = resolveSessionForkState(childSessionId)
+          if (
+            sessionState &&
+            typeof sessionState.sdkSessionId === 'string' &&
+            sessionState.sdkSessionId.trim() !== '' &&
+            !sessionState.pendingFork &&
+            sessionState.checkoutStrategy === 'isolated'
+          ) {
+            this.deps.journal.updateMetadata(entry.journalId, {
+              state: 'established',
+              childSdkSessionId: sessionState.sdkSessionId,
+              establishedAt: Date.now(),
+            })
+            report.resumed += 1
+          }
+        }
+        continue
+      }
+
+      if (entry.status === 'failed') {
+        // Failed entries (blocked confirms, compensation failures) are not
+        // resumable; recover() surfaces the typed error. Report pre-existing
+        // recovery-required state so the operator sees the full inventory.
+        if (metadata?.state === 'recovery-required') report.recoveryRequired += 1
+        continue
+      }
+
+      if (entry.status !== 'in-progress') continue
+
+      if (!entry.steps.includes('child-created')) {
+        // Steps through target-verified only: recover() resumes the confirm
+        // from the journal. Do NOT auto-compensate.
+        continue
+      }
+      // Child-created is durable but the commit point is not. A live pending
+      // child (recordId === pendingFork.transactionId) is owned by the
+      // first-Send establish flow; anything else may be an orphaned child and
+      // surfaces as recovery-required for explicit recovery.
+      if (childSessionId && resolveSessionForkState) {
+        const sessionState = resolveSessionForkState(childSessionId)
+        if (sessionState?.pendingFork?.transactionId === entry.recordId) {
+          continue
+        }
+      }
+      this.deps.journal.updateMetadata(entry.journalId, {
+        state: 'recovery-required',
+        recoveryReason:
+          'The fork journal recorded a child session without a durable commit point; the child may or may not exist.',
+        reconciledAt: Date.now(),
+      })
+      report.recovered += 1
+      report.recoveryRequired += 1
+    }
+    return report
   }
 
   // -------------------------------------------------------------------------
