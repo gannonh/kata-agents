@@ -51,6 +51,15 @@ Each package has its own agent context file — read it before modifying that pa
 - Commits: Conventional Commits (`feat(scope): summary`). Commit after every logical unit of work.
 - Deferred work: any work deferred during planning, implementation, verification, or testing must be filed as a GitHub issue immediately using the `.github/ISSUE_TEMPLATE/deferred_work.yml` template. Do not leave deferrals only in code comments, chat, or memory.
 
+## Credentials and E2E provider UAT
+
+**This environment is credentialed by default.** Provider-requiring E2E tests run here — never assume "no credentials", never defer UAT to a later issue, and never wire a fake provider seam without asking the user first.
+
+- **Primary credential: codex OAuth.** The app is already authenticated against the codex harness (credentials in `dotfiles/pi/.pi/agent/auth.json`); the `chatgpt-plus` connection is reused without entering a key.
+- **Fallback chain: root `.env`.** `KATA_E2E_AGENT_PROVIDER[_NN]` + `KATA_E2E_AGENT_MODEL[_NN]` select the provider; the matching `KATA_*_API_KEY` supplies the key (`openai-codex` → `KATA_OPENAI_API_KEY`, `opencode-go` → `KATA_OPENCODE_GO_API_KEY`, `openrouter` → `KATA_OPENROUTER_API_KEY`, `deepseek` → `KATA_DEEPSEEK_API_KEY`, `anthropic` → `KATA_ANTHROPIC_API_KEY` — avoid, expensive).
+- The agent E2E specs (`@agent`, `@worktree-v2 fork`, `@worktree-v2 handoff`) walk the whole chain via `runWithAgentProviderFallback` (`e2e/src/flows/agentChat.ts`) and only fail after every option is exhausted, with each attempt logged and the aggregated failure naming every option.
+- Before deferring any UAT tier or claiming credentials are unavailable: check the chain above and **ask the user**. Deterministic adapters (`@kata-sh/shared/agent/testing`) are test doubles only — never import them from production code, and never add `KATA_*_DETERMINISTIC_ADAPTER`-style env seams to production paths.
+
 ## Active context
 
 - **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/archive/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/archive/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.

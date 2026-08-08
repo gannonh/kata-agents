@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { createDeterministicHandoffAdapter } from '../deterministic-handoff-adapter'
+import { createDeterministicHandoffAdapter } from '../testing'
 import { resolveHandoffCapability } from '../handoff-capability'
 
 describe('deterministic handoff adapter factory', () => {

@@ -10,7 +10,8 @@ import type {
   SessionCheckout,
 } from '@kata-sh/shared/protocol'
 import type { StrictConversationForkCapability } from '@kata-sh/shared/agent/backend'
-import { createDeterministicStrictForkAdapter, resolveIsolatedForkCapability } from '@kata-sh/shared/agent/backend'
+import { createDeterministicStrictForkAdapter } from '@kata-sh/shared/agent/testing'
+import { resolveIsolatedForkCapability } from '@kata-sh/shared/agent/backend'
 import { initRepo, makeTmpDir, cleanup, git, writeFile, runGit } from './test-helpers'
 import {
   WORKTREE_SNAPSHOT_REF_PREFIX,

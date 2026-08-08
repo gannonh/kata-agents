@@ -9,7 +9,7 @@ import type {
   WorktreeHandoffProviderCapability,
 } from '@kata-sh/shared/protocol'
 import type { ExecutionCwdRebindCapability } from '@kata-sh/shared/agent/backend'
-import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/backend'
+import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/testing'
 import { initRepo, makeTmpDir, cleanup, git, writeFile } from './test-helpers'
 
 const cleanups: string[] = []

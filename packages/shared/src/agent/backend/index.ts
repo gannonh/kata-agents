@@ -63,18 +63,6 @@ export {
   type IsolatedForkCapabilityResolution,
 } from './conversation-fork-capability.ts';
 
-// Credential-free deterministic handoff adapter (state-machine coverage)
-export {
-  createDeterministicHandoffAdapter,
-  type DeterministicHandoffAdapterOptions,
-} from './deterministic-handoff-adapter.ts';
-
-// Credential-free deterministic strict fork adapter (state-machine coverage)
-export {
-  createDeterministicStrictForkAdapter,
-  type DeterministicStrictForkAdapterOptions,
-} from './deterministic-fork-adapter.ts';
-
 // Enums need to be exported as values, not just types
 export { AbortReason } from './types.ts';
 

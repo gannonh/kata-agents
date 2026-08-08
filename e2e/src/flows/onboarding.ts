@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
-import { readAgentProviderConfig } from "../harness/env.ts";
+import type { AgentProviderCandidate } from "../harness/env.ts";
 import {
   waitForOnboardingWizard,
   waitForReadyOrWorkspacePicker,
@@ -52,58 +52,6 @@ export async function completeDeferredSetup(page: Page): Promise<void> {
   await handleWorkspacePickerIfPresent(page);
 }
 
-/**
- * Real API-key path for @agent: configure a real provider connection using the
- * key from root .env, then reach the ready shell.
- *
- * Flow (validated on a headed harness run, adoption guide learning #7):
- * provider select -> "I use other provider" lands on the API Configuration
- * step with an API key field (Anthropic endpoint preselected) and a Continue
- * button.
- *
- * NOTE: this function is the Anthropic API-key path. The configured
- * ChatGPT/Codex OAuth path is handled by completeConfiguredChatGptOnboarding
- * and does not enter an API key.
- */
-export async function completeApiKeyOnboarding(page: Page): Promise<void> {
-  const { apiKey } = readAgentProviderConfig();
-  if (!apiKey) {
-    throw new Error(
-      "API-key onboarding requires an API-key provider. Set KATA_E2E_AGENT_PROVIDER=anthropic or use the configured openai-codex OAuth flow; see e2e/README.md.",
-    );
-  }
-  const wizard = page.locator("#onboarding-wizard");
-  await waitForOnboardingWizard(page);
-
-  // Provider select -> "I use other provider" -> API Configuration step.
-  await wizard.locator('[data-testid="onboarding-provider-api_key"]').click();
-
-  // Enter the key and continue.
-  const keyInput = wizard.locator("#api-key");
-  await keyInput.waitFor({
-    state: "visible",
-    timeout: E2E_TIMEOUTS.electronWindowMs,
-  });
-  await keyInput.fill(apiKey);
-
-  await wizard.locator('[data-testid="onboarding-api-key-continue"]').click();
-
-  // Completion step -> finish onboarding.
-  const finishButton = wizard.locator('[data-testid="onboarding-finish"]');
-  await finishButton.waitFor({
-    state: "visible",
-    timeout: E2E_TIMEOUTS.electronWindowMs,
-  });
-  await finishButton.click();
-
-  // Onboarding completes and the app reaches ready (handling workspace picker).
-  await handleWorkspacePickerIfPresent(page);
-  await setAgentWorkingDirectory(page);
-  await expect(page.locator("#app-ready")).toBeVisible({
-    timeout: E2E_TIMEOUTS.electronWindowMs,
-  });
-}
-
 async function setAgentWorkingDirectory(page: Page): Promise<void> {
   await page.evaluate(async (workingDirectory) => {
     const api = (
@@ -133,6 +81,149 @@ async function setAgentWorkingDirectory(page: Page): Promise<void> {
 }
 
 const CHATGPT_CONNECTION_SLUG = "chatgpt-plus";
+const PI_API_KEY_SLUG = "pi-api-key";
+const ANTHROPIC_API_KEY_SLUG = "anthropic-api";
+
+/** Connection slug used for an API-key candidate (Anthropic has its own). */
+function apiKeySlugFor(provider: string): string {
+  return provider === "anthropic" ? ANTHROPIC_API_KEY_SLUG : PI_API_KEY_SLUG;
+}
+
+/** Make a connection the global default (retries must repoint the default). */
+async function setDefaultConnection(page: Page, slug: string): Promise<void> {
+  const result = await page.evaluate(async (targetSlug) => {
+    const api = (
+      window as unknown as {
+        electronAPI: {
+          setDefaultLlmConnection(slug: string): Promise<{
+            success: boolean;
+            error?: string;
+          }>;
+        };
+      }
+    ).electronAPI;
+    return api.setDefaultLlmConnection(targetSlug);
+  }, slug);
+  if (!result.success) {
+    throw new Error(
+      `Failed to set default LLM connection to ${slug}: ${result.error ?? "unknown error"}`,
+    );
+  }
+}
+
+/**
+ * Programmatic API-key connection setup (re-runnable on fallback retries,
+ * unlike the one-shot onboarding wizard): create/update the connection with
+ * the candidate's key + provider + model, make it the default, then reload
+ * into the ready shell. Mirrors what the wizard's pi_api_key / anthropic_api_key
+ * paths ultimately call (setupLlmConnection).
+ */
+async function configureApiKeyConnection(
+  page: Page,
+  candidate: AgentProviderCandidate,
+): Promise<void> {
+  if (!candidate.apiKey) {
+    throw new Error(
+      `API-key provider ${candidate.provider} has no key (${candidate.keySource}).`, 
+    );
+  }
+  const slug = apiKeySlugFor(candidate.provider);
+  const setup = await page.evaluate(
+    async ({ targetSlug, credential, defaultModel, piAuthProvider }) => {
+      const api = (
+        window as unknown as {
+          electronAPI: {
+            setupLlmConnection(setup: {
+              slug: string;
+              credential: string;
+              defaultModel: string;
+              models: string[];
+              piAuthProvider: string;
+              modelSelectionMode: "userDefined3Tier";
+            }): Promise<{ success: boolean; error?: string }>;
+          };
+        }
+      ).electronAPI;
+      return api.setupLlmConnection({
+        slug: targetSlug,
+        credential,
+        defaultModel,
+        models: [defaultModel],
+        piAuthProvider,
+        modelSelectionMode: "userDefined3Tier",
+      });
+    },
+    {
+      targetSlug: slug,
+      credential: candidate.apiKey,
+      defaultModel: candidate.model,
+      piAuthProvider: candidate.provider,
+    },
+  );
+  if (!setup.success) {
+    throw new Error(
+      `Provider connection setup failed for ${candidate.provider} (${candidate.keySource}): ${setup.error ?? "unknown error"}. See e2e/README.md.`,
+    );
+  }
+  await setDefaultConnection(page, slug);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await handleWorkspacePickerIfPresent(page);
+  await setAgentWorkingDirectory(page);
+  await expect(page.locator("#app-ready")).toBeVisible({
+    timeout: E2E_TIMEOUTS.electronWindowMs,
+  });
+}
+
+/**
+ * Configure the app for one fallback-chain candidate, re-runnable for retries.
+ * OAuth candidates (openai-codex) prefer the existing codex OAuth credential
+ * and fall back to the provider API key when it is unavailable; api-key
+ * candidates configure programmatically.
+ */
+export async function configureAgentConnection(
+  page: Page,
+  candidate: AgentProviderCandidate,
+): Promise<void> {
+  if (candidate.auth !== "oauth") {
+    await configureApiKeyConnection(page, candidate);
+    return;
+  }
+
+  const authStatus = await page.evaluate(async (connectionSlug) => {
+    const api = (
+      window as unknown as {
+        electronAPI: {
+          getChatGptAuthStatus(slug: string): Promise<{
+            authenticated: boolean;
+            expiresAt?: number;
+            hasRefreshToken?: boolean;
+          }>;
+        };
+      }
+    ).electronAPI;
+    return api.getChatGptAuthStatus(connectionSlug);
+  }, CHATGPT_CONNECTION_SLUG);
+
+  if (authStatus.authenticated) {
+    await completeConfiguredChatGptOnboarding(page, candidate.model);
+    // A retry may have pointed the default at an earlier api-key candidate;
+    // repoint it at the OAuth connection so new sessions use it.
+    await setDefaultConnection(page, CHATGPT_CONNECTION_SLUG);
+    return;
+  }
+
+  if (candidate.apiKey) {
+    console.warn(
+      `[e2e][provider] chatgpt-plus OAuth credential is not available; falling back to ${candidate.keySource}`,
+    );
+    await configureApiKeyConnection(page, candidate);
+    return;
+  }
+
+  throw new Error(
+    `openai-codex OAuth is not authenticated (chatgpt-plus) and no ${candidate.keySource} fallback is set.`,
+  );
+}
 
 /**
  * Reuse the existing ChatGPT/Codex OAuth credential without opening a browser

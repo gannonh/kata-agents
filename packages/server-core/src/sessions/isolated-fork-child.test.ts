@@ -11,7 +11,7 @@ const { SessionManager, createManagedSession } = await import('./SessionManager'
 const { CONFIG_DIR } = await import('@kata-sh/shared/config')
 const { createGitServices } = await import('../git')
 const { initRepo, makeTmpDir, cleanup, git } = await import('../git/__tests__/test-helpers')
-const { createDeterministicStrictForkAdapter } = await import('@kata-sh/shared/agent/backend')
+const { createDeterministicStrictForkAdapter } = await import('@kata-sh/shared/agent/testing')
 import type { ConversationForkEstablishInput, StrictConversationForkCapability } from '@kata-sh/shared/agent/backend'
 const {
   saveSession: saveStoredSession,

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { createDeterministicStrictForkAdapter } from '../deterministic-fork-adapter'
+import { createDeterministicStrictForkAdapter } from '../testing'
 import { resolveIsolatedForkCapability } from '../conversation-fork-capability'
 import type { ConversationForkEstablishInput } from '../types'
 

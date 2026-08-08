@@ -1,7 +1,108 @@
 import { type Page } from "@playwright/test";
 
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
-import { readAgentProviderConfig } from "../harness/env.ts";
+import {
+  readAgentProviderChain,
+  readAgentProviderConfig,
+  type AgentProviderCandidate,
+} from "../harness/env.ts";
+
+/**
+ * Serial-suite timeout that budgets one {@link E2E_TIMEOUTS.agentTestMs} per
+ * ready fallback candidate so a chain-wide walk cannot hit the describe
+ * timeout before every option is exhausted.
+ */
+export function agentSuiteTimeoutMs(): number {
+  const chain = readAgentProviderChain();
+  const readyCount = Math.max(1, chain.filter((candidate) => candidate.ready).length);
+  return readyCount * E2E_TIMEOUTS.agentTestMs;
+}
+
+/** One recorded fallback attempt (skipped, failed, or ok). */
+export interface ProviderAttemptRecord {
+  readonly candidate: AgentProviderCandidate;
+  readonly status: "skipped" | "failed" | "ok";
+  readonly error?: string;
+  readonly durationMs?: number;
+}
+
+/**
+ * Raised only after every provider option in the fallback chain has been
+ * attempted. The message names each candidate, its credential source, and its
+ * failure reason so the Playwright report/UI shows exactly what was tried.
+ */
+export class AgentProviderChainExhaustedError extends Error {
+  readonly attempts: readonly ProviderAttemptRecord[];
+
+  constructor(label: string, attempts: readonly ProviderAttemptRecord[]) {
+    const lines = attempts.map((attempt, index) => {
+      const { candidate } = attempt;
+      const detail =
+        attempt.status === "skipped"
+          ? `skipped: ${candidate.readyReason}`
+          : attempt.status === "ok"
+            ? "ok"
+            : `failed after ${attempt.durationMs}ms: ${attempt.error ?? "unknown error"}`;
+      return `  ${index + 1}. ${candidate.provider} (${candidate.model || "no model"}, ${candidate.keySource}) — ${detail}`;
+    });
+    super(
+      `${label}: all ${attempts.length} provider option(s) exhausted.\n${lines.join("\n")}\n\n` +
+        `Check the credentials in root .env (KATA_*_API_KEY) and the codex OAuth harness ` +
+        `(dotfiles/pi/.pi/agent/auth.json), then re-run. See e2e/README.md.`,
+    );
+    this.name = "AgentProviderChainExhaustedError";
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * Walk the provider fallback chain for one agent-requiring section. Each ready
+ * candidate is attempted in order (configure + run); failures are logged with
+ * the candidate and reason and the next option is tried. When every option is
+ * exhausted, throws {@link AgentProviderChainExhaustedError} so the failure is
+ * loud in both the logs and the Playwright report.
+ */
+export async function runWithAgentProviderFallback<T>(
+  page: Page,
+  label: string,
+  run: (candidate: AgentProviderCandidate) => Promise<T>,
+): Promise<T> {
+  const chain = readAgentProviderChain();
+  const attempts: ProviderAttemptRecord[] = [];
+
+  for (const candidate of chain) {
+    if (!candidate.ready) {
+      console.warn(
+        `[e2e][provider] ${label}: candidate ${candidate.index}/${chain.length} (${candidate.provider}) skipped — ${candidate.readyReason}`,
+      );
+      attempts.push({ candidate, status: "skipped" });
+      continue;
+    }
+
+    const started = Date.now();
+    console.log(
+      `[e2e][provider] ${label}: attempting candidate ${candidate.index}/${chain.length} — ${candidate.provider} (${candidate.model}, ${candidate.keySource})`,
+    );
+    try {
+      const result = await run(candidate);
+      const durationMs = Date.now() - started;
+      console.log(
+        `[e2e][provider] ${label}: candidate ${candidate.index}/${chain.length} OK after ${durationMs}ms — ${candidate.provider}`,
+      );
+      attempts.push({ candidate, status: "ok", durationMs });
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - started;
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[e2e][provider] ${label}: candidate ${candidate.index}/${chain.length} FAILED after ${durationMs}ms — ${candidate.provider}: ${reason.slice(0, 500)}`,
+      );
+      attempts.push({ candidate, status: "failed", error: reason, durationMs });
+    }
+  }
+
+  throw new AgentProviderChainExhaustedError(label, attempts);
+}
 
 export interface DeterministicAgentTurn {
   readonly prompt: string;

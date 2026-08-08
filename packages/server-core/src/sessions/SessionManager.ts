@@ -3760,40 +3760,6 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
-      // Credential-free UI UAT seam (AC-15): the deterministic adapter lets
-      // the real Electron app exercise preview/confirm/recovery without a
-      // live provider. Off by default; production adapters remain disabled
-      // until credentialed UAT proves context continuity.
-      if (
-        process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' &&
-        process.env.NODE_ENV !== 'production' &&
-        managed.agent
-      ) {
-        sessionLog.warn(
-          `Session ${managed.id}: deterministic handoff adapter is active. Execution-CWD proofs are synthetic and prove nothing about the live runtime.`,
-        )
-        const { createDeterministicHandoffAdapter } = await import('@kata-sh/shared/agent/backend')
-        managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
-      }
-
-      // Credential-free UI UAT seam (AC-15): the deterministic strict fork
-      // adapter lets the real Electron app exercise preview/confirm and the
-      // first-Send native-fork establishment without a live provider. Off by
-      // default; production adapters remain disabled until credentialed UAT
-      // proves native ancestry, a distinct provider ID after first Send, and
-      // destination-only tool CWD.
-      if (
-        process.env.KATA_FORK_DETERMINISTIC_ADAPTER === '1' &&
-        process.env.NODE_ENV !== 'production' &&
-        managed.agent
-      ) {
-        sessionLog.warn(
-          `Session ${managed.id}: deterministic strict fork adapter is active. Destination-execution proofs are synthetic and prove nothing about the live runtime.`,
-        )
-        const { createDeterministicStrictForkAdapter } = await import('@kata-sh/shared/agent/backend')
-        managed.agent.conversationFork = createDeterministicStrictForkAdapter({ adapterId: 'deterministic-e2e' })
-      }
-
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
       // The renderer's session DTO now carries capabilities that only exist
