@@ -28,12 +28,13 @@ import {
   providerTypeToAgentProvider,
   type AgentBackend,
   type BackendHostRuntimeContext,
+  type ConversationForkEstablishResult,
   type PostInitResult,
 } from '@kata-sh/shared/agent/backend'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@kata-sh/shared/config'
 import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
-import { getDefaultGitServices, type GitServices, safeRealpath, type ConversationForkChildSessionInput } from '../git'
+import { getDefaultGitServices, type GitServices, safeRealpath, type ConversationForkChildSessionInput, type ForkOrphanResult } from '../git'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import { InitGate } from '@kata-sh/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
@@ -93,7 +94,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, CodedError, WORKTREE_FORK_PENDING_CODE, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, CodedError, WORKTREE_FORK_PENDING_CODE, WORKTREE_FORK_ERROR_CODE, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -3453,14 +3454,24 @@ export class SessionManager implements ISessionManager {
    * 2. workspace.defaults.defaultLlmConnection
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
+   *
+   * The pending-child fence is bypassed ONLY when the establish flow calls
+   * in with `allowPendingForkEstablish` (first-Send provider establishment);
+   * every other caller keeps the typed pending gate.
    */
-  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+  private async getOrCreateAgent(
+    managed: ManagedSession,
+    opts?: { allowPendingForkEstablish?: boolean },
+  ): Promise<AgentInstance> {
     this.assertSessionHandoffNotFenced(managed.id)
     // Phase 4: a pending fork transaction owns this session's checkout, and a
     // published-but-unestablished isolated fork child must not create a plain
-    // agent — provider establishment happens on first Send (Task 4).
+    // agent — provider establishment happens on first Send (Task 4). The
+    // establish path alone bypasses the pending-child gate.
     this.assertSessionForkNotFenced(managed.id)
-    this.assertSessionNotPendingForkChild(managed)
+    if (!opts?.allowPendingForkEstablish) {
+      this.assertSessionNotPendingForkChild(managed)
+    }
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -5625,6 +5636,149 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * First-Send provider establishment for a pending isolated fork child
+   * (Phase 4 Task 4). Runs after the user message is persisted: resolves the
+   * strict fork adapter on the child's agent, establishes the native fork at
+   * the recorded source head with the PERSISTED idempotency key, persists the
+   * child provider ID exactly once, retires the pending metadata, and records
+   * the establishment in the fork journal. The message dispatch continues on
+   * the SAME send afterwards.
+   *
+   * No fallback for isolated forks: a missing/malformed anchor, an adapter
+   * without the strict capability, a throwing establish, or a malformed
+   * result are all typed retryable errors. The child stays pending with its
+   * single persisted user message; a retry reuses the SAME persisted
+   * idempotency key and never duplicates the provider child or the message.
+   *
+   * Returns false (no-op) when the session is not a pending fork child.
+   */
+  private async establishPendingFork(managed: ManagedSession): Promise<boolean> {
+    const pending = managed.pendingFork
+    if (!pending) return false
+
+    // Strict anchor errors: the establish input comes from the persisted
+    // pendingFork. A missing/malformed anchor (e.g. corrupted record) is a
+    // typed retryable error — no provider call, no fallback.
+    if (!pending.parentSdkSessionId || !pending.parentSdkTurnId) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        'The isolated fork child has no valid provider anchor (missing parent SDK session or turn id). The fork must be re-created.',
+      )
+    }
+
+    // The child has no agent yet: create it through the normal machinery with
+    // the pending-child fence bypassed ONLY for this establish path.
+    const agent = await this.getOrCreateAgent(managed, { allowPendingForkEstablish: true })
+    // Strict capability gate: absent OR structurally incomplete adapters are
+    // a typed failure — no fallback, no provider call, no orphan risk.
+    const resolution = resolveIsolatedForkCapability(agent)
+    const adapter = agent.conversationFork
+    if (!resolution.supported || !adapter) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        'The provider adapter cannot establish a strict cross-CWD native fork for this session.',
+      )
+    }
+
+    let result: ConversationForkEstablishResult
+    try {
+      result = await adapter.establishNativeFork({
+        parentSdkSessionId: pending.parentSdkSessionId,
+        parentSdkTurnId: pending.parentSdkTurnId,
+        idempotencyKey: pending.idempotencyKey,
+        executionCwd: pending.executionCwd,
+        transcriptCwd: pending.transcriptCwd,
+      })
+    } catch (error) {
+      // We cannot know whether the provider created a native child before
+      // throwing: record the attempt in the durable orphan ledger so an
+      // unlinked provider artifact is never silently attached (Task 5
+      // reconciles). The child stays pending, retryable with the same key.
+      this.recordForkOrphanAttempt(pending, 'failed', error)
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        `The native fork could not be established: ${error instanceof Error ? error.message : String(error)}. Retry to complete the fork.`,
+      )
+    }
+
+    // Malformed result (missing child provider id or proof): never attach an
+    // unverified provider artifact silently.
+    if (
+      !result ||
+      typeof result.childSdkSessionId !== 'string' ||
+      !result.childSdkSessionId.trim() ||
+      !result.proof ||
+      typeof result.proof !== 'object' ||
+      !Array.isArray(result.proof.checks) ||
+      result.proof.checks.length === 0
+    ) {
+      this.recordForkOrphanAttempt(pending, 'unverified')
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        'The native fork establishment returned an incomplete result. Retry to complete the fork.',
+      )
+    }
+
+    // Persist the child provider ID exactly once and retire the pending
+    // metadata (checkoutStrategy stays 'isolated' as provenance). Mirrors the
+    // onSdkSessionIdUpdate persistence pattern: mutate managed, persist, flush.
+    managed.sdkSessionId = result.childSdkSessionId
+    managed.pendingFork = undefined
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+
+    // Record the establishment in the fork journal (metadata-only on the
+    // committed entry; a missing entry is logged-and-continued because the
+    // child session record is authoritative).
+    try {
+      const recorded = this.getGitServices().fork.markEstablished(
+        pending.transactionId,
+        result.childSdkSessionId,
+      )
+      if (!recorded) {
+        sessionLog.warn('Fork journal entry not found for establishment; the child session record is authoritative', {
+          transactionId: pending.transactionId,
+          childSdkSessionId: result.childSdkSessionId,
+        })
+      }
+    } catch (error) {
+      sessionLog.warn('Failed to record fork establishment in the journal', {
+        transactionId: pending.transactionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    sessionLog.info(`Isolated fork child ${managed.id} established: childSdkSessionId=${result.childSdkSessionId}`)
+    return true
+  }
+
+  /**
+   * Append a failed/unverified establishment attempt to the durable orphan
+   * ledger (best-effort: a ledger write failure never masks the typed error).
+   */
+  private recordForkOrphanAttempt(
+    pending: NonNullable<ManagedSession['pendingFork']>,
+    result: ForkOrphanResult,
+    error?: unknown,
+  ): void {
+    try {
+      this.getGitServices().forkOrphans.recordAttempt({
+        transactionId: pending.transactionId,
+        idempotencyKey: pending.idempotencyKey,
+        parentSdkSessionId: pending.parentSdkSessionId,
+        parentSdkTurnId: pending.parentSdkTurnId,
+        executionCwd: pending.executionCwd,
+        result,
+        ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
+      })
+    } catch (ledgerError) {
+      sessionLog.warn('Failed to record fork orphan attempt', {
+        error: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+      })
+    }
+  }
+
+  /**
    * Shared quiescence loop for the lifecycle, handoff, and fork hooks: await
    * teardown of every processing runtime in the set, bounded per session.
    * Returns false when any runtime cannot quiesce.
@@ -7212,9 +7366,9 @@ export class SessionManager implements ISessionManager {
     this.assertSessionHandoffNotFenced(sessionId)
     // Phase 4: a pending fork transaction fences Send; a published isolated
     // fork child is pending until its first-Send provider establishment
-    // (Task 4 replaces this gate with the establish flow).
+    // (the establish flow runs in the prelude below, after the user message
+    // is persisted).
     this.assertSessionForkNotFenced(sessionId)
-    this.assertSessionNotPendingForkChild(managed)
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
     this.assertSessionCheckoutReady(sessionId)
@@ -7401,6 +7555,16 @@ export class SessionManager implements ISessionManager {
         this.generateTitle(managed, message)
       }
     }
+
+    // Phase 4 Task 4: first-Send provider establishment for a pending
+    // isolated fork child. The strict adapter creates the native fork at
+    // the recorded source head with the PERSISTED idempotency key, the
+    // child provider ID is persisted exactly once, and the pending
+    // metadata retires before the message is dispatched (the user message
+    // is already on disk — persisted, flushed and acked above, or reused
+    // via existingMessageId on a retry). Failure is a typed retryable
+    // error with no fallback; the message is never duplicated on retry.
+    await this.establishPendingFork(managed)
 
     // Evaluate auto-label rules against the user message (common path for both
     // fresh and queued messages). Scans regex patterns configured on labels,
