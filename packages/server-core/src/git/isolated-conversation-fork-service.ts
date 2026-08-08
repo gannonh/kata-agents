@@ -27,13 +27,17 @@ import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSy
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import type {
   ConversationForkBlockerCode,
+  ConversationForkCancelInput,
   ConversationForkCommitSummary,
   ConversationForkConfirmInput,
   ConversationForkPreview,
   ConversationForkPreviewInput,
   ConversationForkProviderCapability,
+  ConversationForkRecoverInput,
   ConversationForkRecoveryState,
   ConversationForkResult,
+  ConversationForkStatus,
+  ConversationForkStatusInput,
   ConversationForkStrategy,
   ManagedWorktreeRecordV2,
   ManagedWorktreeSnapshotMeta,
@@ -312,6 +316,86 @@ export class IsolatedConversationForkService {
       if (resolvePath(txn.sourcePath) === canonical || resolvePath(txn.destinationPath) === canonical) return true
     }
     return false
+  }
+
+  // -------------------------------------------------------------------------
+  // Status
+  // -------------------------------------------------------------------------
+
+  /**
+   * Status of the session's fork transaction: the live in-memory transaction
+   * when one exists, otherwise a durable in-progress journal transaction
+   * (restart). The reported state prefers the durable journal metadata state
+   * (the authoritative "how far did we get" signal) over the in-memory one.
+   */
+  async status(input: ConversationForkStatusInput): Promise<ConversationForkStatus> {
+    const sessionId = input.sessionId
+    const txn = this.transactions.get(sessionId)
+    if (txn) {
+      const entry = this.deps.journal.entries().find((candidate) => candidate.journalId === txn.journalId)
+      return this.statusFor(txn, entry)
+    }
+    const entry = this.deps.journal.entries().find(
+      (candidate) =>
+        candidate.op === 'fork' && candidate.sessionIds.includes(sessionId) && candidate.status === 'in-progress',
+    )
+    if (!entry) return { active: false }
+    const rehydrated = this.rehydrateTransaction(entry, sessionId)
+    if (!rehydrated) return { active: false }
+    return this.statusFor(rehydrated, entry)
+  }
+
+  /** Build the active status payload for a transaction (optionally with its journal entry). */
+  private statusFor(txn: ForkTransaction, entry?: WorktreeJournalEntry): ConversationForkStatus {
+    const state =
+      entry?.status === 'in-progress' && typeof entry.metadata?.state === 'string'
+        ? (entry.metadata.state as ConversationForkRecoveryState)
+        : txn.state
+    return {
+      active: true,
+      transactionId: txn.transactionId,
+      strategy: txn.strategy,
+      state,
+      // The fork seed is the retained snapshot authority backing rollback/recovery.
+      ...(txn.seedSnapshotId ? { retainedSnapshotId: txn.seedSnapshotId } : {}),
+      since: txn.startedAt,
+      // Before the first Send the child provider identity is always pending.
+      providerIdentity: { status: 'pending' },
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Cancel
+  // -------------------------------------------------------------------------
+
+  /**
+   * Cancel a pending preview transaction (dialog dismissed without confirming).
+   * Only a transaction whose durable journal entry is still a pure PENDING
+   * preview may be cancelled: any journaled confirm step (quiescence, seed
+   * capture, materialization, …) means the confirm is in flight and must not
+   * be discarded — recovery continues through recover(). The durable entry is
+   * recovered with a `preview-cancelled` marker so a restarted server never
+   * treats the dismissed preview as an in-progress fork (re-preview stays
+   * possible). Returns the post-cancel status.
+   */
+  async cancel(input: ConversationForkCancelInput): Promise<ConversationForkStatus> {
+    const sessionId = input.sessionId
+    const inMemory = this.transactions.get(sessionId)
+    if (inMemory && inMemory.transactionId !== input.transactionId) return this.status(input)
+    const entry = this.deps.journal.entries().find(
+      (candidate) =>
+        candidate.op === 'fork' &&
+        candidate.recordId === input.transactionId &&
+        candidate.sessionIds.includes(sessionId),
+    )
+    if (!entry) return this.status(input)
+    if (entry.status !== 'in-progress' || entry.steps.length > 0 || entry.metadata?.state !== 'pending') {
+      return this.status(input)
+    }
+    this.deps.journal.updateMetadata(entry.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
+    this.deps.journal.recover(entry.journalId, 'preview-cancelled')
+    this.transactions.delete(sessionId)
+    return { active: false }
   }
 
   // -------------------------------------------------------------------------
@@ -841,10 +925,57 @@ export class IsolatedConversationForkService {
     if (!input.worktreeNameSuffix) {
       throw new ConversationForkError('FORK_STRATEGY_MISMATCH', 'An isolated fork confirmation requires the worktree name suffix from the preview.')
     }
-    if (resolved.committedSummary) {
-      // A repeated confirm after the durable commit returns the committed
-      // summary instead of double-creating a target/child/owner.
-      return { outcome: 'committed', transactionId: txn.transactionId, summary: resolved.committedSummary }
+    return this.enterLockedResume(input, txn, resolved.committedSummary)
+  }
+
+  /**
+   * Recover an interrupted fork transaction by re-entering the locked
+   * confirm/resume machinery. The recover input carries only sessionId +
+   * transactionId, so the resume validates against the transaction's OWN
+   * journaled fingerprint and name (recover never accepts a client-supplied
+   * fingerprint). A committed journal entry returns its summary idempotently;
+   * a rolled-back entry starts a fresh attempt through the same resolution
+   * confirm uses.
+   */
+  async recover(input: ConversationForkRecoverInput): Promise<ConversationForkResult> {
+    const resolved = this.resolveConfirmTransaction(input)
+    if (!resolved) {
+      throw new ConversationForkError('FORK_TRANSACTION_UNKNOWN', 'Unknown fork transaction.')
+    }
+    return this.enterLockedResume(
+      this.confirmInputFromTxn(resolved.txn, input.sessionId),
+      resolved.txn,
+      resolved.committedSummary,
+    )
+  }
+
+  /** Rebuild the confirm input a resume uses from the transaction's journaled facts. */
+  private confirmInputFromTxn(txn: ForkTransaction, sessionId: string): ConversationForkConfirmInput {
+    return {
+      sessionId,
+      strategy: txn.strategy,
+      transactionId: txn.transactionId,
+      previewFingerprint: txn.fingerprint,
+      worktreeNameSuffix: txn.nameSuffix,
+    }
+  }
+
+  /**
+   * Shared preamble of confirm and recover: resolve hooks, validate capability
+   * wiring, then re-enter the locked confirm/resume core. A committed
+   * transaction returns its durable summary instead of re-running. Recovery
+   * re-enters with the transaction's journaled fingerprint; confirm with the
+   * client's preview fingerprint (both revalidated inside confirmLocked).
+   */
+  private async enterLockedResume(
+    input: ConversationForkConfirmInput,
+    txn: ForkTransaction,
+    committedSummary?: ConversationForkCommitSummary,
+  ): Promise<ConversationForkResult> {
+    if (committedSummary) {
+      // A repeated confirm/recover after the durable commit returns the
+      // committed summary instead of double-creating a target/child/owner.
+      return { outcome: 'committed', transactionId: txn.transactionId, summary: committedSummary }
     }
     const session = this.hooks.resolveSession?.(input.sessionId)
     if (!session) throw new ConversationForkError('FORK_SESSION_UNKNOWN', 'Unknown session for fork confirmation.')
@@ -1395,12 +1526,14 @@ export class IsolatedConversationForkService {
   }
 
   /**
-   * Resolve the transaction a confirm refers to: the in-memory preview
+   * Resolve the transaction a confirm/recover refers to: the in-memory preview
    * transaction, a durable in-progress journal transaction (crash replay), a
    * rolled-back journal transaction (fresh re-run after full compensation), or
-   * a committed journal transaction (repeat confirm returns the summary).
+   * a committed journal transaction (repeat confirm/recover returns the
+   * summary). Only `sessionId` + `transactionId` are consulted, so recover
+   * resolves through the same path as confirm.
    */
-  private resolveConfirmTransaction(input: ConversationForkConfirmInput): {
+  private resolveConfirmTransaction(input: { sessionId: string; transactionId: string }): {
     txn: ForkTransaction
     committedSummary?: ConversationForkCommitSummary
   } | null {

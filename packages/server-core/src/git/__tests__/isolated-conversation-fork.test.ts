@@ -1246,3 +1246,370 @@ describe('IsolatedConversationForkService fork-journal GC retention', () => {
     expect(existsSync(join(harness.root, 'snapshots', snapshotId))).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Status / cancel / recover — the recovery and cancellation surface
+// ---------------------------------------------------------------------------
+
+function freshServicesWithChildRecording(childCalls: ConversationForkChildSessionInput[], childId: string) {
+  const fresh = createGitServices({
+    worktreeRoot: join(harness.root, 'worktrees'),
+    registryPath: join(harness.root, 'worktrees', 'registry.json'),
+    snapshotsRoot: join(harness.root, 'snapshots'),
+    lockDirectory: join(harness.root, 'locks'),
+    forkHooks: {
+      resolveSession: (sessionId) => harness.sessions.get(sessionId) ?? null,
+      resolveCapability: () => ({ adapterId: 'pi-test', strictCrossCwdNativeFork: true }),
+      resolveCapabilityAdapter: () => createDeterministicStrictForkAdapter({ adapterId: 'pi-test' }),
+      isSessionActive: () => false,
+      createForkChildSession: async (input) => {
+        childCalls.push(input)
+        return childId
+      },
+      deleteForkChildSession: async () => undefined,
+    },
+  })
+  fresh.lifecycle.markReady()
+  return fresh
+}
+
+describe('IsolatedConversationForkService status', () => {
+  test('reports active:false for a session with no fork transaction', async () => {
+    currentSession()
+
+    expect(await harness.svc.fork.status({ sessionId: 'session-1' })).toEqual({ active: false })
+  })
+
+  test('reports an active pending transaction after preview (in-memory and durable)', async () => {
+    currentSession()
+
+    const p = await preview('isolated-worktree', 'status-pending')
+    expect(p.blocked).toBeUndefined()
+
+    const status = await harness.svc.fork.status({ sessionId: 'session-1' })
+    expect(status).toMatchObject({
+      active: true,
+      transactionId: p.transactionId,
+      strategy: 'isolated-worktree',
+      state: 'pending',
+      providerIdentity: { status: 'pending' },
+    })
+    if (status.active) expect(status.since).toBeGreaterThan(0)
+
+    // The preview transaction is durably journaled as in-progress.
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('in-progress')
+  })
+
+  test('rehydrates an active transaction from the journal after a restart', async () => {
+    currentSession()
+
+    const p = await preview('isolated-worktree', 'status-rehydrate')
+    expect(p.blocked).toBeUndefined()
+
+    const fresh = freshServicesWithChildRecording([], 'child-unused')
+    const status = await fresh.fork.status({ sessionId: 'session-1' })
+
+    expect(status).toMatchObject({
+      active: true,
+      transactionId: p.transactionId,
+      strategy: 'isolated-worktree',
+      state: 'pending',
+    })
+    if (status.active) expect(status.since).toBeGreaterThan(0)
+    expect(fresh.fork.isSessionFenced('session-1')).toBe(false)
+  })
+})
+
+describe('IsolatedConversationForkService cancel', () => {
+  test('cancel makes status inactive and a re-preview works (stale-journal gap regression)', async () => {
+    currentSession()
+
+    const p = await preview('isolated-worktree', 'cancel-repreview')
+    expect(p.blocked).toBeUndefined()
+    expect(forkJournalEntries().filter((e) => e.status === 'in-progress')).toHaveLength(1)
+
+    const cancelled = await harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    expect(cancelled).toEqual({ active: false })
+    expect(await harness.svc.fork.status({ sessionId: 'session-1' })).toEqual({ active: false })
+
+    // The durable entry is recovered with the preview-cancelled marker: a
+    // restarted server must NOT block a new preview on this session (the Task 2
+    // review gap: a dismissed preview previously left a durable in-progress
+    // fork entry that blocked re-preview forever after restart).
+    const cancelledEntry = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+    expect(cancelledEntry?.status).toBe('recovered')
+    expect(cancelledEntry?.commitMarker).toBe('preview-cancelled')
+    expect(cancelledEntry?.metadata?.state).toBe('preview-cancelled')
+
+    const fresh = freshServicesWithChildRecording([], 'child-unused')
+    expect(await fresh.fork.status({ sessionId: 'session-1' })).toEqual({ active: false })
+
+    const again = await preview('isolated-worktree', 'cancel-repreview')
+    expect(again.blocked).toBeUndefined()
+    expect(again.transactionId).not.toBe(p.transactionId)
+    expect(forkJournalEntries().filter((e) => e.recordId === again.transactionId && e.status === 'in-progress')).toHaveLength(1)
+  })
+
+  test('cancel releases the session and path fences held by a pending preview', async () => {
+    currentSession()
+
+    const p = await preview('isolated-worktree', 'cancel-fence')
+    expect(p.blocked).toBeUndefined()
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(true)
+    expect(harness.svc.fork.isPathFenced(realpathSync(harness.repo))).toBe(true)
+    expect(harness.svc.fork.isPathFenced(p.destination.checkoutPath)).toBe(true)
+
+    await harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(false)
+    expect(harness.svc.fork.isPathFenced(realpathSync(harness.repo))).toBe(false)
+    expect(harness.svc.fork.isPathFenced(p.destination.checkoutPath)).toBe(false)
+  })
+
+  test('cancel on an unknown transaction id is a no-op returning the current status', async () => {
+    currentSession()
+
+    expect(await harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: 'c'.repeat(16) })).toEqual({
+      active: false,
+    })
+  })
+})
+
+describe('IsolatedConversationForkService recover', () => {
+  test('recover with an unknown transactionId throws a typed fork error', async () => {
+    currentSession()
+
+    let error: unknown
+    try {
+      await harness.svc.fork.recover({ sessionId: 'session-1', transactionId: 'f'.repeat(16) })
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ConversationForkError)
+    expect((error as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+  })
+
+  test('recover on a committed entry returns the committed summary without re-creating anything', async () => {
+    currentSession()
+
+    const p = await preview('isolated-worktree', 'recover-committed')
+    expect(p.blocked).toBeUndefined()
+    const first = await confirmIsolated(p, 'recover-committed')
+    expect(first.outcome).toBe('committed')
+    if (first.outcome !== 'committed') return
+
+    const rec = await harness.svc.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(rec.outcome).toBe('committed')
+    if (rec.outcome !== 'committed') return
+    expect(rec.summary.sessionId).toBe(first.summary.sessionId)
+    expect(rec.summary.executionCwd).toBe(first.summary.executionCwd)
+    expect(rec.summary.committedAt).toBe(first.summary.committedAt)
+    // Nothing re-created: still exactly one target, one child call, one owner.
+    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-committed')).toHaveLength(1)
+    expect(harness.childCalls).toHaveLength(1)
+  })
+
+  test('recover after a rolled-back entry starts a fresh attempt and commits exactly once', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+
+    const p = await preview('isolated-worktree', 'recover-rolled-back')
+    expect(p.blocked).toBeUndefined()
+    let childCalls = 0
+    harness.svc.fork.setHooks({
+      createForkChildSession: async () => {
+        childCalls++
+        if (childCalls === 1) throw new Error('simulated interrupt')
+        return `child-rolled-back-${childCalls}`
+      },
+    })
+    let error: unknown
+    try {
+      await confirmIsolated(p, 'recover-rolled-back')
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ConversationForkError)
+    // The interrupted attempt was fully compensated and journaled rolled-back.
+    const rolledBack = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+    expect(rolledBack?.status).toBe('recovered')
+    expect(rolledBack?.commitMarker).toBe('rolled-back')
+    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')).toHaveLength(0)
+    expect(existsSync(p.destination.checkoutPath)).toBe(false)
+
+    // Recover re-enters the confirm machinery as a fresh attempt (the
+    // rolled-back entry's artifacts are fully compensated) and commits once.
+    const rec = await harness.svc.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(rec.outcome).toBe('committed')
+    if (rec.outcome !== 'committed') return
+    expect(childCalls).toBe(2)
+    const records = harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.ownerSessionIds).toEqual([rec.summary.sessionId])
+    expect(await git(harness.repo, ['worktree', 'list'])).toContain(records[0]!.checkoutPath)
+    expect(forkJournalEntries().filter((e) => e.recordId === p.transactionId && e.status === 'committed')).toHaveLength(1)
+    expect(forkJournalEntries().filter((e) => e.recordId === p.transactionId)).toHaveLength(2)
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(false)
+  })
+
+  test('cancel does NOT cancel an in-progress confirm and recover completes it exactly once', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+
+    const p = await preview('isolated-worktree', 'in-progress-cancel')
+    expect(p.blocked).toBeUndefined()
+    if (p.blocked) return
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)!
+    const journalId = entry.journalId
+    const journal = harness.svc.journal
+    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const headOid = (await git(harness.repo, ['rev-parse', 'HEAD'])).trim()
+    const branch = (await git(harness.repo, ['branch', '--show-current'])).trim()
+
+    // Drive the durable journal past the preview (seed-captured), as a crash
+    // after seed capture would leave it.
+    journal.step(journalId, 'locks-acquired')
+    journal.step(journalId, 'source-quiesced')
+    const seed = await harness.svc.fork.captureForkSeed({
+      checkoutPath: realpathSync(harness.repo),
+      repositoryRoot: realpathSync(harness.repo),
+      gitCommonDir,
+      expectedBranch: branch,
+      baseRef: null,
+      ownerSessionIds: ['session-1'],
+      policyVersion: harness.svc.worktreeSettings.getSnapshot().version,
+      previewFingerprint: p.previewFingerprint,
+    })
+    journal.updateMetadata(journalId, {
+      state: 'seed-captured',
+      seedSnapshotId: seed.snapshotId,
+      seedFingerprint: seed.fingerprint,
+      headOid,
+    })
+    journal.step(journalId, 'seed-captured')
+
+    // In-process cancel must refuse: the transaction is past pending.
+    const cancelResult = await harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    expect(cancelResult.active).toBe(true)
+    if (cancelResult.active) expect(cancelResult.transactionId).toBe(p.transactionId)
+    // The transaction stays in the map (still fenced, still recoverable).
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(true)
+    const durable = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+    expect(durable?.status).toBe('in-progress')
+    expect(durable?.metadata?.state).toBe('seed-captured')
+
+    // A restarted server sees the same durable state: the fork is recoverable.
+    const freshChildCalls: ConversationForkChildSessionInput[] = []
+    const fresh = freshServicesWithChildRecording(freshChildCalls, 'child-seed-captured-recover')
+    const status = await fresh.fork.status({ sessionId: 'session-1' })
+    expect(status).toMatchObject({ active: true, transactionId: p.transactionId, state: 'seed-captured' })
+
+    const rec = await fresh.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(rec.outcome).toBe('committed')
+    if (rec.outcome !== 'committed') return
+    expect(freshChildCalls).toHaveLength(1)
+    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.ownerSessionIds).toEqual(['child-seed-captured-recover'])
+    expect(
+      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel'),
+    ).toHaveLength(1)
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
+    expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
+  })
+
+  test('recover resumes a fork journal that crashed after target materialization exactly once', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+
+    const p = await preview('isolated-worktree', 'crash-materialized-recover')
+    expect(p.blocked).toBeUndefined()
+    if (p.blocked) return
+    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const headOid = (await git(harness.repo, ['rev-parse', 'HEAD'])).trim()
+    const branch = (await git(harness.repo, ['branch', '--show-current'])).trim()
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)!
+    const journalId = entry.journalId
+    const pathToken = entry.metadata?.pathToken as string
+    const journal = harness.svc.journal
+
+    // Drive the durable journal to the exact post-materialization state a crash
+    // would leave: steps recorded through target-verified, a real target
+    // worktree materialized, a real seed captured and restored into it.
+    journal.step(journalId, 'locks-acquired')
+    journal.step(journalId, 'source-quiesced')
+    const seed = await harness.svc.fork.captureForkSeed({
+      checkoutPath: realpathSync(harness.repo),
+      repositoryRoot: realpathSync(harness.repo),
+      gitCommonDir,
+      expectedBranch: branch,
+      baseRef: null,
+      ownerSessionIds: ['session-1'],
+      policyVersion: harness.svc.worktreeSettings.getSnapshot().version,
+      previewFingerprint: p.previewFingerprint,
+    })
+    journal.updateMetadata(journalId, {
+      state: 'seed-captured',
+      seedSnapshotId: seed.snapshotId,
+      seedFingerprint: seed.fingerprint,
+      headOid,
+    })
+    journal.step(journalId, 'seed-captured')
+
+    const created = await harness.svc.worktrees.createWorktree({
+      workspaceId: 'ws1',
+      sessionId: 'session-1',
+      repositoryRoot: realpathSync(harness.repo),
+      gitCommonDir,
+      baseRef: headOid,
+      worktreeNameSuffix: 'crash-materialized-recover',
+      pathToken,
+      lockAlreadyHeld: true,
+    })
+    journal.updateMetadata(journalId, {
+      state: 'target-materialized',
+      managedWorktreeId: created.record.managedWorktreeId,
+    })
+    journal.step(journalId, 'target-materialized')
+
+    const seedMeta = harness.svc.snapshots.loadSnapshotMeta(seed.snapshotId)
+    expect(seedMeta).toBeTruthy()
+    if (!seedMeta) return
+    await harness.svc.snapshots.applySnapshotToCheckout({
+      meta: seedMeta,
+      checkoutPath: created.record.checkoutPath,
+    })
+    journal.step(journalId, 'target-restored')
+    journal.step(journalId, 'target-verified')
+
+    // A fresh server instance must rehydrate and resume WITHOUT treating the
+    // transaction's own materialized destination as a name-collision, and
+    // without creating a second target/child/owner.
+    const freshChildCalls: ConversationForkChildSessionInput[] = []
+    const fresh = freshServicesWithChildRecording(freshChildCalls, 'child-crash-materialized-recover')
+
+    const result = await fresh.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+    expect(freshChildCalls).toHaveLength(1)
+    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.managedWorktreeId).toBe(created.record.managedWorktreeId)
+    expect(records[0]?.ownerSessionIds).toEqual(['child-crash-materialized-recover'])
+    expect(
+      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover'),
+    ).toHaveLength(1)
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
+    expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
+  })
+})
