@@ -164,6 +164,17 @@ function PreviewBody({
                 {preview.source.conversationHeadMessageId.slice(0, 12)}
               </span>
             </SummaryRow>
+            <SummaryRow label={t('git.fork.sourceSession')}>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="font-mono text-[11px]">{preview.source.sessionId.slice(0, 12)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="font-mono text-[11px]">
+                  {preview.source.conversationHeadTurnId
+                    ? preview.source.conversationHeadTurnId.slice(0, 12)
+                    : '—'}
+                </span>
+              </span>
+            </SummaryRow>
             <SummaryRow label={t('git.fork.sourceCheckout')}>
               <span className="inline-flex items-center gap-1.5">
                 {remote && <RemoteLabel serverId={preview.source.serverId} />}
@@ -206,6 +217,11 @@ function PreviewBody({
             </SummaryRow>
             <SummaryRow label={t('git.fork.checkoutPath')}>
               <span className="font-mono text-[11px] text-muted-foreground">{preview.destination.checkoutPath}</span>
+            </SummaryRow>
+            <SummaryRow label={t('git.fork.repositoryRoot')}>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {preview.destination.repositoryRoot}
+              </span>
             </SummaryRow>
             {preview.destination.leases.length > 0 && (
               <SummaryRow label={t('git.fork.destinationLeases')}>

@@ -7545,6 +7545,11 @@ export class SessionManager implements ISessionManager {
       if (!userMessage) {
         throw new Error(`Existing message ${existingMessageId} not found`)
       }
+      // The message is already durable from the original send; acknowledge it
+      // so the RPC promise resolves exactly like the fresh path (the renderer
+      // retry depends on this ack — a retried fork send must resolve
+      // `{ accepted, messageId }` at persistence time, not after the turn).
+      onAck?.(existingMessageId)
     } else {
       // Create new message
       userMessage = {

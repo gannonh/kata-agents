@@ -496,7 +496,23 @@ describe('SessionManager isolated fork child creation', () => {
     )
     const retryMessageId = managed.messages!.find((m) => m.content === 'retry me')!.id
 
-    await sm.sendMessage(childId, 'retry me', undefined, undefined, undefined, retryMessageId)
+    // The retry reuses the persisted message id; the ack contract must fire
+    // exactly like the fresh path so the RPC resolves { accepted, messageId }
+    // at persistence time (the renderer retry depends on it).
+    let retryAck: string | null = null
+    await sm.sendMessage(
+      childId,
+      'retry me',
+      undefined,
+      undefined,
+      undefined,
+      retryMessageId,
+      undefined,
+      (messageId) => {
+        retryAck = messageId
+      },
+    )
+    expect(retryAck === retryMessageId).toBe(true)
 
     // Establish called twice total, SAME persisted key both times; the
     // provider child ID is persisted exactly once and pendingFork retires.
