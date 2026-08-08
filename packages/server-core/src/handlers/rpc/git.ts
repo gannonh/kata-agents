@@ -393,14 +393,14 @@ export function registerGitHandlers(
       // SessionManager (wired through the fork hooks by setGitServices above;
       // passed explicitly here so reconciliation never depends on hook-wiring
       // order).
-      const forkReport = await git.fork.reconcileForkJournal({
+      const forkReport = (await git.fork?.reconcileForkJournal?.({
         resolveSessionForkState: (sessionId: string) =>
           deps.sessionManager.resolveSessionForkState?.(sessionId) ?? null,
-      })
+      })) ?? { resumed: 0, flagged: 0, recoveryRequired: 0 }
       // Orphan reconcile: retire ledger entries whose fork transaction later
       // established; surface stale unresolved entries (never auto-deleted —
       // the operator/UI decides). Never attaches an orphan to a session.
-      const orphanReport = await git.forkOrphans.reconcile({
+      const orphanReport = (await git.forkOrphans?.reconcile?.({
         isEstablished: (transactionId) =>
           git.journal.entries().some(
             (entry) =>
@@ -409,7 +409,7 @@ export function registerGitHandlers(
               entry.status === 'committed' &&
               entry.metadata?.state === 'established',
           ),
-      })
+      })) ?? { resolved: 0, retained: 0, expiredUnresolved: 0, expiredAttemptIds: [] }
       git.journal.compact()
       git.lifecycle.markReady()
       if (journalReport.resumed > 0 || journalReport.recovered > 0) {

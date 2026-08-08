@@ -783,6 +783,31 @@ describe('registerGitHandlers', () => {
     ])
   })
 
+  it('marks lifecycle ready when optional fork reconciliation services are absent', async () => {
+    process.env[FLAG] = '1'
+    const { git, startupCalls } = makeGitServices()
+    ;(git as any).fork = {}
+    ;(git as any).forkOrphans = {}
+    let releaseInit!: () => void
+    const initGate = new Promise<void>((resolve) => {
+      releaseInit = resolve
+    })
+    makeHarness(git, [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }], {
+      waitForInit: async () => initGate,
+    })
+    releaseInit()
+    for (let i = 0; i < 25 && !startupCalls.includes('lifecycle.markReady'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(startupCalls).toEqual([
+      'worktrees.reconcile',
+      'lifecycle.reconcileJournal',
+      'journal.compact',
+      'lifecycle.markReady',
+    ])
+  })
+
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {
     process.env[FLAG] = '1'
     process.env.KATA_FEATURE_WORKTREE_V2 = '1'

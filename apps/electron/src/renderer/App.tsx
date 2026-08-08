@@ -56,6 +56,7 @@ import {
   forceSessionMessagesReloadAtom,
   backgroundTasksAtomFamily,
   forkRetryAtomFamily,
+  findPendingForkRetryMessage,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -255,11 +256,6 @@ export default function App() {
   const updateSessionDirect = useSetAtom(updateSessionAtom)
   const replaceLoadedSession = useSetAtom(replaceLoadedSessionAtom)
   const store = useStore()
-
-  // Last accepted send per session (server message ID + text) so a retryable
-  // isolated-fork establishment failure can re-send the SAME persisted user
-  // message via existingMessageId instead of duplicating it (Phase 4).
-  const forkSendsRef = React.useRef<Map<string, { messageId: string; text: string }>>(new Map())
 
   // Helper to update a session by ID with partial fields
   // Uses per-session atom directly instead of updating an array
@@ -1027,14 +1023,13 @@ export default function App() {
 
       // Phase 4: a typed retryable isolated-fork establishment failure (the
       // child stays pending with its single persisted user message). Surface
-      // the chat-input retry banner using the server message ID captured at
-      // send time so the retry reuses the persisted message.
+      // the chat-input retry banner using the durable post-branch user
+      // message so the retry reuses the persisted message.
       if (event.type === 'error' && event.code === WORKTREE_FORK_ERROR_CODE) {
-        const lastSend = forkSendsRef.current.get(sessionId)
-        if (lastSend) {
+        const retryMessage = findPendingForkRetryMessage(store.get(sessionAtomFamily(sessionId)))
+        if (retryMessage) {
           store.set(forkRetryAtomFamily(sessionId), {
-            messageId: lastSend.messageId,
-            text: lastSend.text,
+            ...retryMessage,
             error: event.error,
           })
         }
@@ -1545,15 +1540,11 @@ export default function App() {
       }))
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
-      const result = await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
+      await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
       })
-      // Remember the server-persisted message ID so a retryable isolated-fork
-      // establishment failure can re-send this exact message (existingMessageId)
-      // without duplicating it in the transcript (Phase 4).
-      forkSendsRef.current.set(sessionId, { messageId: result.messageId, text: message })
       // First send on a pending fork child: poll until the establish flow
       // retires forkPending so the PENDING badge clears without a manual
       // refresh. The RPC resolves before establishment runs.

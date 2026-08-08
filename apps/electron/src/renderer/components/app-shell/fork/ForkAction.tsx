@@ -30,8 +30,9 @@ export function useForkCapability(): { v2Effective: boolean; v2Pending: boolean 
 
   React.useEffect(() => {
     let cancelled = false
-    window.electronAPI
-      ?.getGitCapabilities?.()
+    // Promise.resolve normalizes an unavailable optional IPC method to an
+    // asynchronous `undefined` result instead of calling `.then()` on it.
+    void Promise.resolve(window.electronAPI?.getGitCapabilities?.())
       .then((capability) => {
         if (cancelled) return
         setV2Effective(!!capability?.worktreeV2)

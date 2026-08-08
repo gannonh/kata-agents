@@ -2,6 +2,8 @@
 
 ## 2026-08-08
 
+* **Update**: [2026-08-08-isolated-conversation-forks.md](../adrs/2026-08-08-isolated-conversation-forks.md) — PR #50 review hardening records restart fence rehydration, strict execution-proof validation, source backend identity inheritance, and pre-persist first-Send concurrency fencing.
+
 * **Update**: [system-overview.md](system-overview.md) — added the Phase 4 isolated conversation-fork bullet to the "Git & GitHub worktrees (preview)" section: server-owned eligibility previews with typed blockers, the journaled fork transaction with compensation, the durable pending provider-fork intent (no child provider ID claim before first Send), idempotency-keyed first-Send establishment, and checkout-strategy provenance for cleanup.
 
 ## 2026-07-29

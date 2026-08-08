@@ -2,6 +2,8 @@
 
 ## 2026-08-08
 
+* **PR #50 review hardening**: acceptance evidence now covers restart fencing, exact provider execution proofs, missing parent anchors, source connection inheritance, pre-persist concurrency rejection, durable renderer retry recovery, and protected E2E onboarding credentials for [#43](https://github.com/gannonh/kata-agents/issues/43).
+
 * **Worktree V2 Phase 4 built**: [#43](https://github.com/gannonh/kata-agents/issues/43) — isolated conversation forks are implemented on branch `feat/worktree-v2-phase-4-isolated-conversation-forks` (shared stays the default; isolated is offered only for current-head idle sources with a strict cross-CWD native fork adapter; pending provider-fork intent with first-Send idempotency-keyed establishment; journaled fork transactions with compensation and an orphan ledger; checkout-strategy provenance for cleanup). The E2E fork spec is authored and lists cleanly; the credentialed UI UAT run tier is deferred (mirrors #47): the run needs a provider credential plus the desktop build artifacts, and production adapters stay disabled until credentialed UAT proves native ancestry, a distinct provider ID after first Send, and destination-only tool CWD.
 
 ## 2026-08-05

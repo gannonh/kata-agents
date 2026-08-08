@@ -108,6 +108,8 @@ export const CONVERSATION_FORK_BLOCKER_CODES = [
   'invalid-name',
   /** A pending/recovery fork transaction exists for the source or target. */
   'fork-in-progress',
+  /** The source provider session or conversation-turn anchor is missing. */
+  'missing-parent-anchor',
 ] as const
 
 /** A typed conversation-fork blocker code (precondition checks only). */

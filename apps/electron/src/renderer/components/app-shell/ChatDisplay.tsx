@@ -83,7 +83,7 @@ import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
 import { ForkDialog } from "./fork/ForkDialog"
 import { useForkCapability } from "./fork/ForkAction"
-import { forkRetryAtomFamily } from "@/atoms/sessions"
+import { findPendingForkRetryMessage, forkRetryAtomFamily } from "@/atoms/sessions"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -558,11 +558,36 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   } | null>(null)
 
   // Retryable isolated-fork establishment failure surfaced above the input
-  // (Phase 4). Read from the per-session atom set by App.tsx on the typed
-  // WORKTREE_FORK_FAILED error event; Retry re-sends the persisted message.
+  // (Phase 4). App sets this from the typed error event, and the initial
+  // loaded snapshot can reconstruct it from the durable child transcript.
   const forkRetry = useAtomValue(forkRetryAtomFamily(session?.id ?? '__no_session__'))
+  const setForkRetry = useSetAtom(forkRetryAtomFamily(session?.id ?? '__no_session__'))
   const clearForkRetry = useSetAtom(forkRetryAtomFamily(session?.id ?? '__no_session__'))
+  const forkRetryHydratedSessionRef = React.useRef<string | null>(null)
   const [forkRetrying, setForkRetrying] = React.useState(false)
+
+  // On a renderer reload, reconstruct a failed first-Send retry from the
+  // durable child transcript. Only inspect the fully loaded initial snapshot;
+  // a later first-send message is surfaced by App's typed error event instead
+  // of being mistaken for a failure before establishment has run.
+  React.useEffect(() => {
+    if (!session || forkRetryHydratedSessionRef.current === session.id) return
+    if (
+      session.messageCount !== undefined &&
+      session.messages.length < session.messageCount
+    ) {
+      return
+    }
+    forkRetryHydratedSessionRef.current = session.id
+    if (!session.forkPending || forkRetry) return
+    const retryMessage = findPendingForkRetryMessage(session)
+    if (retryMessage) {
+      setForkRetry({
+        ...retryMessage,
+        error: t('git.fork.establishIncomplete'),
+      })
+    }
+  }, [session, forkRetry, setForkRetry, t])
   const handleRetryFork = React.useCallback(async () => {
     if (!session || forkRetrying) return
     setForkRetrying(true)

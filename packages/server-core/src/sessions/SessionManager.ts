@@ -4,7 +4,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import {
   existsSync,
   mkdirSync,
@@ -1221,6 +1221,13 @@ export class SessionManager implements ISessionManager {
    * persisted idempotency key dedupes the provider artifact itself).
    */
   private forkEstablishing: Set<string> = new Set()
+  /**
+   * Pending-child sends that have claimed the pre-persist first-Send slot.
+   * This is separate from forkEstablishing because the slot must be claimed
+   * before the user message is flushed, while provider establishment starts
+   * afterward.
+   */
+  private forkSendInFlight: Set<string> = new Set()
   /** Keeps a blocked destructive deletion fenced until a later retry succeeds. */
   private sessionTeardownFenceHolds: Set<string> = new Set()
   /** Reused by retries while a timed-out backend teardown is still running. */
@@ -5731,17 +5738,28 @@ export class SessionManager implements ISessionManager {
       )
     }
 
-    // Malformed result (missing child provider id or proof): never attach an
-    // unverified provider artifact silently.
-    if (
-      !result ||
-      typeof result.childSdkSessionId !== 'string' ||
-      !result.childSdkSessionId.trim() ||
-      !result.proof ||
-      typeof result.proof !== 'object' ||
-      !Array.isArray(result.proof.checks) ||
-      result.proof.checks.length === 0
-    ) {
+    // Malformed or mismatched results are never attached silently. The proof
+    // must come from the selected adapter, name the exact destination, and
+    // cover every execution surface that an isolated child can use.
+    const proof = result?.proof
+    const requiredProofCategories = ['file:', 'shell:', 'mcp:', 'provider:'] as const
+    const proofIsValid =
+      !!result &&
+      typeof result.childSdkSessionId === 'string' &&
+      result.childSdkSessionId.trim() !== '' &&
+      !!proof &&
+      typeof proof === 'object' &&
+      typeof proof.adapterId === 'string' &&
+      proof.adapterId === resolution.capability.adapterId &&
+      proof.adapterId === adapter.adapterId &&
+      typeof proof.destinationPath === 'string' &&
+      isAbsolute(proof.destinationPath) &&
+      resolve(proof.destinationPath) === resolve(pending.executionCwd) &&
+      Number.isFinite(proof.verifiedAt) &&
+      Array.isArray(proof.checks) &&
+      proof.checks.every((check) => typeof check === 'string') &&
+      requiredProofCategories.every((category) => proof.checks.some((check) => check.startsWith(category)))
+    if (!proofIsValid) {
       this.recordForkOrphanAttempt(pending, 'unverified')
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
@@ -5895,7 +5913,16 @@ export class SessionManager implements ISessionManager {
    * Returns the durable child session id.
    */
   private async createForkChildSession(input: ConversationForkChildSessionInput): Promise<string> {
+    const parent = this.sessions.get(input.parentSessionId)
     const child = await this.createSession(input.workspaceId, {
+      // An isolated child must use the source session's locked backend identity,
+      // not the workspace default. Otherwise branch validation and first-Send
+      // establishment can select a different provider or account.
+      llmConnection: parent?.llmConnection,
+      model: parent?.model,
+      thinkingLevel: parent?.thinkingLevel,
+      permissionMode: parent?.permissionMode,
+      enabledSourceSlugs: parent?.enabledSourceSlugs,
       branchFromSessionId: input.parentSessionId,
       branchFromMessageId: input.forkPointMessageId,
       pendingFork: {
@@ -5909,6 +5936,13 @@ export class SessionManager implements ISessionManager {
         checkout: input.checkout,
       },
     })
+    // createSession initially persists the branch before applying its runtime
+    // options. Flush the managed child again so a restart before first Send
+    // cannot revert to the workspace default connection or model.
+    const childManaged = this.sessions.get(child.id)
+    if (!childManaged) throw new Error(`Fork child ${child.id} was not registered.`)
+    this.persistSession(childManaged)
+    await this.flushSession(child.id)
     return child.id
   }
 
@@ -7439,7 +7473,21 @@ export class SessionManager implements ISessionManager {
       throw new Error('Session is being torn down')
     }
 
-    return this.withPreChatBarrier(sessionId, async (releasePreChat) => {
+    // Claim the pending-child first-Send slot before any message mutation or
+    // flush. A concurrent send must be rejected rather than leaving an
+    // acknowledged orphan message in the transcript.
+    const pendingForkSend = !!managed.pendingFork
+    if (pendingForkSend) {
+      if (this.forkSendInFlight.has(sessionId)) {
+        throw new CodedError(
+          WORKTREE_FORK_PENDING_CODE,
+          i18n.t('git.fork.establishing'),
+        )
+      }
+      this.forkSendInFlight.add(sessionId)
+    }
+
+    const sendPromise = this.withPreChatBarrier(sessionId, async (releasePreChat) => {
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Source-activation auto-retry dedup (kata-agents-oss#804). When the server
@@ -8051,6 +8099,10 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
+    })
+    if (!pendingForkSend) return sendPromise
+    return sendPromise.finally(() => {
+      this.forkSendInFlight.delete(sessionId)
     })
   }
 

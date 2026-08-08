@@ -353,6 +353,39 @@ export class IsolatedConversationForkService {
     return false
   }
 
+  /** Return the authoritative durable attempt for a transaction identity. */
+  private findLatestForkEntry(recordId: string, sessionId?: string): WorktreeJournalEntry | undefined {
+    const entries = this.deps.journal.entries()
+    let newest: WorktreeJournalEntry | undefined
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]
+      if (
+        entry.op !== 'fork' ||
+        entry.recordId !== recordId ||
+        (sessionId && !entry.sessionIds.includes(sessionId))
+      ) {
+        continue
+      }
+      newest ??= entry
+      // A committed entry is the publication authority. Prefer the newest
+      // committed attempt when stale/replayed records share the same ID.
+      if (entry.status === 'committed') return entry
+    }
+    return newest
+  }
+
+  /** Rehydrate unresolved durable entries into the runtime fence map. */
+  private restoreJournalFence(entry: WorktreeJournalEntry): void {
+    const unresolved =
+      entry.status === 'in-progress' ||
+      (entry.status === 'failed' && entry.metadata?.state === 'recovery-required')
+    if (!unresolved) return
+    for (const sessionId of entry.sessionIds) {
+      const transaction = this.rehydrateTransaction(entry, sessionId)
+      if (transaction) this.transactions.set(sessionId, transaction)
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Status
   // -------------------------------------------------------------------------
@@ -372,11 +405,15 @@ export class IsolatedConversationForkService {
     }
     const entry = this.deps.journal.entries().find(
       (candidate) =>
-        candidate.op === 'fork' && candidate.sessionIds.includes(sessionId) && candidate.status === 'in-progress',
+        candidate.op === 'fork' &&
+        candidate.sessionIds.includes(sessionId) &&
+        (candidate.status === 'in-progress' ||
+          (candidate.status === 'failed' && candidate.metadata?.state === 'recovery-required')),
     )
     if (!entry) return { active: false }
     const rehydrated = this.rehydrateTransaction(entry, sessionId)
     if (!rehydrated) return { active: false }
+    this.transactions.set(sessionId, rehydrated)
     return this.statusFor(rehydrated, entry)
   }
 
@@ -421,9 +458,7 @@ export class IsolatedConversationForkService {
    * Send for a bookkeeping miss).
    */
   markEstablished(transactionId: string, childSdkSessionId: string): boolean {
-    const entry = this.deps.journal.entries().find(
-      (candidate) => candidate.op === 'fork' && candidate.recordId === transactionId,
-    )
+    const entry = this.findLatestForkEntry(transactionId)
     if (!entry || entry.status !== 'committed') {
       // Missing/not-yet-committed journal entry: the durable child session
       // record is authoritative; skip without failing the establishment.
@@ -467,6 +502,7 @@ export class IsolatedConversationForkService {
     const resolveSessionForkState = options?.resolveSessionForkState ?? this.hooks.resolveSessionForkState
     for (const entry of this.deps.journal.entries()) {
       if (entry.op !== 'fork') continue
+      this.restoreJournalFence(entry)
       const metadata = entry.metadata
       const childSessionId = typeof metadata?.childSessionId === 'string' ? metadata.childSessionId : undefined
 
@@ -528,6 +564,10 @@ export class IsolatedConversationForkService {
           'The fork journal recorded a child session without a durable commit point; the child may or may not exist.',
         reconciledAt: Date.now(),
       })
+      for (const sessionId of entry.sessionIds) {
+        const transaction = this.transactions.get(sessionId)
+        if (transaction?.journalId === entry.journalId) transaction.state = 'recovery-required'
+      }
       report.flagged += 1
       report.recoveryRequired += 1
     }
@@ -552,12 +592,7 @@ export class IsolatedConversationForkService {
     const sessionId = input.sessionId
     const inMemory = this.transactions.get(sessionId)
     if (inMemory && inMemory.transactionId !== input.transactionId) return this.status(input)
-    const entry = this.deps.journal.entries().find(
-      (candidate) =>
-        candidate.op === 'fork' &&
-        candidate.recordId === input.transactionId &&
-        candidate.sessionIds.includes(sessionId),
-    )
+    const entry = this.findLatestForkEntry(input.transactionId, sessionId)
     if (!entry) return this.status(input)
     const gitCommonDir =
       typeof entry.metadata?.gitCommonDir === 'string' ? entry.metadata.gitCommonDir : undefined
@@ -571,12 +606,7 @@ export class IsolatedConversationForkService {
     // the cancel is refused.
     if (!gitCommonDir) return this.status(input)
     return this.deps.mutationLock.withLock(gitCommonDir, async () => {
-      const latest = this.deps.journal.entries().find(
-        (candidate) =>
-          candidate.op === 'fork' &&
-          candidate.recordId === input.transactionId &&
-          candidate.sessionIds.includes(sessionId),
-      )
+      const latest = this.findLatestForkEntry(input.transactionId, sessionId)
       if (
         !latest ||
         latest.status !== 'in-progress' ||
@@ -831,6 +861,12 @@ export class IsolatedConversationForkService {
     }
     if (isIsolated && (!capability || capability.strictCrossCwdNativeFork !== true)) {
       return fail('unsupported-provider', 'The provider adapter cannot establish a strict cross-CWD native fork.')
+    }
+    if (
+      isIsolated &&
+      (!session.sdkSessionId?.trim() || !session.conversationHead.turnId?.trim())
+    ) {
+      return fail('missing-parent-anchor', 'missing-parent-anchor')
     }
     const existingTransaction = this.transactions.get(input.sessionId)
     if (existingTransaction && existingTransaction.transactionId !== transactionIdToAllow) {
@@ -1781,9 +1817,7 @@ export class IsolatedConversationForkService {
       // entry so this confirm/recover can still complete durably.
       return this.beginFreshAttempt(existing)
     }
-    const entry = this.deps.journal.entries().find(
-      (candidate) => candidate.op === 'fork' && candidate.recordId === input.transactionId && candidate.sessionIds.includes(input.sessionId),
-    )
+    const entry = this.findLatestForkEntry(input.transactionId, input.sessionId)
     if (!entry) return null
     const rehydrated = this.rehydrateTransaction(entry, input.sessionId)
     if (!rehydrated) return null

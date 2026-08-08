@@ -98,7 +98,7 @@ function buildCandidate(index: number, providerRaw: string, modelRaw: string | u
   }
 
   const oauth = OAUTH_PROVIDERS.has(provider);
-  const apiKey = firstNonEmpty(process.env[keyEnv], process.env[keyEnv.replace("KATA_", "")]);
+  const apiKey = firstNonEmpty(process.env[keyEnv]);
   const model = firstNonEmpty(modelRaw) ?? DEFAULT_MODELS[provider];
 
   if (!model) {

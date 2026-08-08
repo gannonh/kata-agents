@@ -47,20 +47,9 @@ class RecordingForkAdapter implements StrictConversationForkCapability {
   }
 }
 
-/**
- * Deterministic fixture backend. The rest of AgentBackend is irrelevant to the
- * capability gate; the spy on updateSdkCwd proves the contract never touches
- * transcript identity.
- */
-function makeBackend(conversationFork?: StrictConversationForkCapability): AgentBackend & { sdkCwdWrites: string[] } {
-  const sdkCwdWrites: string[] = []
-  const partial = {
-    conversationFork,
-    updateSdkCwd(path: string) {
-      sdkCwdWrites.push(path)
-    },
-  }
-  return Object.assign(partial, { sdkCwdWrites }) as unknown as AgentBackend & { sdkCwdWrites: string[] }
+/** Deterministic fixture backend; the rest of AgentBackend is irrelevant here. */
+function makeBackend(conversationFork?: StrictConversationForkCapability): AgentBackend {
+  return { conversationFork } as unknown as AgentBackend
 }
 
 describe('isolated conversation fork provider capability gate', () => {
@@ -123,9 +112,8 @@ describe('isolated conversation fork provider capability gate', () => {
     }
   })
 
-  it('establishes the native fork with idempotency-keyed parent identity and never mutates transcript identity', async () => {
+  it('passes idempotency-keyed parent identity through and proves the destination CWD', async () => {
     const adapter = new RecordingForkAdapter()
-    const backend = makeBackend(adapter)
     const input: ConversationForkEstablishInput = {
       parentSdkSessionId: 'sdk-parent-1',
       parentSdkTurnId: 'turn-42',
@@ -139,6 +127,6 @@ describe('isolated conversation fork provider capability gate', () => {
     expect(adapter.establishCalls).toEqual([input])
     expect(result.childSdkSessionId).toBe('sdk-child-test-pi')
     expect(result.proof.destinationPath).toBe(input.executionCwd)
-    expect(backend.sdkCwdWrites).toEqual([])
+    expect(result.proof.destinationPath).not.toBe(input.transcriptCwd)
   })
 })

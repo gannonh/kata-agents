@@ -266,6 +266,18 @@ describe('fork dialog state machine', () => {
     expect(next.nameInput).toMatch(/^[0-9a-f]{8}$/)
   })
 
+  it('keeps name keystrokes while the initial preview is loading', () => {
+    let state = reduceForkDialog(initialForkDialogState(), {
+      type: 'open',
+      strategy: 'isolated-worktree',
+      initialName: 'initial',
+    })
+
+    state = reduceForkDialog(state, { type: 'name-changed', value: 'initial-a' })
+    expect(state.phase).toBe('loading')
+    expect(state.nameInput).toBe('initial-a')
+  })
+
   it('shows the preview and keeps the server fingerprint for confirm', () => {
     let state = reduceForkDialog(initialForkDialogState(), {
       type: 'open',

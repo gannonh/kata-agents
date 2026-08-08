@@ -146,6 +146,7 @@ function currentSession(overrides: Partial<SessionFixture> = {}): SessionFixture
     checkout: null,
     transcriptCwd: join(harness.repo, '.kata-transcript'),
     conversationHead: { messageId: 'msg-1', turnId: 'turn-1' },
+    sdkSessionId: 'sdk-parent-1',
     ...overrides,
   }
   harness.sessions.set('session-1', fixture)
@@ -278,6 +279,19 @@ describe('IsolatedConversationForkService preview', () => {
     const shared = await preview('shared-worktree')
     expect(shared.blocked).toBeUndefined()
     expect(shared.currentHead).toBe(false)
+  })
+
+  test('blocks isolated when the parent provider session or turn anchor is missing', async () => {
+    currentSession({
+      sdkSessionId: '',
+      conversationHead: { messageId: 'msg-1', turnId: '' },
+    })
+
+    const p = await preview('isolated-worktree', 'missing-anchor')
+    expect(p.blocked?.blocked).toBe(true)
+    expect(p.blocked?.code).toBe('missing-parent-anchor')
+    expect(p.blocked?.reason).toBe('missing-parent-anchor')
+    expect(harness.childCalls).toHaveLength(0)
   })
 
   test('blocks when any source owner has an active turn (source-active)', async () => {
@@ -522,7 +536,7 @@ describe('IsolatedConversationForkService managed/shared sources', () => {
 
 async function dirtySource(): Promise<{ policyVersion: number; branch: string; headOid: string }> {
   writeFile(harness.repo, 'staged.txt', 'staged\n')
-  void git(harness.repo, ['add', 'staged.txt'])
+  await git(harness.repo, ['add', 'staged.txt'])
   writeFile(harness.repo, 'unstaged.txt', 'unstaged\n')
   writeFile(harness.repo, 'untracked.txt', 'untracked\n')
   writeFile(harness.repo, '.gitignore', 'secret.txt\n')
@@ -738,7 +752,7 @@ describe('IsolatedConversationForkService confirm', () => {
     const call = harness.childCalls[0]!
     expect(call.transactionId).toBe(p.transactionId)
     expect(call.parentSessionId).toBe('session-1')
-    expect(call.parentSdkSessionId).toBeUndefined()
+    expect(call.parentSdkSessionId).toBe('sdk-parent-1')
     expect(call.parentSdkTurnId).toBe('turn-1')
     expect(call.workspaceId).toBe('ws1')
     expect(call.nameSuffix).toBe('child-one')
@@ -1345,6 +1359,9 @@ describe('IsolatedConversationForkService status', () => {
     expect(p.blocked).toBeUndefined()
 
     const fresh = freshServicesWithChildRecording([], 'child-unused')
+    await fresh.fork.reconcileForkJournal()
+    expect(fresh.fork.isSessionFenced('session-1')).toBe(true)
+    expect(fresh.fork.isPathFenced(realpathSync(harness.repo))).toBe(true)
     const status = await fresh.fork.status({ sessionId: 'session-1' })
 
     expect(status).toMatchObject({
@@ -1354,7 +1371,10 @@ describe('IsolatedConversationForkService status', () => {
       state: 'pending',
     })
     if (status.active) expect(status.since).toBeGreaterThan(0)
-    expect(fresh.fork.isSessionFenced('session-1')).toBe(false)
+    // Status rehydration also restores the runtime session/path fences so
+    // Send and Git mutations remain blocked before explicit recovery.
+    expect(fresh.fork.isSessionFenced('session-1')).toBe(true)
+    expect(fresh.fork.isPathFenced(realpathSync(harness.repo))).toBe(true)
   })
 
   test('status reports recovery-required for a compensation-failed transaction', async () => {
@@ -1451,7 +1471,8 @@ describe('IsolatedConversationForkService cancel', () => {
     // recovery state rather than a bogus cancel).
     const fresh = freshServicesWithChildRecording([], 'child-unused')
     const cancelledFresh = await fresh.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
-    expect(cancelledFresh.active).toBe(false)
+    expect(cancelledFresh).toMatchObject({ active: true, transactionId: p.transactionId, state: 'recovery-required' })
+    expect(fresh.fork.isSessionFenced('session-1')).toBe(true)
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('failed')
   })
 

@@ -294,6 +294,23 @@ describe('SessionManager isolated fork child creation', () => {
     expect(source?.pendingFork).toBeUndefined()
   })
 
+  it('persists the source backend identity on an isolated child before first Send', async () => {
+    const source = injectSession('source-identity')
+    source.llmConnection = 'source-connection'
+    await persistSourceWithMessages('source-identity')
+    armStrictAdapter('source-identity')
+
+    const childId = await confirmChild('source-identity', 'identity-child')
+    if (!childId) return
+
+    const stored = loadStoredSession(root, childId)!
+    expect(stored.llmConnection).toBe('source-connection')
+    const child = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(childId) as {
+      llmConnection?: string
+    }
+    expect(child.llmConnection).toBe('source-connection')
+  })
+
   it('rejects Send on a published-but-unestablished pending child with no establishable adapter: typed fork error, no fallback, message persisted once', async () => {
     injectSession('source-2')
     await persistSourceWithMessages('source-2')
@@ -618,6 +635,41 @@ describe('SessionManager isolated fork child creation', () => {
     expect(chatCalls).toHaveLength(0)
   })
 
+  it('rejects an incomplete or mismatched execution proof before attaching the provider child', async () => {
+    injectSession('source-proof')
+    await persistSourceWithMessages('source-proof')
+    armStrictAdapter('source-proof')
+    const childId = await confirmChild('source-proof', 'proof-child')
+    if (!childId) return
+
+    const chatCalls: string[] = []
+    const malformedProofAdapter: StrictConversationForkCapability = {
+      adapterId: 'pi-test',
+      forkCapability: () => ({ adapterId: 'pi-test', strictCrossCwdNativeFork: true }),
+      establishNativeFork: async () => ({
+        childSdkSessionId: 'sdk-unverified-child',
+        proof: {
+          adapterId: 'other-adapter',
+          destinationPath: '/wrong-destination',
+          verifiedAt: Date.now(),
+          checks: ['file:read'],
+        },
+      }),
+    }
+    armChildAgent(childId, malformedProofAdapter, chatCalls)
+
+    await expect(sm.sendMessage(childId, 'proof test')).rejects.toMatchObject({
+      code: WORKTREE_FORK_ERROR_CODE,
+    })
+
+    const stored = loadStoredSession(root, childId)!
+    expect(stored.sdkSessionId).toBeUndefined()
+    expect(stored.pendingFork).toBeDefined()
+    expect(chatCalls).toHaveLength(0)
+    expect(services.forkOrphans.entries()).toHaveLength(1)
+    expect(services.forkOrphans.entries()[0]!.result).toBe('unverified')
+  })
+
   it('ordinary session sends are unaffected by the pending-fork establish flow', async () => {
     injectSession('plain-1')
     const chatCalls: string[] = []
@@ -687,6 +739,9 @@ describe('SessionManager isolated fork child creation', () => {
     await expect(sm.sendMessage(childId, 'second concurrent send')).rejects.toMatchObject({
       code: WORKTREE_FORK_PENDING_CODE,
     })
+    // The pre-persist fence rejects the concurrent send without leaving an
+    // acknowledged orphan user message on disk.
+    expect(persistedMessageCount(childId, 'second concurrent send')).toBe(0)
     releaseEstablish()
     await firstSend
 

@@ -716,6 +716,27 @@ export interface ForkRetryState {
   /** Sanitized server error detail. */
   error: string
 }
+
+/**
+ * Recover the first-Send message from the durable child transcript. The
+ * branch marker separates copied parent history from the one user message
+ * whose establishment can be retried; no renderer-local send map is needed.
+ */
+export function findPendingForkRetryMessage(
+  session: Pick<Session, 'forkPending' | 'branchFromMessageId' | 'messages'> | null | undefined,
+): Pick<ForkRetryState, 'messageId' | 'text'> | null {
+  if (!session?.forkPending || !session.branchFromMessageId) return null
+  const branchIndex = session.messages.findIndex(
+    (message) => message.id === session.branchFromMessageId,
+  )
+  if (branchIndex < 0) return null
+  const message = session.messages
+    .slice(branchIndex + 1)
+    .find((candidate) => candidate.role === 'user' && typeof candidate.content === 'string')
+  if (!message || typeof message.content !== 'string') return null
+  return { messageId: message.id, text: message.content }
+}
+
 export const forkRetryAtomFamily = atomFamily(
   (_sessionId: string) => atom<ForkRetryState | null>(null),
   (a, b) => a === b

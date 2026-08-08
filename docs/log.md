@@ -2,6 +2,8 @@
 
 ## 2026-08-08
 
+* **PR #50 review hardening**: tightened isolated-fork safety with restart fence rehydration, newest journal-attempt resolution, source LLM identity inheritance, missing-anchor blockers, complete destination execution-proof validation, pre-persist concurrent-send rejection, durable renderer retry reconstruction, optional startup reconciliation guards, and E2E credential/onboarding protections. Updated [adrs/2026-08-08-isolated-conversation-forks.md](adrs/2026-08-08-isolated-conversation-forks.md).
+
 * **Worktree V2 Phase 4 implemented**: [#43](https://github.com/gannonh/kata-agents/issues/43) adds isolated conversation forks — the Branch action offers **New isolated worktree** next to the default **Shared worktree** for capable providers; server-owned eligibility previews with typed blockers (current-head only, strict cross-CWD native fork required, no fallback); journaled fork transactions with PENDING-preview cancel, snapshot-backed seed capture, CAS-compensated pre-publication failure, and startup classification/reconciliation; a durable pending provider-fork intent on the published child (provider identity shown as **Pending**, no child provider ID claim); idempotency-keyed first-Send native-fork establishment with exactly-once provider/message creation and a durable orphan ledger; and checkout-strategy provenance so isolated-child deletion never mutates the source record. ADR: [adrs/2026-08-08-isolated-conversation-forks.md](adrs/2026-08-08-isolated-conversation-forks.md). Updated the roadmap, online Git/worktree documentation, ADR index/log, release notes, and this log; the E2E fork spec is authored and listed (run tier deferred to credentialed UAT exactly like handoff #47).
 
 ## 2026-08-07

@@ -2,6 +2,8 @@
 
 ## 2026-08-08
 
+* **Isolated conversation forks ADR hardened**: [2026-08-08-isolated-conversation-forks.md](2026-08-08-isolated-conversation-forks.md) records PR #50 review invariants for restart fence rehydration, authoritative journal-attempt lookup, source backend identity inheritance, missing-anchor blocking, complete execution proofs, and pre-persist first-Send serialization.
+
 * **Isolated conversation forks ADR accepted**: [2026-08-08-isolated-conversation-forks.md](2026-08-08-isolated-conversation-forks.md) records the server-owned fork engine for Worktree V2 Phase 4 ([#43](https://github.com/gannonh/kata-agents/issues/43)): shared stays the default while isolated is offered only for current-head idle sources with a strict cross-CWD native fork adapter, fingerprint-bound previews with typed blockers and no fallback, the journaled fork transaction (PENDING preview cancel, compensation with CAS proof, recovery-required classification, startup reconciliation), the durable pending provider-fork intent with no child provider ID claim before first Send, idempotency-keyed first-Send establishment with exactly-once provider/message creation and the orphan ledger, checkout-strategy provenance for cleanup, and the `KATA_FORK_DETERMINISTIC_ADAPTER=1` seam for credential-free coverage while production adapters stay disabled until credentialed UAT.
 
 ## 2026-08-07

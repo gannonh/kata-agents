@@ -257,7 +257,7 @@ export function reduceForkDialog(state: ForkDialogState, action: ForkDialogActio
       // with the new suffix before confirm is re-enabled. Allowed while a
       // blocker (e.g. invalid-name or a destination collision) keeps the
       // preview unusable so the user can fix the name inline.
-      if (state.phase !== 'preview' && state.phase !== 'preview-blocked') return state
+      if (state.phase !== 'loading' && state.phase !== 'preview' && state.phase !== 'preview-blocked') return state
       return { ...state, phase: 'loading', nameInput: action.value }
     }
     case 'confirm':

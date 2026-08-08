@@ -3,6 +3,7 @@ import { expect, type Page } from "@playwright/test";
 import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 import type { AgentProviderCandidate } from "../harness/env.ts";
 import {
+  waitForOnboardingOrReady,
   waitForOnboardingWizard,
   waitForReadyOrWorkspacePicker,
 } from "./shell.ts";
@@ -128,8 +129,13 @@ async function configureApiKeyConnection(
     );
   }
   const slug = apiKeySlugFor(candidate.provider);
+  // Keep the credential out of page.evaluate arguments: Playwright records
+  // those arguments in failure traces. The page-local binding returns it only
+  // when the authenticated renderer invokes the setup IPC.
+  const credentialBinding = `__kataE2eCredential_${candidate.index}_${Date.now()}`;
+  await page.exposeFunction(credentialBinding, () => candidate.apiKey!);
   const setup = await page.evaluate(
-    async ({ targetSlug, credential, defaultModel, piAuthProvider }) => {
+    async ({ targetSlug, defaultModel, piAuthProvider, credentialBinding }) => {
       const api = (
         window as unknown as {
           electronAPI: {
@@ -144,9 +150,15 @@ async function configureApiKeyConnection(
           };
         }
       ).electronAPI;
+      const credentialProvider = (
+        window as unknown as Record<string, () => Promise<string>>
+      )[credentialBinding];
+      if (!credentialProvider) {
+        throw new Error("Agent E2E setup: credential binding is unavailable.");
+      }
       return api.setupLlmConnection({
         slug: targetSlug,
-        credential,
+        credential: await credentialProvider(),
         defaultModel,
         models: [defaultModel],
         piAuthProvider,
@@ -155,9 +167,9 @@ async function configureApiKeyConnection(
     },
     {
       targetSlug: slug,
-      credential: candidate.apiKey,
       defaultModel: candidate.model,
       piAuthProvider: candidate.provider,
+      credentialBinding,
     },
   );
   if (!setup.success) {
@@ -234,7 +246,10 @@ export async function completeConfiguredChatGptOnboarding(
   page: Page,
   model: string,
 ): Promise<void> {
-  await waitForOnboardingWizard(page);
+  const shell = await waitForOnboardingOrReady(page);
+  if (shell === "workspace-picker") {
+    await handleWorkspacePickerIfPresent(page);
+  }
 
   const authStatus = await page.evaluate(async (connectionSlug) => {
     const api = (

@@ -98,6 +98,8 @@ export interface Session {
   }
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
+  /** Durable source-message boundary separating copied parent history from new messages. */
+  branchFromMessageId?: string
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
