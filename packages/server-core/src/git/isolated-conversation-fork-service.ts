@@ -562,7 +562,7 @@ export class IsolatedConversationForkService {
       return fail('git-operation-in-progress', 'A Git operation is in progress or the index is unmerged.')
     }
 
-    if (sourceCtx.detached) {
+    if (isIsolated && sourceCtx.detached) {
       return fail('unsupported-snapshot', 'The source checkout is on a detached HEAD; a fork seed cannot be captured.')
     }
 
@@ -615,15 +615,18 @@ export class IsolatedConversationForkService {
       }
     }
 
-    // Seed-capture feasibility: unsupported state or oversize are typed
-    // blockers at preview time (authoritative enforcement stays at capture).
-    try {
-      await this.deps.snapshots.assertSupportedState(sourcePath)
-    } catch (error) {
-      if (error instanceof WorktreeSnapshotError) {
-        return { ...fail('unsupported-snapshot', sanitizeError(error)), destination, expectedBranch, nameSuffix, pathToken, currentHead }
+    // Seed-capture feasibility (isolated only — shared forks capture no seed):
+    // unsupported state or oversize are typed blockers at preview time
+    // (authoritative enforcement stays at capture).
+    if (isIsolated) {
+      try {
+        await this.deps.snapshots.assertSupportedState(sourcePath)
+      } catch (error) {
+        if (error instanceof WorktreeSnapshotError) {
+          return { ...fail('unsupported-snapshot', sanitizeError(error)), destination, expectedBranch, nameSuffix, pathToken, currentHead }
+        }
+        throw error
       }
-      throw error
     }
     if (isIsolated && await this.estimateSeedOversize(sourcePath, counts, includedIgnored)) {
       return { ...fail('oversized-capture', `The source state exceeds the snapshot limit (${WORKTREE_SNAPSHOT_MAX_FILES} files / ${WORKTREE_SNAPSHOT_MAX_BYTES} bytes).`), destination, expectedBranch, nameSuffix, pathToken, currentHead }

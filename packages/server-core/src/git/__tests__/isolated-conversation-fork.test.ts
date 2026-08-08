@@ -372,6 +372,15 @@ describe('IsolatedConversationForkService preview', () => {
     expect(p.blocked?.code).toBe('unsupported-snapshot')
   })
 
+  test('shared strategy stays available for a detached HEAD source (no seed is captured)', async () => {
+    currentSession()
+    await git(harness.repo, ['checkout', '--detach', 'HEAD'])
+
+    const p = await preview('shared-worktree')
+    expect(p.blocked).toBeUndefined()
+    expect(p.strategy).toBe('shared-worktree')
+  })
+
   test('blocks an oversized source state (oversized-capture)', async () => {
     currentSession()
     const big = 'x'.repeat(1024 * 1024)
