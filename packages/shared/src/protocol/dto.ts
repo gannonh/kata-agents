@@ -118,6 +118,12 @@ export interface Session {
    * the agent runtime has not been created yet.
    */
   handoffCapable?: boolean
+  /**
+   * Server-derived: true when this session's provider adapter advertises a
+   * strict cross-CWD native fork (the isolated conversation-fork strategy may
+   * be offered). Absent while the agent runtime has not been created yet.
+   */
+  isolatedForkCapable?: boolean
 }
 
 export interface CreateSessionOptions {

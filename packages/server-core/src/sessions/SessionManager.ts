@@ -23,6 +23,7 @@ import {
   resolveBackendContext,
   createBackendFromResolvedContext,
   resolveHandoffCapability,
+  resolveIsolatedForkCapability,
   cleanupSourceRuntimeArtifacts,
   providerTypeToAgentProvider,
   type AgentBackend,
@@ -1114,10 +1115,22 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
       /* adapter capability unavailable — omit; the server blocker remains authoritative */
     }
   }
+  // Client-visible isolated-fork capability (Phase 4): the fork dialog offers
+  // the isolated strategy only when the provider adapter advertises a strict
+  // cross-CWD native fork. Absent until the runtime exists, like handoffCapable.
+  let isolatedForkCapable: boolean | undefined
+  if (m.agent) {
+    try {
+      isolatedForkCapable = resolveIsolatedForkCapability(m.agent).supported
+    } catch {
+      /* adapter capability unavailable — omit; the server blocker remains authoritative */
+    }
+  }
   return {
     ...pickSessionFields(m),
     sharedOwnerCount,
     handoffCapable,
+    isolatedForkCapable,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,

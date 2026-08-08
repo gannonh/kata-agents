@@ -31,6 +31,7 @@ export type WorktreeJournalOp =
   | 'session-delete'
   | 'cleanup'
   | 'handoff'
+  | 'fork'
 
 export type WorktreeJournalStatus = 'in-progress' | 'committed' | 'failed' | 'recovered'
 
