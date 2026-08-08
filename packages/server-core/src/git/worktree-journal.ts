@@ -230,10 +230,19 @@ export class WorktreeJournal {
     return this.readAll()
   }
 
-  /** Drop committed/recovered entries; keep failures as recovery evidence. */
+  /**
+   * Drop committed/recovered entries; keep failures as recovery evidence.
+   * Committed fork entries are EXEMPT: their establishment metadata (and the
+   * orphan-ledger resolution that depends on it) must survive restarts until
+   * the fork is durably established — the first-Send establish flow writes
+   * `markEstablished` after the commit marker, and startup reconciliation
+   * resolves ledger entries against committed+established fork entries.
+   */
   compact(): void {
     this.lock.runSync(() => {
-      const entries = this.readAll().filter((entry) => entry.status === 'failed')
+      const entries = this.readAll().filter(
+        (entry) => entry.status === 'failed' || (entry.status === 'committed' && entry.op === 'fork'),
+      )
       if (entries.length === this.readAll().length) return
       this.writeAll(entries)
     })

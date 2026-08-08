@@ -1928,7 +1928,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     const entry = forkJournalEntries().find((e) => e.recordId === 'a'.repeat(16))
     expect(entry?.status).toBe('committed')
     expect(entry?.metadata?.state).toBe('binding-committed')
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 0 })
   })
 
   test('classifies a child-created in-progress entry as recovery-required when no live pending child owns it', async () => {
@@ -1946,7 +1946,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     expect(entry?.status).toBe('in-progress')
     expect(entry?.metadata?.state).toBe('recovery-required')
     expect(typeof entry?.metadata?.recoveryReason).toBe('string')
-    expect(report).toEqual({ resumed: 0, recovered: 1, recoveryRequired: 1 })
+    expect(report).toEqual({ resumed: 0, flagged: 1, recoveryRequired: 1 })
   })
 
   test('leaves a pre-child in-progress entry resumable (steps through target-verified, no child)', async () => {
@@ -1962,7 +1962,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     const entry = forkJournalEntries().find((e) => e.recordId === 'c'.repeat(16))
     expect(entry?.status).toBe('in-progress')
     expect(entry?.metadata?.state).toBe('target-verified')
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 0 })
   })
 
   test('leaves failed entries failed (not resumable) and reports pre-existing recovery-required state', async () => {
@@ -1980,7 +1980,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     const entry = forkJournalEntries().find((e) => e.recordId === 'd'.repeat(16))
     expect(entry?.status).toBe('failed')
     expect(entry?.metadata?.state).toBe('recovery-required')
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 1 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 1 })
   })
 
   test('leaves a child-created in-progress entry untouched when the child is live and pending (establish flow owns it)', async () => {
@@ -2002,7 +2002,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     const entry = forkJournalEntries().find((e) => e.recordId === 'e'.repeat(16))
     expect(entry?.status).toBe('in-progress')
     expect(entry?.metadata?.state).toBe('target-materialized')
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 0 })
   })
 
   test('backfills the established marker on a committed entry whose child is durably established', async () => {
@@ -2027,7 +2027,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     expect(entry?.metadata?.state).toBe('established')
     expect(entry?.metadata?.childSdkSessionId).toBe('sdk-child-f')
     expect(typeof entry?.metadata?.establishedAt).toBe('number')
-    expect(report).toEqual({ resumed: 1, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 1, flagged: 0, recoveryRequired: 0 })
   })
 
   test('does not backfill when the committed child session is still pending', async () => {
@@ -2050,7 +2050,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     const entry = forkJournalEntries().find((e) => e.recordId === 'g'.repeat(16))
     expect(entry?.status).toBe('committed')
     expect(entry?.metadata?.state).toBe('binding-committed')
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 0 })
   })
 
   test('leaves an already-established committed entry untouched', async () => {
@@ -2074,7 +2074,7 @@ describe('IsolatedConversationForkService startup reconciliation', () => {
     expect(entry?.status).toBe('committed')
     expect(entry?.metadata?.state).toBe('established')
     expect(entry?.metadata?.childSdkSessionId).toBeUndefined()
-    expect(report).toEqual({ resumed: 0, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 0, flagged: 0, recoveryRequired: 0 })
   })
 })
 

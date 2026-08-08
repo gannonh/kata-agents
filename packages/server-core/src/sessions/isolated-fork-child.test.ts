@@ -728,7 +728,7 @@ describe('SessionManager isolated fork child creation', () => {
 
     const report = await services.fork.reconcileForkJournal()
 
-    expect(report).toEqual({ resumed: 1, recovered: 0, recoveryRequired: 0 })
+    expect(report).toEqual({ resumed: 1, flagged: 0, recoveryRequired: 0 })
     const after = services.journal
       .entries()
       .find((e) => e.op === 'fork' && e.recordId === pendingBefore.transactionId)!

@@ -236,8 +236,8 @@ export interface SessionForkState {
 export interface ForkJournalReconcileReport {
   /** Committed entries whose lost established marker was backfilled. */
   resumed: number
-  /** In-progress child-created entries classified recovery-required. */
-  recovered: number
+  /** In-progress child-created entries newly classified recovery-required. */
+  flagged: number
   /** Total entries surfacing recovery-required after reconciliation. */
   recoveryRequired: number
 }
@@ -462,7 +462,7 @@ export class IsolatedConversationForkService {
   async reconcileForkJournal(options?: {
     resolveSessionForkState?: (sessionId: string) => SessionForkState | null
   }): Promise<ForkJournalReconcileReport> {
-    const report: ForkJournalReconcileReport = { resumed: 0, recovered: 0, recoveryRequired: 0 }
+    const report: ForkJournalReconcileReport = { resumed: 0, flagged: 0, recoveryRequired: 0 }
     const resolveSessionForkState = options?.resolveSessionForkState ?? this.hooks.resolveSessionForkState
     for (const entry of this.deps.journal.entries()) {
       if (entry.op !== 'fork') continue
@@ -527,7 +527,7 @@ export class IsolatedConversationForkService {
           'The fork journal recorded a child session without a durable commit point; the child may or may not exist.',
         reconciledAt: Date.now(),
       })
-      report.recovered += 1
+      report.flagged += 1
       report.recoveryRequired += 1
     }
     return report

@@ -68,6 +68,28 @@ describe('WorktreeJournal', () => {
     expect(journal.inProgress()).toEqual([])
   })
 
+  test('compaction keeps committed fork entries so establishment metadata and orphan resolution survive restarts', () => {
+    const root = tmp()
+    const journal = new WorktreeJournal(join(root, 'journal.jsonl'))
+
+    // A committed fork entry receives its establishment marker AFTER the
+    // commit (first-Send establish flow) and cross-restart orphan resolution
+    // matches ledger attempts against committed+established fork entries —
+    // compacting it away would make the orphan ledger permanently unresolvable.
+    const fork = journal.begin({ op: 'fork', recordId: '0123456789abcdef', sessionIds: ['s1'], policyVersion: 1 })
+    journal.commit(fork.journalId, '0123456789abcdef')
+    const handoff = journal.begin({ op: 'handoff', recordId: 'fedcba9876543210', sessionIds: ['s2'], policyVersion: 1 })
+    journal.commit(handoff.journalId, 'm2')
+
+    journal.compact()
+    const after = journal.entries()
+    expect(after.map((e) => e.op)).toEqual(['fork'])
+    expect(after[0]?.status).toBe('committed')
+    // Establishment metadata can still be written to the retained entry.
+    journal.updateMetadata(after[0]!.journalId, { state: 'established', childSdkSessionId: 'sdk-child' })
+    expect(new WorktreeJournal(join(root, 'journal.jsonl')).entries()[0]?.metadata?.state).toBe('established')
+  })
+
   test('appends entries from separate instances without losing records', () => {
     const root = tmp()
     const path = join(root, 'journal.jsonl')

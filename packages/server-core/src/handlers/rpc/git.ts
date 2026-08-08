@@ -395,9 +395,7 @@ export function registerGitHandlers(
       // order).
       const forkReport = await git.fork.reconcileForkJournal({
         resolveSessionForkState: (sessionId: string) =>
-          (deps.sessionManager as {
-            resolveSessionForkState?: (sessionId: string) => SessionForkState | null
-          }).resolveSessionForkState?.(sessionId) ?? null,
+          deps.sessionManager.resolveSessionForkState?.(sessionId) ?? null,
       })
       // Orphan reconcile: retire ledger entries whose fork transaction later
       // established; surface stale unresolved entries (never auto-deleted —
@@ -419,9 +417,9 @@ export function registerGitHandlers(
           `[worktree] startup reconciliation resumed ${journalReport.resumed} and recovered ${journalReport.recovered} interrupted lifecycle transaction(s).`,
         )
       }
-      if (forkReport.resumed > 0 || forkReport.recovered > 0 || forkReport.recoveryRequired > 0) {
+      if (forkReport.resumed > 0 || forkReport.flagged > 0 || forkReport.recoveryRequired > 0) {
         console.info(
-          `[worktree] startup fork reconciliation backfilled ${forkReport.resumed}, recovered ${forkReport.recovered}, and flagged ${forkReport.recoveryRequired} fork transaction(s) as recovery-required.`,
+          `[worktree] startup fork reconciliation backfilled ${forkReport.resumed}, flagged ${forkReport.flagged} new, and surfaced ${forkReport.recoveryRequired} recovery-required fork transaction(s).`,
         )
       }
       if (orphanReport.resolved > 0 || orphanReport.expiredUnresolved > 0) {
