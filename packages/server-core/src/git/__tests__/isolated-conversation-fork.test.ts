@@ -1273,6 +1273,43 @@ function freshServicesWithChildRecording(childCalls: ConversationForkChildSessio
   return fresh
 }
 
+/**
+ * Drive a confirm into a durable FAILED (recovery-required) state: the child
+ * is created, then the target record leaves `ready` before the owner commit,
+ * and compensation then fails (the child-removal hook throws). Mirrors the
+ * existing compensation-failure test pattern with compensation itself failing,
+ * which is exactly the state a real FORK_COMPENSATION_FAILED leaves behind.
+ */
+async function compensationFailedFork(nameSuffix: string): Promise<ConversationForkPreview> {
+  writeFile(harness.repo, 'tracked.txt', 'base\n')
+  await git(harness.repo, ['add', 'tracked.txt'])
+  await git(harness.repo, ['commit', '-m', 'base'])
+  const p = await preview('isolated-worktree', nameSuffix)
+  expect(p.blocked).toBeUndefined()
+  if (p.blocked) return p
+  harness.svc.fork.setHooks({
+    createForkChildSession: async (input) => {
+      harness.svc.registry.setState(input.checkout.managedWorktreeId, 'snapshotted')
+      return `child-${nameSuffix}`
+    },
+    deleteForkChildSession: async () => {
+      throw new Error('simulated compensation failure')
+    },
+  })
+  let error: unknown
+  try {
+    await confirmIsolated(p, nameSuffix)
+  } catch (caught) {
+    error = caught
+  }
+  expect(error).toBeInstanceOf(ConversationForkError)
+  expect((error as ConversationForkError).code).toBe('FORK_COMPENSATION_FAILED')
+  const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+  expect(entry?.status).toBe('failed')
+  expect(entry?.metadata?.state).toBe('recovery-required')
+  return p
+}
+
 describe('IsolatedConversationForkService status', () => {
   test('reports active:false for a session with no fork transaction', async () => {
     currentSession()
@@ -1317,6 +1354,27 @@ describe('IsolatedConversationForkService status', () => {
     })
     if (status.active) expect(status.since).toBeGreaterThan(0)
     expect(fresh.fork.isSessionFenced('session-1')).toBe(false)
+  })
+
+  test('status reports recovery-required for a compensation-failed transaction', async () => {
+    currentSession()
+
+    const p = await compensationFailedFork('recovery-required-status')
+    if (p.blocked) return
+
+    // The durable entry is failed with recovery-required metadata and the
+    // in-memory transaction is still present: status must surface the durable
+    // recovery-required state, not the stale in-memory step state, and the
+    // fence stays held until the recovery-required state resolves.
+    const status = await harness.svc.fork.status({ sessionId: 'session-1' })
+    expect(status).toMatchObject({
+      active: true,
+      transactionId: p.transactionId,
+      strategy: 'isolated-worktree',
+      state: 'recovery-required',
+    })
+    if (status.active) expect(status.since).toBeGreaterThan(0)
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(true)
   })
 })
 
@@ -1373,6 +1431,28 @@ describe('IsolatedConversationForkService cancel', () => {
       active: false,
     })
   })
+
+  test('cancel refuses a failed (recovery-required) entry on both in-memory and restarted paths', async () => {
+    currentSession()
+
+    const p = await compensationFailedFork('cancel-refused-failed')
+    if (p.blocked) return
+
+    // In-process: the failed entry is still in the map and fenced; cancel must
+    // refuse (nothing to cancel) and report the recovery-required status.
+    const cancelled = await harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    expect(cancelled).toMatchObject({ active: true, transactionId: p.transactionId, state: 'recovery-required' })
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('failed')
+    expect(harness.svc.fork.isSessionFenced('session-1')).toBe(true)
+
+    // After restart: the durable failed entry is still not cancellable and the
+    // entry is left untouched (a new preview is still gated by the leftover
+    // recovery state rather than a bogus cancel).
+    const fresh = freshServicesWithChildRecording([], 'child-unused')
+    const cancelledFresh = await fresh.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    expect(cancelledFresh.active).toBe(false)
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('failed')
+  })
 })
 
 describe('IsolatedConversationForkService recover', () => {
@@ -1387,6 +1467,58 @@ describe('IsolatedConversationForkService recover', () => {
     }
     expect(error).toBeInstanceOf(ConversationForkError)
     expect((error as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+  })
+
+  test('recover and confirm on a failed (recovery-required) entry throw the same typed fork error in-process', async () => {
+    currentSession()
+
+    const p = await compensationFailedFork('recover-failed-inprocess')
+    if (p.blocked) return
+
+    // The failed entry must not be silently reset and re-run over possibly
+    // uncompensated artifacts (the old in-memory beginFreshAttempt bug): both
+    // recover and confirm surface the typed transaction-unknown error, exactly
+    // like the durable failed entry does after a restart.
+    let recoverError: unknown
+    try {
+      await harness.svc.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+    } catch (caught) {
+      recoverError = caught
+    }
+    expect(recoverError).toBeInstanceOf(ConversationForkError)
+    expect((recoverError as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+
+    let confirmError: unknown
+    try {
+      await confirmIsolated(p, 'recover-failed-inprocess')
+    } catch (caught) {
+      confirmError = caught
+    }
+    expect(confirmError).toBeInstanceOf(ConversationForkError)
+    expect((confirmError as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+
+    // Nothing re-ran: still one failed entry, no fresh journal entry, no new
+    // child creation attempt beyond the original failure.
+    expect(forkJournalEntries().filter((e) => e.recordId === p.transactionId)).toHaveLength(1)
+  })
+
+  test('recover on a failed (recovery-required) entry after restart throws the same typed fork error', async () => {
+    currentSession()
+
+    const p = await compensationFailedFork('recover-failed-restart')
+    if (p.blocked) return
+
+    const fresh = freshServicesWithChildRecording([], 'child-unused')
+    let error: unknown
+    try {
+      await fresh.fork.recover({ sessionId: 'session-1', transactionId: p.transactionId })
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ConversationForkError)
+    expect((error as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+    // The durable failed entry is untouched.
+    expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('failed')
   })
 
   test('recover on a committed entry returns the committed summary without re-creating anything', async () => {

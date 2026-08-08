@@ -347,8 +347,13 @@ export class IsolatedConversationForkService {
 
   /** Build the active status payload for a transaction (optionally with its journal entry). */
   private statusFor(txn: ForkTransaction, entry?: WorktreeJournalEntry): ConversationForkStatus {
+    // Prefer the durable journal metadata state over the in-memory one for any
+    // unresolved entry (in-progress AND failed/recovery-required): the journal
+    // is the authoritative "how far did we get" signal, and a compensation
+    // failure must surface as recovery-required, not as the stale in-memory
+    // step state the transaction had when the confirm threw.
     const state =
-      entry?.status === 'in-progress' && typeof entry.metadata?.state === 'string'
+      entry && entry.status !== 'committed' && typeof entry.metadata?.state === 'string'
         ? (entry.metadata.state as ConversationForkRecoveryState)
         : txn.state
     return {
@@ -1531,7 +1536,10 @@ export class IsolatedConversationForkService {
    * rolled-back journal transaction (fresh re-run after full compensation), or
    * a committed journal transaction (repeat confirm/recover returns the
    * summary). Only `sessionId` + `transactionId` are consulted, so recover
-   * resolves through the same path as confirm.
+   * resolves through the same path as confirm. In-memory and journal-only
+   * resolution decide identically so confirm/recover behave the same before
+   * and after a restart: a failed entry (blocked confirm or recovery-required
+   * compensation failure) is never resumable.
    */
   private resolveConfirmTransaction(input: { sessionId: string; transactionId: string }): {
     txn: ForkTransaction
@@ -1545,9 +1553,24 @@ export class IsolatedConversationForkService {
         existing.steps = [...entry.steps]
         return { txn: existing }
       }
-      // The previous attempt terminated without a durable commit (compensation
-      // failure or journal recovery): restart with a fresh journal entry so
-      // this confirm can still complete durably.
+      if (entry) {
+        // Mirror the journal-only resolution below: a committed entry returns
+        // its summary, a fully compensated (rolled-back) entry starts a fresh
+        // attempt, and every other durable terminal state — a failed entry
+        // (blocked confirm or recovery-required compensation failure) — is not
+        // resumable and yields the typed transaction-unknown error.
+        if (entry.status === 'committed') {
+          const summary = this.committedSummaryFromMetadata(entry, existing)
+          if (summary) return { txn: existing, committedSummary: summary }
+          return null
+        }
+        if (entry.status === 'recovered' && entry.commitMarker === 'rolled-back') {
+          return this.beginFreshAttempt(existing)
+        }
+        return null
+      }
+      // No durable entry (compacted/lost journal): restart with a fresh journal
+      // entry so this confirm/recover can still complete durably.
       return this.beginFreshAttempt(existing)
     }
     const entry = this.deps.journal.entries().find(
