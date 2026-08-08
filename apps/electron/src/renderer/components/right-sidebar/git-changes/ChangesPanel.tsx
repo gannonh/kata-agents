@@ -30,7 +30,7 @@ import {
   changeIndicator,
   summarizePendingComments,
 } from '@kata-sh/shared/git'
-import type { GitWorkingTreeEntry, WorktreeHandoffDirection, WorktreeHandoffResult } from '@kata-sh/shared/protocol'
+import type { GitWorkingTreeEntry, WorktreeHandoffDirection, WorktreeHandoffResult, ConversationForkResult } from '@kata-sh/shared/protocol'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@kata-sh/ui'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
@@ -45,6 +45,9 @@ import { submitPendingFeedback } from './feedback-send'
 import { HandoffButton, HandoffRecoveryBadge } from '@/components/app-shell/handoff/HandoffAction'
 import { HandoffDialog } from '@/components/app-shell/handoff/HandoffDialog'
 import { recoveryResultFromStatus } from '@/components/app-shell/input/handoff-controls'
+import { ForkRecoveryBadge } from '@/components/app-shell/fork/ForkAction'
+import { ForkDialog } from '@/components/app-shell/fork/ForkDialog'
+import { recoveryResultFromForkStatus } from '@/components/app-shell/input/fork-controls'
 
 export interface ChangesPanelProps {
   sessionId: string | null
@@ -113,6 +116,10 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
     direction: WorktreeHandoffDirection
     recovery: Extract<WorktreeHandoffResult, { outcome: 'recovery-required' }>
   } | null>(null)
+  // Phase 4: fork recovery dialog (active FORK_STATUS transaction).
+  const [forkRecovery, setForkRecovery] = React.useState<{
+    recovery: Extract<ConversationForkResult, { outcome: 'recovery-required' }>
+  } | null>(null)
 
   const { status, loading, error, lastUpdatedAt } = useGitStatusSubscription(
     sessionId ?? undefined,
@@ -130,6 +137,7 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
   React.useEffect(() => {
     setSelectedPath(null)
     setRecoveryDialog(null)
+    setForkRecovery(null)
   }, [sessionId])
 
   const entries = React.useMemo(
@@ -269,6 +277,14 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
               })
             }
           />
+          <ForkRecoveryBadge
+            sessionId={sessionId}
+            onRecover={(status) =>
+              setForkRecovery({
+                recovery: recoveryResultFromForkStatus(status, t('git.fork.recoveryNote')),
+              })
+            }
+          />
         </div>
       )}
     </div>
@@ -393,6 +409,19 @@ export function ChangesPanel({ sessionId }: ChangesPanelProps) {
           initialRecovery={recoveryDialog.recovery}
           onOpenChange={(open) => {
             if (!open) setRecoveryDialog(null)
+          }}
+        />
+      )}
+      {forkRecovery && sessionId && (
+        <ForkDialog
+          open
+          sessionId={sessionId}
+          isolatedForkCapable={session?.isolatedForkCapable}
+          isRemoteWorkspace={isRemoteWorkspace}
+          initialRecovery={forkRecovery.recovery}
+          onCommitted={() => setForkRecovery(null)}
+          onOpenChange={(open) => {
+            if (!open) setForkRecovery(null)
           }}
         />
       )}

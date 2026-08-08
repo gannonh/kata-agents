@@ -232,7 +232,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       }
 
       sessionManager
-        .sendMessage(sessionId, message, attachments, storedAttachments, options, undefined, undefined, onAck, { callerClientId })
+        .sendMessage(sessionId, message, attachments, storedAttachments, options, options?.existingMessageId, undefined, onAck, { callerClientId })
         .then(() => {
           // sendMessage finished without firing onAck — should not happen in
           // practice (every code path that creates a user message acks).
@@ -250,11 +250,15 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
             reject(err)
             return
           }
-          // Post-persist error — route via the event stream as today.
+          // Post-persist error — route via the event stream as today. The
+          // typed code travels with the event so the renderer can distinguish
+          // retryable isolated-fork establishment failures (Phase 4) from
+          // generic send errors.
           pushTyped(server, RPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
             type: 'error',
             sessionId,
-            error: err instanceof Error ? err.message : 'Unknown error'
+            error: err instanceof Error ? err.message : 'Unknown error',
+            ...((err as { code?: string } | null)?.code ? { code: (err as { code: string }).code } : {}),
           } as SessionEvent)
           pushTyped(server, RPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
             type: 'complete',

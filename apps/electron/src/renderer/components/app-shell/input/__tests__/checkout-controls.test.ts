@@ -350,6 +350,47 @@ describe('resolveCheckoutIdentity', () => {
     expect(id.kind).toBe('menu')
   })
 
+  test('shows PENDING provider identity for a published-but-not-established isolated fork child', () => {
+    const id = resolveCheckoutIdentity({
+      isGitRepository: true,
+      isEmptySession: false,
+      hasSessionId: true,
+      persistedCheckout: worktreeCheckout,
+      locallyPrepared: null,
+      sharedOwnerCount: 1,
+      forkPending: true,
+    })
+    // Never claims the worktree identity / a child provider ID before first Send.
+    expect(id.kind).toBe('fork-pending')
+    expect(id.branch).toBe('kata-agent/aabbccdd')
+  })
+
+  test('PENDING fork identity wins even when the worktree is shared', () => {
+    const id = resolveCheckoutIdentity({
+      isGitRepository: true,
+      isEmptySession: false,
+      hasSessionId: true,
+      persistedCheckout: worktreeCheckout,
+      locallyPrepared: null,
+      sharedOwnerCount: 2,
+      forkPending: true,
+    })
+    expect(id.kind).toBe('fork-pending')
+  })
+
+  test('does not show PENDING once the fork intent retired', () => {
+    const id = resolveCheckoutIdentity({
+      isGitRepository: true,
+      isEmptySession: false,
+      hasSessionId: true,
+      persistedCheckout: worktreeCheckout,
+      locallyPrepared: null,
+      sharedOwnerCount: 1,
+      forkPending: false,
+    })
+    expect(id.kind).toBe('worktree')
+  })
+
   test('generates an editable lowercase eight-hex default name', () => {
     expect(generateDefaultWorktreeName()).toMatch(/^[0-9a-f]{8}$/)
   })

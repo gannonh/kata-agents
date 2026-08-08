@@ -48,6 +48,10 @@ const playgroundValue: AppShellContextType = {
     logCall('onSendMessage')(...args)
     return true
   },
+  onRetryForkSend: async () => {
+    logCall('onRetryForkSend')()
+    return true
+  },
   onRenameSession: logCall('onRenameSession'),
   onFlagSession: logCall('onFlagSession'),
   onUnflagSession: logCall('onUnflagSession'),

@@ -10,12 +10,17 @@ import {
   CircleAlert,
   ExternalLink,
   Info,
+  Loader2,
+  RotateCcw,
+  TriangleAlert,
   X,
 } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
+import { useAtomValue, useSetAtom } from "jotai"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { coerceInputText, appendRestoredInput } from "@/lib/input-text"
 import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
@@ -76,6 +81,9 @@ import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
+import { ForkDialog } from "./fork/ForkDialog"
+import { useForkCapability } from "./fork/ForkAction"
+import { forkRetryAtomFamily } from "@/atoms/sessions"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -539,6 +547,55 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Navigation for session branching
   const { navigate } = useNavigation()
+
+  // Worktree V2 effectiveness gates the fork dialog: V2 on → the Branch
+  // action opens the fork dialog; V2 off → immediate shared branch (byte-
+  // identical to the pre-Phase-4 behavior).
+  const { v2Effective: worktreeV2Effective, v2Pending: worktreeV2Pending } = useForkCapability()
+  const [forkDialog, setForkDialog] = React.useState<{
+    messageId: string
+    newPanel?: boolean
+  } | null>(null)
+
+  // Retryable isolated-fork establishment failure surfaced above the input
+  // (Phase 4). Read from the per-session atom set by App.tsx on the typed
+  // WORKTREE_FORK_FAILED error event; Retry re-sends the persisted message.
+  const forkRetry = useAtomValue(forkRetryAtomFamily(session?.id ?? '__no_session__'))
+  const clearForkRetry = useSetAtom(forkRetryAtomFamily(session?.id ?? '__no_session__'))
+  const [forkRetrying, setForkRetrying] = React.useState(false)
+  const handleRetryFork = React.useCallback(async () => {
+    if (!session || forkRetrying) return
+    setForkRetrying(true)
+    try {
+      await appShellContext?.onRetryForkSend?.(session.id)
+    } finally {
+      setForkRetrying(false)
+    }
+  }, [session, forkRetrying, appShellContext])
+
+  // Shared-worktree branch creation — the pre-existing branch flow reused both
+  // by the immediate (V2-off) path and by the fork dialog's shared strategy.
+  const createSharedBranch = React.useCallback(
+    async (messageId: string, options?: { newPanel?: boolean }) => {
+      if (!session) return
+      const child = await appShellContext.onCreateSession(
+        session.workspaceId,
+        {
+          branchFromMessageId: messageId,
+          branchFromSessionId: session.id,
+          name: `Branch of ${session.name || 'Untitled'}`,
+          // Keep branch on the same backend/provider by inheriting parent session settings.
+          llmConnection: session.llmConnection,
+          model: session.model,
+          permissionMode: session.permissionMode,
+          workingDirectory: session.workingDirectory,
+          enabledSourceSlugs: session.enabledSourceSlugs,
+        },
+      )
+      navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
+    },
+    [session, appShellContext, navigate],
+  )
 
   // Get isDark from useTheme hook for overlay theme
   // This accounts for scenic themes (like Haze) that force dark mode
@@ -1733,22 +1790,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         openAnnotationRequest={openAnnotationRequest}
                         onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return
+                          // Worktree V2 effective → the fork dialog offers both
+                          // strategies (shared default, isolated when eligible).
+                          // V2 off → keep today's immediate shared branch.
+                          if (worktreeV2Effective && !worktreeV2Pending) {
+                            setForkDialog({ messageId, newPanel: options?.newPanel })
+                            return
+                          }
                           try {
-                            const child = await appShellContext.onCreateSession(
-                              session.workspaceId,
-                              {
-                                branchFromMessageId: messageId,
-                                branchFromSessionId: session.id,
-                                name: `Branch of ${session.name || 'Untitled'}`,
-                                // Keep branch on the same backend/provider by inheriting parent session settings.
-                                llmConnection: session.llmConnection,
-                                model: session.model,
-                                permissionMode: session.permissionMode,
-                                workingDirectory: session.workingDirectory,
-                                enabledSourceSlugs: session.enabledSourceSlugs,
-                              }
-                            )
-                            navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
+                            await createSharedBranch(messageId, options)
                           } catch (error) {
                             const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
                             const message = rawMessage.includes('source and target providers must match')
@@ -1916,6 +1966,46 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
+          {forkRetry && (
+            <div
+              data-testid="fork-retry-banner"
+              className="mx-auto mt-1 w-full max-w-[760px] px-4 pb-2"
+            >
+              <div className="flex items-start gap-2 rounded-[6px] border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[12px]">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-rose-700 dark:text-rose-300">
+                    {t('git.fork.retryTitle')}
+                  </span>
+                  <span className="block text-muted-foreground">{forkRetry.error}</span>
+                </div>
+                <Button
+                  data-testid="fork-retry-button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+                  onClick={() => void handleRetryFork()}
+                  disabled={forkRetrying}
+                >
+                  {forkRetrying ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3 w-3" />
+                  )}
+                  {forkRetrying ? t('git.fork.retrying') : t('git.fork.retry')}
+                </Button>
+                <button
+                  type="button"
+                  data-testid="fork-retry-dismiss"
+                  aria-label={t('common.close')}
+                  onClick={() => clearForkRetry(null)}
+                  className="shrink-0 rounded-[4px] p-1 text-muted-foreground opacity-70 hover:bg-foreground/5 hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          )}
           <ChatInputZone
             compactMode={compactMode}
             permissionMode={permissionMode}
@@ -1976,6 +2066,30 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </div>
         </div>
       ) : null}
+
+      {/* Fork dialog (Phase 4): Branch action with Worktree V2 effective. */}
+      {forkDialog && session && (
+        <ForkDialog
+          open
+          sessionId={session.id}
+          branchPointMessageId={forkDialog.messageId}
+          conversationHeadMessageId={session.lastFinalMessageId}
+          isolatedForkCapable={session.isolatedForkCapable}
+          onCreateSharedBranch={(messageId) =>
+            createSharedBranch(messageId, { newPanel: forkDialog.newPanel })
+          }
+          onCommitted={(childSessionId) => {
+            const newPanel = forkDialog.newPanel
+            setForkDialog(null)
+            navigate(routes.view.allSessions(childSessionId), {
+              newPanel: resolveBranchNewPanelOption({ newPanel }),
+            })
+          }}
+          onOpenChange={(open) => {
+            if (!open) setForkDialog(null)
+          }}
+        />
+      )}
 
       {/* ================================================================== */}
       {/* Preview Overlays - Rendered outside the main chat flow            */}

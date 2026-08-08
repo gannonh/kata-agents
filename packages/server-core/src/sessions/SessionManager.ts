@@ -1154,6 +1154,10 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     sharedOwnerCount,
     handoffCapable,
     isolatedForkCapable,
+    // Phase 4: a published-but-not-established isolated fork child shows
+    // provider identity as PENDING (never a child provider ID) until the
+    // first-Send establish flow retires the pending intent.
+    forkPending: !!m.pendingFork,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,

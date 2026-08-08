@@ -702,6 +702,26 @@ export const backgroundTasksAtomFamily = atomFamily(
 )
 
 /**
+ * Retryable isolated-fork establishment failure surfaced above the chat input
+ * (Phase 4). Set when a fork child's first-Send establish fails with the typed
+ * WORKTREE_FORK_FAILED code; cleared on Retry, manual dismiss, or when the
+ * session DTO stops reporting forkPending. The server message ID lets the retry
+ * reuse the already-persisted user message instead of duplicating it.
+ */
+export interface ForkRetryState {
+  /** Server-persisted user message ID to reuse on retry. */
+  messageId: string
+  /** The message text to re-send. */
+  text: string
+  /** Sanitized server error detail. */
+  error: string
+}
+export const forkRetryAtomFamily = atomFamily(
+  (_sessionId: string) => atom<ForkRetryState | null>(null),
+  (a, b) => a === b
+)
+
+/**
  * Window's current workspace ID — shared between Root (ThemeProvider) and App.
  * Written by App on workspace switch, read by Root to keep the theme in sync.
  */

@@ -349,6 +349,12 @@ export const CHANNEL_MAP = {
   handoffStatus: invoke(RPC_CHANNELS.git.HANDOFF_STATUS),
   handoffRecover: invoke(RPC_CHANNELS.git.HANDOFF_RECOVER),
   handoffCancel: invoke(RPC_CHANNELS.git.HANDOFF_CANCEL),
+  // Git / GitHub V1 — isolated conversation forks (Phase 4)
+  forkPreview: invoke(RPC_CHANNELS.git.FORK_PREVIEW),
+  forkConfirm: invoke(RPC_CHANNELS.git.FORK_CONFIRM),
+  forkStatus: invoke(RPC_CHANNELS.git.FORK_STATUS),
+  forkRecover: invoke(RPC_CHANNELS.git.FORK_RECOVER),
+  forkCancel: invoke(RPC_CHANNELS.git.FORK_CANCEL),
 
   // Git / GitHub V1 — commit / pull / push + pull requests (Phase 3)
   commitGit: invoke(RPC_CHANNELS.git.COMMIT),
