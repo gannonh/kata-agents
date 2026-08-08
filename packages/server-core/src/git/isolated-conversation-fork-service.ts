@@ -207,7 +207,8 @@ export interface ConversationForkHooks {
    * service journals the returned child session id after the hook returns;
    * the child must not be visible to the client until the commit marker is
    * durable. Absent hook → typed hook-not-wired error, never a fabricated
-   * child. SessionManager implements this in a later phase.
+   * child. SessionManager implements the durable pending child
+   * creation (pendingFork intent) and first-Send establishment.
    */
   createForkChildSession?: (input: ConversationForkChildSessionInput) => Promise<string>
   /**
@@ -705,7 +706,7 @@ export class IsolatedConversationForkService {
   }
 
   // -------------------------------------------------------------------------
-  // Seed capture (used by the confirm transaction in a later phase)
+  // Seed capture (used by the confirm transaction)
   // -------------------------------------------------------------------------
 
   /**
@@ -903,7 +904,7 @@ export class IsolatedConversationForkService {
     }
 
     // No foreign lease may occupy the source path; every owner must be
-    // leaseable. Confirm (later phase) takes the stable leases under lock.
+    // leaseable. Confirm takes the stable leases under lock.
     const foreignLeases = this.deps.leases.leasedBy(sourcePath).filter((id) => !ownerSessionIds.includes(id))
     if (foreignLeases.length > 0) {
       return fail('path-unleased', 'Another session or runtime leases the source path.')
@@ -1104,7 +1105,8 @@ export class IsolatedConversationForkService {
   async confirm(input: ConversationForkConfirmInput): Promise<ConversationForkResult> {
     if (input.strategy !== 'isolated-worktree') {
       // Shared-worktree forks own no transaction and reuse the existing
-      // branch/shared-checkout path; their confirmation is a later task.
+      // branch/shared-checkout path; the renderer routes shared confirmation
+      // through sessions:create (the branch flow), never this RPC.
       throw new ConversationForkError('FORK_NOT_IMPLEMENTED', 'Shared-worktree fork confirmation is not implemented by the isolated transaction core.')
     }
     const resolved = this.resolveConfirmTransaction(input)
