@@ -205,6 +205,60 @@ reports `handoff-rolled-back` and you can preview again.
   guessing.
 </Warning>
 
+## Forking a conversation
+
+The Branch action on an assistant message offers two strategies when Worktree
+V2 is enabled:
+
+<Steps>
+  <Step title="Shared worktree">
+    The default. The new session branches the conversation into the source's
+    managed worktree (existing behavior): both sessions share one working
+    tree, one branch, and one checkout, and each can keep its own
+    conversation path.
+  </Step>
+  <Step title="New isolated worktree">
+    A separately named managed worktree, Git branch, Kata session, and
+    execution runtime at the source conversation's **current head**. The
+    source conversation and checkout stay completely unchanged.
+  </Step>
+</Steps>
+
+Isolated forking is offered only when the source session is idle at its
+current conversation head, the Git state is supported, and the provider can
+establish a **strict cross-CWD native fork**. If the provider does not support
+it yet, or the message you branched from is not the latest one, the isolated
+option is disabled with a typed reason and only the shared strategy remains.
+
+Before confirming, the fork dialog previews the source conversation head,
+session, checkout, branch, HEAD, Git-state summary, path owners, destination
+server/root/branch, provider capability, and the ignored-file policy (only
+`.worktreeinclude`-listed ignored files copy). Confirm takes an editable name
+for the isolated target — Kata uses it as the suffix of a `kata-agent/<name>`
+branch — and commits the child session through a durable journaled
+transaction, so an interrupted fork either resumes to a committed child or
+surfaces an explicit recovery state.
+
+The child session copies the conversation through the fork point, binds the
+new worktree, and keeps its **provider identity pending** until its first
+message: no child provider ID is claimed before the provider creates one. On
+that first Send, Kata establishes the native fork at the recorded source head
+with a persisted idempotency key and proves every file, shell, MCP, and
+provider tool executes in the child's checkout. If establishment fails, the
+child keeps exactly one persisted message in a visible retryable state and
+never duplicates it, never executes in the source, and never falls back to a
+full-history or shared fork.
+
+Deleting an isolated fork child removes only that child's own worktree and
+branch; the source session, checkout, and conversation are never touched.
+
+<Note>
+  Isolated forks are available only at the current conversation head — older
+  messages keep the shared strategy. Forking from a snapshotted or missing
+  checkout requires restoring it first, and cross-repository forks are out of
+  scope.
+</Note>
+
 ## Archiving and deleting sessions
 
 - **Archiving** a session never removes its worktree, but with Worktree V2 the
