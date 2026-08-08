@@ -301,7 +301,8 @@ describe('SessionManager isolated fork child creation', () => {
     armStrictAdapter('source-identity')
 
     const childId = await confirmChild('source-identity', 'identity-child')
-    if (!childId) return
+    expect(childId).toBeDefined()
+    if (!childId) throw new Error('Expected isolated child confirmation to succeed')
 
     const stored = loadStoredSession(root, childId)!
     expect(stored.llmConnection).toBe('source-connection')
@@ -640,7 +641,8 @@ describe('SessionManager isolated fork child creation', () => {
     await persistSourceWithMessages('source-proof')
     armStrictAdapter('source-proof')
     const childId = await confirmChild('source-proof', 'proof-child')
-    if (!childId) return
+    expect(childId).toBeDefined()
+    if (!childId) throw new Error('Expected isolated child confirmation to succeed')
 
     const chatCalls: string[] = []
     const malformedProofAdapter: StrictConversationForkCapability = {

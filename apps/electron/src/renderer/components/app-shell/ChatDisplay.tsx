@@ -563,7 +563,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const forkRetry = useAtomValue(forkRetryAtomFamily(session?.id ?? '__no_session__'))
   const setForkRetry = useSetAtom(forkRetryAtomFamily(session?.id ?? '__no_session__'))
   const clearForkRetry = useSetAtom(forkRetryAtomFamily(session?.id ?? '__no_session__'))
-  const forkRetryHydratedSessionRef = React.useRef<string | null>(null)
+  const forkRetryHydratedSessionIdsRef = React.useRef<Set<string>>(new Set())
   const [forkRetrying, setForkRetrying] = React.useState(false)
 
   // On a renderer reload, reconstruct a failed first-Send retry from the
@@ -571,14 +571,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // a later first-send message is surfaced by App's typed error event instead
   // of being mistaken for a failure before establishment has run.
   React.useEffect(() => {
-    if (!session || forkRetryHydratedSessionRef.current === session.id) return
+    if (!session || forkRetryHydratedSessionIdsRef.current.has(session.id)) return
     if (
       session.messageCount !== undefined &&
       session.messages.length < session.messageCount
     ) {
       return
     }
-    forkRetryHydratedSessionRef.current = session.id
+    forkRetryHydratedSessionIdsRef.current.add(session.id)
     if (!session.forkPending || forkRetry) return
     const retryMessage = findPendingForkRetryMessage(session)
     if (retryMessage) {

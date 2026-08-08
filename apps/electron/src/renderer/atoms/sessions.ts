@@ -732,7 +732,7 @@ export function findPendingForkRetryMessage(
   if (branchIndex < 0) return null
   const message = session.messages
     .slice(branchIndex + 1)
-    .find((candidate) => candidate.role === 'user' && typeof candidate.content === 'string')
+    .find((candidate) => candidate.role === 'user')
   if (!message || typeof message.content !== 'string') return null
   return { messageId: message.id, text: message.content }
 }

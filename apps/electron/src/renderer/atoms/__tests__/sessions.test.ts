@@ -57,6 +57,20 @@ describe('pending fork retry recovery', () => {
 
     expect(findPendingForkRetryMessage(session)).toBeNull()
   })
+
+  it('does not skip a structured first user message for a later text message', () => {
+    const structured = {
+      ...msg('structured-user'),
+      content: { kind: 'structured' } as unknown as string,
+    }
+    const session = makeSession({
+      forkPending: true,
+      branchFromMessageId: 'head',
+      messages: [msg('head', 'assistant'), structured, msg('later-user')],
+    })
+
+    expect(findPendingForkRetryMessage(session)).toBeNull()
+  })
 })
 
 describe('session message loading atoms', () => {
