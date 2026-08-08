@@ -3776,6 +3776,24 @@ export class SessionManager implements ISessionManager {
         managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
       }
 
+      // Credential-free UI UAT seam (AC-15): the deterministic strict fork
+      // adapter lets the real Electron app exercise preview/confirm and the
+      // first-Send native-fork establishment without a live provider. Off by
+      // default; production adapters remain disabled until credentialed UAT
+      // proves native ancestry, a distinct provider ID after first Send, and
+      // destination-only tool CWD.
+      if (
+        process.env.KATA_FORK_DETERMINISTIC_ADAPTER === '1' &&
+        process.env.NODE_ENV !== 'production' &&
+        managed.agent
+      ) {
+        sessionLog.warn(
+          `Session ${managed.id}: deterministic strict fork adapter is active. Destination-execution proofs are synthetic and prove nothing about the live runtime.`,
+        )
+        const { createDeterministicStrictForkAdapter } = await import('@kata-sh/shared/agent/backend')
+        managed.agent.conversationFork = createDeterministicStrictForkAdapter({ adapterId: 'deterministic-e2e' })
+      }
+
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
       // The renderer's session DTO now carries capabilities that only exist
@@ -5631,7 +5649,7 @@ export class SessionManager implements ISessionManager {
     if (this.getGitServices().fork?.isSessionFenced?.(sessionId)) {
       throw new CodedError(
         WORKTREE_FORK_PENDING_CODE,
-        'A conversation-fork transaction is pending for this session.',
+        i18n.t('git.fork.pendingFence'),
       )
     }
   }
@@ -5646,7 +5664,7 @@ export class SessionManager implements ISessionManager {
     if (managed.pendingFork) {
       throw new CodedError(
         WORKTREE_FORK_PENDING_CODE,
-        'This session is a pending isolated conversation fork that has not been established yet.',
+        i18n.t('git.fork.pendingChild'),
       )
     }
   }
@@ -5679,7 +5697,7 @@ export class SessionManager implements ISessionManager {
     if (this.forkEstablishing.has(managed.id)) {
       throw new CodedError(
         WORKTREE_FORK_PENDING_CODE,
-        'This session is establishing its isolated conversation fork; try again shortly.',
+        i18n.t('git.fork.establishing'),
       )
     }
     this.forkEstablishing.add(managed.id)
@@ -5700,13 +5718,13 @@ export class SessionManager implements ISessionManager {
     if (!pending.parentSdkSessionId || !pending.parentSdkTurnId || !pending.idempotencyKey) {
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        'The isolated fork child has no valid provider anchor (missing parent SDK session, turn id, or idempotency key). The fork must be re-created.',
+        i18n.t('git.fork.anchorMissing'),
       )
     }
     if (!pending.executionCwd || !pending.transcriptCwd) {
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        'The isolated fork child has no valid execution or transcript CWD. The fork must be re-created.',
+        i18n.t('git.fork.cwdInvalid'),
       )
     }
 
@@ -5720,7 +5738,7 @@ export class SessionManager implements ISessionManager {
     if (!resolution.supported || !adapter) {
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        'The provider adapter cannot establish a strict cross-CWD native fork for this session.',
+        i18n.t('git.fork.strictAdapterUnavailable'),
       )
     }
 
@@ -5741,7 +5759,9 @@ export class SessionManager implements ISessionManager {
       this.recordForkOrphanAttempt(pending, 'failed', error)
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        `The native fork could not be established: ${error instanceof Error ? error.message : String(error)}. Retry to complete the fork.`,
+        i18n.t('git.fork.establishFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }),
       )
     }
 
@@ -5759,7 +5779,7 @@ export class SessionManager implements ISessionManager {
       this.recordForkOrphanAttempt(pending, 'unverified')
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        'The native fork establishment returned an incomplete result. Retry to complete the fork.',
+        i18n.t('git.fork.establishIncomplete'),
       )
     }
 
@@ -7148,7 +7168,7 @@ export class SessionManager implements ISessionManager {
             if (cancelled?.active) {
               throw new CodedError(
                 WORKTREE_FORK_PENDING_CODE,
-                'A conversation-fork transaction is in progress for this session.',
+                i18n.t('git.fork.pendingFence'),
               )
             }
           } catch (err) {
@@ -7160,7 +7180,7 @@ export class SessionManager implements ISessionManager {
           // otherwise be published onto a deleted source session.
           throw new CodedError(
             WORKTREE_FORK_PENDING_CODE,
-            'A conversation-fork transaction is in progress for this session.',
+            i18n.t('git.fork.pendingFence'),
           )
         }
       }
