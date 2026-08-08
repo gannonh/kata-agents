@@ -23,21 +23,27 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, lstatSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import type {
   ConversationForkBlockerCode,
+  ConversationForkCommitSummary,
+  ConversationForkConfirmInput,
   ConversationForkPreview,
   ConversationForkPreviewInput,
   ConversationForkProviderCapability,
   ConversationForkRecoveryState,
+  ConversationForkResult,
   ConversationForkStrategy,
   ManagedWorktreeRecordV2,
+  ManagedWorktreeSnapshotMeta,
   SessionCheckout,
+  SessionCheckoutV2,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type { StrictConversationForkCapability } from '@kata-sh/shared/agent/backend'
-import { runGit, splitNul } from './command-runner'
+import { runGit, runGitBuffer, splitNul } from './command-runner'
+import { removeCheckoutFiles } from './managed-worktree-service'
 import { listWorktreeIncludeFiles } from './worktree-include'
 import {
   WORKTREE_SNAPSHOT_MAX_BYTES,
@@ -49,7 +55,7 @@ import {
 import type { ManagedWorktreeService } from './managed-worktree-service'
 import type { MutationLock } from './mutation-lock'
 import type { PathLeaseManager } from './path-leases'
-import type { WorktreeJournal } from './worktree-journal'
+import type { WorktreeJournal, WorktreeJournalEntry } from './worktree-journal'
 import type { WorktreeLifecycleService } from './worktree-lifecycle-service'
 import type { RepositoryService } from './repository-service'
 import type { WorktreeRegistry } from './worktree-registry'
@@ -60,6 +66,9 @@ export type ConversationForkErrorCode =
   | 'FORK_TRANSACTION_UNKNOWN'
   | 'FORK_STRATEGY_MISMATCH'
   | 'FORK_NOT_IMPLEMENTED'
+  | 'FORK_HOOK_NOT_WIRED'
+  | 'FORK_TARGET_FAILED'
+  | 'FORK_COMPENSATION_FAILED'
   | 'FORK_SEED_LIMIT'
   | 'FORK_SEED_CAPTURE_FAILED'
   | 'FORK_SEED_REMOVE_FAILED'
@@ -104,6 +113,21 @@ function lstatSyncSafe(path: string): 'symlink' | 'other' | null {
   }
 }
 
+/** True when `child` is contained within `parent` (both resolved, non-empty). */
+function isContainedPath(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/** Resolve a path, following symlinks when possible (tolerant of absence). */
+function realpathSafe(path: string): string {
+  try {
+    return resolvePath(realpathSync(path))
+  } catch {
+    return resolvePath(path)
+  }
+}
+
 /** Session facts the host supplies for one fork evaluation. */
 export interface ForkSessionInfo {
   /** The session's active checkout path (never client-nominated). */
@@ -129,6 +153,30 @@ export interface ForkSessionInfo {
   forkPointTurnId?: string
 }
 
+/** Host input for durable child-session creation of an isolated fork. */
+export interface ConversationForkChildSessionInput {
+  transactionId: string
+  /** Source Kata session the fork is created from. */
+  parentSessionId: string
+  /** Parent provider SDK session identity (anchor lineage). */
+  parentSdkSessionId: string | undefined
+  /** Parent provider turn anchor at the branch point. */
+  parentSdkTurnId: string | undefined
+  /** Immutable transcript lookup identity — never rewritten by the fork. */
+  transcriptCwd: string
+  /** Destination execution CWD every runtime must resolve to. */
+  executionCwd: string
+  /** Durable checkout binding for the isolated target (always a V2 managed worktree). */
+  checkout: SessionCheckoutV2
+  /** Generated/edited name suffix of the target worktree. */
+  nameSuffix: string
+  /** Source message ID at the current conversation head (the branch point). */
+  sourceMessageId: string
+  workspaceId: string
+  /** Requested fork point message ID (the current conversation head for isolated). */
+  forkPointMessageId: string
+}
+
 export interface ConversationForkHooks {
   /** Resolve persisted session facts; null for an unknown session. */
   resolveSession?: (sessionId: string) => ForkSessionInfo | null
@@ -140,6 +188,20 @@ export interface ConversationForkHooks {
   isSessionActive?: (sessionId: string) => boolean
   /** Quiesce the session's runtime; false when it cannot quiesce. */
   quiesceRuntimes?: (sessionIds: string[]) => Promise<boolean>
+  /**
+   * Create the durable child Kata session for an isolated fork target. The
+   * service journals the returned child session id after the hook returns;
+   * the child must not be visible to the client until the commit marker is
+   * durable. Absent hook → typed hook-not-wired error, never a fabricated
+   * child. SessionManager implements this in a later phase.
+   */
+  createForkChildSession?: (input: ConversationForkChildSessionInput) => Promise<string>
+  /**
+   * Remove a child Kata session created by a rolled-back fork transaction
+   * (compensation). Absent hook → the compensation fails closed and the
+   * transaction stays recovery-required.
+   */
+  deleteForkChildSession?: (childSessionId: string) => Promise<void>
 }
 
 export interface ConversationForkDeps {
@@ -157,7 +219,7 @@ export interface ConversationForkDeps {
   hooks?: ConversationForkHooks
 }
 
-/** One in-flight fork transaction (preview → confirm/recover in later phases). */
+/** One in-flight fork transaction (preview → confirm; recovery in a later phase). */
 interface ForkTransaction {
   transactionId: string
   sessionId: string
@@ -182,6 +244,18 @@ interface ForkTransaction {
   transcriptCwd?: string
   sourceLeases: string[]
   startedAt: number
+  /** Source HEAD OID pinned by the captured seed (journaled before capture). */
+  headOid?: string
+  /** Seed snapshot id captured by this transaction (GC-retained until commit). */
+  seedSnapshotId?: string
+  /** Managed worktree record id of the materialized target. */
+  managedWorktreeId?: string
+  /** Child session id returned by the host hook (journaled after creation). */
+  childSessionId?: string
+  /** Child checkout binding built from the materialized target. */
+  childCheckout?: SessionCheckoutV2
+  /** Commit timestamp, set when the binding commits. */
+  committedAt?: number
 }
 
 /** Facts collected during one fork preview evaluation. */
@@ -455,6 +529,7 @@ export class IsolatedConversationForkService {
     session: ForkSessionInfo,
     capability: ConversationForkProviderCapability | null,
     transactionIdToAllow?: string,
+    recordLookup?: (id: string) => ManagedWorktreeRecordV2 | undefined,
   ): Promise<ForkFacts> {
     const fail = (code: ConversationForkBlockerCode, reason: string, overrides: Partial<ForkFacts> = {}): ForkFacts =>
       ({ ...this.fallbackFacts(input.sessionId, session, this.deps.serverId), blocker: code, blockerReason: reason, currentHead, ...overrides })
@@ -494,7 +569,7 @@ export class IsolatedConversationForkService {
       }
     }
     if (isIsolated && this.deps.journal.inProgress().some(
-      (entry) => entry.op === 'fork' && entry.sessionIds.includes(input.sessionId),
+      (entry) => entry.op === 'fork' && entry.sessionIds.includes(input.sessionId) && entry.recordId !== transactionIdToAllow,
     )) {
       return fail('fork-in-progress', 'A fork transaction is already in progress for this session.')
     }
@@ -525,7 +600,7 @@ export class IsolatedConversationForkService {
     // be idle, quiesceable, and covered by a stable path lease during capture.
     let ownerSessionIds = [input.sessionId]
     if (session.checkout?.mode === 'managed-worktree' && session.checkout.managedWorktreeId) {
-      const record = this.deps.registry.get(session.checkout.managedWorktreeId)
+      const record = (recordLookup ?? ((id: string) => this.deps.registry.get(id)))(session.checkout.managedWorktreeId)
       if (!record || record.state !== 'ready' || !existsSync(record.checkoutPath)) {
         return fail('missing-source', 'The managed worktree is snapshotted or missing; restore it before forking.')
       }
@@ -724,6 +799,757 @@ export class IsolatedConversationForkService {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Confirm (durable target/child transaction core)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Commit the isolated target + child session through the durable fork
+   * journal. Revalidates every preview-bound fact under the common-directory
+   * mutation lock + registry lock, captures the fingerprinted seed, materializes
+   * and restores the target, creates the child session through the host hook,
+   * and commits the registry owner + journal marker before the child is
+   * visible. Pre-publication failures compensate only transaction-owned
+   * artifacts with CAS proof. A repeated confirm with the same transactionId
+   * after an interrupt continues from the journal without double-creating
+   * target/child/owner.
+   */
+  async confirm(input: ConversationForkConfirmInput): Promise<ConversationForkResult> {
+    if (input.strategy !== 'isolated-worktree') {
+      // Shared-worktree forks own no transaction and reuse the existing
+      // branch/shared-checkout path; their confirmation is a later task.
+      throw new ConversationForkError('FORK_NOT_IMPLEMENTED', 'Shared-worktree fork confirmation is not implemented by the isolated transaction core.')
+    }
+    const resolved = this.resolveConfirmTransaction(input)
+    if (!resolved) {
+      throw new ConversationForkError('FORK_TRANSACTION_UNKNOWN', 'Unknown fork transaction.')
+    }
+    const txn = resolved.txn
+    if (txn.strategy !== input.strategy) {
+      throw new ConversationForkError('FORK_STRATEGY_MISMATCH', 'Fork strategy does not match the transaction.')
+    }
+    if (!input.worktreeNameSuffix) {
+      throw new ConversationForkError('FORK_STRATEGY_MISMATCH', 'An isolated fork confirmation requires the worktree name suffix from the preview.')
+    }
+    if (resolved.committedSummary) {
+      // A repeated confirm after the durable commit returns the committed
+      // summary instead of double-creating a target/child/owner.
+      return { outcome: 'committed', transactionId: txn.transactionId, summary: resolved.committedSummary }
+    }
+    const session = this.hooks.resolveSession?.(input.sessionId)
+    if (!session) throw new ConversationForkError('FORK_SESSION_UNKNOWN', 'Unknown session for fork confirmation.')
+    const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
+    if (!capability || capability.strictCrossCwdNativeFork !== true) {
+      this.deps.journal.fail(txn.journalId, 'The provider adapter cannot establish a strict cross-CWD native fork.')
+      this.transactions.delete(input.sessionId)
+      return this.blockedResult(txn, 'unsupported-provider', 'The provider adapter cannot establish a strict cross-CWD native fork.')
+    }
+    if (!this.hooks.createForkChildSession || !this.hooks.deleteForkChildSession) {
+      this.deps.journal.fail(txn.journalId, 'Fork child-session hooks are not wired.')
+      this.transactions.delete(input.sessionId)
+      throw new ConversationForkError(
+        'FORK_HOOK_NOT_WIRED',
+        'Isolated fork confirmation requires a wired child-session creation hook.',
+      )
+    }
+
+    return this.deps.mutationLock.withLock<ConversationForkResult>(txn.gitCommonDir, async () => {
+      return this.confirmLocked(txn, input, session, capability)
+    })
+  }
+
+  /**
+   * Revalidation + mutation core of confirm, running under the git lock.
+   * Re-entrant for an interrupted transaction: completed journal steps are
+   * skipped, so a repeated confirm never double-creates target/child/owner.
+   */
+  private async confirmLocked(
+    txn: ForkTransaction,
+    input: ConversationForkConfirmInput,
+    session: ForkSessionInfo,
+    capability: ConversationForkProviderCapability,
+  ): Promise<ConversationForkResult> {
+    // Re-gather facts + revalidate every preview-bound fact under the registry
+    // lock so a concurrent owner bind / lifecycle decision cannot interleave
+    // between the revalidation and the capture.
+    const revalidation = await this.deps.registry.runExclusive(async (tx) => {
+      const gathered = await this.gatherFacts(
+        {
+          sessionId: input.sessionId,
+          strategy: txn.strategy,
+          worktreeNameSuffix: input.worktreeNameSuffix,
+        },
+        session,
+        capability,
+        txn.transactionId,
+        (id: string) => tx.get(id),
+      )
+      if (gathered.blocker) {
+        this.deps.journal.fail(txn.journalId, gathered.blockerReason ?? 'Fork precondition failed.')
+        this.transactions.delete(input.sessionId)
+        return { blocked: this.blockedResult(txn, gathered.blocker, gathered.blockerReason ?? 'Fork precondition failed.') }
+      }
+      // Path-unleased at confirm: EVERY source owner must now hold a stable
+      // lease on the canonical source path (the preview only blocked foreign
+      // leases).
+      const sourceLeases = this.deps.leases.leasedBy(gathered.sourceCheckoutPath)
+      const unleasedOwners = gathered.ownerSessionIds.filter((owner) => !sourceLeases.includes(owner))
+      if (unleasedOwners.length > 0 || sourceLeases.some((owner) => !gathered.ownerSessionIds.includes(owner))) {
+        this.deps.journal.fail(txn.journalId, 'A source path owner or lease is missing at confirm.')
+        this.transactions.delete(input.sessionId)
+        return {
+          blocked: this.blockedResult(
+            txn,
+            'path-unleased',
+            unleasedOwners.length > 0
+              ? `Source owner ${unleasedOwners[0]} does not hold a stable lease on the source path.`
+              : 'A foreign session or runtime leases the source path.',
+          ),
+        }
+      }
+      // Fork-in-progress re-check: no other pending fork may own the source or
+      // the target paths.
+      if (this.isForkInProgressFor(txn)) {
+        this.deps.journal.fail(txn.journalId, 'Another fork transaction is in progress for the source or target.')
+        this.transactions.delete(input.sessionId)
+        return { blocked: this.blockedResult(txn, 'fork-in-progress', 'Another fork transaction is in progress for the source or target.') }
+      }
+      const freshFingerprint = await this.computeFingerprint(
+        { sessionId: input.sessionId, strategy: txn.strategy, worktreeNameSuffix: input.worktreeNameSuffix },
+        session,
+        gathered,
+        capability,
+        txn.transactionId,
+      )
+      if (freshFingerprint !== txn.fingerprint || input.previewFingerprint !== txn.fingerprint) {
+        this.deps.journal.fail(txn.journalId, 'The fork facts changed after the preview.')
+        this.transactions.delete(input.sessionId)
+        return { blocked: this.blockedResult(txn, 'identity-drift', 'The fork facts changed after the preview; inspect it again.') }
+      }
+      return { facts: gathered }
+    })
+    if (revalidation.blocked) return revalidation.blocked
+    const facts = revalidation.facts
+    if (!facts) throw new ConversationForkError('FORK_TARGET_FAILED', 'Fork facts could not be gathered.')
+
+    this.journalStep(txn, 'locks-acquired')
+
+    // Source quiescence: every owner must be idle, then quiesced through the
+    // host hook (the harness quiesce removes processing runtimes).
+    const activeOwner = facts.ownerSessionIds.find((owner) => this.hooks.isSessionActive?.(owner))
+    if (activeOwner) {
+      this.deps.journal.fail(txn.journalId, `Source owner ${activeOwner} has an active turn.`)
+      this.transactions.delete(input.sessionId)
+      return this.blockedResult(txn, 'source-active', `Source owner ${activeOwner} has an active turn; forking requires idle runtimes.`)
+    }
+    const quiesced = this.hooks.quiesceRuntimes ? await this.hooks.quiesceRuntimes(facts.ownerSessionIds) : true
+    if (!quiesced) {
+      this.deps.journal.fail(txn.journalId, 'A source runtime could not be quiesced.')
+      this.transactions.delete(input.sessionId)
+      return this.blockedResult(txn, 'source-active', 'A source runtime could not be quiesced; forking requires idle runtimes.')
+    }
+    this.journalStep(txn, 'source-quiesced')
+
+    let transactionLeaseId: string | null = null
+    try {
+      // Target reservation, journaled BEFORE the seed capture: nameSuffix,
+      // pathToken, expectedBranch, and the source HEAD OID the target must pin.
+      txn.headOid = facts.source.headSha ?? ''
+      if (!txn.headOid) throw new Error('The source HEAD could not be resolved for the fork target.')
+      this.deps.journal.updateMetadata(txn.journalId, {
+        state: 'target-reserved',
+        nameSuffix: txn.nameSuffix ?? null,
+        pathToken: txn.pathToken ?? null,
+        expectedBranch: txn.expectedBranch,
+        headOid: txn.headOid,
+      })
+
+      // Stable-lease guard: the source fingerprint must not change under our
+      // own capture (the seed is read-only on the checkout).
+      const settings = this.deps.settings.getSnapshot(this.deps.serverId)
+      const sourceFingerprintBeforeCapture = await computeWorktreeFingerprint({
+        managedWorktreeId: `fork:${facts.sourceCheckoutPath}`,
+        checkoutPath: facts.sourceCheckoutPath,
+        gitCommonDir: txn.gitCommonDir,
+        expectedBranch: facts.source.branch ?? '',
+        baseRef: null,
+        ownerSessionIds: facts.ownerSessionIds,
+        policyVersion: settings.version,
+        archivedOwnerSessionIds: [],
+      })
+
+      // Seed capture (skipped on replay: the seed id is journaled). The seed
+      // pins the SOURCE checkout, so it records the source branch — the target
+      // branch is applied by the restore projection.
+      if (!txn.steps.includes('seed-captured')) {
+        const captured = await this.captureForkSeed({
+          checkoutPath: facts.sourceCheckoutPath,
+          repositoryRoot: txn.repositoryRoot,
+          gitCommonDir: txn.gitCommonDir,
+          expectedBranch: facts.source.branch ?? '',
+          baseRef: txn.headOid,
+          ownerSessionIds: facts.ownerSessionIds,
+          policyVersion: settings.version,
+          previewFingerprint: txn.fingerprint,
+        })
+        txn.seedSnapshotId = captured.snapshotId
+        // The seed is journaled immediately after capture so an in-progress
+        // fork entry's seed is GC-retained until the commit marker.
+        this.deps.journal.updateMetadata(txn.journalId, {
+          state: 'seed-captured',
+          seedSnapshotId: captured.snapshotId,
+          seedFingerprint: captured.fingerprint,
+        })
+        this.journalStep(txn, 'seed-captured')
+        txn.state = 'seed-captured'
+      } else if (!txn.seedSnapshotId) {
+        throw new Error('The interrupted fork journal has no recorded seed.')
+      }
+
+      const afterCaptureFingerprint = await computeWorktreeFingerprint({
+        managedWorktreeId: `fork:${facts.sourceCheckoutPath}`,
+        checkoutPath: facts.sourceCheckoutPath,
+        gitCommonDir: txn.gitCommonDir,
+        expectedBranch: facts.source.branch ?? '',
+        baseRef: null,
+        ownerSessionIds: facts.ownerSessionIds,
+        policyVersion: settings.version,
+        archivedOwnerSessionIds: [],
+      })
+      if (afterCaptureFingerprint !== sourceFingerprintBeforeCapture) {
+        throw new Error('The source checkout changed during seed capture.')
+      }
+
+      // Destination lease fences the target path against other runtimes.
+      transactionLeaseId = `fork:${txn.transactionId}`
+      this.deps.leases.lease(transactionLeaseId, txn.destinationPath)
+      this.journalStep(txn, 'destination-leased')
+
+      // Materialize the target (skipped on replay when the journal records it).
+      if (!txn.steps.includes('target-materialized')) {
+        const created = await this.deps.worktrees.createWorktree({
+          workspaceId: session.workspaceId,
+          sessionId: input.sessionId,
+          repositoryRoot: txn.repositoryRoot,
+          gitCommonDir: txn.gitCommonDir,
+          baseRef: txn.headOid,
+          worktreeNameSuffix: txn.nameSuffix,
+          pathToken: txn.pathToken,
+          lockAlreadyHeld: true,
+        })
+        if (created.record.schemaVersion !== 2) {
+          throw new Error('Named fork creation did not produce a V2 worktree record.')
+        }
+        txn.managedWorktreeId = created.record.managedWorktreeId
+        this.deps.journal.updateMetadata(txn.journalId, {
+          state: 'target-materialized',
+          managedWorktreeId: created.record.managedWorktreeId,
+        })
+        this.journalStep(txn, 'target-materialized')
+        txn.state = 'target-materialized'
+      }
+      const targetRecord = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      if (!targetRecord || targetRecord.schemaVersion !== 2 || targetRecord.state !== 'ready') {
+        throw new Error('The materialized fork target record is missing or not ready.')
+      }
+      if (realpathSafe(targetRecord.checkoutPath) !== realpathSafe(txn.destinationPath)) {
+        throw new Error('The materialized fork target is not at the reserved destination.')
+      }
+
+      const seedMeta = this.deps.snapshots.loadSnapshotMeta(txn.seedSnapshotId)
+      if (!seedMeta) throw new Error('The fork seed is missing; it cannot restore the target.')
+
+      // Restore the seed into the target (skipped on replay when recorded).
+      if (!txn.steps.includes('target-restored')) {
+        await this.deps.snapshots.applySnapshotToCheckout({
+          meta: seedMeta,
+          checkoutPath: targetRecord.checkoutPath,
+        })
+        this.journalStep(txn, 'target-restored')
+      }
+
+      // Verify: the restored target must reproduce the seed content exactly
+      // (staged/unstaged/untracked/.worktreeinclude byte-for-byte) and sit at
+      // the captured HEAD on the reserved branch.
+      if (!txn.steps.includes('target-verified')) {
+        const targetContext = await this.deps.repository.getContext(targetRecord.checkoutPath)
+        if (
+          !targetContext.isGitRepository ||
+          !targetContext.gitCommonDir ||
+          resolvePath(targetContext.gitCommonDir) !== resolvePath(txn.gitCommonDir) ||
+          targetContext.currentBranch !== targetRecord.expectedBranch ||
+          targetContext.headSha !== seedMeta.headOid
+        ) {
+          throw new Error('The fork target failed identity verification after restore.')
+        }
+        await this.assertTargetMatchesSeed(txn, seedMeta, targetRecord.checkoutPath)
+        this.journalStep(txn, 'target-verified')
+        txn.state = 'target-verified'
+      }
+
+      // Child session through the host hook (skipped on replay: the child id
+      // is journaled). The child is invisible until the journal commit marker.
+      if (!txn.steps.includes('child-created')) {
+        const childSessionId = await this.hooks.createForkChildSession!({
+          transactionId: txn.transactionId,
+          parentSessionId: input.sessionId,
+          parentSdkSessionId: session.sdkSessionId,
+          parentSdkTurnId: session.forkPointTurnId ?? session.conversationHead.turnId,
+          transcriptCwd: session.transcriptCwd,
+          executionCwd: targetRecord.checkoutPath,
+          checkout: this.childCheckoutFor(targetRecord),
+          nameSuffix: txn.nameSuffix!,
+          sourceMessageId: session.conversationHead.messageId,
+          workspaceId: session.workspaceId,
+          forkPointMessageId: session.forkPointMessageId ?? session.conversationHead.messageId,
+        })
+        if (!childSessionId || typeof childSessionId !== 'string' || !childSessionId.trim()) {
+          throw new Error('The child-session hook did not return a durable child session id.')
+        }
+        txn.childSessionId = childSessionId
+        this.deps.journal.updateMetadata(txn.journalId, { state: 'target-materialized', childSessionId })
+        this.journalStep(txn, 'child-created')
+      }
+      if (!txn.childSessionId) {
+        throw new Error('The interrupted fork journal has no recorded child session.')
+      }
+      txn.childCheckout = this.childCheckoutFor(targetRecord)
+
+      // Registry: the child becomes the SOLE owner of the new record; the
+      // source record is never touched.
+      if (!txn.steps.includes('owner-committed')) {
+        await this.deps.registry.runExclusive(async (tx) => {
+          const record = tx.get(txn.managedWorktreeId!)
+          if (!record || record.state !== 'ready') {
+            throw new Error('The fork target record is missing or not ready before the owner commit.')
+          }
+          if (record.ownerSessionIds.length !== 1 || record.ownerSessionIds[0] !== input.sessionId) {
+            throw new Error('The fork target gained unexpected owners before the commit.')
+          }
+          record.ownerSessionIds = [txn.childSessionId!]
+          record.lastUsedAt = Date.now()
+          tx.commit()
+        })
+        this.journalStep(txn, 'owner-committed')
+      }
+
+      // Durable commit marker, then the child is visible through the result.
+      txn.state = 'binding-committed'
+      txn.committedAt = Date.now()
+      this.deps.journal.updateMetadata(txn.journalId, {
+        state: 'binding-committed',
+        childSessionId: txn.childSessionId,
+        childCheckout: txn.childCheckout,
+        executionCwd: targetRecord.checkoutPath,
+        transcriptCwd: session.transcriptCwd,
+        committedAt: txn.committedAt,
+      })
+      this.deps.journal.commit(txn.journalId, txn.transactionId)
+      const committedAt = txn.committedAt
+      const childCheckout = txn.childCheckout
+
+      // Post-commit cleanup: remove the seed (best-effort; GC covers stragglers).
+      if (txn.seedSnapshotId) {
+        try {
+          await this.removeSeed(txn.seedSnapshotId, txn.repositoryRoot)
+        } catch {
+          // The journal is committed; an unreferenced seed is GC-removed.
+        }
+      }
+      if (transactionLeaseId) this.deps.leases.release(transactionLeaseId, txn.destinationPath)
+      this.transactions.delete(input.sessionId)
+      return {
+        outcome: 'committed',
+        transactionId: txn.transactionId,
+        summary: {
+          sessionId: txn.childSessionId!,
+          strategy: 'isolated-worktree',
+          checkout: childCheckout!,
+          executionCwd: targetRecord.checkoutPath,
+          transcriptCwd: session.transcriptCwd,
+          childProviderIdPresent: false,
+          committedAt,
+        },
+      }
+    } catch (error) {
+      if (transactionLeaseId) this.deps.leases.release(transactionLeaseId, txn.destinationPath)
+      try {
+        await this.compensate(txn)
+        this.deps.journal.updateMetadata(txn.journalId, { state: 'rolled-back', rolledBackAt: Date.now() })
+        this.deps.journal.recover(txn.journalId, 'rolled-back')
+        this.transactions.delete(input.sessionId)
+      } catch (compensationError) {
+        this.deps.journal.updateMetadata(txn.journalId, { state: 'recovery-required', lastError: sanitizeError(error) })
+        this.deps.journal.fail(txn.journalId, sanitizeError(error))
+        throw new ConversationForkError(
+          'FORK_COMPENSATION_FAILED',
+          `The fork transaction could not be fully compensated: ${sanitizeError(compensationError)}.`,
+        )
+      }
+      throw new ConversationForkError('FORK_TARGET_FAILED', sanitizeError(error))
+    }
+  }
+
+  /** Build the V2 child checkout binding from the materialized target record. */
+  private childCheckoutFor(record: ManagedWorktreeRecordV2): SessionCheckoutV2 {
+    return {
+      schemaVersion: 2,
+      mode: 'managed-worktree',
+      repositoryRoot: record.repositoryRoot,
+      checkoutPath: record.checkoutPath,
+      branchAtPreparation: record.expectedBranch,
+      baseRef: record.baseRef,
+      managedWorktreeId: record.managedWorktreeId,
+      displayName: record.displayName,
+      expectedBranch: record.expectedBranch,
+      materializationRoot: record.materializationRoot,
+    }
+  }
+
+  /** Idempotent journal step: append to the in-memory steps only once. */
+  private journalStep(txn: ForkTransaction, step: string): void {
+    if (txn.steps.includes(step)) return
+    txn.steps.push(step)
+    this.deps.journal.step(txn.journalId, step)
+  }
+
+  private blockedResult(
+    txn: ForkTransaction,
+    code: ConversationForkBlockerCode,
+    reason: string,
+  ): ConversationForkResult {
+    return { outcome: 'blocked', transactionId: txn.transactionId, code, reason: sanitizeError(reason) }
+  }
+
+  /** True when another in-memory/journal fork owns the source or target path. */
+  private isForkInProgressFor(txn: ForkTransaction): boolean {
+    const source = resolvePath(txn.sourcePath)
+    const destination = resolvePath(txn.destinationPath)
+    const journalCollision = this.deps.journal.inProgress().some((entry) => {
+      if (entry.op !== 'fork' || entry.recordId === txn.transactionId) return false
+      const entrySource = entry.metadata?.sourcePath
+      const entryDestination = entry.metadata?.destinationPath
+      return (
+        entry.sessionIds.includes(txn.sessionId) ||
+        (typeof entrySource === 'string' &&
+          (resolvePath(entrySource) === source || resolvePath(entrySource) === destination)) ||
+        (typeof entryDestination === 'string' &&
+          (resolvePath(entryDestination) === source || resolvePath(entryDestination) === destination))
+      )
+    })
+    if (journalCollision) return true
+    for (const [owner, other] of this.transactions) {
+      if (owner === txn.sessionId || other.transactionId === txn.transactionId) continue
+      const otherSource = resolvePath(other.sourcePath)
+      const otherDestination = resolvePath(other.destinationPath)
+      if (
+        otherSource === source ||
+        otherDestination === source ||
+        otherSource === destination ||
+        otherDestination === destination
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Compensate ONLY transaction-owned artifacts, each with CAS/containment
+   * proof: the branch only while it still points at the journaled OID, the
+   * target only beneath the server root with the exact created owner set, the
+   * seed only when owned by this transaction, and the child session only when
+   * this transaction created it. The source checkout is never touched.
+   */
+  private async compensate(txn: ForkTransaction): Promise<void> {
+    // 1. Child session created by this transaction.
+    if (txn.childSessionId && txn.steps.includes('child-created')) {
+      const removeChild = this.hooks.deleteForkChildSession
+      if (!removeChild) {
+        throw new ConversationForkError('FORK_COMPENSATION_FAILED', 'No child-session removal hook is wired for compensation.')
+      }
+      await removeChild(txn.childSessionId)
+    }
+    // 2. Target worktree + registry record (only the record this transaction created).
+    if (txn.steps.includes('target-materialized')) {
+      const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      if (record && record.schemaVersion === 2) {
+        const ownersAreOurs =
+          record.ownerSessionIds.length === 1 && record.ownerSessionIds[0] === txn.sessionId
+        const branchIsOurs = record.expectedBranch === txn.expectedBranch
+        const rootIsServer = this.deps.worktrees.isUnderWorktreeRoot(record.checkoutPath, record.materializationRoot)
+        if (!ownersAreOurs || !branchIsOurs || !rootIsServer) {
+          throw new ConversationForkError(
+            'FORK_COMPENSATION_FAILED',
+            'The interrupted fork target is not provably owned by this transaction.',
+          )
+        }
+        const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
+        if (!released) {
+          throw new ConversationForkError('FORK_COMPENSATION_FAILED', 'The interrupted fork target checkout could not be removed.')
+        }
+        this.deps.registry.remove(record.managedWorktreeId)
+      } else if (existsSync(txn.destinationPath) || lstatSyncSafe(txn.destinationPath) === 'symlink') {
+        // Crash between the provisional record and the ready record: remove
+        // the reserved path only when it is beneath the server root.
+        if (!this.deps.worktrees.isUnderWorktreeRoot(txn.destinationPath)) {
+          throw new ConversationForkError('FORK_COMPENSATION_FAILED', 'The interrupted fork target path escapes the server root.')
+        }
+        const released = await removeCheckoutFiles(txn.repositoryRoot, txn.destinationPath)
+        if (!released) {
+          throw new ConversationForkError('FORK_COMPENSATION_FAILED', 'The interrupted fork target path could not be removed.')
+        }
+      }
+      // 3. Branch CAS: remove it only while it still points at the OID this
+      // transaction created (the journaled head OID). A branch advanced or
+      // replaced by external work is never ours to delete.
+      if (txn.headOid) {
+        const branchOid = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${txn.expectedBranch}`], {
+          cwd: txn.repositoryRoot,
+          okExitCodes: [1, 128],
+        })
+        if (branchOid.exitCode === 0 && branchOid.stdout.trim() === txn.headOid) {
+          await runGit(['branch', '-D', txn.expectedBranch], { cwd: txn.repositoryRoot, okExitCodes: [1, 128] })
+        }
+      }
+    }
+    // 4. Seed owned by this transaction (CAS-deletes only the owned hidden ref).
+    if (txn.seedSnapshotId) {
+      await this.removeSeed(txn.seedSnapshotId, txn.repositoryRoot)
+    }
+  }
+
+  /**
+   * Content verification: the restored target must reproduce the seed's
+   * captured staged/unstaged projections and every untracked/included file
+   * byte-for-byte and mode-for-mode.
+   */
+  private async assertTargetMatchesSeed(
+    txn: ForkTransaction,
+    meta: ManagedWorktreeSnapshotMeta,
+    checkoutPath: string,
+  ): Promise<void> {
+    const manifest = this.deps.snapshots.verifyPayload(meta)
+    const maxBufferBytes = this.deps.snapshots.getMaxBytes() + 16 * 1024
+    const staged = (
+      await runGitBuffer(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes,
+      })
+    ).stdout
+    if (sha256(staged) !== manifest.stagedPatch.sha256) {
+      throw new Error('The fork target staged state differs from the captured seed.')
+    }
+    const unstaged = (
+      await runGitBuffer(['diff', '--binary', '--no-color', '--no-ext-diff'], {
+        cwd: checkoutPath,
+        maxBufferBytes,
+      })
+    ).stdout
+    if (sha256(unstaged) !== manifest.unstagedPatch.sha256) {
+      throw new Error('The fork target unstaged state differs from the captured seed.')
+    }
+    for (const entry of manifest.files) {
+      const dest = join(checkoutPath, entry.path)
+      const kind = lstatSyncSafe(dest)
+      if (kind === null) {
+        throw new Error(`The fork target is missing a captured file: ${entry.path}`)
+      }
+      if (entry.mode === '120000') {
+        if (kind !== 'symlink' || readlinkSync(dest) !== entry.linkText) {
+          throw new Error(`The fork target symlink differs from the captured seed: ${entry.path}`)
+        }
+        continue
+      }
+      if (kind !== 'other' || !statSync(dest).isFile()) {
+        throw new Error(`The fork target path is not a regular file: ${entry.path}`)
+      }
+      const actual = statSync(dest)
+      if (
+        (actual.mode & 0o777) !== parseInt(entry.mode.slice(-3), 8) ||
+        sha256(readFileSync(dest)) !== entry.sha256
+      ) {
+        throw new Error(`The fork target file differs from the captured seed: ${entry.path}`)
+      }
+    }
+    void txn
+  }
+
+  /**
+   * Resolve the transaction a confirm refers to: the in-memory preview
+   * transaction, a durable in-progress journal transaction (crash replay), a
+   * rolled-back journal transaction (fresh re-run after full compensation), or
+   * a committed journal transaction (repeat confirm returns the summary).
+   */
+  private resolveConfirmTransaction(input: ConversationForkConfirmInput): {
+    txn: ForkTransaction
+    committedSummary?: ConversationForkCommitSummary
+  } | null {
+    const existing = this.transactions.get(input.sessionId)
+    if (existing) {
+      if (existing.transactionId !== input.transactionId) return null
+      const entry = this.deps.journal.entries().find((candidate) => candidate.journalId === existing.journalId)
+      if (entry && entry.status === 'in-progress') {
+        existing.steps = [...entry.steps]
+        return { txn: existing }
+      }
+      // The previous attempt terminated without a durable commit (compensation
+      // failure or journal recovery): restart with a fresh journal entry so
+      // this confirm can still complete durably.
+      return this.beginFreshAttempt(existing)
+    }
+    const entry = this.deps.journal.entries().find(
+      (candidate) => candidate.op === 'fork' && candidate.recordId === input.transactionId && candidate.sessionIds.includes(input.sessionId),
+    )
+    if (!entry) return null
+    const rehydrated = this.rehydrateTransaction(entry, input.sessionId)
+    if (!rehydrated) return null
+    if (entry.status === 'committed') {
+      const summary = this.committedSummaryFromMetadata(entry, rehydrated)
+      return { txn: rehydrated, committedSummary: summary }
+    }
+    if (entry.status === 'recovered') {
+      if (entry.commitMarker !== 'rolled-back') return null
+      // The previous attempt was fully compensated; start a fresh journal entry
+      // for the re-run so the transaction commits exactly once.
+      return this.beginFreshAttempt(rehydrated)
+    }
+    if (entry.status === 'in-progress') {
+      this.transactions.set(rehydrated.sessionId, rehydrated)
+      return { txn: rehydrated }
+    }
+    // Failed entries (blocked confirms) are not resumable.
+    return null
+  }
+
+  /** Reset a transaction for a fresh confirm attempt with a new journal entry. */
+  private beginFreshAttempt(txn: ForkTransaction): { txn: ForkTransaction } | null {
+    txn.steps = []
+    txn.state = 'pending'
+    txn.headOid = undefined
+    txn.seedSnapshotId = undefined
+    txn.managedWorktreeId = undefined
+    txn.childSessionId = undefined
+    txn.childCheckout = undefined
+    txn.committedAt = undefined
+    const journal = this.deps.journal.begin({
+      op: 'fork',
+      recordId: txn.transactionId,
+      sessionIds: [txn.sessionId],
+      policyVersion: this.deps.settings.getSnapshot(this.deps.serverId).version,
+      metadata: this.transactionMetadata(txn),
+    })
+    txn.journalId = journal.journalId
+    this.transactions.set(txn.sessionId, txn)
+    return { txn }
+  }
+
+  /** Rebuild a transaction from a journal entry's recorded metadata + steps. */
+  private rehydrateTransaction(entry: WorktreeJournalEntry, sessionId: string): ForkTransaction | null {
+    const metadata = entry.metadata
+    if (!metadata) return null
+    const stringValue = (key: string): string | undefined =>
+      typeof metadata[key] === 'string' ? (metadata[key] as string) : undefined
+    const transactionId = stringValue('transactionId')
+    const strategy = stringValue('strategy')
+    const fingerprint = stringValue('fingerprint')
+    const sourcePath = stringValue('sourcePath')
+    const destinationPath = stringValue('destinationPath')
+    const repositoryRoot = stringValue('repositoryRoot')
+    const gitCommonDir = stringValue('gitCommonDir')
+    const expectedBranch = stringValue('expectedBranch')
+    const nameSuffix = stringValue('nameSuffix')
+    const pathToken = stringValue('pathToken')
+    const transcriptCwd = stringValue('transcriptCwd')
+    if (
+      entry.recordId !== transactionId ||
+      strategy !== 'isolated-worktree' ||
+      !transactionId ||
+      !/^[a-f0-9]{16}$/.test(transactionId) ||
+      !sessionId ||
+      !fingerprint ||
+      !/^[a-f0-9]{64}$/.test(fingerprint) ||
+      !sourcePath ||
+      !destinationPath ||
+      !repositoryRoot ||
+      !gitCommonDir ||
+      !expectedBranch ||
+      !transcriptCwd ||
+      !nameSuffix ||
+      nameSuffix.includes('\0') ||
+      !pathToken ||
+      !/^[a-f0-9]{8}$/.test(pathToken)
+    ) {
+      return null
+    }
+    const absolutePaths = [sourcePath, destinationPath, repositoryRoot, gitCommonDir, transcriptCwd]
+    if (absolutePaths.some((path) => !isAbsolute(path) || path.includes('\0'))) return null
+    const root = resolvePath(this.deps.settings.getSnapshot(this.deps.serverId).materializationRoot)
+    if (!isContainedPath(root, destinationPath)) return null
+    const sourceLeases = metadata.sourceLeases
+    if (!Array.isArray(sourceLeases) || !sourceLeases.every((value) => typeof value === 'string')) return null
+    const providerAdapterId = stringValue('providerAdapterId')
+    const capability: ConversationForkProviderCapability | undefined = providerAdapterId
+      ? { adapterId: providerAdapterId, strictCrossCwdNativeFork: true }
+      : undefined
+    return {
+      transactionId,
+      sessionId,
+      strategy: 'isolated-worktree',
+      state: (stringValue('state') as ConversationForkRecoveryState) ?? 'pending',
+      fingerprint,
+      nameSuffix,
+      pathToken,
+      sourcePath,
+      destinationPath,
+      repositoryRoot,
+      gitCommonDir,
+      expectedBranch,
+      steps: [...entry.steps],
+      journalId: entry.journalId,
+      providerCapability: capability,
+      transcriptCwd,
+      sourceLeases: sourceLeases as string[],
+      startedAt: typeof metadata.startedAt === 'number' ? metadata.startedAt : entry.startedAt,
+      headOid: stringValue('headOid'),
+      seedSnapshotId: stringValue('seedSnapshotId'),
+      managedWorktreeId: stringValue('managedWorktreeId'),
+      childSessionId: stringValue('childSessionId'),
+      committedAt: typeof metadata.committedAt === 'number' ? metadata.committedAt : undefined,
+    }
+  }
+
+  /** Rebuild the committed summary from a committed journal entry. */
+  private committedSummaryFromMetadata(entry: WorktreeJournalEntry, txn: ForkTransaction): ConversationForkCommitSummary | undefined {
+    const metadata = entry.metadata
+    if (!metadata) return undefined
+    const childSessionId = txn.childSessionId
+    const checkout = metadata.childCheckout
+    const executionCwd = metadata.executionCwd
+    const transcriptCwd = typeof metadata.transcriptCwd === 'string' ? metadata.transcriptCwd : txn.transcriptCwd
+    const committedAt = txn.committedAt
+    if (
+      !childSessionId ||
+      !checkout ||
+      typeof checkout !== 'object' ||
+      typeof (checkout as { schemaVersion?: unknown }).schemaVersion !== 'number' ||
+      typeof executionCwd !== 'string' ||
+      !transcriptCwd ||
+      !committedAt
+    ) {
+      return undefined
+    }
+    return {
+      sessionId: childSessionId,
+      strategy: 'isolated-worktree',
+      checkout: checkout as SessionCheckoutV2,
+      executionCwd,
+      transcriptCwd,
+      childProviderIdPresent: false,
+      committedAt,
+    }
+  }
+
   /** Session facts helper for the unknown-session fallback. */
   private sessionFactsFallback(sessionId: string, serverId: string): ForkFacts {
     return {
@@ -816,6 +1642,7 @@ export class IsolatedConversationForkService {
       transactionId: txn.transactionId,
       strategy: txn.strategy,
       state: txn.state,
+      fingerprint: txn.fingerprint,
       nameSuffix: txn.nameSuffix ?? null,
       pathToken: txn.pathToken ?? null,
       sourcePath: txn.sourcePath,
@@ -825,6 +1652,8 @@ export class IsolatedConversationForkService {
       expectedBranch: txn.expectedBranch,
       providerAdapterId: txn.providerCapability?.adapterId ?? null,
       sourceLeases: txn.sourceLeases,
+      transcriptCwd: txn.transcriptCwd ?? null,
+      startedAt: txn.startedAt,
     }
   }
 
