@@ -1482,10 +1482,18 @@ export class WorktreeLifecycleService {
       // A pending/failed handoff retains its snapshot as the recovery
       // authority even after the managed source record was removed
       // (managed-to-current release). Never GC a payload recovery needs.
+      // A pending/failed fork retains its seed the same way: the confirm
+      // journal records the seed id immediately after capture, and an
+      // interrupted confirm must still be able to restore the target from it.
       for (const entry of this.deps.journal.entries()) {
-        if (entry.op !== 'handoff' || (entry.status !== 'in-progress' && entry.status !== 'failed')) continue
-        const retained = entry.metadata?.retainedSnapshotId
-        if (typeof retained === 'string' && retained) referenced.add(retained)
+        if (entry.status !== 'in-progress' && entry.status !== 'failed') continue
+        if (entry.op === 'handoff') {
+          const retained = entry.metadata?.retainedSnapshotId
+          if (typeof retained === 'string' && retained) referenced.add(retained)
+        } else if (entry.op === 'fork') {
+          const seed = entry.metadata?.seedSnapshotId
+          if (typeof seed === 'string' && seed) referenced.add(seed)
+        }
       }
       for (const name of entries) {
         if (name.startsWith('.tmp-')) {

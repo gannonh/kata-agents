@@ -36,6 +36,29 @@ export async function waitForOnboardingWizard(
   await page.locator(ONBOARDING_SELECTOR).waitFor({ state: "visible", timeout: timeoutMs });
 }
 
+/** Wait for the onboarding wizard or a shell that has already completed setup. */
+export async function waitForOnboardingOrReady(
+  page: Page,
+  timeoutMs = E2E_TIMEOUTS.electronWindowMs,
+): Promise<"onboarding" | "ready" | "workspace-picker"> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await page.locator(ONBOARDING_SELECTOR).isVisible().catch(() => false)) {
+      return "onboarding";
+    }
+    if (await page.locator(APP_READY_SELECTOR).isVisible().catch(() => false)) {
+      return "ready";
+    }
+    if (await isWorkspacePickerVisible(page)) {
+      return "workspace-picker";
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `E2E shell: onboarding or a ready shell did not become visible within ${timeoutMs}ms.`,
+  );
+}
+
 export async function waitForAppReady(
   page: Page,
   timeoutMs = E2E_TIMEOUTS.electronWindowMs,

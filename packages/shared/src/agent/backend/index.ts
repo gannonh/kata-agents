@@ -46,6 +46,9 @@ export type {
   PostInitResult,
   ExecutionCwdProof,
   ExecutionCwdRebindCapability,
+  ConversationForkEstablishInput,
+  ConversationForkEstablishResult,
+  StrictConversationForkCapability,
 } from './types.ts';
 
 // Handoff capability gate
@@ -54,11 +57,11 @@ export {
   type HandoffCapabilityResolution,
 } from './handoff-capability.ts';
 
-// Credential-free deterministic handoff adapter (state-machine coverage)
+// Isolated conversation fork capability gate (Worktree V2 Phase 4)
 export {
-  createDeterministicHandoffAdapter,
-  type DeterministicHandoffAdapterOptions,
-} from './deterministic-handoff-adapter.ts';
+  resolveIsolatedForkCapability,
+  type IsolatedForkCapabilityResolution,
+} from './conversation-fork-capability.ts';
 
 // Enums need to be exported as values, not just types
 export { AbortReason } from './types.ts';

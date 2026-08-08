@@ -100,6 +100,14 @@ export const WORKTREE_HANDOFF_BLOCKED_CODE = 'WORKTREE_HANDOFF_BLOCKED' as const
 export const WORKTREE_HANDOFF_PREVIEW_STALE_CODE = 'WORKTREE_HANDOFF_PREVIEW_STALE' as const
 /** Wire error returned when a pending/recovery handoff fences an action. */
 export const WORKTREE_HANDOFF_PENDING_CODE = 'WORKTREE_HANDOFF_PENDING' as const
+/** Wire error returned when a fork RPC fails during execution. */
+export const WORKTREE_FORK_ERROR_CODE = 'WORKTREE_FORK_FAILED' as const
+/** Wire error returned when a fork RPC is rejected by a typed blocker. */
+export const WORKTREE_FORK_BLOCKED_CODE = 'WORKTREE_FORK_BLOCKED' as const
+/** Wire error returned when a fork preview fingerprint is stale. */
+export const WORKTREE_FORK_PREVIEW_STALE_CODE = 'WORKTREE_FORK_PREVIEW_STALE' as const
+/** Wire error returned when a pending/recovery fork fences an action. */
+export const WORKTREE_FORK_PENDING_CODE = 'WORKTREE_FORK_PENDING' as const
 
 export type ErrorCode =
   | 'HANDLER_ERROR'
@@ -128,6 +136,10 @@ export type ErrorCode =
   | typeof WORKTREE_HANDOFF_BLOCKED_CODE
   | typeof WORKTREE_HANDOFF_PREVIEW_STALE_CODE
   | typeof WORKTREE_HANDOFF_PENDING_CODE
+  | typeof WORKTREE_FORK_ERROR_CODE
+  | typeof WORKTREE_FORK_BLOCKED_CODE
+  | typeof WORKTREE_FORK_PREVIEW_STALE_CODE
+  | typeof WORKTREE_FORK_PENDING_CODE
   | 'CLIENT_DISCONNECTED'
   | 'CLIENT_REQUEST_TIMEOUT'
   | 'BROWSER_NO_CAPABLE_CLIENT'
@@ -162,6 +174,10 @@ const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   WORKTREE_HANDOFF_BLOCKED_CODE,
   WORKTREE_HANDOFF_PREVIEW_STALE_CODE,
   WORKTREE_HANDOFF_PENDING_CODE,
+  WORKTREE_FORK_ERROR_CODE,
+  WORKTREE_FORK_BLOCKED_CODE,
+  WORKTREE_FORK_PREVIEW_STALE_CODE,
+  WORKTREE_FORK_PENDING_CODE,
   'CLIENT_DISCONNECTED',
   'CLIENT_REQUEST_TIMEOUT',
   'BROWSER_NO_CAPABLE_CLIENT',

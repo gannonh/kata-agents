@@ -12,6 +12,7 @@ Durable architecture decisions for this fork are recorded here. See the Accepted
 * [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) — The workspace-owning server owns all managed-worktree lifecycle and Git mutation; worktrees live under Kata config data, mutations serialize by Git common directory, and checkout preparation is an atomic empty-session gate.
 * [2026-08-05-snapshot-backed-worktree-lifecycle.md](2026-08-05-snapshot-backed-worktree-lifecycle.md) — Every destructive V2 path routes through one lifecycle service with verified snapshots, path leases, a durable journal, and event-driven retention cleanup.
 * [2026-08-07-conflict-safe-checkout-handoff.md](2026-08-07-conflict-safe-checkout-handoff.md) — The server moves a single-owner idle session between current and managed checkouts with fingerprint-bound previews, journaled idempotent steps, snapshot-backed rollback, and provider-proven execution-CWD rebinding.
+* [2026-08-08-isolated-conversation-forks.md](2026-08-08-isolated-conversation-forks.md) — The server forks an idle source conversation's current head into a separate managed worktree, branch, session, and runtime with a durable pending provider-fork intent, strict cross-CWD native-fork establishment on first Send, journaled fork transactions with compensation, and an orphan ledger.
 
 ## Superseded
 

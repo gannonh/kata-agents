@@ -4,7 +4,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import {
   existsSync,
   mkdirSync,
@@ -23,16 +23,18 @@ import {
   resolveBackendContext,
   createBackendFromResolvedContext,
   resolveHandoffCapability,
+  resolveIsolatedForkCapability,
   cleanupSourceRuntimeArtifacts,
   providerTypeToAgentProvider,
   type AgentBackend,
   type BackendHostRuntimeContext,
+  type ConversationForkEstablishResult,
   type PostInitResult,
 } from '@kata-sh/shared/agent/backend'
 import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior } from '@kata-sh/shared/config'
 import { PrivilegedExecutionBroker } from '@kata-sh/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
-import { getDefaultGitServices, type GitServices, safeRealpath } from '../git'
+import { getDefaultGitServices, type GitServices, safeRealpath, type ConversationForkChildSessionInput, type ForkOrphanResult } from '../git'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import { InitGate } from '@kata-sh/server-core/domain'
 import { i18n, LOCALE_REGISTRY, type LanguageCode } from '@kata-sh/shared/i18n'
@@ -92,7 +94,7 @@ import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
-import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, generateMessageId } from '@kata-sh/shared/protocol'
+import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, CodedError, WORKTREE_FORK_PENDING_CODE, WORKTREE_FORK_ERROR_CODE, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@kata-sh/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@kata-sh/shared/skills'
@@ -845,6 +847,28 @@ interface ManagedSession {
   checkout?: import('@kata-sh/shared/protocol').SessionCheckout
   // Handoff runtime reconstruction state ('unverified' arms the Send proof gate).
   handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required'
+  /**
+   * Durable pending isolated-fork intent (Phase 4). Present on an isolated
+   * fork child from publication until first-Send provider establishment
+   * (Task 4 replaces the Send gate with the establish flow). Mirrors the
+   * persisted StoredSession.pendingFork.
+   */
+  pendingFork?: {
+    transactionId: string
+    parentSessionId: string
+    parentSdkSessionId: string
+    parentSdkTurnId: string
+    transcriptCwd: string
+    executionCwd: string
+    idempotencyKey: string
+    createdAt: number
+  }
+  /**
+   * Durable checkout-strategy provenance recorded at branch/fork creation
+   * (Phase 4): 'shared' for branches sharing the parent managed worktree,
+   * 'isolated' for isolated fork children owning a dedicated target.
+   */
+  checkoutStrategy?: 'shared' | 'isolated'
   // Shared viewer URL (if shared via viewer)
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
@@ -974,6 +998,7 @@ interface ManagedSession {
 }
 
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
+const FORK_PROOF_MAX_AGE_MS = 5 * 60 * 1000
 
 export interface AutoRetryPendingHost {
   autoRetryPending?: {
@@ -1114,10 +1139,26 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
       /* adapter capability unavailable — omit; the server blocker remains authoritative */
     }
   }
+  // Client-visible isolated-fork capability (Phase 4): the fork dialog offers
+  // the isolated strategy only when the provider adapter advertises a strict
+  // cross-CWD native fork. Absent until the runtime exists, like handoffCapable.
+  let isolatedForkCapable: boolean | undefined
+  if (m.agent) {
+    try {
+      isolatedForkCapable = resolveIsolatedForkCapability(m.agent).supported
+    } catch {
+      /* adapter capability unavailable — omit; the server blocker remains authoritative */
+    }
+  }
   return {
     ...pickSessionFields(m),
     sharedOwnerCount,
     handoffCapable,
+    isolatedForkCapable,
+    // Phase 4: a published-but-not-established isolated fork child shows
+    // provider identity as PENDING (never a child provider ID) until the
+    // first-Send establish flow retires the pending intent.
+    forkPending: !!m.pendingFork,
     // Pre-computed fields from header (not in SESSION_PERSISTENT_FIELDS)
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
@@ -1143,12 +1184,51 @@ interface PendingDelta {
   turnId?: string
 }
 
+/**
+ * Internal (SessionManager-only) option that turns {@link SessionManager.createSession}
+ * into durable pending isolated-fork child creation (Phase 4 Task 3c). The fork
+ * service invokes it through the wired `createForkChildSession` hook: the child
+ * copies messages through the fork point, binds the TARGET checkout (never the
+ * source's), persists the pendingFork intent, and skips the branch backend
+ * preflight entirely — provider establishment happens on first Send (Task 4),
+ * not at creation.
+ */
+interface ForkChildCreateOptions {
+  pendingFork?: {
+    transactionId: string
+    parentSessionId: string
+    parentSdkSessionId: string | undefined
+    parentSdkTurnId: string | undefined
+    /** Immutable transcript lookup identity of the parent. */
+    transcriptCwd: string
+    /** Destination execution CWD every runtime must resolve to. */
+    executionCwd: string
+    idempotencyKey: string
+    /** Durable checkout binding for the isolated target (V2 managed worktree). */
+    checkout: import('@kata-sh/shared/protocol').SessionCheckoutV2
+  }
+}
+
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
   private sessionTeardownFences: Map<string, number> = new Map()
+  /**
+   * Sessions whose first-Send fork establishment is currently in flight.
+   * Serializes concurrent first-sends on a pending isolated fork child so a
+   * second send cannot double-dispatch while establishment runs (the
+   * persisted idempotency key dedupes the provider artifact itself).
+   */
+  private forkEstablishing: Set<string> = new Set()
+  /**
+   * Pending-child sends that have claimed the pre-persist first-Send slot.
+   * This is separate from forkEstablishing because the slot must be claimed
+   * before the user message is flushed, while provider establishment starts
+   * afterward.
+   */
+  private forkSendInFlight: Set<string> = new Set()
   /** Keeps a blocked destructive deletion fenced until a later retry succeeds. */
   private sessionTeardownFenceHolds: Set<string> = new Set()
   /** Reused by retries while a timed-out backend teardown is still running. */
@@ -2661,7 +2741,10 @@ export class SessionManager implements ISessionManager {
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
-  async createSession(workspaceId: string, options?: import('@kata-sh/shared/protocol').CreateSessionOptions): Promise<Session> {
+  async createSession(
+    workspaceId: string,
+    options?: import('@kata-sh/shared/protocol').CreateSessionOptions & ForkChildCreateOptions,
+  ): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
@@ -2932,6 +3015,24 @@ export class SessionManager implements ISessionManager {
       isFlagged: options?.isFlagged,
     })
 
+    // Phase 4: durable pending isolated-fork intent, computed once so the
+    // persisted record and the in-memory managed session agree exactly. Only
+    // set for pending fork children (Task 3c); ordinary branches leave this
+    // undefined.
+    const forkPending = options?.pendingFork
+    const forkPendingIntent = forkPending
+      ? {
+          transactionId: forkPending.transactionId,
+          parentSessionId: forkPending.parentSessionId,
+          parentSdkSessionId: forkPending.parentSdkSessionId ?? '',
+          parentSdkTurnId: forkPending.parentSdkTurnId ?? '',
+          transcriptCwd: forkPending.transcriptCwd,
+          executionCwd: forkPending.executionCwd,
+          idempotencyKey: forkPending.idempotencyKey,
+          createdAt: Date.now(),
+        }
+      : undefined
+
     // Branch: copy messages from source session up to and including the branch point
     if (validatedBranch) {
       const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
@@ -2974,11 +3075,25 @@ export class SessionManager implements ISessionManager {
       // session shares the same managed worktree (V1 does not claim filesystem
       // isolation between provider-native conversation branches). Inherit the
       // parent's checkout metadata and worktree working directory / sdk cwd.
-      if (validatedBranch.sourceSession.checkout) {
+      //
+      // Pending isolated-fork children (Phase 4) are the exception: they bind
+      // the TARGET checkout the fork transaction materialized (isolated = new
+      // record), persist the durable pendingFork intent, and record the
+      // 'isolated' checkout-strategy provenance for session-branch cleanup.
+      if (forkPendingIntent && forkPending) {
+        const targetCheckout = forkPending.checkout
+        branchedStored.checkout = targetCheckout
+        branchedStored.workingDirectory = targetCheckout.checkoutPath
+        branchedStored.sdkCwd = targetCheckout.checkoutPath
+        branchedStored.pendingFork = forkPendingIntent
+        branchedStored.checkoutStrategy = 'isolated'
+      } else if (validatedBranch.sourceSession.checkout) {
         const parentCheckout = validatedBranch.sourceSession.checkout
         branchedStored.checkout = parentCheckout
         branchedStored.workingDirectory = parentCheckout.checkoutPath
         branchedStored.sdkCwd = parentCheckout.checkoutPath
+        // Conversation-branch shared ownership: durable provenance for cleanup.
+        branchedStored.checkoutStrategy = 'shared'
       }
 
       await saveStoredSession(branchedStored)
@@ -3042,7 +3157,13 @@ export class SessionManager implements ISessionManager {
     if (isBranch) {
       await this.ensureMessagesLoaded(managed)
 
-      const requiresBranchPreflight = managed.branchContextStrategy === 'sdk-fork'
+      const requiresBranchPreflight =
+        managed.branchContextStrategy === 'sdk-fork' && !options?.pendingFork
+      // Phase 4 guard: pendingFork children (isolated fork children) NEVER
+      // enter this preflight, so rollbackFailedBranchCreation is unreachable
+      // for them — provider establishment happens on first Send, and failed
+      // fork creation is compensated by the fork service (which owns the
+      // target worktree), never by this branch rollback.
       if (requiresBranchPreflight) {
         // Enforce branch correctness at creation time.
         // A branch is only valid if backend context can be established now,
@@ -3086,7 +3207,21 @@ export class SessionManager implements ISessionManager {
     // Conversation-branch shared ownership: mirror the parent's checkout onto
     // the in-memory child and register it as an additional owner of the shared
     // managed worktree so removal is blocked while this owner remains.
-    if (validatedBranch?.sourceSession.checkout) {
+    // Pending isolated-fork children instead bind the TARGET checkout, mirror
+    // the durable pendingFork intent onto the runtime session (Task 4 consumes
+    // it at first Send), and fence the target path with a session lease.
+    // Guarded on validatedBranch like the stored block: the internal
+    // pendingFork option must never apply to a payload that was not a real
+    // branch/fork (the sessions:create RPC boundary is untyped).
+    if (validatedBranch && forkPendingIntent && forkPending) {
+      const targetCheckout = forkPending.checkout
+      managed.checkout = targetCheckout
+      managed.workingDirectory = targetCheckout.checkoutPath
+      managed.sdkCwd = targetCheckout.checkoutPath
+      managed.pendingFork = forkPendingIntent
+      managed.checkoutStrategy = 'isolated'
+      this.getGitServices().pathLeases.lease(storedSession.id, targetCheckout.checkoutPath)
+    } else if (validatedBranch?.sourceSession.checkout) {
       const parentCheckout = validatedBranch.sourceSession.checkout
       managed.checkout = parentCheckout
       managed.workingDirectory = parentCheckout.checkoutPath
@@ -3343,9 +3478,24 @@ export class SessionManager implements ISessionManager {
    * 2. workspace.defaults.defaultLlmConnection
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
+   *
+   * The pending-child fence is bypassed ONLY when the establish flow calls
+   * in with `allowPendingForkEstablish` (first-Send provider establishment);
+   * every other caller keeps the typed pending gate.
    */
-  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+  private async getOrCreateAgent(
+    managed: ManagedSession,
+    opts?: { allowPendingForkEstablish?: boolean },
+  ): Promise<AgentInstance> {
     this.assertSessionHandoffNotFenced(managed.id)
+    // Phase 4: a pending fork transaction owns this session's checkout, and a
+    // published-but-unestablished isolated fork child must not create a plain
+    // agent — provider establishment happens on first Send (Task 4). The
+    // establish path alone bypasses the pending-child gate.
+    this.assertSessionForkNotFenced(managed.id)
+    if (!opts?.allowPendingForkEstablish) {
+      this.assertSessionNotPendingForkChild(managed)
+    }
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -3617,22 +3767,6 @@ export class SessionManager implements ISessionManager {
         },
         },
       }) as AgentInstance
-
-      // Credential-free UI UAT seam (AC-15): the deterministic adapter lets
-      // the real Electron app exercise preview/confirm/recovery without a
-      // live provider. Off by default; production adapters remain disabled
-      // until credentialed UAT proves context continuity.
-      if (
-        process.env.KATA_HANDOFF_DETERMINISTIC_ADAPTER === '1' &&
-        process.env.NODE_ENV !== 'production' &&
-        managed.agent
-      ) {
-        sessionLog.warn(
-          `Session ${managed.id}: deterministic handoff adapter is active. Execution-CWD proofs are synthetic and prove nothing about the live runtime.`,
-        )
-        const { createDeterministicHandoffAdapter } = await import('@kata-sh/shared/agent/backend')
-        managed.agent.executionCwdRebind = createDeterministicHandoffAdapter({ adapterId: 'deterministic-e2e' })
-      }
 
       sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
 
@@ -5480,6 +5614,378 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Fence an action while a pending/recovery conversation-fork transaction
+   * owns the session: the checkout identity is not safe to act on until the
+   * transaction commits, rolls back, or the session is deleted. Composes with
+   * the handoff fence (a session may only carry one active binding transition).
+   */
+  private assertSessionForkNotFenced(sessionId: string): void {
+    if (this.getGitServices().fork?.isSessionFenced?.(sessionId)) {
+      throw new CodedError(
+        WORKTREE_FORK_PENDING_CODE,
+        i18n.t('git.fork.pendingFence'),
+      )
+    }
+  }
+
+  /**
+   * Fence Send/agent-creation on a published-but-not-established isolated fork
+   * child (Phase 4). The child carries a durable pendingFork intent until the
+   * provider-native fork is established on first Send; before Task 4 the gate
+   * blocks with the typed pending code instead of proceeding.
+   */
+  private assertSessionNotPendingForkChild(managed: ManagedSession): void {
+    if (managed.pendingFork) {
+      throw new CodedError(
+        WORKTREE_FORK_PENDING_CODE,
+        i18n.t('git.fork.pendingChild'),
+      )
+    }
+  }
+
+  /**
+   * First-Send provider establishment for a pending isolated fork child
+   * (Phase 4 Task 4). Runs after the user message is persisted: resolves the
+   * strict fork adapter on the child's agent, establishes the native fork at
+   * the recorded source head with the PERSISTED idempotency key, persists the
+   * child provider ID exactly once, retires the pending metadata, and records
+   * the establishment in the fork journal. The message dispatch continues on
+   * the SAME send afterwards.
+   *
+   * No fallback for isolated forks: a missing/malformed anchor, an adapter
+   * without the strict capability, a throwing establish, or a malformed
+   * result are all typed retryable errors. The child stays pending with its
+   * single persisted user message; a retry reuses the SAME persisted
+   * idempotency key and never duplicates the provider child or the message.
+   *
+   * Returns false (no-op) when the session is not a pending fork child.
+   */
+  private async establishPendingFork(managed: ManagedSession): Promise<boolean> {
+    const pending = managed.pendingFork
+    if (!pending) return false
+
+    // Serialize concurrent first-sends on the same pending child: a second
+    // send arriving while establishment is in flight must not double-dispatch.
+    // The persisted idempotency key already dedupes the provider artifact, so
+    // this guard closes the double-dispatch window (two model turns).
+    if (this.forkEstablishing.has(managed.id)) {
+      throw new CodedError(
+        WORKTREE_FORK_PENDING_CODE,
+        i18n.t('git.fork.establishing'),
+      )
+    }
+    this.forkEstablishing.add(managed.id)
+    try {
+      return await this.establishPendingForkLocked(managed)
+    } finally {
+      this.forkEstablishing.delete(managed.id)
+    }
+  }
+
+  private async establishPendingForkLocked(managed: ManagedSession): Promise<boolean> {
+    const pending = managed.pendingFork
+    if (!pending) return false
+
+    // Strict anchor errors: the establish input comes from the persisted
+    // pendingFork. A missing/malformed anchor (e.g. corrupted record) is a
+    // typed retryable error — no provider call, no fallback.
+    if (!pending.parentSdkSessionId || !pending.parentSdkTurnId || !pending.idempotencyKey) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        i18n.t('git.fork.anchorMissing'),
+      )
+    }
+    if (!pending.executionCwd || !pending.transcriptCwd) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        i18n.t('git.fork.cwdInvalid'),
+      )
+    }
+
+    // The child has no agent yet: create it through the normal machinery with
+    // the pending-child fence bypassed ONLY for this establish path.
+    const agent = await this.getOrCreateAgent(managed, { allowPendingForkEstablish: true })
+    // Strict capability gate: absent OR structurally incomplete adapters are
+    // a typed failure — no fallback, no provider call, no orphan risk.
+    const resolution = resolveIsolatedForkCapability(agent)
+    const adapter = agent.conversationFork
+    if (!resolution.supported || !adapter) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        i18n.t('git.fork.strictAdapterUnavailable'),
+      )
+    }
+
+    let result: ConversationForkEstablishResult
+    try {
+      result = await adapter.establishNativeFork({
+        parentSdkSessionId: pending.parentSdkSessionId,
+        parentSdkTurnId: pending.parentSdkTurnId,
+        idempotencyKey: pending.idempotencyKey,
+        executionCwd: pending.executionCwd,
+        transcriptCwd: pending.transcriptCwd,
+      })
+    } catch (error) {
+      // We cannot know whether the provider created a native child before
+      // throwing: record the attempt in the durable orphan ledger so an
+      // unlinked provider artifact is never silently attached (Task 5
+      // reconciles). The child stays pending, retryable with the same key.
+      this.recordForkOrphanAttempt(pending, 'failed', error)
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        i18n.t('git.fork.establishFailed', {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+
+    // Malformed or mismatched results are never attached silently. The proof
+    // must come from the selected adapter, name the exact destination, and
+    // cover every execution surface that an isolated child can use.
+    const proof = result?.proof
+    const proofNow = Date.now()
+    const requiredProofCategories = ['file:', 'shell:', 'mcp:', 'provider:'] as const
+    const proofIsValid =
+      !!result &&
+      typeof result.childSdkSessionId === 'string' &&
+      result.childSdkSessionId.trim() !== '' &&
+      !!proof &&
+      typeof proof === 'object' &&
+      typeof proof.adapterId === 'string' &&
+      proof.adapterId === resolution.capability.adapterId &&
+      proof.adapterId === adapter.adapterId &&
+      typeof proof.destinationPath === 'string' &&
+      isAbsolute(proof.destinationPath) &&
+      resolve(proof.destinationPath) === resolve(pending.executionCwd) &&
+      Number.isFinite(proof.verifiedAt) &&
+      proof.verifiedAt > proofNow - FORK_PROOF_MAX_AGE_MS &&
+      proof.verifiedAt <= proofNow &&
+      Array.isArray(proof.checks) &&
+      proof.checks.every((check) => typeof check === 'string') &&
+      requiredProofCategories.every((category) => proof.checks.some((check) => check.startsWith(category)))
+    if (!proofIsValid) {
+      this.recordForkOrphanAttempt(pending, 'unverified')
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        i18n.t('git.fork.establishIncomplete'),
+      )
+    }
+
+    // Persist the child provider ID exactly once and retire the pending
+    // metadata (checkoutStrategy stays 'isolated' as provenance). Mirrors the
+    // onSdkSessionIdUpdate persistence pattern: mutate managed, persist, flush.
+    managed.sdkSessionId = result.childSdkSessionId
+    managed.pendingFork = undefined
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+
+    // Record the establishment in the fork journal (metadata-only on the
+    // committed entry; a missing entry is logged-and-continued because the
+    // child session record is authoritative).
+    try {
+      const recorded = this.getGitServices().fork.markEstablished(
+        pending.transactionId,
+        result.childSdkSessionId,
+      )
+      if (!recorded) {
+        sessionLog.warn('Fork journal entry not found for establishment; the child session record is authoritative', {
+          transactionId: pending.transactionId,
+          childSdkSessionId: result.childSdkSessionId,
+        })
+      }
+    } catch (error) {
+      sessionLog.warn('Failed to record fork establishment in the journal', {
+        transactionId: pending.transactionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    sessionLog.info(`Isolated fork child ${managed.id} established: childSdkSessionId=${result.childSdkSessionId}`)
+    return true
+  }
+
+  /**
+   * Append a failed/unverified establishment attempt to the durable orphan
+   * ledger (best-effort: a ledger write failure never masks the typed error).
+   */
+  private recordForkOrphanAttempt(
+    pending: NonNullable<ManagedSession['pendingFork']>,
+    result: ForkOrphanResult,
+    error?: unknown,
+  ): void {
+    try {
+      this.getGitServices().forkOrphans.recordAttempt({
+        transactionId: pending.transactionId,
+        idempotencyKey: pending.idempotencyKey,
+        parentSdkSessionId: pending.parentSdkSessionId,
+        parentSdkTurnId: pending.parentSdkTurnId,
+        executionCwd: pending.executionCwd,
+        result,
+        ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
+      })
+    } catch (ledgerError) {
+      sessionLog.warn('Failed to record fork orphan attempt', {
+        error: ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+      })
+    }
+  }
+
+  /**
+   * Shared quiescence loop for the lifecycle, handoff, and fork hooks: await
+   * teardown of every processing runtime in the set, bounded per session.
+   * Returns false when any runtime cannot quiesce.
+   */
+  private async quiesceSessionRuntimes(sessionIds: string[]): Promise<boolean> {
+    for (const sessionId of sessionIds) {
+      const managed = this.sessions.get(sessionId)
+      if (!managed || !managed.isProcessing) continue
+      const quiesced = await this.awaitAgentTeardown(sessionId, managed, 60_000, undefined)
+      if (!quiesced) return false
+    }
+    return true
+  }
+
+  /**
+   * Fork hook: resolve the persisted source-session facts a fork evaluation
+   * needs. The conversation head is the LAST user/assistant message of the
+   * source conversation (managed view when loaded, else the persisted record);
+   * forkPointMessageId/forkPointTurnId default to that head.
+   */
+  private resolveForkSessionInfo(sessionId: string): import('../git').ForkSessionInfo | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    const checkoutPath = managed.checkout?.checkoutPath ?? managed.workingDirectory
+    if (!checkoutPath) return null
+    const conversationHead = this.resolveForkConversationHead(managed)
+    return {
+      checkoutPath,
+      workspaceId: managed.workspace.id,
+      checkout: managed.checkout ?? null,
+      transcriptCwd: managed.sdkCwd ?? checkoutPath,
+      conversationHead,
+      sdkSessionId: managed.sdkSessionId,
+    }
+  }
+
+  /**
+   * Durable fork-child session state for startup reconciliation (Task 5): the
+   * managed session's provider identity, pending-fork intent, and checkout
+   * provenance. The pendingFork transaction id ties a journal entry to a live
+   * published-but-unestablished child; sdkSessionId + 'isolated' strategy + no
+   * pendingFork identify an established child whose journal marker a crash may
+   * have lost. Null for an unknown session. Wired into the fork service's
+   * `resolveSessionForkState` hook; the git.ts startup reconciliation also
+   * passes it explicitly.
+   */
+  resolveSessionForkState(sessionId: string): import('../git').SessionForkState | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return null
+    return {
+      sdkSessionId: managed.sdkSessionId,
+      pendingFork: managed.pendingFork ? { transactionId: managed.pendingFork.transactionId } : null,
+      checkoutStrategy: managed.checkoutStrategy,
+    }
+  }
+
+  /** Last user/assistant message id + turn id of a session's conversation. */
+  private resolveForkConversationHead(managed: ManagedSession): { messageId: string; turnId: string } {
+    const findHead = (
+      messages: ReadonlyArray<{ id: string; type?: string; role?: string; turnId?: string }>,
+    ): { messageId: string; turnId: string } => {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        // StoredMessage spells the role `type`; runtime Message spells it `role`.
+        const role = m.type ?? m.role
+        if (role === 'user' || role === 'assistant') {
+          return { messageId: m.id, turnId: m.turnId ?? '' }
+        }
+      }
+      return { messageId: '', turnId: '' }
+    }
+    if (managed.messagesLoaded && managed.messages.length > 0) return findHead(managed.messages)
+    const stored = loadStoredSession(managed.workspace.rootPath, managed.id)
+    if (stored && stored.messages.length > 0) return findHead(stored.messages)
+    return findHead(managed.messages)
+  }
+
+  /**
+   * Fork hook: durably create the pending isolated-fork child Kata session.
+   * Reuses the createSession branch path (message copy through the fork point +
+   * branchFrom* identity) with the internal pendingFork option: the child binds
+   * the TARGET checkout, persists the pendingFork intent, and skips the branch
+   * backend preflight (provider establishment happens on first Send, Task 4).
+   * Returns the durable child session id.
+   */
+  private async createForkChildSession(input: ConversationForkChildSessionInput): Promise<string> {
+    const parent = this.sessions.get(input.parentSessionId)
+    const child = await this.createSession(input.workspaceId, {
+      // An isolated child must use the source session's locked backend identity,
+      // not the workspace default. Otherwise branch validation and first-Send
+      // establishment can select a different provider or account.
+      llmConnection: parent?.llmConnection,
+      model: parent?.model,
+      thinkingLevel: parent?.thinkingLevel,
+      permissionMode: parent?.permissionMode,
+      enabledSourceSlugs: parent?.enabledSourceSlugs,
+      branchFromSessionId: input.parentSessionId,
+      branchFromMessageId: input.forkPointMessageId,
+      pendingFork: {
+        transactionId: input.transactionId,
+        parentSessionId: input.parentSessionId,
+        parentSdkSessionId: input.parentSdkSessionId,
+        parentSdkTurnId: input.parentSdkTurnId,
+        transcriptCwd: input.transcriptCwd,
+        executionCwd: input.executionCwd,
+        idempotencyKey: randomUUID(),
+        checkout: input.checkout,
+      },
+    })
+    // createSession initially persists the branch before applying its runtime
+    // options. Flush the managed child again so a restart before first Send
+    // cannot revert to the workspace default connection or model.
+    const childManaged = this.sessions.get(child.id)
+    if (!childManaged) throw new Error(`Fork child ${child.id} was not registered.`)
+    this.persistSession(childManaged)
+    await this.flushSession(child.id)
+    return child.id
+  }
+
+  /**
+   * Fork hook: best-effort removal of a child session created by a fork
+   * transaction that failed before publication (compensation). Removes the
+   * runtime session + persisted record; the fork service compensates the
+   * target worktree/registry/seed itself. Only ever called for un-published
+   * children, so no registry owner is touched here.
+   */
+  private async deleteForkChildSession(childSessionId: string): Promise<void> {
+    const managed = this.sessions.get(childSessionId)
+    const workspaceRootPath = managed?.workspace.rootPath
+    try {
+      this.getGitServices().pathLeases.releaseSession(childSessionId)
+    } catch {
+      // Best-effort: stale leases are pruned by the lifecycle sweep.
+    }
+    if (managed) {
+      if (managed.agent) {
+        try {
+          managed.agent.destroy?.()
+        } catch {
+          // Best-effort compensation cleanup.
+        }
+        managed.agent = null
+      }
+      this.sessions.delete(childSessionId)
+    }
+    if (workspaceRootPath) {
+      try {
+        await deleteStoredSession(workspaceRootPath, childSessionId)
+      } catch {
+        // Best-effort rollback: runtime removal is the critical path.
+      }
+    }
+  }
+
+  /**
    * Override the Git domain services. Bootstrap wires the same instance used by
    * the RPC handlers so checkout preparation and read-only Git RPCs share one
    * registry/mutation-lock. Tests inject temp-rooted services.
@@ -5579,21 +6085,30 @@ export class SessionManager implements ISessionManager {
         return managed?.agent?.executionCwdRebind ?? null
       },
       isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
-      quiesceRuntimes: async (sessionIds) => {
-        for (const sessionId of sessionIds) {
-          const managed = this.sessions.get(sessionId)
-          if (!managed || !managed.isProcessing) continue
-          const quiesced = await this.awaitAgentTeardown(
-            sessionId,
-            managed,
-            60_000,
-            undefined,
-          )
-          if (!quiesced) return false
-        }
-        return true
-      },
+      quiesceRuntimes: (sessionIds) => this.quiesceSessionRuntimes(sessionIds),
       commitSessionBinding: (input) => this.commitHandoffBinding(input),
+    })
+
+    // Phase 4: fork resolves all session identity and provider capability
+    // server-side (mirroring handoff). The child-session hooks implement the
+    // durable pending isolated-fork child lifecycle.
+    services.fork.setHooks({
+      resolveSession: (sessionId) => this.resolveForkSessionInfo(sessionId),
+      resolveCapability: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        if (!managed?.agent) return null
+        const resolution = resolveIsolatedForkCapability(managed.agent)
+        return resolution.supported ? resolution.capability : null
+      },
+      resolveCapabilityAdapter: (sessionId) => {
+        const managed = this.sessions.get(sessionId)
+        return managed?.agent?.conversationFork ?? null
+      },
+      resolveSessionForkState: (sessionId) => this.resolveSessionForkState(sessionId),
+      isSessionActive: (sessionId) => this.sessions.get(sessionId)?.isProcessing ?? false,
+      quiesceRuntimes: (sessionIds) => this.quiesceSessionRuntimes(sessionIds),
+      createForkChildSession: (input) => this.createForkChildSession(input),
+      deleteForkChildSession: (childSessionId) => this.deleteForkChildSession(childSessionId),
     })
   }
 
@@ -6635,6 +7150,45 @@ export class SessionManager implements ISessionManager {
         }
       }
     }
+    // Phase 4: a pending conversation-fork transaction fences deletion the
+    // same way. A pure pending preview is cancelled; an in-progress confirm is
+    // blocked (the child would otherwise be published onto a deleted source);
+    // recovery-required stays deletable as the escape hatch and the journal
+    // keeps the recovery authority.
+    if (this.getGitServices().fork?.isSessionFenced?.(sessionId)) {
+      const forkStatus = await this.getGitServices().fork?.status({ sessionId })
+      if (forkStatus?.active && forkStatus.state !== 'recovery-required') {
+        if (forkStatus.state === 'pending') {
+          // A pure preview has never mutated anything; cancel it so the
+          // session can be deleted (cancel serializes with confirm under the
+          // mutation lock and refuses once a confirm is in flight). If the
+          // cancel refuses — durable steps already recorded — the confirm is
+          // genuinely in flight and deletion must block.
+          try {
+            const cancelled = await this.getGitServices().fork?.cancel({
+              sessionId,
+              transactionId: forkStatus.transactionId,
+            })
+            if (cancelled?.active) {
+              throw new CodedError(
+                WORKTREE_FORK_PENDING_CODE,
+                i18n.t('git.fork.pendingFence'),
+              )
+            }
+          } catch (err) {
+            if (err instanceof CodedError) throw err
+            sessionLog.warn(`Failed to release pending conversation fork for deleted session ${sessionId}:`, err)
+          }
+        } else {
+          // An in-progress confirm must not be discarded: the child would
+          // otherwise be published onto a deleted source session.
+          throw new CodedError(
+            WORKTREE_FORK_PENDING_CODE,
+            i18n.t('git.fork.pendingFence'),
+          )
+        }
+      }
+    }
 
     return this.withSessionTeardownFence(sessionId, async (retainFence, preChatSettled, teardownDeadline) => {
     // Get workspace slug before deleting
@@ -6660,6 +7214,14 @@ export class SessionManager implements ISessionManager {
     // authoritative confirmation check and removal complete while the session
     // still exists. If anything changed after the dialog inspection, the
     // operation stops before ownership or session state is touched.
+    //
+    // Phase 4 provenance: an isolated fork child owns its worktree record as
+    // the SOLE owner, so this path removes only that child's lifecycle — the
+    // standard snapshot-first transaction on the child's own record
+    // (resolveOwnedWorktreeId resolves the CHILD's checkout metadata, never the
+    // source's) — and the SOURCE session/record/branch are never referenced
+    // here. A shared child (or a legacy session with no checkoutStrategy) stays
+    // on the shared record and drops exactly one owner below.
     let completedWorktreeRemoval:
       | import('@kata-sh/shared/protocol').WorktreeRemovalResult
       | undefined
@@ -6742,7 +7304,10 @@ export class SessionManager implements ISessionManager {
     // shared-owner counts stay correct. When explicit removal was requested,
     // the registry record is already gone and this is a harmless no-op. Phase 2
     // routes through the lifecycle service (final-owner detach leaves an
-    // unowned record and enqueues policy cleanup).
+    // unowned record and enqueues policy cleanup). Phase 4: for an isolated
+    // child the detached record is the child's OWN record (its sole owner), so
+    // this never touches the source's record; for a shared child it drops
+    // exactly this session's owner reference.
     if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
       try {
         if (isWorktreeV2Enabled()) {
@@ -6899,6 +7464,11 @@ export class SessionManager implements ISessionManager {
       throw new Error('Session is being torn down')
     }
     this.assertSessionHandoffNotFenced(sessionId)
+    // Phase 4: a pending fork transaction fences Send; a published isolated
+    // fork child is pending until its first-Send provider establishment
+    // (the establish flow runs in the prelude below, after the user message
+    // is persisted).
+    this.assertSessionForkNotFenced(sessionId)
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
     this.assertSessionCheckoutReady(sessionId)
@@ -6907,7 +7477,21 @@ export class SessionManager implements ISessionManager {
       throw new Error('Session is being torn down')
     }
 
-    return this.withPreChatBarrier(sessionId, async (releasePreChat) => {
+    // Claim the pending-child first-Send slot before any message mutation or
+    // flush. A concurrent send must be rejected rather than leaving an
+    // acknowledged orphan message in the transcript.
+    const pendingForkSend = !!managed.pendingFork
+    if (pendingForkSend) {
+      if (this.forkSendInFlight.has(sessionId)) {
+        throw new CodedError(
+          WORKTREE_FORK_PENDING_CODE,
+          i18n.t('git.fork.establishing'),
+        )
+      }
+      this.forkSendInFlight.add(sessionId)
+    }
+
+    const sendPromise = this.withPreChatBarrier(sessionId, async (releasePreChat) => {
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Source-activation auto-retry dedup (kata-agents-oss#804). When the server
@@ -7015,6 +7599,11 @@ export class SessionManager implements ISessionManager {
       if (!userMessage) {
         throw new Error(`Existing message ${existingMessageId} not found`)
       }
+      // The message is already durable from the original send; acknowledge it
+      // so the RPC promise resolves exactly like the fresh path (the renderer
+      // retry depends on this ack — a retried fork send must resolve
+      // `{ accepted, messageId }` at persistence time, not after the turn).
+      onAck?.(existingMessageId)
     } else {
       // Create new message
       userMessage = {
@@ -7085,6 +7674,16 @@ export class SessionManager implements ISessionManager {
         this.generateTitle(managed, message)
       }
     }
+
+    // Phase 4 Task 4: first-Send provider establishment for a pending
+    // isolated fork child. The strict adapter creates the native fork at
+    // the recorded source head with the PERSISTED idempotency key, the
+    // child provider ID is persisted exactly once, and the pending
+    // metadata retires before the message is dispatched (the user message
+    // is already on disk — persisted, flushed and acked above, or reused
+    // via existingMessageId on a retry). Failure is a typed retryable
+    // error with no fallback; the message is never duplicated on retry.
+    await this.establishPendingFork(managed)
 
     // Evaluate auto-label rules against the user message (common path for both
     // fresh and queued messages). Scans regex patterns configured on labels,
@@ -7504,6 +8103,10 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
+    })
+    if (!pendingForkSend) return sendPromise
+    return sendPromise.finally(() => {
+      this.forkSendInFlight.delete(sessionId)
     })
   }
 

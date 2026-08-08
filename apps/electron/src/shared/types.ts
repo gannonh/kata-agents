@@ -235,6 +235,17 @@ import type {
   WorktreeHandoffStatus,
   WorktreeHandoffRecoverInput,
   WorktreeHandoffCancelInput,
+  ConversationForkPreviewInput,
+  ConversationForkPreview,
+  ConversationForkConfirmInput,
+  ConversationForkResult,
+  ConversationForkStatusInput,
+  ConversationForkStatus,
+  ConversationForkRecoverInput,
+  ConversationForkRecoverResult,
+  ConversationForkCancelInput,
+  ConversationForkCancelResult,
+  ConversationForkStrategy,
   SessionDeleteOptions,
   SessionDeleteResult,
   GitCommitInput,
@@ -261,7 +272,13 @@ export interface ElectronAPI {
     sessionId: string,
     options?: SessionDeleteOptions,
   ): Promise<SessionDeleteResult>
-  sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
+  sendMessage(
+    sessionId: string,
+    message: string,
+    attachments?: FileAttachment[],
+    storedAttachments?: StoredAttachmentType[],
+    options?: SendMessageOptions,
+  ): Promise<{ accepted: true; messageId: string }>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
@@ -665,6 +682,22 @@ export interface ElectronAPI {
   /** Continue/recover an interrupted handoff (idempotent, snapshot-backed). */
   handoffRecover(input: WorktreeHandoffRecoverInput): Promise<WorktreeHandoffResult>
   handoffCancel(input: WorktreeHandoffCancelInput): Promise<WorktreeHandoffStatus>
+
+  // Git / GitHub V1 — isolated conversation forks (Phase 4). Mirrors the
+  // handoff contract: clients submit a session ID, a strategy, and an editable
+  // name suffix — never paths; the workspace-owning server binds every
+  // decision-relevant fact into the preview fingerprint and revalidates it
+  // under lock on confirm. Typed blockers come back as normal preview results.
+  /** Preview a conversation fork; the server returns typed blockers as normal results. */
+  forkPreview(input: ConversationForkPreviewInput): Promise<ConversationForkPreview>
+  /** Confirm a previewed fork by transaction ID + exact preview fingerprint. */
+  forkConfirm(input: ConversationForkConfirmInput): Promise<ConversationForkResult>
+  /** Report whether a session has an active (pending/recovery) fork transaction. */
+  forkStatus(input: ConversationForkStatusInput): Promise<ConversationForkStatus>
+  /** Continue/recover an interrupted fork transaction (idempotent, snapshot-backed). */
+  forkRecover(input: ConversationForkRecoverInput): Promise<ConversationForkRecoverResult>
+  /** Cancel a pending fork preview transaction (dialog dismissed without confirming). */
+  forkCancel(input: ConversationForkCancelInput): Promise<ConversationForkCancelResult>
 
   // Git / GitHub V1 — commit / pull / push + GitHub pull requests (Phase 3).
   // Identity is resolved server-side from the session's persisted checkout;

@@ -455,9 +455,41 @@ function WorkspaceCheckoutBadgeInner(
     persistedCheckout,
     locallyPrepared: prepared?.checkout ?? null,
     sharedOwnerCount,
+    forkPending: session?.forkPending,
   })
 
   if (identity.kind === 'none') return null
+
+  // Phase 4: a published-but-not-established isolated fork child carries a
+  // durable pending fork intent and NO child provider ID yet. The surface
+  // displays provider identity as PENDING and never claims a child provider
+  // ID until the first-Send establish flow retires the pending intent.
+  if (identity.kind === 'fork-pending') {
+    const branch = identity.branch ?? null
+    return (
+      <span data-testid="git-workspace-fork-pending">
+        <FreeFormInputContextBadge
+          icon={<GitFork className="h-4 w-4" />}
+          label={t('git.fork.providerPending')}
+          isExpanded
+          hasSelection
+          showChevron={false}
+          tooltip={
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium">{t('git.fork.providerPending')}</span>
+              <span className="text-xs opacity-70">{t('git.fork.providerPendingNote')}</span>
+              {branch && (
+                <span className="text-xs opacity-70">
+                  {t('chat.onBranch', { branch })}
+                </span>
+              )}
+            </span>
+          }
+          disabled
+        />
+      </span>
+    )
+  }
 
   // Locked managed-worktree identity (prepared, resumed, or conversation-branch
   // shared). Persists for the composer lifetime even if a later send fails.

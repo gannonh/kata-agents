@@ -58,6 +58,10 @@ export const SESSION_PERSISTENT_FIELDS = [
   'checkout',
   // Handoff runtime reconstruction state (unverified arms the Send proof gate)
   'handoffRuntimeState',
+  // Durable pending isolated-fork intent (Phase 4: isolated conversation forks)
+  'pendingFork',
+  // Durable checkout-strategy provenance recorded at branch/fork creation
+  'checkoutStrategy',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -214,6 +218,39 @@ export interface SessionConfig {
    * this process; `recovery-required` blocks Send until the runtime is fixed.
    */
   handoffRuntimeState?: 'unverified' | 'verified' | 'recovery-required';
+  /**
+   * Durable pending isolated-fork intent (Phase 4). Set on an isolated fork
+   * child between fork publication and first-Send provider establishment.
+   * Carries strict parent conversation/turn identity, the immutable transcript
+   * lookup identity, and the destination execution CWD. Blocks Send with the
+   * typed pending code until Task 4 replaces the gate with the establish flow.
+   */
+  pendingFork?: {
+    /** Opaque fork transaction id that created this child. */
+    transactionId: string;
+    /** Source Kata session the fork is created from. */
+    parentSessionId: string;
+    /** Parent provider SDK session identity (anchor lineage). */
+    parentSdkSessionId: string;
+    /** Parent provider turn anchor at the branch point. */
+    parentSdkTurnId: string;
+    /** Immutable transcript lookup identity — never rewritten by the fork. */
+    transcriptCwd: string;
+    /** Destination execution CWD every runtime must resolve to. */
+    executionCwd: string;
+    /** Idempotency key for the first-Send provider establishment. */
+    idempotencyKey: string;
+    /** Server timestamp of child creation. */
+    createdAt: number;
+  };
+  /**
+   * Durable checkout-strategy provenance recorded at branch/fork creation
+   * (Phase 4): `shared` for conversation branches sharing the parent managed
+   * worktree, `isolated` for isolated fork children owning a dedicated target.
+   * Session branch cleanup consumes this to decide shared-owner removal vs
+   * isolated-child-only lifecycle.
+   */
+  checkoutStrategy?: 'shared' | 'isolated';
 }
 
 /**
@@ -307,6 +344,10 @@ export interface SessionHeader {
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
   /** Git checkout metadata (schema-versioned). See SessionConfig.checkout. */
   checkout?: SessionCheckout;
+  /** Durable pending isolated-fork intent. See SessionConfig.pendingFork. */
+  pendingFork?: SessionConfig['pendingFork'];
+  /** Durable checkout-strategy provenance. See SessionConfig.checkoutStrategy. */
+  checkoutStrategy?: SessionConfig['checkoutStrategy'];
   // Pre-computed fields for fast list loading
   /** Number of messages in session */
   messageCount: number;

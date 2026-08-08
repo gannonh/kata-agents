@@ -22,6 +22,8 @@ import {
   WORKTREE_PREVIEW_STALE_CODE,
   WORKTREE_SETTINGS_ERROR_CODE,
   WORKTREE_STATE_UNMANAGEABLE_CODE,
+  WORKTREE_FORK_ERROR_CODE,
+  WORKTREE_FORK_PENDING_CODE,
   WorktreeV2CapabilityError,
 } from '@kata-sh/shared/protocol'
 import type {
@@ -45,6 +47,11 @@ import type {
   WorktreeHandoffRecoverInput,
   WorktreeHandoffCancelInput,
   WorktreeHandoffStatusInput,
+  ConversationForkPreviewInput,
+  ConversationForkConfirmInput,
+  ConversationForkStatusInput,
+  ConversationForkRecoverInput,
+  ConversationForkCancelInput,
 } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import { i18n } from '@kata-sh/shared/i18n'
@@ -57,8 +64,9 @@ import {
   WorktreeLifecycleError,
   WorktreeSettingsError,
   WorktreeHandoffError,
+  ConversationForkError,
 } from '../../git'
-import type { GitServices } from '../../git'
+import type { GitServices, SessionForkState } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 
 export const GIT_HANDLED_CHANNELS = [
@@ -94,6 +102,11 @@ export const GIT_HANDLED_CHANNELS = [
   RPC_CHANNELS.git.HANDOFF_STATUS,
   RPC_CHANNELS.git.HANDOFF_RECOVER,
   RPC_CHANNELS.git.HANDOFF_CANCEL,
+  RPC_CHANNELS.git.FORK_PREVIEW,
+  RPC_CHANNELS.git.FORK_CONFIRM,
+  RPC_CHANNELS.git.FORK_STATUS,
+  RPC_CHANNELS.git.FORK_RECOVER,
+  RPC_CHANNELS.git.FORK_CANCEL,
 ] as const
 
 function assertFeatureEnabled(): void {
@@ -151,6 +164,13 @@ function throwTypedWorktreeHandoffError(error: unknown): never {
   throw error
 }
 
+function throwTypedConversationForkError(error: unknown): never {
+  if (error instanceof ConversationForkError) {
+    throw new CodedError(WORKTREE_FORK_ERROR_CODE, error.message)
+  }
+  throw error
+}
+
 /**
  * Fence Git work on a session whose managed-worktree record is not `ready`:
  * Send, agent creation, Git actions, and further lifecycle actions stay fenced
@@ -161,6 +181,9 @@ function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void 
   if (!isWorktreeV2Enabled()) return
   if (git.handoff?.isSessionFenced?.(sessionId)) {
     throw new CodedError(WORKTREE_HANDOFF_PENDING_CODE, i18n.t('git.handoff.pendingFence'))
+  }
+  if (git.fork?.isSessionFenced?.(sessionId)) {
+    throw new CodedError(WORKTREE_FORK_PENDING_CODE, i18n.t('git.fork.pendingFence'))
   }
   git.lifecycle.assertReady()
   const { state } = git.lifecycle.recordStateForSession(sessionId)
@@ -362,11 +385,46 @@ export function registerGitHandlers(
       }
       await git.worktrees.reconcile({ knownSessionIds, sessionCheckouts })
       const journalReport = await git.lifecycle.reconcileJournal()
+      // Fork reconciliation: classify interrupted fork journal entries
+      // (committed stay; pre-child in-progress stays resumable; child-created
+      // without a live pending child becomes recovery-required) and backfill
+      // the establish marker a crash between the child-session flush and
+      // markEstablished may have lost. The session lookup comes from the
+      // SessionManager (wired through the fork hooks by setGitServices above;
+      // passed explicitly here so reconciliation never depends on hook-wiring
+      // order).
+      const forkReport = (await git.fork?.reconcileForkJournal?.({
+        resolveSessionForkState: (sessionId: string) =>
+          deps.sessionManager.resolveSessionForkState?.(sessionId) ?? null,
+      })) ?? { resumed: 0, flagged: 0, recoveryRequired: 0 }
+      // Orphan reconcile: retire ledger entries whose fork transaction later
+      // established; surface stale unresolved entries (never auto-deleted —
+      // the operator/UI decides). Never attaches an orphan to a session.
+      const orphanReport = (await git.forkOrphans?.reconcile?.({
+        isEstablished: (transactionId) =>
+          git.journal.entries().some(
+            (entry) =>
+              entry.op === 'fork' &&
+              entry.recordId === transactionId &&
+              entry.status === 'committed' &&
+              entry.metadata?.state === 'established',
+          ),
+      })) ?? { resolved: 0, retained: 0, expiredUnresolved: 0, expiredAttemptIds: [] }
       git.journal.compact()
       git.lifecycle.markReady()
       if (journalReport.resumed > 0 || journalReport.recovered > 0) {
         console.info(
           `[worktree] startup reconciliation resumed ${journalReport.resumed} and recovered ${journalReport.recovered} interrupted lifecycle transaction(s).`,
+        )
+      }
+      if (forkReport.resumed > 0 || forkReport.flagged > 0 || forkReport.recoveryRequired > 0) {
+        console.info(
+          `[worktree] startup fork reconciliation backfilled ${forkReport.resumed}, flagged ${forkReport.flagged} new, and surfaced ${forkReport.recoveryRequired} recovery-required fork transaction(s).`,
+        )
+      }
+      if (orphanReport.resolved > 0 || orphanReport.expiredUnresolved > 0) {
+        console.info(
+          `[worktree] startup orphan reconciliation resolved ${orphanReport.resolved} and surfaced ${orphanReport.expiredUnresolved} expired unresolved fork establishment attempt(s).`,
         )
       }
     } catch (error) {
@@ -552,6 +610,73 @@ export function registerGitHandlers(
         return await git.handoff.cancel(input)
       } catch (error) {
         throwTypedWorktreeHandoffError(error)
+      }
+    },
+  )
+
+  // --- Isolated conversation forks (Phase 4) ---
+
+  // The fork surface is server-authoritative: previews return typed blockers
+  // as normal results (never throw), confirms/status/recover/cancel map typed
+  // fork errors to the WORKTREE_FORK_FAILED code, and every handler requires
+  // Worktree V2 effective.
+
+  server.handle(
+    RPC_CHANNELS.git.FORK_PREVIEW,
+    async (_ctx, input: ConversationForkPreviewInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.fork.preview(input)
+      } catch (error) {
+        throwTypedConversationForkError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.FORK_CONFIRM,
+    async (_ctx, input: ConversationForkConfirmInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.fork.confirm(input)
+      } catch (error) {
+        throwTypedConversationForkError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.FORK_STATUS,
+    async (_ctx, input: ConversationForkStatusInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.fork.status(input)
+      } catch (error) {
+        throwTypedConversationForkError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.FORK_RECOVER,
+    async (_ctx, input: ConversationForkRecoverInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.fork.recover(input)
+      } catch (error) {
+        throwTypedConversationForkError(error)
+      }
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.git.FORK_CANCEL,
+    async (_ctx, input: ConversationForkCancelInput) => {
+      assertWorktreeV2Enabled()
+      try {
+        return await git.fork.cancel(input)
+      } catch (error) {
+        throwTypedConversationForkError(error)
       }
     },
   )

@@ -192,6 +192,15 @@ export type CheckoutIdentityKind =
   | 'current' // locked Current checkout identity
   | 'worktree' // locked managed worktree identity
   | 'shared-worktree' // locked managed worktree shared by >1 owner
+  | 'fork-pending' // published-but-not-established isolated fork child (PENDING provider identity)
+
+export interface CheckoutIdentity {
+  kind: CheckoutIdentityKind
+  /** Exact branch identity, when applicable. */
+  branch?: string | null
+  /** V2 display name, when the server supplied one. */
+  displayName?: string | null
+}
 
 export interface CheckoutIdentityState {
   isGitRepository: boolean
@@ -203,14 +212,11 @@ export interface CheckoutIdentityState {
   locallyPrepared: SessionCheckout | null
   /** Shared-owner count derived on the server; > 1 means a shared worktree. */
   sharedOwnerCount: number | undefined
-}
-
-export interface CheckoutIdentity {
-  kind: CheckoutIdentityKind
-  /** Exact branch identity, when applicable. */
-  branch?: string | null
-  /** V2 display name, when the server supplied one. */
-  displayName?: string | null
+  /**
+   * True while this session is a published-but-not-established isolated fork
+   * child (durable pending fork intent, no child provider ID yet).
+   */
+  forkPending?: boolean
 }
 
 /**
@@ -218,13 +224,27 @@ export interface CheckoutIdentity {
  *
  * Preference order:
  * 1. Non-Git directory → nothing.
- * 2. A prepared checkout (local result or persisted DTO) locks the identity —
+ * 2. A pending isolated fork child → PENDING provider identity (never a child
+ *    provider ID before first Send; the branch is still named for context).
+ * 3. A prepared checkout (local result or persisted DTO) locks the identity —
  *    resume/restart must NOT reset a managed worktree back to Current.
- * 3. Managed worktree with owner count > 1 → Shared worktree (AC8).
- * 4. An empty Git session with no checkout → interactive menu.
- * 5. Otherwise (session already has messages, no checkout) → live Current checkout.
+ * 4. Managed worktree with owner count > 1 → Shared worktree (AC8).
+ * 5. An empty Git session with no checkout → interactive menu.
+ * 6. Otherwise (session already has messages, no checkout) → live Current checkout.
  */
 export function resolveCheckoutIdentity(state: CheckoutIdentityState): CheckoutIdentity {
+  // A pending isolated fork child carries no child provider identity: the
+  // surface shows PENDING before any worktree identity. The branch (if the
+  // child already binds a managed worktree) is still surfaced for context.
+  if (state.forkPending) {
+    const checkout = state.locallyPrepared ?? state.persistedCheckout
+    const branch =
+      checkout?.mode === 'managed-worktree'
+        ? checkout.expectedBranch ?? checkout.branchAtPreparation ?? null
+        : null
+    return { kind: 'fork-pending', branch }
+  }
+
   // A prepared checkout (local result or persisted DTO) locks the identity and
   // is authoritative even before repository context finishes loading on resume —
   // restart/resume must NOT reset a managed worktree back to Current.

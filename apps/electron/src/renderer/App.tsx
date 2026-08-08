@@ -22,6 +22,7 @@ import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { DeleteSessionDialog } from '@/components/app-shell/DeleteSessionDialog'
 import { resolveDeleteConfirmation } from '@/components/app-shell/worktree-removal'
 import { FEATURE_FLAGS } from '@kata-sh/shared/feature-flags'
+import { WORKTREE_FORK_ERROR_CODE } from '@kata-sh/shared/protocol'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@kata-sh/ui'
 import { FocusProvider } from '@/context/FocusContext'
@@ -54,6 +55,8 @@ import {
   loadedSessionsAtom,
   forceSessionMessagesReloadAtom,
   backgroundTasksAtomFamily,
+  forkRetryAtomFamily,
+  findPendingForkRetryMessage,
   extractSessionMeta,
   windowWorkspaceIdAtom,
   type SessionMeta,
@@ -499,6 +502,61 @@ export default function App() {
       return 'failed'
     }
   }, [clearStreamingState, replaceLoadedSession, syncSessionOptionsFromSession, reconcilePermissionModeState, store])
+
+  /**
+   * Poll a fork child's session DTO until its pending fork intent retires
+   * (first-Send establishment succeeded) or the attempts are exhausted. The
+   * send RPC resolves before the establish flow runs, so the renderer cannot
+   * learn establishment success from the RPC alone; a refresh also retires the
+   * PENDING provider identity badge and any retry banner (Phase 4).
+   */
+  const refreshUntilForkEstablished = React.useCallback(
+    (sessionId: string) => {
+      void (async () => {
+        for (const delay of [1500, 3000, 6000]) {
+          await new Promise((resolve) => setTimeout(resolve, delay))
+          const result = await refreshSessionFromServer(sessionId)
+          if (result === 'failed') continue
+          const session = store.get(sessionAtomFamily(sessionId))
+          if (!session?.forkPending) {
+            store.set(forkRetryAtomFamily(sessionId), null)
+            return
+          }
+        }
+      })()
+    },
+    [refreshSessionFromServer, store],
+  )
+
+  /**
+   * Retry a failed isolated-fork establishment: re-send the SAME persisted
+   * user message via existingMessageId (the server reuses the persisted fork
+   * idempotency key, so neither the provider artifact nor the message is ever
+   * duplicated). Clears the banner immediately; a re-failure re-surfaces it
+   * via the typed error event.
+   */
+  const handleRetryForkSend = React.useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      const retry = store.get(forkRetryAtomFamily(sessionId))
+      if (!retry) return false
+      store.set(forkRetryAtomFamily(sessionId), null)
+      try {
+        await window.electronAPI.sendMessage(sessionId, retry.text, undefined, undefined, {
+          existingMessageId: retry.messageId,
+        })
+      } catch (error) {
+        store.set(forkRetryAtomFamily(sessionId), {
+          ...retry,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return false
+      }
+      refreshUntilForkEstablished(sessionId)
+      return true
+    },
+    [store, refreshUntilForkEstablished],
+  )
+
 
   const loadSessionsFromServer = useCallback(async () => {
     setSessionLoadError(null)
@@ -961,6 +1019,20 @@ export default function App() {
         revisions.set(sessionId, (revisions.get(sessionId) ?? 0) + 1)
         removeSession(sessionId)
         return
+      }
+
+      // Phase 4: a typed retryable isolated-fork establishment failure (the
+      // child stays pending with its single persisted user message). Surface
+      // the chat-input retry banner using the durable post-branch user
+      // message so the retry reuses the persisted message.
+      if (event.type === 'error' && event.code === WORKTREE_FORK_ERROR_CODE) {
+        const retryMessage = findPendingForkRetryMessage(store.get(sessionAtomFamily(sessionId)))
+        if (retryMessage) {
+          store.set(forkRetryAtomFamily(sessionId), {
+            ...retryMessage,
+            error: event.error,
+          })
+        }
       }
 
       const agentEvent = event as unknown as AgentEvent
@@ -1473,6 +1545,12 @@ export default function App() {
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
       })
+      // First send on a pending fork child: poll until the establish flow
+      // retires forkPending so the PENDING badge clears without a manual
+      // refresh. The RPC resolves before establishment runs.
+      if (store.get(sessionAtomFamily(sessionId))?.forkPending) {
+        refreshUntilForkEstablished(sessionId)
+      }
       // Resolved once the message is persisted/accepted (pre-persist failures
       // reject and land in the catch below). Signals successful submission so
       // callers like the Changes feedback flow can safely clear local state.
@@ -1493,7 +1571,7 @@ export default function App() {
       }))
       return false
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId, refreshUntilForkEstablished, store])
 
   /**
    * Unified handler for all session option changes.
@@ -1930,6 +2008,7 @@ export default function App() {
     // Session callbacks
     onCreateSession: handleCreateSession,
     onSendMessage: handleSendMessage,
+    onRetryForkSend: handleRetryForkSend,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
     onUnflagSession: handleUnflagSession,
@@ -1977,6 +2056,7 @@ export default function App() {
     updateDefaultThinkingLevel,
     handleCreateSession,
     handleSendMessage,
+    handleRetryForkSend,
     handleRenameSession,
     handleFlagSession,
     handleUnflagSession,

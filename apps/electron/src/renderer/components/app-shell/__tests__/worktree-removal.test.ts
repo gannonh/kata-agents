@@ -29,6 +29,20 @@ describe('summarizeWorktreeRemoval', () => {
     expect(s.branchWillBePruned).toBe(true)
   })
 
+  it('an isolated fork child (sole owner) never yields the shared-worktree block copy', () => {
+    // Phase 4 provenance: an isolated fork child owns its own record as the
+    // SOLE owner. The inspection is resolved from the child's own record, so
+    // the summary must never show the shared-owner block language or name
+    // another owner — the dialog renders `git.delete.sharedBlocked` only when
+    // this summary is blocked.
+    const s = summarizeWorktreeRemoval(
+      risk({ ownerSessionIds: ['isolated-child'], otherOwnerCount: 0 }),
+    )
+    expect(s.blocked).toBe(false)
+    expect(s.otherOwnerCount).toBe(0)
+    expect(s.blockedReason).toBeUndefined()
+  })
+
   it('blocks while another session owns the worktree', () => {
     const s = summarizeWorktreeRemoval(
       risk({ otherOwnerCount: 1, blocked: true, blockedReason: 'Another session still owns this worktree.' }),

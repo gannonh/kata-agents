@@ -11,6 +11,7 @@ import {
   refreshSessionsMetadataAtom,
   initializeSessionsAtom,
   replaceLoadedSessionAtom,
+  findPendingForkRetryMessage,
 } from '../sessions'
 
 function msg(id: string, role: Message['role'] = 'user'): Message {
@@ -32,6 +33,45 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     ...overrides,
   } as Session
 }
+
+describe('pending fork retry recovery', () => {
+  it('finds the durable user message after the branch point', () => {
+    const session = makeSession({
+      forkPending: true,
+      branchFromMessageId: 'head',
+      messages: [msg('parent-user'), msg('head', 'assistant'), msg('retry-user')],
+    })
+
+    expect(findPendingForkRetryMessage(session)).toEqual({
+      messageId: 'retry-user',
+      text: 'content:retry-user',
+    })
+  })
+
+  it('does not treat copied parent history as a retry message', () => {
+    const session = makeSession({
+      forkPending: true,
+      branchFromMessageId: 'head',
+      messages: [msg('parent-user'), msg('head', 'assistant')],
+    })
+
+    expect(findPendingForkRetryMessage(session)).toBeNull()
+  })
+
+  it('does not skip a structured first user message for a later text message', () => {
+    const structured = {
+      ...msg('structured-user'),
+      content: { kind: 'structured' } as unknown as string,
+    }
+    const session = makeSession({
+      forkPending: true,
+      branchFromMessageId: 'head',
+      messages: [msg('head', 'assistant'), structured, msg('later-user')],
+    })
+
+    expect(findPendingForkRetryMessage(session)).toBeNull()
+  })
+})
 
 describe('session message loading atoms', () => {
   const originalWindow = globalThis.window

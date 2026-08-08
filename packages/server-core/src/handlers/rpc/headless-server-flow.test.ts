@@ -340,4 +340,57 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     expect(restored.checkout?.recoveryState).toBeUndefined()
     expect(restored.checkout?.checkoutPath).not.toBe(checkoutPath)
   })
+
+  test('serves the conversation-fork surface headlessly: typed blocked previews, typed confirm errors, pending fences', async () => {
+    process.env[V2_FLAG] = '1'
+    const repo = tmp()
+    await initRepo(repo)
+    const { sm, handlers, ctx } = makeServer()
+    const sessionRoot = tmp()
+    injectSession(sm, 'remote-fork', sessionRoot)
+    // Point the session's working directory at the real repository so the
+    // fork source resolves; the session has no live agent, so the strict fork
+    // capability is absent and preview returns the typed unsupported-provider
+    // blocker.
+    const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get('remote-fork') as {
+      workingDirectory?: string
+    }
+    managed.workingDirectory = repo
+
+    // A session without a live agent advertises no strict fork capability:
+    // preview must return a typed blocked preview (never throw) — the same
+    // contract a remote client sees.
+    const preview = (await handlers.get(RPC_CHANNELS.git.FORK_PREVIEW)!(ctx, {
+      sessionId: 'remote-fork',
+      strategy: 'isolated-worktree',
+      worktreeNameSuffix: 'headless-isolated',
+    })) as { blocked?: { code: string }; strategy: string }
+    expect(preview.strategy).toBe('isolated-worktree')
+    expect(preview.blocked?.code).toBe('unsupported-provider')
+
+    // Shared-worktree strategy stays available headlessly without a capability.
+    const shared = (await handlers.get(RPC_CHANNELS.git.FORK_PREVIEW)!(ctx, {
+      sessionId: 'remote-fork',
+      strategy: 'shared-worktree',
+    })) as { blocked?: { code: string }; strategy: string }
+    expect(shared.strategy).toBe('shared-worktree')
+    expect(shared.blocked).toBeUndefined()
+
+    // Unknown transaction on the wire maps to the typed fork error code.
+    await expect(
+      handlers.get(RPC_CHANNELS.git.FORK_CONFIRM)!(ctx, {
+        sessionId: 'remote-fork',
+        strategy: 'isolated-worktree',
+        transactionId: 'deadbeefdeadbeef',
+        previewFingerprint: 'fp',
+        worktreeNameSuffix: 'headless-isolated',
+      }),
+    ).rejects.toMatchObject({ code: 'WORKTREE_FORK_FAILED' })
+
+    // Fork RPCs are V2-gated like every other V2 surface.
+    delete process.env[V2_FLAG]
+    await expect(
+      handlers.get(RPC_CHANNELS.git.FORK_STATUS)!(ctx, { sessionId: 'remote-fork' }),
+    ).rejects.toMatchObject({ code: 'GIT_WORKTREE_V2_UNAVAILABLE' })
+  })
 })

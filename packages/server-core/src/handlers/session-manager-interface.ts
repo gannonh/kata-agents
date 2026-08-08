@@ -105,6 +105,13 @@ export interface ISessionManager {
    */
   setGitServices?(services: import('../git').GitServices): void
   /**
+   * Durable fork-state facts for one session (Phase 4 reconciliation): the
+   * child SDK session id, the pending fork intent, and the checkout-strategy
+   * provenance. Used by fork-journal reconciliation to backfill the establish
+   * marker a crash between the child-session flush and markEstablished lost.
+   */
+  resolveSessionForkState?(sessionId: string): import('../git').SessionForkState | null
+  /**
    * Install a callback that requests an immediate Git status refresh for a
    * session. The git RPC handlers wire this so agent turn completion refreshes
    * the Changes surface without waiting for the coalesced poll tick.

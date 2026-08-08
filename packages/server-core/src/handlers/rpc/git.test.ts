@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   RPC_CHANNELS,
   WORKTREE_BRANCH_COLLISION_CODE,
+  WORKTREE_FORK_ERROR_CODE,
   WORKTREE_HANDOFF_ERROR_CODE,
   WORKTREE_LIFECYCLE_ERROR_CODE,
   WORKTREE_OWNERS_PRESENT_CODE,
@@ -19,7 +20,7 @@ import type {
   SessionCheckoutV1,
 } from '@kata-sh/shared/protocol'
 import type { HandlerFn, RequestContext, RpcServer } from '@kata-sh/server-core/transport'
-import { WorktreeCreationError, WorktreeHandoffError, WorktreeSettingsError } from '../../git'
+import { WorktreeCreationError, WorktreeHandoffError, WorktreeSettingsError, ConversationForkError } from '../../git'
 import type { GitServices } from '../../git'
 import type { HandlerDeps } from '../handler-deps'
 import { registerGitHandlers, checkManagedCheckoutIdentity } from './git'
@@ -46,22 +47,35 @@ interface MockOverrides {
   createdPr?: PullRequestSummary
   /** Make every handoff mock method throw (typed or plain) to exercise the error mapping. */
   handoffError?: 'typed' | 'plain'
+  /** Make every fork mock method throw (typed or plain) to exercise the error mapping. */
+  forkError?: 'typed' | 'plain'
+  /** Gate the startup reconciliation on a controllable promise (wiring tests). */
+  waitForInit?: () => Promise<void>
 }
 
 interface MockGit {
   git: GitServices
   calls: string[]
   createPrArgs: Array<{ baseRef: string }>
+  /** Order of startup reconciliation steps, recorded by the mock. */
+  startupCalls: string[]
 }
 
 function makeGitServices(overrides?: MockOverrides): MockGit {
   const calls: string[] = []
   const createPrArgs: Array<{ baseRef: string }> = []
+  const startupCalls: string[] = []
   const maybeThrow = () => {
     if (overrides?.handoffError === 'typed') {
       throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'Unknown handoff transaction.')
     }
     if (overrides?.handoffError === 'plain') throw new Error('boom')
+  }
+  const maybeThrowFork = () => {
+    if (overrides?.forkError === 'typed') {
+      throw new ConversationForkError('FORK_TRANSACTION_UNKNOWN', 'Unknown fork transaction.')
+    }
+    if (overrides?.forkError === 'plain') throw new Error('boom')
   }
   const defaultContext: RepositoryContext = {
     isGitRepository: false,
@@ -153,7 +167,10 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       },
     },
     worktrees: {
-      reconcile: async () => ({ repaired: 0, removed: 0 }),
+      reconcile: async () => {
+        startupCalls.push('worktrees.reconcile')
+        return { repaired: 0, removed: 0 }
+      },
     },
     pathLeases: {
       lease: () => undefined,
@@ -161,7 +178,9 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
     },
     lifecycle: {
       assertReady: () => undefined,
-      markReady: () => undefined,
+      markReady: () => {
+        startupCalls.push('lifecycle.markReady')
+      },
       isReady: () => true,
       recordStateForSession: (sessionId: string) => ({ managedWorktreeId: null, state: 'ready' }),
       isSessionRecordReady: () => true,
@@ -190,10 +209,15 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       permanentDelete: async () => ({ deleted: true }),
       setArchived: async () => ({ archived: true, state: 'ready', cleanupEnqueued: false }),
       enqueueCleanup: async () => ({ at: 1, outcome: 'skipped', policyVersion: 0 }),
-      reconcileJournal: async () => ({ resumed: 0, recovered: 0 }),
+      reconcileJournal: async () => {
+        startupCalls.push('lifecycle.reconcileJournal')
+        return { resumed: 0, recovered: 0 }
+      },
     },
     journal: {
-      compact: () => undefined,
+      compact: () => {
+        startupCalls.push('journal.compact')
+      },
     },
     handoff: {
       preview: async (input: { sessionId: string; direction: string; worktreeNameSuffix?: string }) => {
@@ -222,6 +246,48 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
         return { active: false }
       },
     },
+    fork: {
+      preview: async (input: { sessionId: string; strategy: string; worktreeNameSuffix?: string }) => {
+        calls.push(`fork.preview:${input.sessionId}:${input.strategy}`)
+        maybeThrowFork()
+        return {
+          transactionId: 'fork-txn-1',
+          previewFingerprint: 'fp-fork',
+          strategy: input.strategy,
+          currentHead: true,
+        }
+      },
+      confirm: async (input: { sessionId: string; transactionId: string; strategy: string }) => {
+        calls.push(`fork.confirm:${input.sessionId}:${input.transactionId}`)
+        maybeThrowFork()
+        return { outcome: 'committed', transactionId: input.transactionId, summary: { sessionId: 'child-1' } }
+      },
+      status: async (input: { sessionId: string }) => {
+        calls.push(`fork.status:${input.sessionId}`)
+        maybeThrowFork()
+        return { active: false }
+      },
+      recover: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`fork.recover:${input.sessionId}:${input.transactionId}`)
+        maybeThrowFork()
+        return { outcome: 'blocked', transactionId: input.transactionId, code: 'identity-drift', reason: 'stale' }
+      },
+      cancel: async (input: { sessionId: string; transactionId: string }) => {
+        calls.push(`fork.cancel:${input.sessionId}:${input.transactionId}`)
+        maybeThrowFork()
+        return { active: false }
+      },
+      reconcileForkJournal: async () => {
+        startupCalls.push('fork.reconcileForkJournal')
+        return { resumed: 0, recovered: 0, recoveryRequired: 0 }
+      },
+    },
+    forkOrphans: {
+      reconcile: async () => {
+        startupCalls.push('forkOrphans.reconcile')
+        return { resolved: 0, retained: 0, expiredUnresolved: 0, expiredAttemptIds: [] }
+      },
+    },
     worktreeSettings: {
       getCapability: (serverId = 'mock-server') => ({ serverId, worktreeV2: true }),
       getSnapshot: (serverId = 'mock-server') => ({
@@ -244,7 +310,7 @@ function makeGitServices(overrides?: MockOverrides): MockGit {
       }),
     },
   } as unknown as GitServices
-  return { git, calls, createPrArgs }
+  return { git, calls, createPrArgs, startupCalls }
 }
 
 interface SessionShape {
@@ -259,6 +325,7 @@ function makeHarness(
   sessions: SessionShape[] = [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }],
   overrides?: {
     prepareCheckout?: (sessionId: string, intent: unknown) => Promise<unknown>
+    waitForInit?: () => Promise<void>
   },
 ) {
   const handlers = new Map<string, HandlerFn>()
@@ -287,6 +354,7 @@ function makeHarness(
 
   const deps: HandlerDeps = {
     sessionManager: {
+      waitForInit: overrides?.waitForInit ?? (async () => {}),
       getSessions() {
         return sessions
       },
@@ -587,6 +655,157 @@ describe('registerGitHandlers', () => {
     for (const [channel, input] of Object.entries(handoffInputs)) {
       await expect(plain.handlers.get(channel)!(plain.ctx, input as never)).rejects.toMatchObject({ message: 'boom' })
     }
+  })
+
+  it('routes fork preview, confirm, status, recover, and cancel through shared contracts', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+    const { git, calls } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.FORK_PREVIEW)!(ctx, {
+        sessionId: 's1',
+        strategy: 'isolated-worktree',
+        worktreeNameSuffix: 'demo',
+      }),
+    ).resolves.toMatchObject({ transactionId: 'fork-txn-1', previewFingerprint: 'fp-fork', strategy: 'isolated-worktree' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.FORK_CONFIRM)!(ctx, {
+        sessionId: 's1',
+        strategy: 'isolated-worktree',
+        transactionId: 'fork-txn-1',
+        previewFingerprint: 'fp-fork',
+        worktreeNameSuffix: 'demo',
+      }),
+    ).resolves.toMatchObject({ outcome: 'committed', transactionId: 'fork-txn-1' })
+    await expect(harness.handlers.get(RPC_CHANNELS.git.FORK_STATUS)!(ctx, { sessionId: 's1' })).resolves.toEqual({
+      active: false,
+    })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.FORK_RECOVER)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'fork-txn-1',
+      }),
+    ).resolves.toMatchObject({ outcome: 'blocked', code: 'identity-drift' })
+    await expect(
+      harness.handlers.get(RPC_CHANNELS.git.FORK_CANCEL)!(ctx, {
+        sessionId: 's1',
+        transactionId: 'fork-txn-1',
+      }),
+    ).resolves.toEqual({ active: false })
+    expect(calls.filter((call) => call.startsWith('fork.'))).toEqual([
+      'fork.preview:s1:isolated-worktree',
+      'fork.confirm:s1:fork-txn-1',
+      'fork.status:s1',
+      'fork.recover:s1:fork-txn-1',
+      'fork.cancel:s1:fork-txn-1',
+    ])
+  })
+
+  it('rejects every fork RPC when the V2 flag is disabled', async () => {
+    process.env[FLAG] = '1'
+    delete process.env[V2_FLAG]
+    const { git } = makeGitServices()
+    const harness = makeHarness(git)
+    const ctx = harness.ctx
+
+    const forkInputs = {
+      [RPC_CHANNELS.git.FORK_PREVIEW]: { sessionId: 's1', strategy: 'isolated-worktree' },
+      [RPC_CHANNELS.git.FORK_CONFIRM]: { sessionId: 's1', strategy: 'isolated-worktree', transactionId: 'fork-txn-1', previewFingerprint: 'fp' },
+      [RPC_CHANNELS.git.FORK_STATUS]: { sessionId: 's1' },
+      [RPC_CHANNELS.git.FORK_RECOVER]: { sessionId: 's1', transactionId: 'fork-txn-1' },
+      [RPC_CHANNELS.git.FORK_CANCEL]: { sessionId: 's1', transactionId: 'fork-txn-1' },
+    } as const
+
+    for (const [channel, input] of Object.entries(forkInputs)) {
+      await expect(harness.handlers.get(channel)!(ctx, input as never)).rejects.toMatchObject({
+        code: WORKTREE_V2_CAPABILITY_ERROR_CODE,
+      })
+    }
+  })
+
+  it('maps ConversationForkError to the typed wire code and rethrows unrelated errors unchanged', async () => {
+    process.env[FLAG] = '1'
+    process.env[V2_FLAG] = '1'
+
+    const forkInputs = {
+      [RPC_CHANNELS.git.FORK_PREVIEW]: { sessionId: 's1', strategy: 'isolated-worktree' },
+      [RPC_CHANNELS.git.FORK_CONFIRM]: { sessionId: 's1', strategy: 'isolated-worktree', transactionId: 'fork-txn-1', previewFingerprint: 'fp' },
+      [RPC_CHANNELS.git.FORK_STATUS]: { sessionId: 's1' },
+      [RPC_CHANNELS.git.FORK_RECOVER]: { sessionId: 's1', transactionId: 'fork-txn-1' },
+      [RPC_CHANNELS.git.FORK_CANCEL]: { sessionId: 's1', transactionId: 'fork-txn-1' },
+    } as const
+
+    const typed = makeHarness(makeGitServices({ forkError: 'typed' }).git)
+    for (const [channel, input] of Object.entries(forkInputs)) {
+      await expect(typed.handlers.get(channel)!(typed.ctx, input as never)).rejects.toMatchObject({
+        code: WORKTREE_FORK_ERROR_CODE,
+      })
+    }
+
+    const plain = makeHarness(makeGitServices({ forkError: 'plain' }).git)
+    for (const [channel, input] of Object.entries(forkInputs)) {
+      await expect(plain.handlers.get(channel)!(plain.ctx, input as never)).rejects.toMatchObject({ message: 'boom' })
+    }
+  })
+
+  it('startup reconciliation runs fork and orphan reconcile before journal compact and markReady', async () => {
+    process.env[FLAG] = '1'
+    const { git, startupCalls } = makeGitServices()
+    // Gate the best-effort startup reconciliation so the wiring test can await
+    // its exact ordering instead of racing the fire-and-forget IIFE.
+    let releaseInit!: () => void
+    const initGate = new Promise<void>((resolve) => {
+      releaseInit = resolve
+    })
+    const harness = makeHarness(git, [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }], {
+      waitForInit: async () => initGate,
+    })
+    expect(startupCalls).toEqual([])
+    releaseInit()
+    // Drain the async startup reconciliation (bounded wait for markReady).
+    for (let i = 0; i < 25 && !startupCalls.includes('lifecycle.markReady'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    // Every step runs, in the lifecycle-ready gate order: session leases →
+    // worktrees.reconcile → lifecycle.reconcileJournal → fork reconcile →
+    // orphan reconcile → journal.compact → markReady.
+    expect(startupCalls).toEqual([
+      'worktrees.reconcile',
+      'lifecycle.reconcileJournal',
+      'fork.reconcileForkJournal',
+      'forkOrphans.reconcile',
+      'journal.compact',
+      'lifecycle.markReady',
+    ])
+  })
+
+  it('marks lifecycle ready when optional fork reconciliation services are absent', async () => {
+    process.env[FLAG] = '1'
+    const { git, startupCalls } = makeGitServices()
+    ;(git as any).fork = {}
+    ;(git as any).forkOrphans = {}
+    let releaseInit!: () => void
+    const initGate = new Promise<void>((resolve) => {
+      releaseInit = resolve
+    })
+    makeHarness(git, [{ id: 's1', workspaceId: 'ws1', workingDirectory: '/repo' }], {
+      waitForInit: async () => initGate,
+    })
+    releaseInit()
+    for (let i = 0; i < 25 && !startupCalls.includes('lifecycle.markReady'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(startupCalls).toEqual([
+      'worktrees.reconcile',
+      'lifecycle.reconcileJournal',
+      'journal.compact',
+      'lifecycle.markReady',
+    ])
   })
 
   it('serves inventory, preview, delete, restore, retry, permanent-delete, archive, and unarchive RPCs', async () => {

@@ -84,6 +84,13 @@ export interface AppShellContextType {
    * (e.g. the Changes feedback flow) can clear local state only on success.
    */
   onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@kata-sh/core').ContentBadge[]) => Promise<boolean>
+  /**
+   * Retry a failed isolated-fork establishment: re-sends the persisted user
+   * message via existingMessageId. Resolves true once the retry send is
+   * accepted (establishment completion is confirmed by the session DTO losing
+   * forkPending).
+   */
+  onRetryForkSend: (sessionId: string) => Promise<boolean>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void

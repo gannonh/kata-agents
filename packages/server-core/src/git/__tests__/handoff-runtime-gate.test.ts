@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach, beforeEach } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/backend'
+import { createDeterministicHandoffAdapter } from '@kata-sh/shared/agent/testing'
 import { loadSession as loadStoredSession } from '@kata-sh/shared/sessions'
 import { setupI18n } from '@kata-sh/shared/i18n/setupI18n'
 import { SessionManager, createManagedSession } from '../../sessions/SessionManager'

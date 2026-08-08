@@ -98,6 +98,8 @@ export interface Session {
   }
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
+  /** Durable source-message boundary separating copied parent history from new messages. */
+  branchFromMessageId?: string
   isArchived?: boolean
   archivedAt?: number
   supportsBranching?: boolean
@@ -118,6 +120,20 @@ export interface Session {
    * the agent runtime has not been created yet.
    */
   handoffCapable?: boolean
+  /**
+   * Server-derived: true when this session's provider adapter advertises a
+   * strict cross-CWD native fork (the isolated conversation-fork strategy may
+   * be offered). Absent while the agent runtime has not been created yet.
+   */
+  isolatedForkCapable?: boolean
+  /**
+   * Server-derived: true while this session is a published-but-not-established
+   * isolated conversation-fork child (a durable pending fork intent exists and
+   * the child provider identity has not been claimed yet). Before first Send
+   * the surface must display provider identity as PENDING and never claim a
+   * child provider ID. Absent (false) for every other session.
+   */
+  forkPending?: boolean
 }
 
 export interface CreateSessionOptions {
@@ -186,7 +202,7 @@ export type SessionEvent =
   | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
   | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
-  | { type: 'error'; sessionId: string; error: string; timestamp?: number }
+  | { type: 'error'; sessionId: string; error: string; timestamp?: number; code?: string }
   | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
   | { type: 'complete'; sessionId: string; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean }
   | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[] }
@@ -235,6 +251,14 @@ export interface SendMessageOptions {
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /**
+   * Retry a previously persisted user message by its server message ID instead
+   * of creating a new one. Used by the isolated-fork establish retry: the
+   * failed first Send already persisted the user message, so a retry must
+   * reuse it (the server also reuses the persisted fork idempotency key, so
+   * the provider artifact is never duplicated).
+   */
+  existingMessageId?: string
 }
 
 // ---------------------------------------------------------------------------
