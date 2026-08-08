@@ -611,4 +611,70 @@ describe('SessionManager isolated fork child creation', () => {
     const stored = loadStoredSession(root, 'plain-1')
     expect(stored?.pendingFork).toBeUndefined()
   })
+
+  it('serializes concurrent first-sends: a second send during establishment is refused with the pending code', async () => {
+    injectSession('source-concurrent')
+    await persistSourceWithMessages('source-concurrent')
+    armStrictAdapter('source-concurrent')
+    services.pathLeases.lease('source-concurrent', realpathSync(repo))
+
+    const preview = await services.fork.preview({
+      sessionId: 'source-concurrent',
+      strategy: 'isolated-worktree',
+      worktreeNameSuffix: 'concurrent-child',
+    })
+    expect(preview.blocked).toBeUndefined()
+    if (preview.blocked) return
+    const result = await services.fork.confirm({
+      sessionId: 'source-concurrent',
+      strategy: 'isolated-worktree',
+      transactionId: preview.transactionId,
+      previewFingerprint: preview.previewFingerprint,
+      worktreeNameSuffix: 'concurrent-child',
+    })
+    expect(result.outcome).toBe('committed')
+    if (result.outcome !== 'committed') return
+
+    // Block the establish call so the second send lands while establishment
+    // is in flight.
+    let releaseEstablish!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseEstablish = resolve
+    })
+    const establishLog: Array<{ input: unknown }> = []
+    const gatedAdapter = createDeterministicStrictForkAdapter({ adapterId: 'pi-test' })
+    const blockingAdapter: StrictConversationForkCapability = {
+      ...gatedAdapter,
+      establishNativeFork: async (input) => {
+        establishLog.push({ input })
+        await gate
+        return gatedAdapter.establishNativeFork(input)
+      },
+    }
+    const childId = result.summary.sessionId
+    const chatCalls: string[] = []
+    armChildAgent(childId, blockingAdapter, chatCalls)
+
+    const firstSend = sm.sendMessage(childId, 'first concurrent send')
+    // Wait until the establish call is in flight, then fire the second send.
+    while (establishLog.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    await expect(sm.sendMessage(childId, 'second concurrent send')).rejects.toMatchObject({
+      code: WORKTREE_FORK_PENDING_CODE,
+    })
+    releaseEstablish()
+    await firstSend
+
+    // Exactly one establishment, one dispatch; the refused second message is
+    // never dispatched.
+    expect(establishLog).toHaveLength(1)
+    expect(chatCalls).toEqual(['first concurrent send'])
+    const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(childId) as {
+      pendingFork?: unknown
+      sdkSessionId?: string
+    }
+    expect(managed.pendingFork).toBeUndefined()
+    expect(managed.sdkSessionId).toBeTruthy()
+  })
 })

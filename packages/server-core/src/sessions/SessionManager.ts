@@ -1210,6 +1210,13 @@ export class SessionManager implements ISessionManager {
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
   private sessionTeardownFences: Map<string, number> = new Map()
+  /**
+   * Sessions whose first-Send fork establishment is currently in flight.
+   * Serializes concurrent first-sends on a pending isolated fork child so a
+   * second send cannot double-dispatch while establishment runs (the
+   * persisted idempotency key dedupes the provider artifact itself).
+   */
+  private forkEstablishing: Set<string> = new Set()
   /** Keeps a blocked destructive deletion fenced until a later retry succeeds. */
   private sessionTeardownFenceHolds: Set<string> = new Set()
   /** Reused by retries while a timed-out backend teardown is still running. */
@@ -5656,13 +5663,41 @@ export class SessionManager implements ISessionManager {
     const pending = managed.pendingFork
     if (!pending) return false
 
+    // Serialize concurrent first-sends on the same pending child: a second
+    // send arriving while establishment is in flight must not double-dispatch.
+    // The persisted idempotency key already dedupes the provider artifact, so
+    // this guard closes the double-dispatch window (two model turns).
+    if (this.forkEstablishing.has(managed.id)) {
+      throw new CodedError(
+        WORKTREE_FORK_PENDING_CODE,
+        'This session is establishing its isolated conversation fork; try again shortly.',
+      )
+    }
+    this.forkEstablishing.add(managed.id)
+    try {
+      return await this.establishPendingForkLocked(managed)
+    } finally {
+      this.forkEstablishing.delete(managed.id)
+    }
+  }
+
+  private async establishPendingForkLocked(managed: ManagedSession): Promise<boolean> {
+    const pending = managed.pendingFork
+    if (!pending) return false
+
     // Strict anchor errors: the establish input comes from the persisted
     // pendingFork. A missing/malformed anchor (e.g. corrupted record) is a
     // typed retryable error — no provider call, no fallback.
-    if (!pending.parentSdkSessionId || !pending.parentSdkTurnId) {
+    if (!pending.parentSdkSessionId || !pending.parentSdkTurnId || !pending.idempotencyKey) {
       throw new CodedError(
         WORKTREE_FORK_ERROR_CODE,
-        'The isolated fork child has no valid provider anchor (missing parent SDK session or turn id). The fork must be re-created.',
+        'The isolated fork child has no valid provider anchor (missing parent SDK session, turn id, or idempotency key). The fork must be re-created.',
+      )
+    }
+    if (!pending.executionCwd || !pending.transcriptCwd) {
+      throw new CodedError(
+        WORKTREE_FORK_ERROR_CODE,
+        'The isolated fork child has no valid execution or transcript CWD. The fork must be re-created.',
       )
     }
 
