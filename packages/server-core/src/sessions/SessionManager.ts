@@ -6912,13 +6912,34 @@ export class SessionManager implements ISessionManager {
     if (this.getGitServices().fork?.isSessionFenced?.(sessionId)) {
       const forkStatus = await this.getGitServices().fork?.status({ sessionId })
       if (forkStatus?.active && forkStatus.state !== 'recovery-required') {
-        throw new CodedError(WORKTREE_FORK_PENDING_CODE, 'A conversation-fork transaction is pending for this session.')
-      }
-      if (forkStatus?.active) {
-        try {
-          await this.getGitServices().fork?.cancel({ sessionId, transactionId: forkStatus.transactionId })
-        } catch (err) {
-          sessionLog.warn(`Failed to release pending conversation fork for deleted session ${sessionId}:`, err)
+        if (forkStatus.state === 'pending') {
+          // A pure preview has never mutated anything; cancel it so the
+          // session can be deleted (cancel serializes with confirm under the
+          // mutation lock and refuses once a confirm is in flight). If the
+          // cancel refuses — durable steps already recorded — the confirm is
+          // genuinely in flight and deletion must block.
+          try {
+            const cancelled = await this.getGitServices().fork?.cancel({
+              sessionId,
+              transactionId: forkStatus.transactionId,
+            })
+            if (cancelled?.active) {
+              throw new CodedError(
+                WORKTREE_FORK_PENDING_CODE,
+                'A conversation-fork transaction is in progress for this session.',
+              )
+            }
+          } catch (err) {
+            if (err instanceof CodedError) throw err
+            sessionLog.warn(`Failed to release pending conversation fork for deleted session ${sessionId}:`, err)
+          }
+        } else {
+          // An in-progress confirm must not be discarded: the child would
+          // otherwise be published onto a deleted source session.
+          throw new CodedError(
+            WORKTREE_FORK_PENDING_CODE,
+            'A conversation-fork transaction is in progress for this session.',
+          )
         }
       }
     }
