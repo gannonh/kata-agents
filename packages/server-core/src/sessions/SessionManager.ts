@@ -3151,6 +3151,11 @@ export class SessionManager implements ISessionManager {
 
       const requiresBranchPreflight =
         managed.branchContextStrategy === 'sdk-fork' && !options?.pendingFork
+      // Phase 4 guard: pendingFork children (isolated fork children) NEVER
+      // enter this preflight, so rollbackFailedBranchCreation is unreachable
+      // for them — provider establishment happens on first Send, and failed
+      // fork creation is compensated by the fork service (which owns the
+      // target worktree), never by this branch rollback.
       if (requiresBranchPreflight) {
         // Enforce branch correctness at creation time.
         // A branch is only valid if backend context can be established now,
@@ -7185,6 +7190,14 @@ export class SessionManager implements ISessionManager {
     // authoritative confirmation check and removal complete while the session
     // still exists. If anything changed after the dialog inspection, the
     // operation stops before ownership or session state is touched.
+    //
+    // Phase 4 provenance: an isolated fork child owns its worktree record as
+    // the SOLE owner, so this path removes only that child's lifecycle — the
+    // standard snapshot-first transaction on the child's own record
+    // (resolveOwnedWorktreeId resolves the CHILD's checkout metadata, never the
+    // source's) — and the SOURCE session/record/branch are never referenced
+    // here. A shared child (or a legacy session with no checkoutStrategy) stays
+    // on the shared record and drops exactly one owner below.
     let completedWorktreeRemoval:
       | import('@kata-sh/shared/protocol').WorktreeRemovalResult
       | undefined
@@ -7267,7 +7280,10 @@ export class SessionManager implements ISessionManager {
     // shared-owner counts stay correct. When explicit removal was requested,
     // the registry record is already gone and this is a harmless no-op. Phase 2
     // routes through the lifecycle service (final-owner detach leaves an
-    // unowned record and enqueues policy cleanup).
+    // unowned record and enqueues policy cleanup). Phase 4: for an isolated
+    // child the detached record is the child's OWN record (its sole owner), so
+    // this never touches the source's record; for a shared child it drops
+    // exactly this session's owner reference.
     if (managed.checkout?.mode === 'managed-worktree' && managed.checkout.managedWorktreeId) {
       try {
         if (isWorktreeV2Enabled()) {

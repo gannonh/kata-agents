@@ -10,7 +10,7 @@ import { join } from 'node:path'
 const { SessionManager, createManagedSession } = await import('./SessionManager')
 const { CONFIG_DIR } = await import('@kata-sh/shared/config')
 const { createGitServices } = await import('../git')
-const { initRepo, makeTmpDir, cleanup } = await import('../git/__tests__/test-helpers')
+const { initRepo, makeTmpDir, cleanup, git } = await import('../git/__tests__/test-helpers')
 const { createDeterministicStrictForkAdapter } = await import('@kata-sh/shared/agent/backend')
 import type { ConversationForkEstablishInput, StrictConversationForkCapability } from '@kata-sh/shared/agent/backend'
 const {
@@ -86,7 +86,7 @@ describe('SessionManager isolated fork child creation', () => {
     cleanup(root)
   })
 
-  function injectSession(id: string): void {
+  function injectSession(id: string): ReturnType<typeof createManagedSession> {
     const workspace = { id: 'ws_test', name: 'WS', rootPath: root, createdAt: Date.now() }
     const managed = createManagedSession(
       {
@@ -100,6 +100,14 @@ describe('SessionManager isolated fork child creation', () => {
       { messagesLoaded: true },
     )
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(id, managed)
+    return managed
+  }
+
+  /** Inject a session that still satisfies the empty-session checkout gate. */
+  function injectEmptySession(id: string): ReturnType<typeof createManagedSession> {
+    const managed = injectSession(id)
+    delete (managed as unknown as { sdkSessionId?: string }).sdkSessionId
+    return managed
   }
 
   /** Persist a source session with a user + assistant message (head = msg-2). */
@@ -750,5 +758,315 @@ describe('SessionManager isolated fork child creation', () => {
       .find((e) => e.op === 'fork' && e.recordId === pendingBefore.transactionId)!
     expect(after.metadata?.state).toBe('established')
     expect(after.metadata?.childSdkSessionId).toBe('sdk-hook-child')
+  })
+
+  /**
+   * Phase 4 Task 7: provenance-aware cleanup. An isolated fork child owns its
+   * worktree record as the SOLE owner, so deletion uses only that child's
+   * lifecycle — the standard snapshot-first removal transaction on the child's
+   * own record — and never mutates the source session, the source's record, or
+   * the source branch/HEAD/index. Shared children keep dropping exactly one
+   * owner from the shared record (legacy behavior).
+   */
+  describe('SessionManager isolated fork child deletion (Task 7 cleanup provenance)', () => {
+    /** The fork journal entry that published the given child session. */
+    function forkEntryForChild(childId: string) {
+      return services.journal
+        .entries()
+        .find((e) => e.op === 'fork' && e.metadata?.childSessionId === childId)
+    }
+
+    it('delete-with-worktree removes only the child lifecycle and leaves the source untouched', async () => {
+      injectSession('source-del')
+      await persistSourceWithMessages('source-del')
+      armStrictAdapter('source-del')
+      const childId = await confirmChild('source-del', 'del-child')
+      if (!childId) return
+
+      // The child owns its own record as the SOLE owner.
+      const childRecord = services.registry.list().find((r) => r.ownerSessionIds.includes(childId))
+      expect(childRecord).toBeDefined()
+      expect(childRecord!.ownerSessionIds).toEqual([childId])
+      expect(childRecord!.state).toBe('ready')
+      const childCheckoutPath = childRecord!.checkoutPath
+
+      // Source repo state (branch/HEAD/index) and fork journal entry before deletion.
+      const headBefore = (await git(repo, ['rev-parse', 'HEAD'])).trim()
+      const branchBefore = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+      const indexBefore = await git(repo, ['status', '--porcelain'])
+      expect(forkEntryForChild(childId)?.status).toBe('committed')
+
+      const result = await sm.deleteSession(childId, { removeManagedWorktree: true })
+
+      expect(result.deleted).toBe(true)
+      expect(result.worktreeRemoval?.removed).toBe(true)
+
+      // Child session gone: runtime and persisted storage.
+      expect(sm.getSessions().some((s) => s.id === childId)).toBe(false)
+      expect(existsSync(getSessionFilePath(root, childId))).toBe(false)
+
+      // Child record removed from the ready/owned set snapshot-first: the
+      // checkout is gone, the record is snapshotted with no owners and a
+      // verified snapshot, and the removal is journaled.
+      const after = services.registry.get(childRecord!.managedWorktreeId)
+      expect(after?.ownerSessionIds).toEqual([])
+      expect(after?.state).toBe('snapshotted')
+      expect((after as import('@kata-sh/shared/protocol').ManagedWorktreeRecordV2 | undefined)?.snapshot).toBeDefined()
+      expect(existsSync(childCheckoutPath)).toBe(false)
+      expect(
+        services.journal
+          .entries()
+          .some((e) => e.op === 'session-delete' && e.recordId === childRecord!.managedWorktreeId && e.status === 'committed'),
+      ).toBe(true)
+
+      // The fork journal entry is retained (kept by compaction) — never cleaned
+      // up by child deletion.
+      expect(forkEntryForChild(childId)?.status).toBe('committed')
+
+      // Source session + persisted record untouched.
+      expect(sm.getSessions().some((s) => s.id === 'source-del')).toBe(true)
+      const sourceStored = loadStoredSession(root, 'source-del')
+      expect(sourceStored?.messages.map((m) => m.id)).toEqual(['msg-1', 'msg-2'])
+      expect(sourceStored?.checkout).toBeUndefined()
+
+      // Source branch/HEAD/index unchanged.
+      expect((await git(repo, ['rev-parse', 'HEAD'])).trim()).toBe(headBefore)
+      expect((await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe(branchBefore)
+      expect(await git(repo, ['status', '--porcelain'])).toBe(indexBefore)
+    })
+
+    it('deleting an isolated child without the removal choice leaves its record unowned and manageable (auto-delete applies)', async () => {
+      injectSession('source-del2')
+      await persistSourceWithMessages('source-del2')
+      armStrictAdapter('source-del2')
+      const childId = await confirmChild('source-del2', 'keep-child')
+      if (!childId) return
+
+      const childRecord = services.registry.list().find((r) => r.ownerSessionIds.includes(childId))!
+      const childCheckoutPath = childRecord.checkoutPath
+      // A second materialized record so the retention sweep has a candidate to
+      // select beyond the limit (retention candidates require count > limit).
+      injectEmptySession('extra-owner')
+      const prep = await sm.prepareCheckout('extra-owner', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'main',
+      })
+      const extraRecordId = prep.checkout.managedWorktreeId!
+
+      const result = await sm.deleteSession(childId)
+      expect(result.deleted).toBe(true)
+
+      // The child's record stays manageable: unowned, checkout intact, nothing
+      // removed, no snapshot. The source record is untouched.
+      const after = services.registry.get(childRecord.managedWorktreeId)!
+      expect(after.state).toBe('unowned')
+      expect(after.ownerSessionIds).toEqual([])
+      expect((after as import('@kata-sh/shared/protocol').ManagedWorktreeRecordV2).snapshot).toBeUndefined()
+      expect(existsSync(childCheckoutPath)).toBe(true)
+      expect(services.registry.get(extraRecordId)!.ownerSessionIds).toEqual(['extra-owner'])
+      expect(sm.getSessions().some((s) => s.id === 'source-del2')).toBe(true)
+
+      // Auto-delete policy then removes the unowned record snapshot-first,
+      // exactly like any other record (the registry is provenance-neutral).
+      services.worktreeSettings.update({
+        materializationRoot: join(root, 'worktrees'),
+        autoDeleteEnabled: true,
+        retentionLimit: 1,
+      })
+      await services.lifecycle.runCleanupSweep()
+      const removed = services.registry.get(childRecord.managedWorktreeId)!
+      expect(removed.state).toBe('snapshotted')
+      expect((removed as import('@kata-sh/shared/protocol').ManagedWorktreeRecordV2).snapshot).toBeDefined()
+      expect(existsSync(childCheckoutPath)).toBe(false)
+      // The owned record survives the sweep.
+      expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+    })
+
+    it('deleting a shared-branch child drops exactly one owner from the shared record (regression guard)', async () => {
+      injectEmptySession('shared-parent')
+      const prep = await sm.prepareCheckout('shared-parent', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'main',
+      })
+      const recordId = prep.checkout.managedWorktreeId!
+      // Mirror the createSession shared-branch end state: the child mirrors the
+      // parent checkout, records 'shared' provenance, and joins the record as a
+      // second owner with a path lease.
+      const childId = 'shared-child'
+      const childManaged = injectSession(childId)
+      childManaged.checkout = prep.checkout as never
+      childManaged.workingDirectory = prep.checkout.checkoutPath
+      childManaged.sdkCwd = prep.checkout.checkoutPath
+      ;(childManaged as unknown as { checkoutStrategy?: string }).checkoutStrategy = 'shared'
+      services.worktrees.addOwner(recordId, childId)
+      services.pathLeases.lease(childId, prep.checkout.checkoutPath)
+      await saveStoredSession({
+        id: childId,
+        workspaceRootPath: root,
+        name: 'shared-child',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sdkCwd: prep.checkout.checkoutPath,
+        sdkSessionId: 'sdk-parent-1',
+        workingDirectory: prep.checkout.checkoutPath,
+        messages: [],
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, costUsd: 0 },
+      } as never)
+
+      expect(services.registry.get(recordId)!.ownerSessionIds).toEqual(['shared-parent', childId])
+
+      const result = await sm.deleteSession(childId)
+      expect(result.deleted).toBe(true)
+
+      // Exactly one owner dropped; the shared record, checkout, and the other
+      // owner are untouched.
+      const record = services.registry.get(recordId)!
+      expect(record.ownerSessionIds).toEqual(['shared-parent'])
+      expect(record.state).toBe('ready')
+      expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
+      expect(sm.getSessions().some((s) => s.id === childId)).toBe(false)
+      expect(sm.getSessions().some((s) => s.id === 'shared-parent')).toBe(true)
+    })
+
+    it('inspectManagedWorktreeRemoval reports the child record with no other owners (provenance-correct inspection)', async () => {
+      injectSession('source-inspect')
+      await persistSourceWithMessages('source-inspect')
+      armStrictAdapter('source-inspect')
+      const childId = await confirmChild('source-inspect', 'inspect-child')
+      if (!childId) return
+      const childRecord = services.registry.list().find((r) => r.ownerSessionIds.includes(childId))!
+
+      // The inspection resolves the CHILD's own record — never the source's —
+      // and reports a sole owner, so the delete dialog shows no shared-worktree
+      // language and an accurate removal label.
+      const risk = await sm.inspectManagedWorktreeRemoval(childId)
+      expect(risk.managedWorktreeId).toBe(childRecord.managedWorktreeId)
+      expect(risk.ownerSessionIds).toEqual([childId])
+      expect(risk.otherOwnerCount).toBe(0)
+      expect(risk.blocked).toBe(false)
+    })
+
+    it('a recovery-required fork journal entry survives child deletion and later reconcile', async () => {
+      injectSession('source-rec')
+      await persistSourceWithMessages('source-rec')
+      armStrictAdapter('source-rec')
+      const childId = await confirmChild('source-rec', 'recovery-child')
+      if (!childId) return
+      const forkEntry = forkEntryForChild(childId)!
+      // Drive the committed entry into the recovery-required state that an
+      // interrupted fork leaves behind; the deletion escape hatch must still
+      // apply and the entry must stay for later reconcile.
+      services.journal.updateMetadata(forkEntry.journalId, {
+        state: 'recovery-required',
+        recoveryReason: 'simulated interrupted fork',
+      })
+
+      const result = await sm.deleteSession(childId, { removeManagedWorktree: true })
+      expect(result.deleted).toBe(true)
+
+      const after = services.journal
+        .entries()
+        .find((e) => e.journalId === forkEntry.journalId)!
+      expect(after.status).toBe('committed')
+      expect(after.metadata?.state).toBe('recovery-required')
+
+      // Reconcile reports the retained entry without blocking or editing it.
+      const report = await services.fork.reconcileForkJournal()
+      expect(report.recoveryRequired).toBeGreaterThanOrEqual(1)
+      const still = services.journal
+        .entries()
+        .find((e) => e.journalId === forkEntry.journalId)!
+      expect(still.status).toBe('committed')
+    })
+
+    it('pendingFork children skip the branch-preflight rollback (structural guard)', async () => {
+      // rollbackFailedBranchCreation is only reachable from the branch backend
+      // preflight gate, which requires `branchContextStrategy === 'sdk-fork' &&
+      // !options.pendingFork`. A pendingFork child therefore never enters it:
+      // the child is created durably with NO backend preflight (no agent) and
+      // its worktree record survives, even though this harness cannot complete
+      // the shared-branch preflight (no real backend). The fork service owns
+      // compensation for failed fork creation instead.
+      injectSession('source-gate')
+      await persistSourceWithMessages('source-gate')
+      armStrictAdapter('source-gate')
+      const childId = await confirmChild('source-gate', 'gate-child')
+      if (!childId) return
+
+      const managed = (sm as unknown as { sessions: Map<string, unknown> }).sessions.get(
+        childId,
+      ) as { agent?: unknown; pendingFork?: unknown; checkoutStrategy?: string }
+      expect(managed.agent == null).toBe(true)
+      expect(managed.pendingFork).toBeDefined()
+      expect(managed.checkoutStrategy).toBe('isolated')
+      // The child's worktree record exists (nothing was rolled back).
+      expect(services.registry.list().some((r) => r.ownerSessionIds.includes(childId))).toBe(true)
+      // The durable fork creation committed exactly once.
+      expect(forkEntryForChild(childId)?.status).toBe('committed')
+    })
+
+    it('delete-with-worktree on an isolated child never mutates a managed source record', async () => {
+      // A managed source: the fork source owns its OWN worktree record. The
+      // child's deletion must leave that record, its checkout, and its HEAD
+      // exactly as they were.
+      const sourceManaged = injectEmptySession('managed-source')
+      const prep = await sm.prepareCheckout('managed-source', {
+        mode: 'managed-worktree',
+        workingDirectory: repo,
+        baseRef: 'main',
+      })
+      const sourceRecordId = prep.checkout.managedWorktreeId!
+      // Restore the SDK identity the fork child anchors on (the stored record
+      // below also carries it).
+      ;(sourceManaged as unknown as { sdkSessionId?: string }).sdkSessionId = 'sdk-parent-1'
+      await persistSourceWithMessages('managed-source')
+      armStrictAdapter('managed-source')
+      services.pathLeases.lease('managed-source', prep.checkout.checkoutPath)
+
+      const preview = await services.fork.preview({
+        sessionId: 'managed-source',
+        strategy: 'isolated-worktree',
+        worktreeNameSuffix: 'src-isolated',
+      })
+      expect(preview.blocked).toBeUndefined()
+      if (preview.blocked) return
+      const result = await services.fork.confirm({
+        sessionId: 'managed-source',
+        strategy: 'isolated-worktree',
+        transactionId: preview.transactionId,
+        previewFingerprint: preview.previewFingerprint,
+        worktreeNameSuffix: 'src-isolated',
+      })
+      expect(result.outcome).toBe('committed')
+      if (result.outcome !== 'committed') return
+      const childId = result.summary.sessionId
+
+      const childRecord = services.registry.list().find((r) => r.ownerSessionIds.includes(childId))!
+      expect(childRecord.managedWorktreeId).not.toBe(sourceRecordId)
+      const sourceCheckoutPath = prep.checkout.checkoutPath
+      const sourceHeadBefore = (await git(sourceCheckoutPath, ['rev-parse', 'HEAD'])).trim()
+      const sourceBranchBefore = (await git(sourceCheckoutPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+
+      const del = await sm.deleteSession(childId, { removeManagedWorktree: true })
+      expect(del.deleted).toBe(true)
+
+      // The source record is untouched: same sole owner, still ready, checkout
+      // on disk, branch/HEAD unchanged.
+      const sourceRecordAfter = services.registry.get(sourceRecordId)!
+      expect(sourceRecordAfter.ownerSessionIds).toEqual(['managed-source'])
+      expect(sourceRecordAfter.state).toBe('ready')
+      expect(existsSync(sourceCheckoutPath)).toBe(true)
+      expect((await git(sourceCheckoutPath, ['rev-parse', 'HEAD'])).trim()).toBe(sourceHeadBefore)
+      expect((await git(sourceCheckoutPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe(sourceBranchBefore)
+      expect(sm.getSessions().some((s) => s.id === 'managed-source')).toBe(true)
+
+      // The child record is the only thing removed from the ready/owned set.
+      const childAfter = services.registry.get(childRecord.managedWorktreeId)
+      expect(childAfter?.ownerSessionIds).toEqual([])
+      expect(childAfter?.state).toBe('snapshotted')
+      expect(existsSync(childRecord.checkoutPath)).toBe(false)
+    })
   })
 })
