@@ -260,20 +260,24 @@ export interface ConversationForkConfirmInput {
  * `published` makes the child visible with pending provider identity;
  * `establishing`/`established` cover the first-Send native-fork lifecycle.
  */
-export type ConversationForkRecoveryState =
-  | 'pending'
-  | 'source-leased'
-  | 'seed-captured'
-  | 'target-reserved'
-  | 'target-materialized'
-  | 'target-verified'
-  | 'binding-committed'
-  | 'published'
-  | 'establishing'
-  | 'established'
-  | 'restore-failed'
-  | 'cleanup-failed'
-  | 'recovery-required'
+export const CONVERSATION_FORK_RECOVERY_STATES = [
+  'pending',
+  'source-leased',
+  'seed-captured',
+  'target-reserved',
+  'target-materialized',
+  'target-verified',
+  'binding-committed',
+  'published',
+  'establishing',
+  'established',
+  'restore-failed',
+  'cleanup-failed',
+  'recovery-required',
+] as const
+
+/** Every durable state an isolated-fork transaction can report. */
+export type ConversationForkRecoveryState = (typeof CONVERSATION_FORK_RECOVERY_STATES)[number]
 
 /** Durable binding summary recorded at the fork commit point. */
 export interface ConversationForkCommitSummary {

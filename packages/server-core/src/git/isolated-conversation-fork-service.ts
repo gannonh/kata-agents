@@ -44,6 +44,7 @@ import type {
   SessionCheckout,
   SessionCheckoutV2,
 } from '@kata-sh/shared/protocol'
+import { CONVERSATION_FORK_RECOVERY_STATES } from '@kata-sh/shared/protocol'
 import { isGitWorkspaceV1Enabled, isWorktreeV2Enabled } from '@kata-sh/shared/feature-flags'
 import type { StrictConversationForkCapability } from '@kata-sh/shared/agent/backend'
 import { runGit, runGitBuffer, splitNul } from './command-runner'
@@ -223,7 +224,7 @@ export interface ConversationForkDeps {
   hooks?: ConversationForkHooks
 }
 
-/** One in-flight fork transaction (preview → confirm; recovery in a later phase). */
+/** One in-flight fork transaction (preview → confirm → recover/cancel). */
 interface ForkTransaction {
   transactionId: string
   sessionId: string
@@ -351,10 +352,15 @@ export class IsolatedConversationForkService {
     // unresolved entry (in-progress AND failed/recovery-required): the journal
     // is the authoritative "how far did we get" signal, and a compensation
     // failure must surface as recovery-required, not as the stale in-memory
-    // step state the transaction had when the confirm threw.
-    const state =
-      entry && entry.status !== 'committed' && typeof entry.metadata?.state === 'string'
-        ? (entry.metadata.state as ConversationForkRecoveryState)
+    // step state the transaction had when the confirm threw. Journal-internal
+    // markers outside the protocol union (preview-cancelled, rolled-back) are
+    // never surfaced: a corrupted journal cannot leak a non-union wire value.
+    const durableState = entry?.metadata?.state
+    const state: ConversationForkRecoveryState =
+      entry && entry.status !== 'committed' && typeof durableState === 'string'
+        ? CONVERSATION_FORK_RECOVERY_STATES.includes(durableState as ConversationForkRecoveryState)
+          ? (durableState as ConversationForkRecoveryState)
+          : txn.state
         : txn.state
     return {
       active: true,
@@ -394,13 +400,37 @@ export class IsolatedConversationForkService {
         candidate.sessionIds.includes(sessionId),
     )
     if (!entry) return this.status(input)
-    if (entry.status !== 'in-progress' || entry.steps.length > 0 || entry.metadata?.state !== 'pending') {
-      return this.status(input)
-    }
-    this.deps.journal.updateMetadata(entry.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
-    this.deps.journal.recover(entry.journalId, 'preview-cancelled')
-    this.transactions.delete(sessionId)
-    return { active: false }
+    const gitCommonDir =
+      typeof entry.metadata?.gitCommonDir === 'string' ? entry.metadata.gitCommonDir : undefined
+    // Serialize with confirm: a confirm may be revalidating before its first
+    // journal step, during which the durable entry still looks like a pure
+    // pending preview. Without the lock, a cancel in that window would mark
+    // the entry preview-cancelled while the in-flight confirm durably commits
+    // a child the journal no longer records. Taking the same common-directory
+    // mutation lock makes the guard below effective: once confirm has started
+    // (or finished), its first journal step (or commit marker) is durable and
+    // the cancel is refused.
+    if (!gitCommonDir) return this.status(input)
+    return this.deps.mutationLock.withLock(gitCommonDir, async () => {
+      const latest = this.deps.journal.entries().find(
+        (candidate) =>
+          candidate.op === 'fork' &&
+          candidate.recordId === input.transactionId &&
+          candidate.sessionIds.includes(sessionId),
+      )
+      if (
+        !latest ||
+        latest.status !== 'in-progress' ||
+        latest.steps.length > 0 ||
+        latest.metadata?.state !== 'pending'
+      ) {
+        return this.status(input)
+      }
+      this.deps.journal.updateMetadata(latest.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
+      this.deps.journal.recover(latest.journalId, 'preview-cancelled')
+      this.transactions.delete(sessionId)
+      return { active: false }
+    })
   }
 
   // -------------------------------------------------------------------------
@@ -1015,6 +1045,24 @@ export class IsolatedConversationForkService {
     session: ForkSessionInfo,
     capability: ConversationForkProviderCapability,
   ): Promise<ConversationForkResult> {
+    // Durability guard under the mutation lock: cancel() serializes on this
+    // same lock, so by the time we hold it either a queued cancel already
+    // recovered the entry as `preview-cancelled` (or a new preview superseded
+    // it) — the journal is authoritative and a cancelled entry must never
+    // receive a child commit. If the entry is no longer in-progress, abort
+    // with the typed transaction-unknown error instead of mutating.
+    const durableEntry = this.deps.journal.entries().find(
+      (candidate) =>
+        candidate.op === 'fork' &&
+        candidate.journalId === txn.journalId &&
+        candidate.sessionIds.includes(txn.sessionId),
+    )
+    if (!durableEntry || durableEntry.status !== 'in-progress') {
+      throw new ConversationForkError(
+        'FORK_TRANSACTION_UNKNOWN',
+        'The fork transaction is no longer in progress (cancelled or superseded).',
+      )
+    }
     // Re-gather facts + revalidate every preview-bound fact under the registry
     // lock so a concurrent owner bind / lifecycle decision cannot interleave
     // between the revalidation and the capture.

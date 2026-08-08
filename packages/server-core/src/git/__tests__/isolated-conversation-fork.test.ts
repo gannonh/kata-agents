@@ -1453,6 +1453,97 @@ describe('IsolatedConversationForkService cancel', () => {
     expect(cancelledFresh.active).toBe(false)
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('failed')
   })
+
+  test('cancel that wins the mutation lock first aborts the queued confirm (no child on a cancelled entry)', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+    const p = await preview('isolated-worktree', 'cancel-wins-race')
+    expect(p.blocked).toBeUndefined()
+    if (p.blocked) return
+    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+
+    // Hold the mutation lock so both the cancel and the confirm queue behind
+    // it in FIFO order (cancel first). When released, cancel must cancel the
+    // pure pending preview, and the queued confirm must abort with a typed
+    // error instead of durably committing a child the journal no longer
+    // records.
+    let releaseGate!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    const gateHeld = harness.svc.mutationLock.withLock(gitCommonDir, async () => {
+      await gate
+    })
+    const cancelP = harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    const confirmP = harness.svc.fork
+      .confirm({
+        sessionId: 'session-1',
+        strategy: 'isolated-worktree',
+        transactionId: p.transactionId,
+        previewFingerprint: p.previewFingerprint,
+        worktreeNameSuffix: 'cancel-wins-race',
+      })
+      .then(
+        (result) => ({ result }),
+        (error) => ({ error }),
+      )
+    releaseGate()
+    await gateHeld
+    const [cancelResult, confirmOutcome] = await Promise.all([cancelP, confirmP])
+
+    expect(cancelResult).toEqual({ active: false })
+    expect('error' in confirmOutcome).toBe(true)
+    if ('error' in confirmOutcome) {
+      expect(confirmOutcome.error).toBeInstanceOf(ConversationForkError)
+      expect((confirmOutcome.error as ConversationForkError).code).toBe('FORK_TRANSACTION_UNKNOWN')
+    }
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+    expect(entry?.status).toBe('recovered')
+    expect(entry?.commitMarker).toBe('preview-cancelled')
+    expect(harness.childCalls).toHaveLength(0)
+  })
+
+  test('confirm that wins the mutation lock first makes the queued cancel refuse (entry stays committed)', async () => {
+    currentSession()
+    writeFile(harness.repo, 'tracked.txt', 'base\n')
+    await git(harness.repo, ['add', 'tracked.txt'])
+    await git(harness.repo, ['commit', '-m', 'base'])
+    const p = await preview('isolated-worktree', 'confirm-wins-race')
+    expect(p.blocked).toBeUndefined()
+    if (p.blocked) return
+    const gitCommonDir = (await git(harness.repo, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+
+    // FIFO order: confirm queues first, cancel second. Confirm commits
+    // durably; the queued cancel then sees the first journal step and refuses
+    // instead of cancelling a committed transaction.
+    let releaseGate!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    const gateHeld = harness.svc.mutationLock.withLock(gitCommonDir, async () => {
+      await gate
+    })
+    const confirmP = harness.svc.fork.confirm({
+      sessionId: 'session-1',
+      strategy: 'isolated-worktree',
+      transactionId: p.transactionId,
+      previewFingerprint: p.previewFingerprint,
+      worktreeNameSuffix: 'confirm-wins-race',
+    })
+    const cancelP = harness.svc.fork.cancel({ sessionId: 'session-1', transactionId: p.transactionId })
+    releaseGate()
+    await gateHeld
+    const [confirmResult, cancelResult] = await Promise.all([confirmP, cancelP])
+
+    expect(confirmResult.outcome).toBe('committed')
+    expect(cancelResult).toEqual({ active: false })
+    const entry = forkJournalEntries().find((e) => e.recordId === p.transactionId)
+    expect(entry?.status).toBe('committed')
+    expect(entry?.commitMarker).toBe(p.transactionId)
+    expect(harness.childCalls).toHaveLength(1)
+  })
 })
 
 describe('IsolatedConversationForkService recover', () => {

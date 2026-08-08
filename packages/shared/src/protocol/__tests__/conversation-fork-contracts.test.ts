@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   CONVERSATION_FORK_BLOCKER_CODES,
+  CONVERSATION_FORK_RECOVERY_STATES,
   CONVERSATION_FORK_STRATEGIES,
   WORKTREE_FORK_BLOCKED_CODE,
   WORKTREE_FORK_ERROR_CODE,
@@ -270,21 +271,8 @@ describe('Conversation fork protocol contracts', () => {
   })
 
   it('covers the durable transaction steps in the recovery state union', () => {
-    const states: readonly ConversationForkRecoveryState[] = [
-      'pending',
-      'source-leased',
-      'seed-captured',
-      'target-reserved',
-      'target-materialized',
-      'target-verified',
-      'binding-committed',
-      'published',
-      'establishing',
-      'established',
-      'restore-failed',
-      'cleanup-failed',
-      'recovery-required',
-    ]
+    // The tuple is the single source of truth for the union.
+    const states: readonly ConversationForkRecoveryState[] = CONVERSATION_FORK_RECOVERY_STATES
     // Pin the length so adding a state is a deliberate contract change.
     expect(states).toHaveLength(13)
     for (const state of states) {
