@@ -246,7 +246,7 @@ describe('SessionManager isolated fork child creation', () => {
     }
   })
 
-  it('deleteSession cancels a pending preview, blocks an in-progress confirm, and allows recovery-required', async () => {
+  it('deleteSession cancels a pending preview and blocks an in-progress confirm (recovery-required stays deletable by the state guard)', async () => {
     injectSession('source-3')
     await persistSourceWithMessages('source-3')
     armStrictAdapter('source-3')

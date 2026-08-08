@@ -3185,7 +3185,10 @@ export class SessionManager implements ISessionManager {
     // Pending isolated-fork children instead bind the TARGET checkout, mirror
     // the durable pendingFork intent onto the runtime session (Task 4 consumes
     // it at first Send), and fence the target path with a session lease.
-    if (forkPendingIntent && forkPending) {
+    // Guarded on validatedBranch like the stored block: the internal
+    // pendingFork option must never apply to a payload that was not a real
+    // branch/fork (the sessions:create RPC boundary is untyped).
+    if (validatedBranch && forkPendingIntent && forkPending) {
       const targetCheckout = forkPending.checkout
       managed.checkout = targetCheckout
       managed.workingDirectory = targetCheckout.checkoutPath
