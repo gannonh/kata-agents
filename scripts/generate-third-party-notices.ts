@@ -465,11 +465,47 @@ const render = (): string => {
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`
 }
 
+/**
+ * Normalize line endings before comparing.
+ *
+ * This is not the cause of any observed failure: the generated file embeds
+ * license texts that already contain CRLF, so git's safe-autocrlf leaves it
+ * untouched on a Windows checkout. It is guarding the latent case — if those
+ * CRLF-bearing licenses ever leave the graph, the file becomes pure LF, and a
+ * Windows checkout with `core.autocrlf=true` would then rewrite it to CRLF and
+ * fail this check for a difference that does not exist in the repository.
+ */
+export const normalizeLineEndings = (text: string): string => text.replaceAll('\r\n', '\n')
+
+/**
+ * Describe the first real difference, so a failure is actionable from the CI
+ * log instead of only reporting that the file is stale.
+ */
+export const describeFirstDifference = (expected: string, actual: string): string => {
+  const expectedLines = expected.split('\n')
+  const actualLines = actual.split('\n')
+  for (let i = 0; i < Math.max(expectedLines.length, actualLines.length); i += 1) {
+    if (expectedLines[i] === actualLines[i]) continue
+    return [
+      `First difference at line ${i + 1}:`,
+      `  committed: ${JSON.stringify(actualLines[i] ?? '<end of file>')}`,
+      `  generated: ${JSON.stringify(expectedLines[i] ?? '<end of file>')}`,
+    ].join('\n')
+  }
+  return 'Files differ only in trailing content.'
+}
+
 const main = (): void => {
   const content = render()
   if (process.argv.includes('--check')) {
-    if (!existsSync(OUTPUT) || readFileSync(OUTPUT, 'utf8') !== content) {
+    if (!existsSync(OUTPUT)) {
+      console.error(`${OUTPUT} is missing. Run: bun run licenses:generate`)
+      process.exit(1)
+    }
+    const committed = readFileSync(OUTPUT, 'utf8')
+    if (normalizeLineEndings(committed) !== normalizeLineEndings(content)) {
       console.error(`${OUTPUT} is stale. Run: bun run licenses:generate`)
+      console.error(describeFirstDifference(content, committed))
       process.exit(1)
     }
     console.log('Third-party notices are up to date.')
