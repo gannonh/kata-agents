@@ -54,6 +54,10 @@ apps/electron/src/
 
 The renderer communicates with the main process over a typed IPC bridge. The main process spawns agent subprocesses and routes WebSocket connections for remote-server mode.
 
+### Development runtime isolation
+
+Source development launches default to `~/.kata-agents-dev` and bypass Electron's production single-instance lock. Packaged development builds use the same isolated backend/config root plus an Electron `userData` scope beneath it, so they retain their own single-instance lock and warm deep-link forwarding while coexisting with an installed Nightly or stable build. An explicit `KATA_CONFIG_DIR` remains authoritative for E2E and numbered worktree launches; startup protocol arguments are queued for cold-start routing.
+
 ## Remote / headless server
 
 The server (`packages/server/`) exposes a WebSocket RPC API (default port 9100). Desktop app and CLI both connect as thin clients. TLS is supported via `KATA_RPC_TLS_CERT` / `KATA_RPC_TLS_KEY`.

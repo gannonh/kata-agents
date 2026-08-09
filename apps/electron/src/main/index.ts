@@ -1,3 +1,8 @@
+// Configure development isolation before any shared module captures CONFIG_DIR.
+// This module has no shared-package dependencies, so its side effect runs first
+// in the bundled main process.
+import { isDevelopmentRuntime } from './runtime-isolation'
+
 // Load user's shell environment first (before other imports that may use env)
 // This ensures tools like Homebrew, nvm, etc. are available to the agent
 import { loadShellEnv } from './shell-env'
@@ -120,6 +125,7 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { configureUpdates, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook, stopUpdates } from './auto-update'
 import type { EventSink } from '@kata-sh/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@kata-sh/server-core/services'
+import { findDeepLinkArg, shouldAcquireSingleInstanceLock } from './single-instance-policy'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -291,30 +297,48 @@ app.on('open-url', (event, url) => {
   }
 })
 
-// Handle deeplink on Windows/Linux (single instance check)
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-} else {
-  app.on('second-instance', (_event, commandLine, _workingDirectory) => {
-    // Someone tried to run a second instance, we should focus our window.
-    // On Windows/Linux, the deeplink is in commandLine
-    const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
-    if (url && windowManager) {
-      mainLog.info('Received deeplink from second instance:', url)
-      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-        mainLog.error('Failed to handle deep link:', err)
-      })
-    } else if (windowManager) {
-      // No deep link - just focus the first window
-      const windows = windowManager.getAllWindows()
-      if (windows.length > 0) {
-        const win = windows[0].window
-        if (win.isMinimized()) win.restore()
-        win.focus()
+// Windows/Linux protocol launches include the URL in the new process argv.
+// Queue it even for development runtimes, which intentionally bypass the
+// Electron lock, so cold-start deep links are not lost.
+const startupDeepLink = findDeepLinkArg(process.argv, DEEPLINK_SCHEME)
+if (startupDeepLink) {
+  pendingDeepLink = startupDeepLink
+}
+
+// Handle deeplink on Windows/Linux (single instance check). Source development
+// bypasses the lock so E2E/dev launches can coexist with an installed app.
+// Packaged development retains a lock in its isolated userData scope, while
+// packaged production/nightly builds retain their normal lock and forwarding.
+if (shouldAcquireSingleInstanceLock(app.isPackaged, isDevelopmentRuntime)) {
+  const gotTheLock = app.requestSingleInstanceLock()
+  if (!gotTheLock) {
+    app.quit()
+  } else {
+    app.on('second-instance', (_event, commandLine, _workingDirectory) => {
+      // Someone tried to run a second instance, we should focus our window.
+      // On Windows/Linux, the deeplink is in commandLine
+      const url = findDeepLinkArg(commandLine, DEEPLINK_SCHEME)
+      if (url) {
+        if (windowManager) {
+          mainLog.info('Received deeplink from second instance:', url)
+          handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
+            mainLog.error('Failed to handle deep link:', err)
+          })
+        } else {
+          // App not ready - process it after initialization.
+          pendingDeepLink = url
+        }
+      } else if (windowManager) {
+        // No deep link - just focus the first window
+        const windows = windowManager.getAllWindows()
+        if (windows.length > 0) {
+          const win = windows[0].window
+          if (win.isMinimized()) win.restore()
+          win.focus()
+        }
       }
-    }
-  })
+    })
+  }
 }
 
 // Helper to create initial windows on startup

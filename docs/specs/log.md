@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-09
+
+* **PR #51 review hardening for #34**: documented the implemented coexistence contract: source development uses an isolated config root and bypasses the production lock, while packaged development uses isolated backend and Electron user-data scopes with retained warm/cold deep-link handling.
+
 ## 2026-08-08
 
 * **PR #50 review hardening**: acceptance evidence now covers restart fencing, exact provider execution proofs, missing parent anchors, source connection inheritance, pre-persist concurrency rejection, durable renderer retry recovery, and protected E2E onboarding credentials for [#43](https://github.com/gannonh/kata-agents/issues/43).
