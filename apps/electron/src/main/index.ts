@@ -120,6 +120,7 @@ import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeC
 import { configureUpdates, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook, stopUpdates } from './auto-update'
 import type { EventSink } from '@kata-sh/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@kata-sh/server-core/services'
+import { shouldAcquireSingleInstanceLock } from './single-instance-policy'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -291,30 +292,35 @@ app.on('open-url', (event, url) => {
   }
 })
 
-// Handle deeplink on Windows/Linux (single instance check)
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-} else {
-  app.on('second-instance', (_event, commandLine, _workingDirectory) => {
-    // Someone tried to run a second instance, we should focus our window.
-    // On Windows/Linux, the deeplink is in commandLine
-    const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
-    if (url && windowManager) {
-      mainLog.info('Received deeplink from second instance:', url)
-      handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
-        mainLog.error('Failed to handle deep link:', err)
-      })
-    } else if (windowManager) {
-      // No deep link - just focus the first window
-      const windows = windowManager.getAllWindows()
-      if (windows.length > 0) {
-        const win = windows[0].window
-        if (win.isMinimized()) win.restore()
-        win.focus()
+// Handle deeplink on Windows/Linux (single instance check). Development runtimes
+// intentionally skip the lock so source E2E/dev launches can coexist with an
+// installed app. Packaged production/nightly builds retain the existing lock and
+// second-instance deep-link/focus behavior.
+if (shouldAcquireSingleInstanceLock(app.isPackaged, process.env.KATA_DEV_RUNTIME === '1')) {
+  const gotTheLock = app.requestSingleInstanceLock()
+  if (!gotTheLock) {
+    app.quit()
+  } else {
+    app.on('second-instance', (_event, commandLine, _workingDirectory) => {
+      // Someone tried to run a second instance, we should focus our window.
+      // On Windows/Linux, the deeplink is in commandLine
+      const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
+      if (url && windowManager) {
+        mainLog.info('Received deeplink from second instance:', url)
+        handleDeepLink(url, windowManager, moduleSink ?? undefined, moduleClientResolver ?? undefined).catch(err => {
+          mainLog.error('Failed to handle deep link:', err)
+        })
+      } else if (windowManager) {
+        // No deep link - just focus the first window
+        const windows = windowManager.getAllWindows()
+        if (windows.length > 0) {
+          const win = windows[0].window
+          if (win.isMinimized()) win.restore()
+          win.focus()
+        }
       }
-    }
-  })
+    })
+  }
 }
 
 // Helper to create initial windows on startup
