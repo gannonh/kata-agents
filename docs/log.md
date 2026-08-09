@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-09
+
+* **Development/runtime coexistence review hardening (#34)**: source development now defaults to an isolated `~/.kata-agents-dev` config root and bypasses the production Electron lock; packaged development retains an isolated Electron lock and queues cold-start deep links. Updated the architecture overview, release notes, and related OKF logs.
+
 ## 2026-08-08
 
 * **PR #50 review hardening**: tightened isolated-fork safety with restart fence rehydration, newest journal-attempt resolution, source LLM identity inheritance, missing-anchor blockers, complete destination execution-proof validation, pre-persist concurrent-send rejection, durable renderer retry reconstruction, optional startup reconciliation guards, and E2E credential/onboarding protections. Updated [adrs/2026-08-08-isolated-conversation-forks.md](adrs/2026-08-08-isolated-conversation-forks.md).

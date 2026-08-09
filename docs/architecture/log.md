@@ -1,5 +1,9 @@
 # Architecture Update Log
 
+## 2026-08-09
+
+* **Update**: [system-overview.md](system-overview.md) — documented isolated backend/config state for source and packaged development runtimes, the packaged-dev Electron lock scope, and cold/warm deep-link routing for #34 review hardening.
+
 ## 2026-08-08
 
 * **Update**: [2026-08-08-isolated-conversation-forks.md](../adrs/2026-08-08-isolated-conversation-forks.md) — PR #50 review hardening records restart fence rehydration, strict execution-proof validation, source backend identity inheritance, and pre-persist first-Send concurrency fencing.

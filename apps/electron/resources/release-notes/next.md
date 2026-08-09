@@ -11,7 +11,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Isolated conversation forks** — The Branch action now offers **New isolated worktree** next to the default **Shared worktree** for sessions whose provider advertises a strict cross-CWD native fork: the fork previews the source conversation head, branch, HEAD, owners, and destination identity, takes an editable name (`kata-agent/<name>` branch), and commits a child session that copies the conversation through the current head into its own managed worktree and runtime while the source stays untouched. Provider identity stays **Pending** until the child's first message establishes the native fork; a failed establishment leaves one persisted message in a visible retryable state and never duplicates it ([#43](https://github.com/gannonh/kata-agents/issues/43)).
 ## Improvements
 
-- **Run development and packaged builds together** — Source development and packaged development-runtime launches no longer claim the production single-instance lock, so they can coexist with an installed Nightly or stable build; packaged production/Nightly behavior and deep-link focus handling remain unchanged ([#34](https://github.com/gannonh/kata-agents/issues/34)).
+- **Run development and packaged builds together** — Source development launches use an isolated `~/.kata-agents-dev` backend/config root and bypass the production single-instance lock, while packaged development builds use that isolated root and their own Electron instance lock; both can coexist with an installed Nightly or stable build, and packaged-development deep links are handled on cold and warm launches ([#34](https://github.com/gannonh/kata-agents/issues/34)).
 
 ## Bug Fixes
 
