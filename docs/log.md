@@ -2,6 +2,7 @@
 
 ## 2026-08-09
 
+* **Automated release-notes promotion**: `next.md` is now promoted to `<version>.md` by the release workflow instead of by hand — bundled at build time for both channels and committed with the reset by the stable `finalize` job. Updated [operations/release.md](operations/release.md), the release runbook skill, and `apps/electron/resources/AGENTS.md`.
 * **Development/runtime coexistence review hardening (#34)**: source development now defaults to an isolated `~/.kata-agents-dev` config root and bypasses the production Electron lock; packaged development retains an isolated Electron lock and queues cold-start deep links. Updated the architecture overview, release notes, and related OKF logs.
 
 ## 2026-08-08

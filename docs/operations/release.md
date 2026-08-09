@@ -1,9 +1,9 @@
 ---
 type: Operations
 title: Release Pipeline
-description: Nightly/stable desktop release pipeline for Kata Agents — channel model, GitHub Releases auto-update shape, dry-run usage, and required repository secrets.
-tags: [release, github-actions, electron-updater, nightly, stable, signing, notarization]
-timestamp: 2026-06-19T00:00:00Z
+description: Nightly/stable desktop release pipeline for Kata Agents — channel model, GitHub Releases auto-update shape, automated release-notes promotion, dry-run usage, and required repository secrets.
+tags: [release, github-actions, electron-updater, nightly, stable, signing, notarization, release-notes]
+timestamp: 2026-08-09T00:00:00Z
 ---
 
 # Release Pipeline
@@ -63,14 +63,15 @@ input is given and no nightly tag exists, the job fails fast.
 ## Jobs
 
 1. `release_meta` — resolves channel/version/tag/name/is_prerelease/make_latest/dry_run.
-   For **stable** it also fails fast (on dry run *and* real release) if the
-   versioned release notes file `apps/electron/resources/release-notes/<version>.md`
-   is missing — promote `next.md` to `<version>.md` before releasing (see the
-   release runbook). Nightlies are exempt (they never promote `next.md`).
+   For **stable** it also fails fast (on dry run *and* real release) when there
+   are no release notes to ship at all — `promote-release-notes.ts --check`
+   requires either pending bullets in `next.md` or an existing
+   `apps/electron/resources/release-notes/<version>.md`. Nightlies are exempt.
 2. `signing_gate` (macOS) — fails fast if any signing secret is missing.
 3. `build` — matrix: macOS arm64 + x64 **signed + notarized** (primary gate);
    Windows + Linux **unsigned best-effort** (`continue-on-error`). Each leg
-   aligns versions, generates the per-channel config, builds via
+   aligns versions, promotes the pending release notes (see Release notes),
+   generates the per-channel config, builds via
    `apps/electron/scripts/build-{dmg.sh,linux.sh,win.ps1}`, and uploads
    dmg/zip/exe/AppImage/blockmap/`*.yml`.
 4. `release` — `permissions: contents: write`; skipped when `dry_run=true`;
@@ -78,12 +79,46 @@ input is given and no nightly tag exists, the job fails fast.
 5. `finalize` — **stable only**, non-dry-run. Declares `permissions:
    contents: write` and checks out `main` with the built-in `GITHUB_TOKEN`,
    runs `scripts/release/update-release-package-versions.ts <version>`,
-   refreshes `bun.lock`, and commits `chore(release): prepare v<version>` back
-   to `main` as `github-actions[bot]`. This is what makes the next nightly
+   promotes and resets the release notes
+   (`promote-release-notes.ts --version <version> --reset`), refreshes
+   `bun.lock`, and commits `chore(release): prepare v<version>` back to `main`
+   as `github-actions[bot]` (rebasing onto `origin/main` and retrying up to 3
+   times if `main` moved during the build). This is what makes the next nightly
    resolve to `X.Y.(Z+1)-nightly.*` instead of reusing the just-released stable
    version. The push targets the unprotected `main` directly; no GitHub App is
    involved. Skipped for nightly and dry runs.
 6. `publish_cli` — **disabled** (`if: false`) in Project B; enabled in Project C.
+
+## Release notes
+
+The in-app What's New overlay reads strict `X.Y.Z.md` files from
+`apps/electron/resources/release-notes/` (non-versioned files, including
+`next.md`, are ignored — see `packages/shared/src/release-notes/index.ts`).
+Promotion from `next.md` to `<version>.md` is fully automated by
+`scripts/release/promote-release-notes.ts`; **no manual promotion commit is
+required before dispatching a release.**
+
+| Where | Invocation | Effect |
+| --- | --- | --- |
+| `release_meta` (stable) | `--check` | Fails the release when there is nothing to ship. Writes nothing. |
+| `build` (both channels) | `--version <resolved>` | Writes `<core>.md` into the CI checkout only, so it is bundled into the artifact. Never committed. |
+| `finalize` (stable) | `--version <version> --reset` | Writes `<version>.md` and empties `next.md` on `main`, inside the `chore(release): prepare` commit. |
+
+The target filename is the **stable core** of the release version, so
+`0.10.11-nightly.20260622.40` and `0.10.11` both promote to `0.10.11.md`.
+Nightly users therefore see the pending notes for the upcoming version instead
+of lagging a stable cycle, and because the version string is identical, the
+overlay (which compares the latest note version against
+`whats-new-last-seen-version`) does not re-prompt when stable ships.
+
+Build-time promotion is deliberately **not** committed: if a cycle that ran
+nightlies as `0.10.11` eventually ships as `0.11.0`, no speculative `0.10.11.md`
+is left on `main` to surface as a ghost version. The script no-ops when
+`next.md` has no bullets, and merges (deduping identical bullets, preserving a
+hand-written `# v<version> — summary` title) when `<version>.md` already exists.
+
+PRs still append their user-visible bullets to `next.md` — that part is manual
+by design.
 
 ## Dry run
 

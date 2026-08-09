@@ -33,29 +33,29 @@ You do not have to run all four. A dry-run failure is expected to be fixed befor
 
 ---
 
-## Stable release notes (required, not automated)
+## Release notes (automated)
 
 The in-app What's New overlay reads versioned files at
 `apps/electron/resources/release-notes/<version>.md`. PRs accumulate pending
-bullets in `next.md`. **Stable dispatches are not auto-generated from
-`next.md`** — the `release_meta` job fails fast if `<version>.md` is missing:
+bullets in `next.md`, and the workflow promotes them automatically —
+**no manual promotion commit is needed before dispatching.**
 
-> Stable release <version> is missing release notes at
-> apps/electron/resources/release-notes/<version>.md. Promote next.md to
-> <version>.md (see docs/operations/release.md) before releasing.
+- `build` (both channels) writes `<core-version>.md` into the CI checkout only,
+  so nightly bundles the pending notes for the upcoming version. Nothing is
+  committed, so a cycle that later ships as a minor bump leaves no ghost file.
+- `finalize` (stable, non-dry-run) writes `<version>.md` and resets `next.md`
+  on `main` inside the `chore(release): prepare v<version>` commit.
+- `release_meta` (stable) fails fast only when there is nothing to ship:
+  no bullets in `next.md` *and* no existing `<version>.md`.
 
-Before dispatching any **stable** release (dry run or real), promote the notes:
+Nightly and stable of the same core version produce the identical filename
+(`0.10.11-nightly.20260622.40` → `0.10.11.md`), so users who saw the notes on
+nightly are not re-prompted when stable ships.
 
-1. Copy `apps/electron/resources/release-notes/next.md` to
-   `apps/electron/resources/release-notes/<version>.md` with a
-   `# v<version> — <summary>` header (match the style of existing versioned
-   files like `0.10.6.md` / `0.10.7.md`).
-2. Reset `next.md` to the empty pending template (keep the header comment and
-   the empty Features / Improvements / Bug Fixes / Breaking Changes sections).
-3. Commit as `docs(release): promote next.md to <version>.md` and push to `main`.
-
-Nightlies are exempt — they never promote `next.md` and bundle the latest
-existing versioned file (so nightly What's New lags one stable cycle by design).
+Optional: to give a stable release a human summary instead of the bare
+`# v<version>` header, pre-create `<version>.md` with a
+`# v<version> — <summary>` title — promotion preserves that title and merges the
+pending bullets under it.
 
 ---
 
@@ -79,20 +79,20 @@ gh secret list --repo gannonh/kata-agents
 #           APPLE_TEAM_ID, APPLE_SIGNING_IDENTITY
 ```
 
-### Stable-only: promote release notes
+### Stable-only: confirm there are notes to ship
 
-For **stable** dispatches, also verify the versioned notes file exists before
-dispatching. The workflow gates this in `release_meta` and fails before any
-build work:
+Promotion is automatic, but a stable release still fails in `release_meta` when
+there is nothing to promote. Verify locally with the same check the workflow
+runs:
 
 ```bash
 version=0.10.7  # the version you are about to release
-notes="apps/electron/resources/release-notes/${version}.md"
-[[ -f "$notes" ]] && echo "OK: $notes" || echo "MISSING: promote next.md to $notes first (see the Stable release notes section above)"
+bun run scripts/release/promote-release-notes.ts --version "$version" --check
 ```
 
-If missing, promote `next.md` → `<version>.md` and push before dispatching.
-Nightly dispatches skip this check entirely.
+If it fails, the pending changes were never written up — append the
+user-visible bullets to `apps/electron/resources/release-notes/next.md` and push
+before dispatching. Nightly dispatches skip this check entirely.
 
 ---
 
@@ -203,7 +203,8 @@ gh release view --repo gannonh/kata-agents <tag>
 | `Release package manifest not found: D:\D:\...` | Windows path doubling from `.pathname` | Use `fileURLToPath(import.meta.url)` instead of `new URL(import.meta.url).pathname` |
 | `signing_gate` fails | Missing Apple secrets | Run `gh secret list --repo gannonh/kata-agents` and add missing secrets from `.env` |
 | macOS build fails after 10+ minutes | Notarization timeout or Apple service issue | Retry; notarization can be rate-limited |
-| `Stable release <version> is missing release notes at .../<version>.md` | Stable dispatch with no versioned What's New file | Promote `next.md` to `apps/electron/resources/release-notes/<version>.md`, reset `next.md`, commit `docs(release): promote next.md to <version>.md`, push to `main`, then re-dispatch |
+| `Stable release <version> has no release notes` | `next.md` has no bullets and no `<version>.md` exists | Append the user-visible changes to `apps/electron/resources/release-notes/next.md`, push to `main`, then re-dispatch. Promotion itself is automatic. |
+| `Could not push the post-release commit to main after 3 attempts` | `finalize` lost 3 rebase/push races, or `main` is protected | Re-run the `finalize` job; if it keeps failing, apply the version bump + notes promotion manually with `promote-release-notes.ts --version <v> --reset` |
 
 ---
 
@@ -219,9 +220,7 @@ All values are in `/Volumes/EVO/dev/kata-agents/.env`.
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization |
 | `APPLE_TEAM_ID` | Apple Developer team ID (`ZBZKKWF95G`) |
 | `APPLE_SIGNING_IDENTITY` | Developer ID Application identity |
-| `RELEASE_APP_ID` | GitHub App ID for the `finalize` job (post-stable version bump to `main`) |
-| `RELEASE_APP_PRIVATE_KEY` | Private key (`.pem`) for the `finalize` GitHub App |
-| `GITHUB_TOKEN` | Auto-provided by Actions — no setup needed |
+| `GITHUB_TOKEN` | Auto-provided by Actions — no setup needed. Also used by `finalize` to push the post-stable version bump + notes promotion to `main`, so repo Workflow permissions must be **Read and write** |
 
 To re-set a secret from `.env`:
 ```bash
@@ -235,8 +234,10 @@ gh secret set SECRET_NAME --repo gannonh/kata-agents --body "value"
 1. Verify the release page looks correct at https://github.com/gannonh/kata-agents/releases
 2. **Stable releases**: the `finalize` job automatically bumps
    `apps/electron/package.json` + `package.json` on `main` to the shipped
-   version and commits `chore(release): prepare v<version>`, so the next nightly
-   resolves to `X.Y.(Z+1)-nightly.*`. No manual bump needed. If `finalize` skips
-   or fails (missing `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`), bump manually
-   as a fallback and fix the secrets before the next stable.
-3. Update `docs/specs/index.md` and `docs/log.md` if this release closes a project milestone
+   version, promotes `next.md` → `<version>.md`, resets `next.md`, and commits
+   `chore(release): prepare v<version>`, so the next nightly resolves to
+   `X.Y.(Z+1)-nightly.*`. No manual bump or promotion needed. If `finalize`
+   fails, apply both manually as a fallback and confirm the commit landed on
+   `main` before the next stable.
+3. Confirm the What's New overlay shows the new version in the shipped build.
+4. Update `docs/specs/index.md` and `docs/log.md` if this release closes a project milestone

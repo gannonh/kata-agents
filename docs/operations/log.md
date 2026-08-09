@@ -9,6 +9,16 @@
   channel model, GitHub Releases auto-update shape, dry-run usage, and the
   required-secrets table (Project B build).
 
+## 2026-08-09
+
+* **Updated**: [release.md](release.md) — release-notes promotion is now
+  automated by `scripts/release/promote-release-notes.ts`. Added the
+  **Release notes** section covering the three call sites (`release_meta
+  --check`, build-time bundling for both channels, `finalize --reset` for
+  stable), the stable-core filename rule that stops nightly What's New from
+  lagging a cycle, and the build-time-only promotion that prevents ghost
+  version files. Also documented the `finalize` rebase-and-retry push.
+
 ## 2026-06-21
 
 * **Updated**: [release.md](release.md) — documented the scheduled nightly

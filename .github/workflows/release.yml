@@ -202,20 +202,16 @@ jobs:
             echo "| **dry_run** | \`$dry_run\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Stable releases must ship versioned What's New notes. Nightlies don't
-      # (they don't promote next.md). This gate runs in release_meta so it fails
-      # fast on both dry runs and real releases, before any build work.
+      # Stable releases must ship What's New notes. The workflow promotes
+      # next.md itself (see the build and finalize jobs), so this only asserts
+      # that there is something to promote: pending bullets, or an already
+      # promoted <version>.md. Runs in release_meta so it fails fast on both dry
+      # runs and real releases, before any build work. Nightlies are exempt.
       - name: Require stable release notes
         if: steps.meta.outputs.channel == 'stable'
         run: |
-          set -euo pipefail
-          version="${{ steps.meta.outputs.version }}"
-          notes="apps/electron/resources/release-notes/${version}.md"
-          if [[ ! -f "$notes" ]]; then
-            echo "::error::Stable release ${version} is missing release notes at ${notes}. Promote next.md to ${version}.md (see docs/operations/release.md) before releasing." >&2
-            exit 1
-          fi
-          echo "Found release notes: $notes"
+          bun run scripts/release/promote-release-notes.ts \
+            --version "${{ steps.meta.outputs.version }}" --check
 
       - name: Verify legal source files
         run: bun run verify:legal
@@ -287,6 +283,16 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
         run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION"
+
+      # Bundle the pending What's New entries as <core-version>.md. This is a
+      # build-time promotion only: it is never committed, so a cycle that later
+      # ships as a minor bump leaves no speculative version file on main. The
+      # stable promotion is committed separately by the finalize job.
+      - name: Promote pending release notes
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/promote-release-notes.ts --version "$RELEASE_VERSION"
 
       - name: Generate electron-builder release config
         shell: bash
@@ -426,27 +432,45 @@ jobs:
           RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
         run: bun run scripts/release/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
 
+      # Durable counterpart to the build-time promotion: writes <version>.md and
+      # empties next.md on main so the repo matches what shipped.
+      - name: Promote and reset release notes
+        env:
+          RELEASE_VERSION: ${{ needs.release_meta.outputs.version }}
+        run: bun run scripts/release/promote-release-notes.ts --version "$RELEASE_VERSION" --reset
+
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
         run: bun install --lockfile-only --ignore-scripts
 
       - name: Commit and push version bump
-        if: steps.update_versions.outputs.changed == 'true'
         env:
           RELEASE_TAG: ${{ needs.release_meta.outputs.tag }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- package.json apps/electron/package.json apps/cli/package.json bun.lock; then
-            echo "No version changes to commit."
+          paths=(package.json apps/electron/package.json apps/cli/package.json bun.lock apps/electron/resources/release-notes)
+          if git diff --quiet -- "${paths[@]}"; then
+            echo "No version or release-note changes to commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add package.json apps/electron/package.json apps/cli/package.json bun.lock
+          git add "${paths[@]}"
           git commit -m "chore(release): prepare $RELEASE_TAG"
-          git push origin HEAD:main
+
+          # main can move while the release builds; rebase onto it before pushing.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt); rebasing onto origin/main and retrying."
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "::error::Could not push the post-release commit to main after 3 attempts." >&2
+          exit 1
 
   # ── npm CLI publish — publishes @kata-sh/agents-cli to npm ──────────────────
   # Publishes the renamed terminal client (@kata-sh/agents-cli / bin kata-agents-cli)
