@@ -1,5 +1,9 @@
 # ADR Update Log
 
+## 2026-08-11
+
+* **Legacy worktree-registry rewrite recovery**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) now records the validated recovery path for V2 records rewritten beneath a V1 wrapper by an older process, including completed-lineage and all-V2 recognition, atomic V2 restoration, original backup/timestamp preservation, refreshed evidence, and fail-closed mixed or malformed-record handling.
+
 ## 2026-08-08
 
 * **Isolated conversation forks ADR hardened**: [2026-08-08-isolated-conversation-forks.md](2026-08-08-isolated-conversation-forks.md) records PR #50 review invariants for restart fence rehydration, authoritative journal-attempt lookup, source backend identity inheritance, missing-anchor blocking, complete execution proofs, and pre-persist first-Send serialization.

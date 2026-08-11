@@ -80,6 +80,116 @@ describe('WorktreeRegistry', () => {
     expect(registry.list()).toHaveLength(1)
   })
 
+  test('recovers a V2 registry rewritten with a V1 wrapper by an older process', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    const registry = new WorktreeRegistry(path)
+    registry.load()
+
+    const evidencePaths = getWorktreeRegistryEvidencePaths(path)
+    const originalBackup = readFileSync(evidencePaths.backupPath)
+    const originalCompletedAt = registry.getUpgradeEvidence()!.completedAt
+    const downgraded = JSON.parse(readFileSync(path, 'utf8')) as {
+      version: number
+      records: ManagedWorktreeRecordV2[]
+    }
+    downgraded.version = 1
+    downgraded.records[0]!.state = 'missing'
+    writeFileSync(path, JSON.stringify(downgraded, null, 2) + '\n')
+
+    const recovered = new WorktreeRegistry(path)
+    expect(recovered.get('repo-aabbccdd')?.state).toBe('missing')
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(2)
+    expect(readFileSync(evidencePaths.backupPath)).toEqual(originalBackup)
+    expect(recovered.getUpgradeEvidence()).toMatchObject({
+      completedAt: originalCompletedAt,
+      registryHash: createHash('sha256').update(readFileSync(path)).digest('hex'),
+    })
+  })
+
+  test('fails closed on ambiguous V1 wrappers containing V2 records', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    new WorktreeRegistry(path).load()
+
+    const mixed = JSON.parse(readFileSync(path, 'utf8'))
+    mixed.version = 1
+    mixed.records.push(legacyRecord(root, 'repo-eeff0011'))
+    const mixedBytes = JSON.stringify(mixed, null, 2) + '\n'
+    writeFileSync(path, mixedBytes)
+    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(mixedBytes)
+
+    mixed.records.pop()
+    const noEvidenceBytes = JSON.stringify(mixed, null, 2) + '\n'
+    writeFileSync(path, noEvidenceBytes)
+    const evidencePaths = getWorktreeRegistryEvidencePaths(path)
+    rmSync(evidencePaths.backupPath)
+    rmSync(evidencePaths.markerPath)
+    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(noEvidenceBytes)
+  })
+
+  test('fails closed when legacy rewrite evidence is not bound to its source backup', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    new WorktreeRegistry(path).load()
+
+    const evidencePaths = getWorktreeRegistryEvidencePaths(path)
+    const downgraded = JSON.parse(readFileSync(path, 'utf8'))
+    downgraded.version = 1
+    const downgradedBytes = JSON.stringify(downgraded, null, 2) + '\n'
+    writeFileSync(path, downgradedBytes)
+    const evidence = JSON.parse(readFileSync(evidencePaths.markerPath, 'utf8'))
+    evidence.sourceHash = '0'.repeat(64)
+    writeFileSync(evidencePaths.markerPath, JSON.stringify(evidence, null, 2) + '\n')
+
+    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(downgradedBytes)
+  })
+
+  test('resumes interrupted legacy rewrite recovery with its original completion time', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    const seed = new WorktreeRegistry(path)
+    seed.load()
+    const completedAt = seed.getUpgradeEvidence()!.completedAt
+
+    const downgraded = JSON.parse(readFileSync(path, 'utf8'))
+    downgraded.version = 1
+    const downgradedBytes = JSON.stringify(downgraded, null, 2) + '\n'
+    writeFileSync(path, downgradedBytes)
+    const interrupted = new WorktreeRegistry(path, undefined, {
+      beforeReplace: () => writeFileSync(path, `${downgradedBytes} `),
+    })
+    expect(() => interrupted.load()).toThrow(WorktreeRegistryError)
+
+    writeFileSync(path, downgradedBytes)
+    const recovered = new WorktreeRegistry(path)
+    expect(recovered.list()).toHaveLength(1)
+    expect(recovered.getUpgradeEvidence()).toMatchObject({ status: 'complete', completedAt })
+  })
+
+  test('fails closed on malformed V2 records beneath a V1 wrapper', () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    writeV1(path, legacyRecord(root))
+    new WorktreeRegistry(path).load()
+
+    const downgraded = JSON.parse(readFileSync(path, 'utf8'))
+    downgraded.version = 1
+    downgraded.records[0].displayName = ''
+    const malformed = JSON.stringify(downgraded, null, 2) + '\n'
+    writeFileSync(path, malformed)
+
+    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(malformed)
+  })
+
   test('fails closed on corrupt and unsupported sources without clearing source bytes', () => {
     const root = tmp()
     const path = join(root, 'registry.json')

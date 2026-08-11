@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-11
+
+* **Managed worktree registry recovery**: documented and release-noted automatic recovery when an older process preserves V2 records beneath a V1 wrapper; completed-lineage and all-V2 recognition, atomic wrapper restoration, and original backup/timestamp preservation keep mixed or malformed registry data fail-closed.
+
 ## 2026-08-09
 
 * **Automated release-notes promotion**: `next.md` is now promoted to `<version>.md` by the release workflow instead of by hand — bundled at build time for both channels and committed with the reset by the stable `finalize` job. Updated [operations/release.md](operations/release.md), the release runbook skill, and `apps/electron/resources/AGENTS.md`.
