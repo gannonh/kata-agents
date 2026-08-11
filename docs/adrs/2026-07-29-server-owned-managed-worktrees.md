@@ -82,7 +82,14 @@ Phase 1 extends the server-owned V1 domain without changing V1 behavior:
   under the cross-process lock; unreadable, unsupported, or conflicting data is
   preserved and blocks V2 mutation rather than being replaced with an empty file.
   V1 records retain their IDs, paths, branches, base refs, owners, and state while
-  deriving a display name from the existing branch suffix.
+  deriving a display name from the existing branch suffix. If a pre-V2 process
+  later preserves valid V2 record fields but rewrites the wrapper as V1, the
+  registry file remains authoritative only when completed upgrade evidence and
+  an original pure-V1 backup still exist and every current record validates as
+  V2. The reader atomically restores the V2 wrapper, preserves the original
+  backup lineage and completion timestamp, and refreshes the evidence hash.
+  Missing evidence, mixed record versions, malformed records, and unsupported
+  schemas still fail closed without rewriting source bytes.
 - Creation compensation records whether the request created the branch and its
   original OID. Cleanup can delete that branch only after compare-and-swap proof
   that the ref is still unchanged and request-owned; pre-existing or externally

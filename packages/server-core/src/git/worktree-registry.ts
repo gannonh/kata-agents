@@ -75,7 +75,7 @@ export class WorktreeRegistryError extends Error {
 
 interface RegistryFileV1 {
   version: 1
-  records: ManagedWorktreeRecord[]
+  records: ManagedWorktreeRecordVersioned[]
 }
 
 interface RegistryFileV2 {
@@ -418,7 +418,11 @@ function parseRegistry(raw: string, registryPath: string): RegistryFile {
   }
 
   const records = value.version === 1
-    ? value.records.map((record) => validateCommonRecord(record, registryPath))
+    ? value.records.map((record) => (
+        isObject(record) && record.schemaVersion === 2
+          ? validateV2Record(record, registryPath)
+          : validateCommonRecord(record, registryPath)
+      ))
     : value.records.map((record) => validateV2Record(record, registryPath))
   const ids = new Set<string>()
   for (const record of records) {
@@ -433,7 +437,7 @@ function parseRegistry(raw: string, registryPath: string): RegistryFile {
   }
 
   return value.version === 1
-    ? { version: 1, records: records as ManagedWorktreeRecord[] }
+    ? { version: 1, records: records as ManagedWorktreeRecordVersioned[] }
     : { version: 2, records: records as ManagedWorktreeRecordV2[] }
 }
 
@@ -738,8 +742,17 @@ export class WorktreeRegistry {
           this.registryPath,
         )
       }
+      if (parsedBackup.records.some((record) => record.schemaVersion === 2)) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'Completed registry upgrade evidence does not reference a pure V1 source backup.',
+          this.registryPath,
+        )
+      }
       const backupUpgradeHash = sha256(
-        encodeRegistry(parsedBackup.records.map((record) => upgradeRecord(record, this.registryPath))),
+        encodeRegistry((parsedBackup.records as ManagedWorktreeRecord[]).map(
+          (record) => upgradeRecord(record, this.registryPath),
+        )),
       )
       if (backupUpgradeHash !== evidence.registryHash) {
         throw new WorktreeRegistryError(
@@ -810,6 +823,7 @@ export class WorktreeRegistry {
     parsed: RegistryFile,
   ): ManagedWorktreeRecordV2[] {
     const priorEvidence = this.getUpgradeEvidence()
+    let priorBackupBytes: Buffer | null = null
     if (priorEvidence) {
       if (!existsSync(this.evidencePaths.backupPath)) {
         throw new WorktreeRegistryError(
@@ -820,7 +834,8 @@ export class WorktreeRegistry {
       }
       let backupHash: string
       try {
-        backupHash = sha256(readFileSync(this.evidencePaths.backupPath))
+        priorBackupBytes = readFileSync(this.evidencePaths.backupPath)
+        backupHash = sha256(priorBackupBytes)
       } catch (error) {
         throw wrapError(
           error,
@@ -829,10 +844,13 @@ export class WorktreeRegistry {
           this.registryPath,
         )
       }
-      if (backupHash !== priorEvidence.backupHash) {
+      if (
+        backupHash !== priorEvidence.backupHash ||
+        backupHash !== priorEvidence.sourceHash
+      ) {
         throw new WorktreeRegistryError(
           'REGISTRY_CONFLICT',
-          'Managed-worktree registry upgrade backup hash conflicts with its evidence.',
+          'Managed-worktree registry upgrade backup hash conflicts with its source evidence.',
           this.registryPath,
         )
       }
@@ -863,13 +881,44 @@ export class WorktreeRegistry {
           sourceHash: priorEvidence.sourceHash,
           backupHash: priorEvidence.backupHash,
           registryHash: source.hash,
-          completedAt: Date.now(),
+          completedAt: priorEvidence.completedAt ?? Date.now(),
         })
       }
       return cloneRecords(parsed.records)
     }
 
-    if (priorEvidence && priorEvidence.sourceHash !== source.hash) {
+    // A pre-V2 process can read V2 records, preserve their unknown fields, and
+    // write them back beneath its hard-coded V1 wrapper. Recognize only the
+    // observed unambiguous shape: a completed prior upgrade followed by a
+    // wrapper-only downgrade of entirely valid V2 records. Mixed records or a
+    // missing evidence chain remain conflicts rather than guessed migrations.
+    const containsV2Records = parsed.records.some((record) => record.schemaVersion === 2)
+    const hasLegacyRewriteEvidence = priorEvidence?.status === 'complete' ||
+      (priorEvidence?.status === 'prepared' && priorEvidence.completedAt !== undefined)
+    const legacyRewrite = hasLegacyRewriteEvidence &&
+      parsed.records.length > 0 &&
+      parsed.records.every((record) => record.schemaVersion === 2)
+    if (containsV2Records && !legacyRewrite) {
+      throw new WorktreeRegistryError(
+        'REGISTRY_CONFLICT',
+        'A V1 registry wrapper contains V2 records without an unambiguous completed upgrade lineage.',
+        this.registryPath,
+      )
+    }
+    if (legacyRewrite) {
+      const priorBackup = parseRegistry(priorBackupBytes!.toString('utf8'), this.evidencePaths.backupPath)
+      if (
+        priorBackup.version !== 1 ||
+        priorBackup.records.some((record) => record.schemaVersion === 2)
+      ) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'Legacy registry rewrite recovery requires the original pure V1 source backup.',
+          this.registryPath,
+        )
+      }
+    }
+    if (!legacyRewrite && priorEvidence && priorEvidence.sourceHash !== source.hash) {
       throw new WorktreeRegistryError(
         'REGISTRY_CONFLICT',
         'The registry source hash conflicts with recorded upgrade evidence.',
@@ -877,14 +926,31 @@ export class WorktreeRegistry {
       )
     }
 
-    const backupHash = this.prepareBackup(source.bytes, source.hash)
-    const records = parsed.records.map((record) => upgradeRecord(record, this.registryPath))
+    const backupHash = legacyRewrite && priorEvidence
+      ? priorEvidence.backupHash
+      : this.prepareBackup(source.bytes, source.hash)
+    const records = legacyRewrite
+      ? cloneRecords(parsed.records as ManagedWorktreeRecordV2[])
+      : (parsed.records as ManagedWorktreeRecord[]).map(
+          (record) => upgradeRecord(record, this.registryPath),
+        )
     const targetBytes = encodeRegistry(records)
     const targetHash = sha256(targetBytes)
-    if (priorEvidence?.status === 'complete' && priorEvidence.registryHash !== targetHash) {
+    if (!legacyRewrite && priorEvidence?.status === 'complete' && priorEvidence.registryHash !== targetHash) {
       throw new WorktreeRegistryError(
         'REGISTRY_CONFLICT',
         'The backup-derived registry upgrade conflicts with the last completed registry hash.',
+        this.registryPath,
+      )
+    }
+    if (
+      legacyRewrite &&
+      priorEvidence?.status === 'prepared' &&
+      priorEvidence.registryHash !== targetHash
+    ) {
+      throw new WorktreeRegistryError(
+        'REGISTRY_CONFLICT',
+        'Prepared legacy registry recovery evidence does not match the current source.',
         this.registryPath,
       )
     }
@@ -892,9 +958,10 @@ export class WorktreeRegistry {
       schemaVersion: 1,
       status: 'prepared',
       sourceVersion: 1,
-      sourceHash: source.hash,
+      sourceHash: legacyRewrite && priorEvidence ? priorEvidence.sourceHash : source.hash,
       backupHash,
       registryHash: targetHash,
+      completedAt: legacyRewrite ? priorEvidence?.completedAt : undefined,
     }
     this.writeMarker(prepared)
 
@@ -941,7 +1008,9 @@ export class WorktreeRegistry {
     this.writeMarker({
       ...prepared,
       status: 'complete',
-      completedAt: Date.now(),
+      completedAt: legacyRewrite && priorEvidence?.completedAt !== undefined
+        ? priorEvidence.completedAt
+        : Date.now(),
     })
     return records
   }
