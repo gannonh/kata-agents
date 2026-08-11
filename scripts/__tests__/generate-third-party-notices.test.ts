@@ -77,15 +77,17 @@ describe('generate-third-party-notices Python collection', () => {
 })
 
 describe('generate-third-party-notices platform filtering', () => {
-  test('recognizes both OS-specific exiftool binary packages before resolution', () => {
+  test('recognizes only the OS-specific exiftool binary package variants', () => {
     expect(isPlatformPackageName('exiftool-vendored.exe')).toBe(true)
     expect(isPlatformPackageName('exiftool-vendored.pl')).toBe(true)
+    expect(isPlatformPackageName('exiftool-vendored.docs')).toBe(false)
+    expect(isPlatformPackageName('exiftool-vendored.helper')).toBe(false)
   })
 })
 
 describe('generate-third-party-notices staleness check', () => {
-  // A Windows checkout rewrites the committed LF file to CRLF, which used to
-  // fail the Windows release leg even though the repository content matched.
+  // Guard the latent case where a Windows checkout rewrites a pure-LF notice
+  // file to CRLF even though the repository content matches.
   test('treats a CRLF checkout of identical content as up to date', () => {
     const generated = '# Third-Party Notices\n\n| a | b |\n'
     const windowsCheckout = generated.replaceAll('\n', '\r\n')
@@ -99,12 +101,12 @@ describe('generate-third-party-notices staleness check', () => {
     expect(normalizeLineEndings(committed)).not.toBe(normalizeLineEndings(generated))
   })
 
-  test('reports the first differing line so CI failures are diagnosable', () => {
+  test('reports the first real differing line across line-ending styles', () => {
     const message = describeFirstDifference(
-      '# Notices\n| pkg | 1.0.0 |\n',
-      '# Notices\n| pkg | 0.9.0 |\n',
+      '# Notices\n| stable | 1.0.0 |\n| pkg | 1.0.0 |\n',
+      '# Notices\r\n| stable | 1.0.0 |\r\n| pkg | 0.9.0 |\r\n',
     )
-    expect(message).toContain('line 2')
+    expect(message).toContain('First difference at line 3:')
     expect(message).toContain('1.0.0')
     expect(message).toContain('0.9.0')
   })

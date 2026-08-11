@@ -117,6 +117,12 @@ const NATIVE_COMPONENTS = [
     source: 'https://github.com/electron/electron',
     note: 'Electron release files retain the upstream Chromium/Electron license notices.',
   },
+  {
+    name: 'ExifTool runtime',
+    license: 'Same terms as Perl, with MIT packaging',
+    source: 'https://exiftool.org/',
+    note: 'Document processing bundles the platform-specific ExifTool payload supplied by exiftool-vendored.',
+  },
 ]
 
 const readJson = (path: string): JsonObject =>
@@ -187,7 +193,7 @@ const resolvePackage = (name: string, fromDir: string): string | undefined => {
 
 export const isPlatformPackageName = (name: string): boolean => {
   const lower = name.toLowerCase()
-  return lower.startsWith('exiftool-vendored.') || lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
+  return lower === 'exiftool-vendored.pl' || lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
     lower.includes(`-${platform}-`) || lower.endsWith(`-${platform}`),
   ) || /-(?:arm|arm64|x64|ia32|ppc64|riscv64|s390x|wasm32)(?:-|$)/.test(lower)
 }
@@ -482,8 +488,8 @@ export const normalizeLineEndings = (text: string): string => text.replaceAll('\
  * log instead of only reporting that the file is stale.
  */
 export const describeFirstDifference = (expected: string, actual: string): string => {
-  const expectedLines = expected.split('\n')
-  const actualLines = actual.split('\n')
+  const expectedLines = normalizeLineEndings(expected).split('\n')
+  const actualLines = normalizeLineEndings(actual).split('\n')
   for (let i = 0; i < Math.max(expectedLines.length, actualLines.length); i += 1) {
     if (expectedLines[i] === actualLines[i]) continue
     const contextEnd = Math.min(

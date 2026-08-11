@@ -1099,6 +1099,7 @@ The Python tools use PEP 723 metadata and resolve these packages through uv at r
 | Bun runtime | MIT and bundled third-party licenses | https://github.com/oven-sh/bun | The server and desktop artifacts bundle a platform-specific Bun runtime. |
 | uv runtime | Apache-2.0 OR MIT | https://github.com/astral-sh/uv | The document tools use the platform-specific uv binary to resolve PEP 723 packages. |
 | Electron and Chromium | MIT, BSD-3-Clause, and other upstream licenses | https://github.com/electron/electron | Electron release files retain the upstream Chromium/Electron license notices. |
+| ExifTool runtime | Same terms as Perl, with MIT packaging | https://exiftool.org/ | Document processing bundles the platform-specific ExifTool payload supplied by exiftool-vendored. |
 
 ### Bundled themes
 
