@@ -486,11 +486,19 @@ export const describeFirstDifference = (expected: string, actual: string): strin
   const actualLines = actual.split('\n')
   for (let i = 0; i < Math.max(expectedLines.length, actualLines.length); i += 1) {
     if (expectedLines[i] === actualLines[i]) continue
-    return [
-      `First difference at line ${i + 1}:`,
-      `  committed: ${JSON.stringify(actualLines[i] ?? '<end of file>')}`,
-      `  generated: ${JSON.stringify(expectedLines[i] ?? '<end of file>')}`,
-    ].join('\n')
+    const contextEnd = Math.min(
+      Math.max(expectedLines.length, actualLines.length),
+      i + 12,
+    )
+    const context = Array.from({ length: contextEnd - i }, (_, offset) => {
+      const line = i + offset
+      return [
+        `  line ${line + 1}:`,
+        `    committed: ${JSON.stringify(actualLines[line] ?? '<end of file>')}`,
+        `    generated: ${JSON.stringify(expectedLines[line] ?? '<end of file>')}`,
+      ].join('\n')
+    })
+    return [`First difference at line ${i + 1}:`, ...context].join('\n')
   }
   return 'Files differ only in trailing content.'
 }
