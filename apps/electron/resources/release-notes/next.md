@@ -15,7 +15,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Managed worktree registry recovery** — Kata now repairs a managed-worktree registry whose V2 records were preserved but rewritten beneath a V1 wrapper by an older running build, so creating a new worktree no longer remains blocked by the schema mismatch; malformed records still fail closed.
+- **Managed worktree registry recovery** — Kata now repairs a managed-worktree registry whose V2 records were preserved but rewritten beneath a V1 wrapper by an older running build, so creating a new worktree no longer remains blocked by the schema mismatch; malformed records still fail closed ([#40](https://github.com/gannonh/kata-agents/issues/40), commit [4bc5a71](https://github.com/gannonh/kata-agents/commit/4bc5a718d4de8e227094f8cb7fc567bf4163cc34)).
 
 - **Worktree handoff fence fixes** — Dismissing the handoff preview dialog now releases the pending transaction (the session no longer stays fenced after Cancel), a session whose handoff is stuck in recovery-required can be deleted as the escape hatch, an interrupted handoff that already rebound the provider runtime is rebound back to the source checkout during recovery, and a failed execution-CWD proof no longer leaves the session stuck in a processing state ([#42](https://github.com/gannonh/kata-agents/issues/42)).
 
