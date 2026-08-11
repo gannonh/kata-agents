@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { mergePythonRecords, parsePythonDependencies } from '../generate-third-party-notices'
+import {
+  describeFirstDifference,
+  isPlatformPackageName,
+  mergePythonRecords,
+  normalizeLineEndings,
+  parsePythonDependencies,
+} from '../generate-third-party-notices'
 
 const imgTool = `# /// script
 # requires-python = ">=3.12"
@@ -67,5 +73,46 @@ describe('generate-third-party-notices Python collection', () => {
       },
     ])
     expect(records).toEqual([])
+  })
+})
+
+describe('generate-third-party-notices platform filtering', () => {
+  test('recognizes only the OS-specific exiftool binary package variants', () => {
+    expect(isPlatformPackageName('exiftool-vendored.exe')).toBe(true)
+    expect(isPlatformPackageName('exiftool-vendored.pl')).toBe(true)
+    expect(isPlatformPackageName('exiftool-vendored.docs')).toBe(false)
+    expect(isPlatformPackageName('exiftool-vendored.helper')).toBe(false)
+  })
+})
+
+describe('generate-third-party-notices staleness check', () => {
+  // Guard the latent case where a Windows checkout rewrites a pure-LF notice
+  // file to CRLF even though the repository content matches.
+  test('treats a CRLF checkout of identical content as up to date', () => {
+    const generated = '# Third-Party Notices\n\n| a | b |\n'
+    const windowsCheckout = generated.replaceAll('\n', '\r\n')
+    expect(windowsCheckout).not.toBe(generated)
+    expect(normalizeLineEndings(windowsCheckout)).toBe(normalizeLineEndings(generated))
+  })
+
+  test('still detects real content drift', () => {
+    const generated = '# Third-Party Notices\n\n| pkg | 1.0.0 |\n'
+    const committed = '# Third-Party Notices\n\n| pkg | 0.9.0 |\n'
+    expect(normalizeLineEndings(committed)).not.toBe(normalizeLineEndings(generated))
+  })
+
+  test('reports the first real differing line across line-ending styles', () => {
+    const message = describeFirstDifference(
+      '# Notices\n| stable | 1.0.0 |\n| pkg | 1.0.0 |\n',
+      '# Notices\r\n| stable | 1.0.0 |\r\n| pkg | 0.9.0 |\r\n',
+    )
+    expect(message).toContain('First difference at line 3:')
+    expect(message).toContain('1.0.0')
+    expect(message).toContain('0.9.0')
+  })
+
+  test('names the end of file when the committed copy is truncated', () => {
+    const message = describeFirstDifference('a\nb', 'a')
+    expect(message).toContain('<end of file>')
   })
 })

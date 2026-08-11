@@ -117,6 +117,12 @@ const NATIVE_COMPONENTS = [
     source: 'https://github.com/electron/electron',
     note: 'Electron release files retain the upstream Chromium/Electron license notices.',
   },
+  {
+    name: 'ExifTool runtime',
+    license: 'GPL-1.0-or-later OR Artistic-1.0, with MIT and CC0 packaging',
+    source: 'https://exiftool.org/',
+    note: 'Document processing bundles ExifTool via exiftool-vendored; the Windows payload includes Strawberry Perl under the same Perl terms and CC0 Windows packaging.',
+  },
 ]
 
 const readJson = (path: string): JsonObject =>
@@ -185,9 +191,9 @@ const resolvePackage = (name: string, fromDir: string): string | undefined => {
   return undefined
 }
 
-const isPlatformPackageName = (name: string): boolean => {
+export const isPlatformPackageName = (name: string): boolean => {
   const lower = name.toLowerCase()
-  return lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
+  return lower === 'exiftool-vendored.pl' || lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
     lower.includes(`-${platform}-`) || lower.endsWith(`-${platform}`),
   ) || /-(?:arm|arm64|x64|ia32|ppc64|riscv64|s390x|wasm32)(?:-|$)/.test(lower)
 }
@@ -465,11 +471,55 @@ const render = (): string => {
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`
 }
 
+/**
+ * Normalize line endings before comparing.
+ *
+ * This is not the cause of any observed failure: the generated file embeds
+ * license texts that already contain CRLF, so git's safe-autocrlf leaves it
+ * untouched on a Windows checkout. It is guarding the latent case — if those
+ * CRLF-bearing licenses ever leave the graph, the file becomes pure LF, and a
+ * Windows checkout with `core.autocrlf=true` would then rewrite it to CRLF and
+ * fail this check for a difference that does not exist in the repository.
+ */
+export const normalizeLineEndings = (text: string): string => text.replaceAll('\r\n', '\n')
+
+/**
+ * Describe the first real difference, so a failure is actionable from the CI
+ * log instead of only reporting that the file is stale.
+ */
+export const describeFirstDifference = (expected: string, actual: string): string => {
+  const expectedLines = normalizeLineEndings(expected).split('\n')
+  const actualLines = normalizeLineEndings(actual).split('\n')
+  for (let i = 0; i < Math.max(expectedLines.length, actualLines.length); i += 1) {
+    if (expectedLines[i] === actualLines[i]) continue
+    const contextEnd = Math.min(
+      Math.max(expectedLines.length, actualLines.length),
+      i + 12,
+    )
+    const context = Array.from({ length: contextEnd - i }, (_, offset) => {
+      const line = i + offset
+      return [
+        `  line ${line + 1}:`,
+        `    committed: ${JSON.stringify(actualLines[line] ?? '<end of file>')}`,
+        `    generated: ${JSON.stringify(expectedLines[line] ?? '<end of file>')}`,
+      ].join('\n')
+    })
+    return [`First difference at line ${i + 1}:`, ...context].join('\n')
+  }
+  return 'Files differ only in trailing content.'
+}
+
 const main = (): void => {
   const content = render()
   if (process.argv.includes('--check')) {
-    if (!existsSync(OUTPUT) || readFileSync(OUTPUT, 'utf8') !== content) {
+    if (!existsSync(OUTPUT)) {
+      console.error(`${OUTPUT} is missing. Run: bun run licenses:generate`)
+      process.exit(1)
+    }
+    const committed = readFileSync(OUTPUT, 'utf8')
+    if (normalizeLineEndings(committed) !== normalizeLineEndings(content)) {
       console.error(`${OUTPUT} is stale. Run: bun run licenses:generate`)
+      console.error(describeFirstDifference(content, committed))
       process.exit(1)
     }
     console.log('Third-party notices are up to date.')

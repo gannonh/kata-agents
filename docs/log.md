@@ -2,6 +2,8 @@
 
 ## 2026-08-11
 
+* **Cross-platform release validation repaired**: four-leg Nightly dry-run diagnostics identified the Windows-only optional ExifTool package mismatch; the third-party-notices generator now reports actionable normalized diff context, recognizes the exact OS-specific ExifTool packages before resolution, and retains stable ExifTool, Windows packaging, and Strawberry Perl attribution across macOS, Linux, and Windows.
+
 * **Managed worktree registry recovery**: documented and release-noted automatic recovery when an older process preserves V2 records beneath a V1 wrapper; completed-lineage and all-V2 recognition, atomic wrapper restoration, and original backup/timestamp preservation keep mixed or malformed registry data fail-closed.
 
 ## 2026-08-09
