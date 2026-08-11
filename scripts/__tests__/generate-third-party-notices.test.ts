@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   describeFirstDifference,
+  isPlatformPackageName,
   mergePythonRecords,
   normalizeLineEndings,
   parsePythonDependencies,
@@ -72,6 +73,13 @@ describe('generate-third-party-notices Python collection', () => {
       },
     ])
     expect(records).toEqual([])
+  })
+})
+
+describe('generate-third-party-notices platform filtering', () => {
+  test('recognizes both OS-specific exiftool binary packages before resolution', () => {
+    expect(isPlatformPackageName('exiftool-vendored.exe')).toBe(true)
+    expect(isPlatformPackageName('exiftool-vendored.pl')).toBe(true)
   })
 })
 

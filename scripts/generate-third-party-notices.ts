@@ -185,9 +185,9 @@ const resolvePackage = (name: string, fromDir: string): string | undefined => {
   return undefined
 }
 
-const isPlatformPackageName = (name: string): boolean => {
+export const isPlatformPackageName = (name: string): boolean => {
   const lower = name.toLowerCase()
-  return lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
+  return lower.startsWith('exiftool-vendored.') || lower.endsWith('.exe') || [...PLATFORM_PACKAGES].some((platform) =>
     lower.includes(`-${platform}-`) || lower.endsWith(`-${platform}`),
   ) || /-(?:arm|arm64|x64|ia32|ppc64|riscv64|s390x|wasm32)(?:-|$)/.test(lower)
 }
