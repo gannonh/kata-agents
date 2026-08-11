@@ -119,9 +119,9 @@ const NATIVE_COMPONENTS = [
   },
   {
     name: 'ExifTool runtime',
-    license: 'Same terms as Perl, with MIT packaging',
+    license: 'GPL-1.0-or-later OR Artistic-1.0, with MIT and CC0 packaging',
     source: 'https://exiftool.org/',
-    note: 'Document processing bundles the platform-specific ExifTool payload supplied by exiftool-vendored.',
+    note: 'Document processing bundles ExifTool via exiftool-vendored; the Windows payload includes Strawberry Perl under the same Perl terms and CC0 Windows packaging.',
   },
 ]
 
