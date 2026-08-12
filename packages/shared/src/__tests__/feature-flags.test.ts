@@ -154,20 +154,20 @@ describe('feature-flags runtime helpers', () => {
     expect(isGitWorkspaceV1Enabled()).toBe(true);
   });
 
-  it('isWorktreeV2Enabled defaults to false when no override is set', () => {
+  it('isWorktreeV2Enabled defaults to true when no override is set', () => {
     delete process.env.KATA_FEATURE_WORKTREE_V2;
     delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1;
 
-    expect(FEATURE_FLAGS.worktreeV2).toBe(false);
-    expect(isWorktreeV2Enabled()).toBe(false);
+    expect(FEATURE_FLAGS.worktreeV2).toBe(true);
+    expect(isWorktreeV2Enabled()).toBe(true);
   });
 
-  it('isWorktreeV2Enabled defaults false while V1 is effective', () => {
+  it('isWorktreeV2Enabled defaults true while V1 is effective', () => {
     process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
     delete process.env.KATA_FEATURE_WORKTREE_V2
 
-    expect(isWorktreeV2Enabled()).toBe(false)
-    expect(FEATURE_FLAGS.worktreeV2).toBe(false)
+    expect(isWorktreeV2Enabled()).toBe(true)
+    expect(FEATURE_FLAGS.worktreeV2).toBe(true)
   })
 
   it('isWorktreeV2Enabled requires both V1 and V2 flags', () => {

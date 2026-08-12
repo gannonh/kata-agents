@@ -112,7 +112,7 @@ describe('SessionManager.prepareCheckout — managed worktree', () => {
 
   test('rejects direct named preparation when V2 is ineffective', async () => {
     const previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
-    delete process.env.KATA_FEATURE_WORKTREE_V2
+    process.env.KATA_FEATURE_WORKTREE_V2 = '0'
     try {
       const repo = tmp()
       await initRepo(repo)

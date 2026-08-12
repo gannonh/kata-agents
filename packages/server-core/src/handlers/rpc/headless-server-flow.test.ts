@@ -184,6 +184,8 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
   })
 
   test('discovers, prepares a worktree, commits, and enforces identity — all server-side by session ID', async () => {
+    // Preserve the V1 regression path explicitly now that V2 defaults on.
+    process.env[V2_FLAG] = '0'
     const repo = tmp()
     await initRepo(repo)
     const { sm, handlers, ctx } = makeServer()
@@ -259,6 +261,8 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
   })
 
   test('removes a managed worktree only through the session-addressed handler (never a client path)', async () => {
+    // Preserve the V1 removal-handler regression path explicitly now that V2 defaults on.
+    process.env[V2_FLAG] = '0'
     const repo = tmp()
     await initRepo(repo)
     const { sm, services, handlers, ctx } = makeServer()
@@ -388,7 +392,7 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     ).rejects.toMatchObject({ code: 'WORKTREE_FORK_FAILED' })
 
     // Fork RPCs are V2-gated like every other V2 surface.
-    delete process.env[V2_FLAG]
+    process.env[V2_FLAG] = '0'
     await expect(
       handlers.get(RPC_CHANNELS.git.FORK_STATUS)!(ctx, { sessionId: 'remote-fork' }),
     ).rejects.toMatchObject({ code: 'GIT_WORKTREE_V2_UNAVAILABLE' })

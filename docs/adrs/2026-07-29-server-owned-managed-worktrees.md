@@ -59,11 +59,12 @@ The **workspace-owning server owns all managed-worktree lifecycle and Git behavi
 
 Phase 1 extends the server-owned V1 domain without changing V1 behavior:
 
-- `KATA_FEATURE_WORKTREE_V2` is default-false and effective only when
-  `KATA_FEATURE_GIT_WORKSPACE_V1` is enabled. Capabilities advertise the effective
-  combination, and clients send the versioned V2 name intent only when the selected
-  owning server supports it. Disabled or incapable V2 requests fail with a typed
-  capability error rather than being interpreted as V1.
+- `KATA_FEATURE_WORKTREE_V2` is enabled by default and effective only when
+  `KATA_FEATURE_GIT_WORKSPACE_V1` is enabled. `KATA_FEATURE_WORKTREE_V2=0` is an
+  explicit compatibility opt-out. Capabilities advertise the effective combination,
+  and clients send the versioned V2 name intent only when the selected owning server
+  supports it. Disabled or incapable V2 requests fail with a typed capability error
+  rather than being interpreted as V1.
 - A V2 name is an exact branch suffix. The server validates `kata-agent/<name>`
   under the common-directory mutation lock, keeps nested valid suffixes, and
   rejects empty, padded, Git-invalid, occupied, exact-colliding, and

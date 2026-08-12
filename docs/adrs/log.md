@@ -1,5 +1,9 @@
 # ADR Update Log
 
+## 2026-08-12
+
+* **Worktree V2 rollout amendment**: the server-owned managed-worktree ADR now records V2 as enabled by default, with `KATA_FEATURE_WORKTREE_V2=0` as the explicit compatibility opt-out while the V1 dependency and provider capability gates remain unchanged.
+
 ## 2026-08-11
 
 * **Legacy worktree-registry rewrite recovery**: [2026-07-29-server-owned-managed-worktrees.md](2026-07-29-server-owned-managed-worktrees.md) now records the validated recovery path for V2 records rewritten beneath a V1 wrapper by an older process, including completed-lineage and all-V2 recognition, atomic V2 restoration, original backup/timestamp preservation, refreshed evidence, and fail-closed mixed or malformed-record handling.

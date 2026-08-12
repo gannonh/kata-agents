@@ -596,7 +596,7 @@ describe('registerGitHandlers', () => {
 
   it('rejects every handoff RPC when the V2 flag is disabled', async () => {
     process.env[FLAG] = '1'
-    delete process.env[V2_FLAG]
+    process.env[V2_FLAG] = '0'
     const { git } = makeGitServices()
     const harness = makeHarness(git)
     const ctx = harness.ctx
@@ -706,7 +706,7 @@ describe('registerGitHandlers', () => {
 
   it('rejects every fork RPC when the V2 flag is disabled', async () => {
     process.env[FLAG] = '1'
-    delete process.env[V2_FLAG]
+    process.env[V2_FLAG] = '0'
     const { git } = makeGitServices()
     const harness = makeHarness(git)
     const ctx = harness.ctx

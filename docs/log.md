@@ -1,5 +1,9 @@
 # Documentation Bundle Update Log
 
+## 2026-08-12
+
+* **Worktree V2 default rollout**: documented that Worktree V2 is shipped and enabled by default, with `KATA_FEATURE_WORKTREE_V2=0` retained as the explicit V1-only opt-out. Updated the roadmap, architecture overview, hosted Git/worktree documentation, and release notes; provider-specific handoff and native-fork capabilities remain adapter-gated.
+
 ## 2026-08-11
 
 * **Cross-platform release validation repaired**: four-leg Nightly dry-run diagnostics identified the Windows-only optional ExifTool package mismatch; the third-party-notices generator now reports actionable normalized diff context, recognizes the exact OS-specific ExifTool packages before resolution, and retains stable ExifTool, Windows packaging, and Strawberry Perl attribution across macOS, Linux, and Windows.

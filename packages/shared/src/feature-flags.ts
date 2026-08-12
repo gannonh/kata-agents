@@ -87,7 +87,7 @@ export const FEATURE_FLAG_CONFIG = {
   },
   worktreeV2: {
     env: 'KATA_FEATURE_WORKTREE_V2',
-    default: false,
+    default: true,
   },
   shareOnline: {
     env: 'KATA_FEATURE_SHARE_ONLINE',

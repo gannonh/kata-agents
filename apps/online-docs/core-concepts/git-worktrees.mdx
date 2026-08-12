@@ -5,11 +5,10 @@ keywords: ["git", "github", "worktree", "commit", "pull request", "gh"]
 ---
 
 <Note>
-  Git & GitHub worktrees are a preview feature and are enabled by default. Set
+  Git & GitHub worktrees, including Worktree V2, are enabled by default. Set
   `KATA_FEATURE_GIT_WORKSPACE_V1=0` on the workspace-owning machine to disable
-  them. Named Worktree V2 is opt-in: set `KATA_FEATURE_WORKTREE_V2=1` on the
-  workspace-owning server, and keep V1 enabled, to show the naming and root
-  settings controls.
+  all worktree mutations, or set `KATA_FEATURE_WORKTREE_V2=0` to retain the V1
+  generated-name behavior while keeping V1 enabled.
 </Note>
 
 When a session's working directory is inside an existing Git repository, Kata
@@ -47,8 +46,8 @@ control:
     The session works directly in your existing checkout and branch.
   </Step>
   <Step title="New worktree">
-    Pick a base ref (defaults to the current branch). With Worktree V2 enabled,
-    you can edit the generated name before creating the checkout. Kata uses the
+    Pick a base ref (defaults to the current branch). With Worktree V2 enabled
+    by default, you can edit the generated name before creating the checkout. Kata uses the
     exact name as the suffix of a `kata-agent/<name>` branch and adds a random
     internal ID to the filesystem leaf. Without V2, it retains the generated
     eight-hex `kata-agent/<id>` branch behavior. The worktree starts from

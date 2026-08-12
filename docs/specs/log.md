@@ -1,5 +1,9 @@
 # Specs Update Log
 
+## 2026-08-12
+
+* **Worktree V2 shipped/default-on follow-up**: the completed phases [#40](https://github.com/gannonh/kata-agents/issues/40)–[#43](https://github.com/gannonh/kata-agents/issues/43) are now enabled by default in the runtime; `KATA_FEATURE_WORKTREE_V2=0` remains the explicit V1-only opt-out, and provider-specific handoff/fork support remains capability-gated.
+
 ## 2026-08-09
 
 * **PR #51 review hardening for #34**: documented the implemented coexistence contract: source development uses an isolated config root and bypasses the production lock, while packaged development uses isolated backend and Electron user-data scopes with retained warm/cold deep-link handling.
