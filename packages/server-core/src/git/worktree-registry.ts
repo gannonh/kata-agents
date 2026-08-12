@@ -1016,27 +1016,47 @@ export class WorktreeRegistry {
   }
 
   /**
+   * Read the authoritative registry state while already holding the
+   * cross-process lock. Performs missing-source recovery and the V1→V2
+   * upgrade, then re-reads the source so the returned hash/identity describe
+   * the bytes the caller will subsequently persist against.
+   */
+  private readAuthoritativeLocked(): {
+    source: { exists: boolean; hash: string; identity: string | null }
+    records: Map<string, ManagedWorktreeRecordV2>
+  } {
+    let source = this.readSource()
+    if (!source.exists) {
+      this.recoverMissingSourceLocked()
+      source = this.readSource()
+    }
+    if (!source.exists) {
+      return { source, records: new Map() }
+    }
+    const parsed = parseRegistry(source.raw, this.registryPath)
+    const authoritative = this.upgradeLocked(source, parsed)
+    const authoritativeSource = this.readSource()
+    return {
+      source: authoritativeSource,
+      records: new Map(
+        authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)] as const),
+      ),
+    }
+  }
+
+  /**
    * Read and validate the fixed registry. This method is intentionally
    * authoritative on every call: callers cannot use an old in-memory snapshot
    * to authorize a mutation after another process has written newer bytes.
    */
-  load(): void {
+  async load(): Promise<void> {
     try {
-      this.lock.runSync(() => {
-        let source = this.readSource()
-        if (!source.exists) {
-          this.recoverMissingSourceLocked()
-          source = this.readSource()
-        }
-        if (!source.exists) {
-          this.cache = new Map()
-          this.sourceState = 'absent'
-          return
-        }
-        const parsed = parseRegistry(source.raw, this.registryPath)
-        const records = this.upgradeLocked(source, parsed)
-        this.cache = new Map(records.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
-        this.sourceState = 'present'
+      await this.lock.run(async () => {
+        const { source, records } = this.readAuthoritativeLocked()
+        this.cache = new Map(
+          Array.from(records.values(), (record) => [record.managedWorktreeId, cloneRecord(record)] as const),
+        )
+        this.sourceState = source.exists ? 'present' : 'absent'
       })
     } catch (error) {
       // Do not clear cache or mark a failed source as loaded. Every public
@@ -1126,35 +1146,22 @@ export class WorktreeRegistry {
     }
   }
 
-  private mutate(mutator: (records: Map<string, ManagedWorktreeRecordV2>) => boolean): void {
+  private async mutate(
+    mutator: (records: Map<string, ManagedWorktreeRecordV2>) => boolean,
+  ): Promise<void> {
     try {
-      this.lock.runSync(() => {
+      await this.lock.run(async () => {
         // Read-modify-write starts from disk while holding the cross-process
         // lock, never from a potentially stale in-memory cache.
-        let source = this.readSource()
-        if (!source.exists) {
-          this.recoverMissingSourceLocked()
-          source = this.readSource()
-        }
-        let records = new Map<string, ManagedWorktreeRecordV2>()
-        let authoritativeHash = source.hash
-        let authoritativeIdentity = source.identity
-        if (source.exists) {
-          const parsed = parseRegistry(source.raw, this.registryPath)
-          const authoritative = this.upgradeLocked(source, parsed)
-          const authoritativeSource = this.readSource()
-          authoritativeHash = authoritativeSource.hash
-          authoritativeIdentity = authoritativeSource.identity
-          records = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
-        }
+        const { source, records } = this.readAuthoritativeLocked()
         const changed = mutator(records)
         if (!changed) {
           const latest = this.readSource()
           if (
             latest.exists !== source.exists ||
             (source.exists && (
-              latest.hash !== authoritativeHash ||
-              latest.identity !== authoritativeIdentity
+              latest.hash !== source.hash ||
+              latest.identity !== source.identity
             ))
           ) {
             throw new WorktreeRegistryError(
@@ -1170,8 +1177,8 @@ export class WorktreeRegistry {
         this.hooks.beforePersist?.()
         this.persistLocked(records.values(), {
           exists: source.exists,
-          hash: authoritativeHash,
-          identity: authoritativeIdentity,
+          hash: source.hash,
+          identity: source.identity,
         })
       })
     } catch (error) {
@@ -1185,25 +1192,25 @@ export class WorktreeRegistry {
     }
   }
 
-  list(): ManagedWorktreeRecordVersioned[] {
-    this.load()
+  async list(): Promise<ManagedWorktreeRecordVersioned[]> {
+    await this.load()
     return cloneRecords(this.cache.values())
   }
 
-  get(id: string): ManagedWorktreeRecordVersioned | undefined {
-    this.load()
+  async get(id: string): Promise<ManagedWorktreeRecordVersioned | undefined> {
+    await this.load()
     const record = this.cache.get(id)
     return record ? cloneRecord(record) : undefined
   }
 
-  /** Synchronous owner count from the authoritative registry (>= 0). */
-  getOwnerCount(id: string): number {
-    this.load()
+  /** Owner count from the authoritative registry (>= 0). */
+  async getOwnerCount(id: string): Promise<number> {
+    await this.load()
     return this.cache.get(id)?.ownerSessionIds.length ?? 0
   }
 
-  upsert(record: ManagedWorktreeRecord | ManagedWorktreeRecordV2): void {
-    this.mutate((records) => {
+  async upsert(record: ManagedWorktreeRecord | ManagedWorktreeRecordV2): Promise<void> {
+    await this.mutate((records) => {
       const normalized = normalizeRecord(record, this.registryPath)
       const previous = records.get(normalized.managedWorktreeId)
       records.set(normalized.managedWorktreeId, normalized)
@@ -1216,14 +1223,14 @@ export class WorktreeRegistry {
    * observed it. Reconciliation uses this to avoid writing a stale snapshot
    * over an owner bind or an in-flight removal.
    */
-  upsertIfUnchanged(
+  async upsertIfUnchanged(
     expected: ManagedWorktreeRecordVersioned,
     replacement: ManagedWorktreeRecord | ManagedWorktreeRecordV2,
-  ): boolean {
+  ): Promise<boolean> {
     const expectedNormalized = normalizeRecord(expected, this.registryPath)
     const replacementNormalized = normalizeRecord(replacement, this.registryPath)
     let applied = false
-    this.mutate((records) => {
+    await this.mutate((records) => {
       const current = records.get(expectedNormalized.managedWorktreeId)
       if (!current || JSON.stringify(current) !== JSON.stringify(expectedNormalized)) {
         return false
@@ -1235,11 +1242,11 @@ export class WorktreeRegistry {
     return applied
   }
 
-  setState(id: string, state: ManagedWorktreeState): void {
+  async setState(id: string, state: ManagedWorktreeState): Promise<void> {
     if (!VALID_STATES.has(state)) {
       throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Invalid managed-worktree state.', this.registryPath)
     }
-    this.mutate((records) => {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec || rec.state === state) return false
       rec.state = state
@@ -1252,15 +1259,15 @@ export class WorktreeRegistry {
    * owner write happen in one locked read-modify-write, so removal can use
    * the same registry transaction to claim the record for destruction.
    */
-  addOwnerIfReady(
+  async addOwnerIfReady(
     id: string,
     sessionId: string,
-  ): WorktreeOwnerBindResult {
+  ): Promise<WorktreeOwnerBindResult> {
     if (!sessionId) {
       throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Owner session ID must be non-empty.', this.registryPath)
     }
     let result: WorktreeOwnerBindResult = { status: 'missing' }
-    this.mutate((records) => {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec) {
         result = { status: 'missing' }
@@ -1287,13 +1294,13 @@ export class WorktreeRegistry {
    * it has resolved all persisted owner references. Missing and blocked records
    * remain claimable for explicit registry/branch cleanup retries.
    */
-  beginRemoval(
+  async beginRemoval(
     id: string,
     requestingSessionId: string,
     allowUnowned = false,
-  ): WorktreeRemovalBeginResult {
+  ): Promise<WorktreeRemovalBeginResult> {
     let result: WorktreeRemovalBeginResult = { status: 'missing' }
-    this.mutate((records) => {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec) {
         result = { status: 'missing' }
@@ -1328,11 +1335,11 @@ export class WorktreeRegistry {
   }
 
   /** Legacy unconditional owner mutation retained for registry maintenance callers. */
-  addOwner(id: string, sessionId: string): void {
+  async addOwner(id: string, sessionId: string): Promise<void> {
     if (!sessionId) {
       throw new WorktreeRegistryError('REGISTRY_INVALID_RECORD', 'Owner session ID must be non-empty.', this.registryPath)
     }
-    this.mutate((records) => {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec || rec.ownerSessionIds.includes(sessionId)) return false
       rec.ownerSessionIds.push(sessionId)
@@ -1340,8 +1347,8 @@ export class WorktreeRegistry {
     })
   }
 
-  removeOwner(id: string, sessionId: string): void {
-    this.mutate((records) => {
+  async removeOwner(id: string, sessionId: string): Promise<void> {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec) return false
       const next = rec.ownerSessionIds.filter((owner) => owner !== sessionId)
@@ -1352,8 +1359,8 @@ export class WorktreeRegistry {
   }
 
   /** Server-authored activity update (creation, restore, attach, unarchive, message). */
-  updateLastUsedAt(id: string, at: number): void {
-    this.mutate((records) => {
+  async updateLastUsedAt(id: string, at: number): Promise<void> {
+    await this.mutate((records) => {
       const rec = records.get(id)
       if (!rec || rec.lastUsedAt === at) return false
       rec.lastUsedAt = at
@@ -1361,8 +1368,8 @@ export class WorktreeRegistry {
     })
   }
 
-  remove(id: string): void {
-    this.mutate((records) => records.delete(id))
+  async remove(id: string): Promise<void> {
+    await this.mutate((records) => records.delete(id))
   }
 
   /**
@@ -1371,6 +1378,14 @@ export class WorktreeRegistry {
    * interleaved by another registry writer. The callback mutates the in-memory
    * record map and calls `commit()` to persist atomically; uncommitted changes
    * are discarded when the callback returns.
+   *
+   * The registry lock is not reentrant. The callback must read and mutate
+   * registry state **only through the provided `tx` object** (`tx.get()` /
+   * `tx.list()` /
+   * `tx.commit()`). Awaiting a lock-acquiring public registry method (such as
+   * `get()`, `list()`, `upsert()`, or `remove()`) inside the callback will
+   * deadlock: it attempts to acquire the lock this transaction already holds,
+   * while the event loop stalls until the transaction releases it.
    */
   async runExclusive<T>(
     fn: (tx: WorktreeRegistryTransaction) => Promise<T> | T,
@@ -1382,22 +1397,7 @@ export class WorktreeRegistry {
     let callbackError: unknown
     try {
       return await this.lock.run(async () => {
-        let source = this.readSource()
-        if (!source.exists) {
-          this.recoverMissingSourceLocked()
-          source = this.readSource()
-        }
-        let records = new Map<string, ManagedWorktreeRecordV2>()
-        let authoritativeHash = source.hash
-        let authoritativeIdentity = source.identity
-        if (source.exists) {
-          const parsed = parseRegistry(source.raw, this.registryPath)
-          const authoritative = this.upgradeLocked(source, parsed)
-          const authoritativeSource = this.readSource()
-          authoritativeHash = authoritativeSource.hash
-          authoritativeIdentity = authoritativeSource.identity
-          records = new Map(authoritative.map((record) => [record.managedWorktreeId, cloneRecord(record)]))
-        }
+        const { source, records } = this.readAuthoritativeLocked()
         const tx: WorktreeRegistryTransaction = {
           // The transaction owns the in-memory map: callers mutate the returned
           // record directly and `commit()` persists it. No clone here, so the
@@ -1408,8 +1408,8 @@ export class WorktreeRegistry {
             this.hooks.beforePersist?.()
             this.persistLocked(records.values(), {
               exists: source.exists,
-              hash: authoritativeHash,
-              identity: authoritativeIdentity,
+              hash: source.hash,
+              identity: source.identity,
             })
           },
         }
@@ -1434,8 +1434,8 @@ export class WorktreeRegistry {
   }
 
   /** Find a record by its checkout path (normalized). */
-  findByCheckoutPath(checkoutPath: string): ManagedWorktreeRecordVersioned | undefined {
-    this.load()
+  async findByCheckoutPath(checkoutPath: string): Promise<ManagedWorktreeRecordVersioned | undefined> {
+    await this.load()
     const normalized = resolvePath(checkoutPath)
     for (const rec of this.cache.values()) {
       if (resolvePath(rec.checkoutPath) === normalized) return cloneRecord(rec)
@@ -1448,8 +1448,8 @@ export class WorktreeRegistry {
    * registry. The caller's mutator is authoritative and each operation starts
    * with a locked read-modify-write.
    */
-  reconcile(params: { knownSessionIds: Set<string> }): void {
-    this.mutate((records) => {
+  async reconcile(params: { knownSessionIds: Set<string> }): Promise<void> {
+    await this.mutate((records) => {
       let dirty = false
       for (const rec of records.values()) {
         const owners = rec.ownerSessionIds.filter((sessionId) => params.knownSessionIds.has(sessionId))

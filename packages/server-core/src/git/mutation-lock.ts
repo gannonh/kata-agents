@@ -47,6 +47,8 @@ interface ObservedOwner {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
+/** Default cross-process lock acquisition timeout, asserted by registry tests. */
+export const DEFAULT_LOCK_TIMEOUT_MS = DEFAULT_TIMEOUT_MS
 const DEFAULT_RETRY_DELAY_MS = 10
 const DEFAULT_STALE_AFTER_MS = 30_000
 
