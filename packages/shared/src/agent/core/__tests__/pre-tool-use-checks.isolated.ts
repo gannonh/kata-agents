@@ -23,6 +23,15 @@ let mockIsReadOnlyBashCommandWithConfig = mock(
   (_command: string, _config: any) => false
 );
 
+let mockExtractBashWriteTarget = mock((_command: string) => null as string | null);
+
+let mockExtractPowerShellWriteTarget = mock((_command: string) => null as string | null);
+
+let mockGetImmutableDefaultBashConfig = mock(() => ({
+  readOnlyBashPatterns: [] as Array<{ regex: RegExp }>,
+  blockedTools: new Set<string>(),
+}));
+
 let mockEffectivePermissionMode: 'safe' | 'ask' | 'allow-all' = 'safe';
 
 // Paths resolve from THIS file's location (core/__tests__/)
@@ -30,12 +39,18 @@ mock.module('../../mode-manager.ts', () => ({
   shouldAllowToolInMode: (a: any, b: any, c: any, d?: any) => mockShouldAllowToolInMode(a, b, c, d),
   isApiEndpointAllowed: (a: any, b: any, c?: any) => mockIsApiEndpointAllowed(a, b, c),
   isReadOnlyBashCommandWithConfig: (a: any, b: any) => mockIsReadOnlyBashCommandWithConfig(a, b),
+  extractBashWriteTarget: (a: string) => mockExtractBashWriteTarget(a),
   getPermissionModeDiagnostics: () => ({
     permissionMode: mockEffectivePermissionMode,
     modeVersion: 7,
     lastChangedAt: '2026-02-28T18:00:00.000Z',
     lastChangedBy: 'user',
   }),
+}));
+
+// Mock PowerShell validator (used by the Bash config-write guard)
+mock.module('../../powershell-validator.ts', () => ({
+  extractPowerShellWriteTarget: (a: string) => mockExtractPowerShellWriteTarget(a),
 }));
 
 // Mock permissionsConfigCache for read-only bash pattern checks
@@ -47,6 +62,7 @@ mock.module('../../permissions-config.ts', () => ({
       readOnlyBashPatterns: mockReadOnlyBashPatterns,
     }),
   },
+  getImmutableDefaultBashConfig: () => mockGetImmutableDefaultBashConfig(),
 }));
 
 // Mock expandPath to avoid real home directory resolution
@@ -155,6 +171,15 @@ describe('runPreToolUseChecks', () => {
     mockIsApiEndpointAllowed.mockImplementation(() => false);
     mockIsReadOnlyBashCommandWithConfig.mockReset();
     mockIsReadOnlyBashCommandWithConfig.mockImplementation(() => false);
+    mockExtractBashWriteTarget.mockReset();
+    mockExtractBashWriteTarget.mockImplementation(() => null);
+    mockExtractPowerShellWriteTarget.mockReset();
+    mockExtractPowerShellWriteTarget.mockImplementation(() => null);
+    mockGetImmutableDefaultBashConfig.mockReset();
+    mockGetImmutableDefaultBashConfig.mockImplementation(() => ({
+      readOnlyBashPatterns: [],
+      blockedTools: new Set<string>(),
+    }));
     mockDetectConfigFileType.mockReset();
     mockDetectConfigFileType.mockImplementation(() => null);
     mockDetectAppConfigFileType.mockReset();
@@ -477,6 +502,345 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('allow');
     });
+
+    it('skips the Bash config guard for empty commands', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: '   ' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockDetectConfigFileType).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // Step 5d: Bash config write mutation guard
+  // ============================================================
+
+  describe('step 5d: Bash config write mutation guard', () => {
+    const labelsDetection = { type: 'labels' as const, displayFile: 'labels/config.json' };
+    const sourceDetection = { type: 'source' as const, slug: 'linear', displayFile: 'sources/linear/config.json' };
+
+    beforeEach(() => {
+      mockEffectivePermissionMode = 'allow-all';
+    });
+
+    it('allows a derivable heredoc with valid content, unchanged', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => null);
+
+      const command = "cat <<'JSON' > labels/config.json\n{\"labels\":[]}\nJSON";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      // Exact content routed through the same validation path as Write.
+      expect(mockValidateConfigFileContent).toHaveBeenCalledWith(
+        labelsDetection,
+        '{"labels":[]}\n'
+      );
+    });
+
+    it('blocks a derivable heredoc with invalid content using the formatted error', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => ({
+        valid: false,
+        errors: [{ message: 'Expected JSON' }],
+      }));
+
+      const command = "cat <<'JSON' > labels/config.json\n{ not json }\nJSON";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('Cannot write invalid config to labels/config.json');
+        expect(result.reason).toContain('Fix the errors above and try again');
+      }
+    });
+
+    it('validates empty heredoc content (does not treat it as absent)', () => {
+      mockDetectConfigFileType.mockImplementation(() => sourceDetection);
+      mockValidateConfigFileContent.mockImplementation(() => ({
+        valid: false,
+        errors: [{ message: 'Empty content' }],
+      }));
+
+      const command = "cat <<'EOF' > sources/linear/config.json\nEOF";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      expect(mockValidateConfigFileContent).toHaveBeenCalledWith(sourceDetection, '');
+    });
+
+    it('resolves absolute heredoc targets for detection', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => null);
+
+      const command =
+        "cat <<'JSON' > /test/workspace/labels/config.json\n{\"labels\":[]}\nJSON";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockDetectConfigFileType).toHaveBeenCalledWith(
+        '/test/workspace/labels/config.json',
+        '/test/workspace'
+      );
+    });
+
+    it('resolves relative heredoc targets against the working directory', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => null);
+
+      const command = "cat <<'JSON' > labels/config.json\n{\"labels\":[]}\nJSON";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        workingDirectory: '/test/workspace/packages/core',
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockDetectConfigFileType).toHaveBeenCalledWith(
+        '/test/workspace/packages/core/labels/config.json',
+        '/test/workspace'
+      );
+    });
+
+    it('does not validate heredoc writes to non-config targets', () => {
+      mockDetectConfigFileType.mockImplementation(() => null);
+
+      const command = "cat <<'A' > /tmp/out.txt\nhello\nA";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockValidateConfigFileContent).not.toHaveBeenCalled();
+    });
+
+    it('leaves commands accepted by the immutable-default read-only classifier unaffected', () => {
+      mockIsReadOnlyBashCommandWithConfig.mockImplementation(() => true);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'cat labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockDetectConfigFileType).not.toHaveBeenCalled();
+      expect(mockValidateConfigFileContent).not.toHaveBeenCalled();
+    });
+
+    it('classifies with the immutable default config, never merged patterns', () => {
+      // A merged workspace pattern would normally whitelist this redirect, but
+      // the guard must classify with immutable defaults only.
+      mockReadOnlyBashPatterns = [{ regex: /^echo\s+.*>\s*labels\/config\.json$/ }];
+      mockExtractBashWriteTarget.mockImplementation(() => 'labels/config.json');
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'echo x > labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      // The immutable classifier was consulted (mock returns false → not read-only).
+      const configsPassed = mockIsReadOnlyBashCommandWithConfig.mock.calls.map((c) => c[1]);
+      expect(configsPassed.length).toBeGreaterThan(0);
+    });
+
+    it('blocks an identifiable redirect targeting a recognized config', () => {
+      mockExtractBashWriteTarget.mockImplementation(() => 'labels/config.json');
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'echo x > labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('labels/config.json');
+        expect(result.reason).toContain('bypass config validation');
+        expect(result.reason).toContain('Write');
+      }
+    });
+
+    it('blocks a tee write targeting a recognized config', () => {
+      mockDetectConfigFileType.mockImplementation(() => sourceDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: "echo '{}' | tee sources/linear/config.json" },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('sources/linear/config.json');
+      }
+    });
+
+    it('blocks a sed -i mutation targeting a recognized config', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: "sed -i 's/x/y/' labels/config.json" },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+    });
+
+    it('blocks a tab-stripping heredoc redirect targeting a recognized config', () => {
+      mockExtractBashWriteTarget.mockImplementation(() => 'labels/config.json');
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const command = "cat <<-'JSON' > labels/config.json\n{\"labels\":[]}\nJSON";
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+    });
+
+    it('blocks a wrapper-shell mutation targeting a recognized config', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'bash -c "echo x > labels/config.json"' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+    });
+
+    it('blocks a script argument that targets a recognized config', () => {
+      mockDetectConfigFileType.mockImplementation(() => sourceDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'python update.py sources/linear/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+    });
+
+    it('allows a script argument that targets an unrecognized path', () => {
+      mockDetectConfigFileType.mockImplementation(() => null);
+      mockDetectAppConfigFileType.mockImplementation(() => null);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'python3 script.py /tmp/data.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+    });
+
+    it('runs before ask-mode prompting and blocks there too', () => {
+      mockEffectivePermissionMode = 'ask';
+      mockExtractBashWriteTarget.mockImplementation(() => 'labels/config.json');
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'echo x > labels/config.json' },
+        permissionMode: 'ask',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('labels/config.json');
+      }
+    });
+
+    it('leaves non-Bash tools untouched', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => ({
+        valid: false,
+        errors: [{ message: 'bad' }],
+      }));
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Glob',
+        input: { pattern: 'labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      // Glob is not a config-write tool and not Bash — unaffected.
+      expect(result.type).toBe('allow');
+    });
+  });
+
+  // ============================================================
+  // Step 5b: Config write validation (empty content)
+  // ============================================================
+
+  describe('step 5b: config write validation empty-content handling', () => {
+    const labelsDetection = { type: 'labels' as const, displayFile: 'labels/config.json' };
+
+    beforeEach(() => {
+      mockEffectivePermissionMode = 'allow-all';
+    });
+
+    it('validates an explicit empty string Write to a config file', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+      mockValidateConfigFileContent.mockImplementation(() => ({
+        valid: false,
+        errors: [{ message: 'Empty' }],
+      }));
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Write',
+        input: { file_path: '/test/workspace/labels/config.json', content: '' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      expect(mockValidateConfigFileContent).toHaveBeenCalledWith(labelsDetection, '');
+    });
+
+    it('does not validate a Write without a content field', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Write',
+        input: { file_path: '/test/workspace/labels/config.json' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('allow');
+      expect(mockValidateConfigFileContent).not.toHaveBeenCalled();
+    });
   });
 
   // ============================================================
@@ -724,6 +1088,15 @@ describe('shouldPromptInAskMode', () => {
     mockIsApiEndpointAllowed.mockImplementation(() => false);
     mockIsReadOnlyBashCommandWithConfig.mockReset();
     mockIsReadOnlyBashCommandWithConfig.mockImplementation(() => false);
+    mockExtractBashWriteTarget.mockReset();
+    mockExtractBashWriteTarget.mockImplementation(() => null);
+    mockExtractPowerShellWriteTarget.mockReset();
+    mockExtractPowerShellWriteTarget.mockImplementation(() => null);
+    mockGetImmutableDefaultBashConfig.mockReset();
+    mockGetImmutableDefaultBashConfig.mockImplementation(() => ({
+      readOnlyBashPatterns: [],
+      blockedTools: new Set<string>(),
+    }));
     mockDetectConfigFileType.mockReset();
     mockDetectConfigFileType.mockImplementation(() => null);
     mockDetectAppConfigFileType.mockReset();

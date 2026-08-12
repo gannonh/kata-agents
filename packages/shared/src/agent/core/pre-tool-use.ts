@@ -41,6 +41,7 @@ import {
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
 import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
 import { rewriteBashWithRtk } from './rtk-rewrite.ts';
+import { classifyBashConfigWrite } from './bash-config-guard.ts';
 
 // ============================================================
 // TYPES
@@ -365,37 +366,52 @@ export function validateConfigWrite(
     return { valid: true };
   }
 
-  let contentToValidate: string | null = null;
-
   if (toolName === 'Write') {
-    // For Write, the full file content is in input.content
-    contentToValidate = input.content as string;
-  } else if (toolName === 'Edit') {
-    // For Edit, simulate the replacement on the current file content
-    try {
-      const currentContent = readFileSync(filePath, 'utf-8');
-      const oldString = input.old_string as string;
-      const newString = input.new_string as string;
-      const replaceAll = input.replace_all as boolean | undefined;
-      contentToValidate = replaceAll
-        ? currentContent.replaceAll(oldString, newString)
-        : currentContent.replace(oldString, newString);
-    } catch {
-      // File doesn't exist yet or can't be read — skip validation
-      // (Write tool will create it; Edit will fail on its own)
+    // For Write, the full file content is in input.content. Distinguish an
+    // absent content field from an explicit '' — empty content is still
+    // content that must be validated (a config file is never validly empty).
+    const content = input.content;
+    if (typeof content !== 'string') {
       return { valid: true };
     }
+    return runConfigContentValidation(detection, content, onDebug);
   }
 
-  if (!contentToValidate) {
+  // Edit: simulate the replacement on the current file content
+  try {
+    const currentContent = readFileSync(filePath, 'utf-8');
+    const oldString = input.old_string as string;
+    const newString = input.new_string as string;
+    const replaceAll = input.replace_all as boolean | undefined;
+    const contentToValidate = replaceAll
+      ? currentContent.replaceAll(oldString, newString)
+      : currentContent.replace(oldString, newString);
+    return runConfigContentValidation(detection, contentToValidate, onDebug);
+  } catch {
+    // File doesn't exist yet or can't be read — skip validation
+    // (Write tool will create it; Edit will fail on its own)
     return { valid: true };
   }
+}
 
-  const validationResult = validateConfigFileContent(detection, contentToValidate);
+/**
+ * Shared content-validation helper for config writes.
+ *
+ * Used by `validateConfigWrite` (Write/Edit tools) and by the Bash
+ * config-write guard, so both routes invoke the same validation path.
+ * Validates the exact content that would be written; empty content is still
+ * content and is validated (a config file is never validly empty).
+ */
+function runConfigContentValidation(
+  detection: ConfigFileDetection,
+  content: string,
+  onDebug?: (message: string) => void
+): ConfigValidationResult {
+  const validationResult = validateConfigFileContent(detection, content);
 
   if (validationResult && !validationResult.valid) {
     onDebug?.(
-      `Config validation blocked ${toolName} to ${detection.displayFile}: ${validationResult.errors.length} errors`
+      `Config validation blocked write to ${detection.displayFile}: ${validationResult.errors.length} errors`
     );
     return {
       valid: false,
@@ -662,6 +678,37 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     if (skillResult.modified) {
       currentInput = skillResult.input;
       wasModified = true;
+    }
+  }
+
+  // 5d. Bash config write mutation guard (restored integrity invariant).
+  // Inspects the ORIGINAL Bash command (before RTK rewriting) for statically
+  // identifiable mutations targeting validator-recognized config files. Runs
+  // after the permission, source-blocking, and prerequisite gates, and before
+  // ask-mode prompting, so every mode (safe/ask/allow-all) is covered after
+  // its own step-1 decision.
+  //
+  // - Commands accepted by the immutable-default read-only classifier are
+  //   unaffected (reads like `cat labels/config.json` keep existing behavior).
+  // - Derivable `cat <<'DELIM' > target` heredocs route their exact content
+  //   through the same validation path as `Write`; valid content proceeds
+  //   with the command unchanged.
+  // - Other identifiable mutations (redirects, tee, append, chaining, wrapper
+  //   shells, sed -i, script args, PowerShell/CMD writes) targeting a
+  //   recognized config are blocked with guidance to use a validated tool.
+  if (toolName === 'Bash') {
+    const command = input.command;
+    if (typeof command === 'string' && command.trim().length > 0) {
+      const guardResult = classifyBashConfigWrite(command, workspaceRootPath, workingDirectory);
+      if (guardResult.kind === 'validate') {
+        const contentResult = runConfigContentValidation(guardResult.detection, guardResult.content, onDebug);
+        if (!contentResult.valid) {
+          return { type: 'block', reason: contentResult.error! };
+        }
+      } else if (guardResult.kind === 'block') {
+        onDebug?.(`Bash config-write guard: ${guardResult.reason}`);
+        return { type: 'block', reason: guardResult.reason };
+      }
     }
   }
 
