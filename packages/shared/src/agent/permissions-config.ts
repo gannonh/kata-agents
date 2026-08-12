@@ -29,6 +29,7 @@ import {
   type CompiledBashPattern,
   type CompiledBlockedCommandHint,
   type BlockedCommandHintRule,
+  type ModeConfig,
   type PermissionPaths,
 } from './mode-types.ts';
 
@@ -200,6 +201,47 @@ export function loadDefaultPermissions(): PermissionsCustomConfig | null {
     debug('[Permissions] Error loading default permissions:', error);
     return null;
   }
+}
+
+// ============================================================
+// Immutable Default Bash Classification Config
+// ============================================================
+
+// Cached immutable-default classification config, invalidated alongside
+// default permissions so runtime edits to default.json take effect.
+let immutableDefaultBashConfigCache: ModeConfig | undefined;
+
+/**
+ * Build the immutable-default Bash classification config used by the
+ * pre-tool-use config-write guard.
+ *
+ * Contains ONLY SAFE_MODE_CONFIG plus the app-level permissions/default.json
+ * read-only patterns. Workspace and source permissions.json files are
+ * intentionally EXCLUDED: they are themselves guarded configuration, so
+ * merged custom patterns must never influence config-write integrity
+ * decisions. Commands accepted by this classifier keep existing behavior;
+ * everything else is subject to the config-write guard.
+ */
+export function getImmutableDefaultBashConfig(): ModeConfig {
+  if (immutableDefaultBashConfigCache) return immutableDefaultBashConfigCache;
+
+  const readOnlyBashPatterns: CompiledBashPattern[] = [...SAFE_MODE_CONFIG.readOnlyBashPatterns];
+  const defaultConfig = loadDefaultPermissions();
+  if (defaultConfig) {
+    for (const patternEntry of defaultConfig.allowedBashPatterns) {
+      const regex = validateRegex(patternEntry.pattern);
+      if (regex) {
+        readOnlyBashPatterns.push({
+          regex,
+          source: patternEntry.pattern,
+          comment: patternEntry.comment,
+        });
+      }
+    }
+  }
+
+  immutableDefaultBashConfigCache = { ...SAFE_MODE_CONFIG, readOnlyBashPatterns };
+  return immutableDefaultBashConfigCache;
 }
 
 // Re-export types from mode-types for external consumers
@@ -610,6 +652,9 @@ class PermissionsConfigCache {
   invalidateDefaults(): void {
     debug('[Permissions] Invalidating app-level default permissions');
     this.defaultConfig = undefined;
+    // The immutable-default Bash classification config derives from the same
+    // default.json file, so it must be rebuilt alongside default permissions.
+    immutableDefaultBashConfigCache = undefined;
     // Clear ALL merged configs since defaults affect everything
     this.mergedConfigs.clear();
   }
@@ -901,6 +946,9 @@ class PermissionsConfigCache {
    */
   clear(): void {
     this.defaultConfig = undefined;
+    // The immutable-default Bash classification config derives from the same
+    // default.json file, so it must be rebuilt alongside default permissions.
+    immutableDefaultBashConfigCache = undefined;
     this.workspaceConfigs.clear();
     this.sourceConfigs.clear();
     this.mergedConfigs.clear();

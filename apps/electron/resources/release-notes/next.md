@@ -8,4 +8,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- Restored a focused Bash config-write guard in pre-tool-use: syntactically identifiable Bash mutations targeting validator-recognized config files (derivable `cat <<'DELIM' > target` heredocs and opaque forms like redirects, `tee`, `sed -i`, wrapper shells, or script arguments) are now validated or blocked instead of bypassing config validation. Read-only commands and non-config targets are unaffected.
+
 ## Breaking Changes
