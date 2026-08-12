@@ -11,26 +11,17 @@ Specs for this repository are GitHub Issues, not files. `docs/specs/` holds only
 - Post build reports and acceptance evidence as comments on the spec issue.
 - ADRs remain files under `docs/adrs/`. Cross-link them with the issues they constrain.
 
-## Open Knowledge Format docs
-
-This repository maintains an OKF v0.1 bundle at `./docs`.
-
-- Read `./docs/index.md` before substantial work to understand the documentation map.
-- Follow cross-links into relevant specs, ADRs, architecture notes, and reference docs before changing related code.
-- Keep `./docs/specs/index.md` current as the roadmap pointer for GitHub Issues and the pre-migration archive.
-- Add or update ADRs in `./docs/adrs/` for durable architecture decisions.
-- After substantial work, PRs, behavior changes, architecture decisions, or documentation moves, update the OKF bundle and add entries to the relevant `log.md` files.
-- Every non-reserved Markdown file under `./docs` must have OKF frontmatter with at least a non-empty `type` field. `index.md` and `log.md` are reserved navigation/history files.
-
 ## Package-level context
 
 Each package has its own agent context file — read it before modifying that package:
 
-| Package | Context file |
-|---------|-------------|
-| `@kata-sh/shared` (business logic) | `packages/shared/CLAUDE.md` |
-| `@kata-sh/core` (shared types) | `packages/core/CLAUDE.md` |
-| Electron bundled resources | `apps/electron/resources/AGENTS.md` |
+
+| Package                            | Context file                        |
+| ---------------------------------- | ----------------------------------- |
+| `@kata-sh/shared` (business logic) | `packages/shared/CLAUDE.md`         |
+| `@kata-sh/core` (shared types)     | `packages/core/CLAUDE.md`           |
+| Electron bundled resources         | `apps/electron/resources/AGENTS.md` |
+
 
 ## Common commands
 
@@ -60,7 +51,12 @@ Each package has its own agent context file — read it before modifying that pa
 - The agent E2E specs (`@agent`, `@worktree-v2 fork`, `@worktree-v2 handoff`) walk the whole chain via `runWithAgentProviderFallback` (`e2e/src/flows/agentChat.ts`) and only fail after every option is exhausted, with each attempt logged and the aggregated failure naming every option.
 - Before deferring any UAT tier or claiming credentials are unavailable: check the chain above and **ask the user**. Deterministic adapters (`@kata-sh/shared/agent/testing`) are test doubles only — never import them from production code, and never add `KATA_*_DETERMINISTIC_ADAPTER`-style env seams to production paths.
 
-## Active context
+## Sub-agents
 
-- **Complete Kata brand transition** is complete. Canonical identity: `@kata-sh/*` packages, `KATA_*` env vars, `~/.kata-agents`, `kataagents://`, `sh.kata.agents`, and `agents.kata.sh`. See `./docs/specs/archive/2026-06-22-complete-kata-brand-transition-design.md` and the verify report `./docs/specs/archive/2026-06-23-complete-kata-brand-transition-verify-report.md`. Verify passed 2026-06-23 (all 12 ACs); fixes included a broken `kata-agent.svg` tool icon, Craft-named `kata-logos` assets, dead `CraftAppIcon` code, a `copy-assets.ts` stale-file hygiene fix, and GitHub org ref reconciliation.
-- **Rebrand Phase 1** (user-facing copy only) is complete. See `./docs/specs/archive/rebrand-kata-agents-phase-1.md`.
+- Use the appropriate model and reasoning level for the task. Limit sub-agents to the following, listed by preference, from most to least capable:  
+  
+- openai-codex/gpt-5.6-sol
+- claude/opus-5  
+- openai-code/gpt-5.6-luna
+- opencode-go/deepseek-v4-flash
+
