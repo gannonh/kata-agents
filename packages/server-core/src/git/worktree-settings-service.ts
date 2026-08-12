@@ -273,10 +273,10 @@ export class WorktreeSettingsService {
   }
 
   /** Persist a validated root update and return the next immutable snapshot. */
-  update(input: WorktreeSettingsUpdateInput, serverId = this.serverId): WorktreeSettingsSnapshot {
+  async update(input: WorktreeSettingsUpdateInput, serverId = this.serverId): Promise<WorktreeSettingsSnapshot> {
     try {
       let snapshot!: WorktreeSettingsSnapshot
-      this.lock.runSync(() => {
+      await this.lock.run(async () => {
         const current = this.readStoredSettings()
         const requested = this.validateRequestedRoot(input.materializationRoot, current.materializationRoot)
         const autoDeleteEnabled = this.validateAutoDeletePolicy(
@@ -306,7 +306,7 @@ export class WorktreeSettingsService {
 
         // The fixed default root is intentionally allowed to contain the
         // existing registry/checkouts; resetting to it must remain possible.
-        if (requested !== this.defaultRoot) this.validateAgainstRegistry(requested)
+        if (requested !== this.defaultRoot) await this.validateAgainstRegistry(requested)
         this.ensureRootUsable(requested, requested === this.defaultRoot)
         const next: StoredWorktreeSettings = {
           schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -482,10 +482,10 @@ export class WorktreeSettingsService {
     return canonical
   }
 
-  private validateAgainstRegistry(candidateRoot: string): void {
+  private async validateAgainstRegistry(candidateRoot: string): Promise<void> {
     let records: ManagedWorktreeRecordVersioned[]
     try {
-      records = this.registry.list()
+      records = await this.registry.list()
     } catch (error) {
       throw new WorktreeSettingsError(
         'WORKTREE_SETTINGS_CONFLICT',

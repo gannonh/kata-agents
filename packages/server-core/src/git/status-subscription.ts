@@ -33,7 +33,7 @@ export interface GitStatusSubscriptionDeps {
   /** Resolve a session ID to its active checkout path + owning workspace. */
   resolveSession: (
     sessionId: string,
-  ) => { checkoutPath: string; workspaceId: string; baseRef?: string | null } | null
+  ) => Promise<{ checkoutPath: string; workspaceId: string; baseRef?: string | null } | null>
   /** Publish a workspace-routed status-change event. */
   publish: (event: GitStatusChangedEvent, workspaceId: string) => void
   /** Poll interval; must be ≤ 3000ms per the acceptance bound. Default 3000. */
@@ -122,7 +122,7 @@ export class GitStatusSubscription {
    * on the checkout.
    */
   async subscribe(clientId: string, sessionId: string): Promise<GitStatusSnapshot> {
-    const resolved = this.resolveSession(sessionId)
+    const resolved = await this.resolveSession(sessionId)
     if (!resolved) {
       throw new Error(`Cannot resolve checkout for session ${sessionId}.`)
     }

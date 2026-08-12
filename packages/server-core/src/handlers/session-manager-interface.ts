@@ -41,7 +41,7 @@ export interface ISessionManager {
   // Session CRUD
   // ---------------------------------------------------------------------------
 
-  getSessions(workspaceId?: string): Session[]
+  getSessions(workspaceId?: string): Promise<Session[]>
   getSession(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   deleteSession(

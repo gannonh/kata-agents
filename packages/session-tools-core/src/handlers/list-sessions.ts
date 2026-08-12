@@ -20,7 +20,7 @@ export async function handleListSessions(
   }
 
   try {
-    const result = ctx.listSessions({
+    const result = await ctx.listSessions({
       status: args.status,
       label: args.label,
       search: args.search,

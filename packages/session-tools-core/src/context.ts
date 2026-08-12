@@ -320,7 +320,7 @@ export interface SessionToolContext {
   getSessionInfo?(sessionId?: string): SessionInfo | null;
 
   /** List sessions in the workspace with pagination. Injected by backend. */
-  listSessions?(options?: ListSessionsOptions): ListSessionsResult;
+  listSessions?(options?: ListSessionsOptions): ListSessionsResult | Promise<ListSessionsResult>;
 
   /** Resolve label display names to IDs against configured labels. Injected by backend. */
   resolveLabels?(labels: string[]): ResolvedLabelsResult;

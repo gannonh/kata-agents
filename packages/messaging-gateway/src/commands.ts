@@ -318,7 +318,7 @@ export class Commands {
 
   private async handleBind(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
     const bindArg = parseCommand(msg.text).args
-    const recent = this.getRecentSessions()
+    const recent = await this.getRecentSessions()
     const replyOpts = msg.threadId !== undefined ? { threadId: msg.threadId } : {}
 
     if (bindArg) {
@@ -660,8 +660,9 @@ export class Commands {
     )
   }
 
-  private getRecentSessions(): ReturnType<ISessionManager['getSessions']> {
-    return this.sessionManager.getSessions(this.workspaceId)
+  private async getRecentSessions(): Promise<Awaited<ReturnType<ISessionManager['getSessions']>>> {
+    const sessions = await this.sessionManager.getSessions(this.workspaceId)
+    return sessions
       .filter((s) => !s.isArchived)
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
       .slice(0, 10)
@@ -669,7 +670,7 @@ export class Commands {
 
   private async resolveBindTarget(
     bindArg: string,
-    recent: ReturnType<ISessionManager['getSessions']>,
+    recent: Awaited<ReturnType<ISessionManager['getSessions']>>,
   ): Promise<Awaited<ReturnType<ISessionManager['getSession']>> | undefined> {
     if (/^\d+$/.test(bindArg)) {
       const index = Number(bindArg)

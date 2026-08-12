@@ -294,7 +294,7 @@ export class WorktreeHandoffService {
       ...(facts.returnRef ? { returnRef: facts.returnRef } : {}),
       recoveryBehavior: facts.recoveryBehavior,
     }
-    return this.deps.registry.runExclusive(async () => {
+    return await this.deps.registry.runExclusive(async () => {
       const existingJournal = this.deps.journal.inProgress().find(
         (entry) => entry.op === 'handoff' && entry.sessionIds.includes(input.sessionId),
       )
@@ -795,7 +795,7 @@ export class WorktreeHandoffService {
         this.deps.journal.updateMetadata(journalId, { state: txn.state })
         this.deps.journal.step(journalId, 'quiesced')
 
-        const record = this.deps.registry.get(txn.managedWorktreeId ?? '')
+        const record = await this.deps.registry.get(txn.managedWorktreeId ?? '')
         if (!record || record.schemaVersion !== 2 || record.state !== 'ready') {
           throw new Error('The managed source record changed before capture.')
         }
@@ -881,7 +881,7 @@ export class WorktreeHandoffService {
         // the captured snapshot meta. Git can no longer check out the branch
         // twice, and hand-back re-materializes this record from the journal
         // return ref. The orphan GC treats the snapshot as referenced.
-        this.deps.registry.upsert({
+        await this.deps.registry.upsert({
           ...record,
           state: 'snapshotted',
           snapshot: captured.meta,
@@ -1070,7 +1070,7 @@ export class WorktreeHandoffService {
         this.deps.journal.updateMetadata(journalId, { state: txn.state })
         this.deps.journal.step(journalId, 'quiesced')
 
-        const record = this.deps.registry.get(txn.managedWorktreeId ?? '')
+        const record = await this.deps.registry.get(txn.managedWorktreeId ?? '')
         if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
           throw new Error('The released managed target record changed before capture.')
         }
@@ -1235,7 +1235,7 @@ export class WorktreeHandoffService {
           checkout,
           executionCwd: record.checkoutPath,
         })
-        this.deps.registry.upsert({
+        await this.deps.registry.upsert({
           ...record,
           state: 'ready',
           snapshot: undefined,
@@ -1475,7 +1475,7 @@ export class WorktreeHandoffService {
     const targetCreated = txn.steps.includes('target-created')
     const sourceCleaned = txn.steps.includes('source-cleaned')
     if (targetCreated) {
-      const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      const record = txn.managedWorktreeId ? await this.deps.registry.get(txn.managedWorktreeId) : undefined
       if (!record || record.schemaVersion !== 2) {
         // A prior rollback attempt may have removed the record before its
         // crash. When the target checkout is provably gone too, treat the
@@ -1491,7 +1491,7 @@ export class WorktreeHandoffService {
         }
         const released = await removeCheckoutFiles(record.repositoryRoot, record.checkoutPath)
         if (!released) throw new Error('The interrupted target checkout could not be removed for rollback.')
-        this.deps.registry.remove(record.managedWorktreeId)
+        await this.deps.registry.remove(record.managedWorktreeId)
       }
       // The branch is txn-owned only while it still points at the captured
       // source HEAD; anything else may be external work and is preserved.
@@ -1545,7 +1545,7 @@ export class WorktreeHandoffService {
       }
       return
     }
-    const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+    const record = txn.managedWorktreeId ? await this.deps.registry.get(txn.managedWorktreeId) : undefined
     if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
       throw new Error('The released managed record is missing; explicit recovery is required.')
     }
@@ -1589,7 +1589,7 @@ export class WorktreeHandoffService {
     } else {
       await this.deps.snapshots.restore({ record, meta: authority, checkoutPath: record.checkoutPath })
     }
-    this.deps.registry.upsert({ ...record, state: 'ready', snapshot: undefined })
+    await this.deps.registry.upsert({ ...record, state: 'ready', snapshot: undefined })
     try {
       await this.deps.snapshots.permanentDelete(record.repositoryRoot, authority)
     } catch {
@@ -1617,7 +1617,7 @@ export class WorktreeHandoffService {
     if (!txn.retainedSnapshotId) throw new Error('The handed source has no retained snapshot authority.')
     const authority = this.deps.snapshots.loadSnapshotMeta(txn.retainedSnapshotId)
     if (!authority) throw new Error('The retained snapshot authority is missing; current restore is impossible.')
-    const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+    const record = txn.managedWorktreeId ? await this.deps.registry.get(txn.managedWorktreeId) : undefined
     if (!record || record.schemaVersion !== 2 || record.state !== 'snapshotted') {
       throw new Error('The released managed record is missing; explicit recovery is required.')
     }
@@ -1969,7 +1969,7 @@ export class WorktreeHandoffService {
           'The session is not bound to a managed worktree; managed-to-current handoff does not apply.',
         )
       }
-      const record = this.deps.registry.get(checkout.managedWorktreeId)
+      const record = await this.deps.registry.get(checkout.managedWorktreeId)
       managedWorktreeId = checkout.managedWorktreeId
       if (!record || record.state !== 'ready' || !existsSync(record.checkoutPath)) {
         return { ...fail('destination-missing', 'The managed worktree is not materialized and ready.'), ...this.emptyFacts(sourcePath, sourceCtx.repositoryRoot ?? sourcePath, gitCommonDir) }
@@ -2008,8 +2008,7 @@ export class WorktreeHandoffService {
       // hand-back: session in current checkout; the managed target is a
       // released (snapshotted) record owned solely by this session.
       const commonDir = gitCommonDir
-      const candidates = this.deps.registry
-        .list()
+      const candidates = (await this.deps.registry.list())
         .filter(
           (rec) =>
             rec.state === 'snapshotted' &&

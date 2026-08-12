@@ -237,8 +237,8 @@ export class ManagedWorktreeService {
     return this.registry
   }
 
-  getOwnerCount(id: string): number {
-    return this.registry.getOwnerCount(id)
+  async getOwnerCount(id: string): Promise<number> {
+    return await this.registry.getOwnerCount(id)
   }
 
   /** True when `path` is contained within the configured worktree root. */
@@ -283,14 +283,13 @@ export class ManagedWorktreeService {
    * blocked/removing) are excluded so a session cannot attach to a checkout
    * that is not currently usable.
    */
-  listManagedWorktrees(
+  async listManagedWorktrees(
     workspaceId: string,
     gitCommonDir: string,
     excludeWorktreeId?: string,
-  ): ManagedWorktreeSummaryVersioned[] {
+  ): Promise<ManagedWorktreeSummaryVersioned[]> {
     const repoKey = computeRepoKey(safeRealpath(gitCommonDir))
-    return this.registry
-      .list()
+    return (await this.registry.list())
       .filter(
         (rec) =>
           rec.state === 'ready' &&
@@ -451,7 +450,7 @@ export class ManagedWorktreeService {
               ownerSessionIds: [sessionId],
               state: 'preparing',
             }
-        this.registry.upsert(provisional)
+        await this.registry.upsert(provisional)
         const transaction: ProvisionalCreation = {
           worktreeCreated: false,
           branchCreated: false,
@@ -524,7 +523,7 @@ export class ManagedWorktreeService {
                 checkoutPath: safeRealpath(worktreePath),
                 state: 'ready',
               }
-          this.registry.upsert(ready)
+          await this.registry.upsert(ready)
           return { record: ready, include }
         } catch (err) {
           const branchCollision = this.isBranchCollisionError(err)
@@ -590,8 +589,8 @@ export class ManagedWorktreeService {
     return fragment ? `${fragment}-${token}` : token
   }
 
-  addOwner(managedWorktreeId: string, sessionId: string): void {
-    const result: WorktreeOwnerBindResult = this.registry.addOwnerIfReady(managedWorktreeId, sessionId)
+  async addOwner(managedWorktreeId: string, sessionId: string): Promise<void> {
+    const result: WorktreeOwnerBindResult = await this.registry.addOwnerIfReady(managedWorktreeId, sessionId)
     if (result.status === 'missing') {
       throw new Error('Managed worktree record not found.')
     }
@@ -600,8 +599,8 @@ export class ManagedWorktreeService {
     }
   }
 
-  removeOwner(managedWorktreeId: string, sessionId: string): void {
-    this.registry.removeOwner(managedWorktreeId, sessionId)
+  async removeOwner(managedWorktreeId: string, sessionId: string): Promise<void> {
+    await this.registry.removeOwner(managedWorktreeId, sessionId)
   }
 
   /**
@@ -720,7 +719,7 @@ export class ManagedWorktreeService {
     managedWorktreeId: string,
     requestingSessionId: string,
   ): Promise<WorktreeRemovalRisk> {
-    const rec = this.registry.get(managedWorktreeId)
+    const rec = await this.registry.get(managedWorktreeId)
     if (!rec) {
       return {
         managedWorktreeId,
@@ -804,7 +803,7 @@ export class ManagedWorktreeService {
       expectedConfirmation?: WorktreeRemovalConfirmation
     },
   ): Promise<WorktreeRemovalResult> {
-    const rec = this.registry.get(managedWorktreeId)
+    const rec = await this.registry.get(managedWorktreeId)
     if (!rec) {
       return { removed: false, branchPruned: false, blocked: false }
     }
@@ -814,7 +813,7 @@ export class ManagedWorktreeService {
       // The registry is shared across server processes. Re-read it after the
       // Git lock is acquired so a stale in-memory record cannot authorize a
       // removal using an old path, owner set, or common directory.
-      const current = this.registry.get(managedWorktreeId)
+      const current = await this.registry.get(managedWorktreeId)
       if (!current) {
         return { removed: false, branchPruned: false, blocked: false }
       }
@@ -898,7 +897,7 @@ export class ManagedWorktreeService {
       // Ownership is mutable registry state and the authoritative inspection
       // performs async Git work. Re-read it synchronously after the last guard
       // await so an owner added during inspection cannot lose its checkout.
-      const currentRecord = this.registry.get(managedWorktreeId)
+      const currentRecord = await this.registry.get(managedWorktreeId)
       const currentOwners = currentRecord?.ownerSessionIds ?? []
       const currentOtherOwners = currentOwners.filter(
         owner => owner !== requestingSessionId,
@@ -928,7 +927,7 @@ export class ManagedWorktreeService {
       // ownership and readiness. addOwnerIfReady() uses that transaction too,
       // so a late owner either lands before this claim (and blocks removal) or
       // is rejected after the record becomes removing.
-      const removalBegin: WorktreeRemovalBeginResult = this.registry.beginRemoval(
+      const removalBegin: WorktreeRemovalBeginResult = await this.registry.beginRemoval(
         managedWorktreeId,
         requestingSessionId,
         requestingSessionId === RECONCILE_ACTOR,
@@ -963,7 +962,7 @@ export class ManagedWorktreeService {
       // unique work.
       const released = await removeCheckoutFiles(rec.repositoryRoot, rec.checkoutPath)
       if (!released) {
-        this.registry.setState(managedWorktreeId, 'blocked')
+        await this.registry.setState(managedWorktreeId, 'blocked')
         return {
           removed: false,
           branchPruned: false,
@@ -986,7 +985,7 @@ export class ManagedWorktreeService {
         }
       }
 
-      this.registry.remove(managedWorktreeId)
+      await this.registry.remove(managedWorktreeId)
       return { removed: true, branchPruned, blocked: false }
     })
   }
@@ -1014,7 +1013,7 @@ export class ManagedWorktreeService {
       reclaimedUnowned: 0,
       retainedUnownedWithWork: 0,
     }
-    const records = this.registry.list()
+    const records = await this.registry.list()
     report.recordsInspected = records.length
     if (records.length === 0) return report
 
@@ -1077,7 +1076,7 @@ export class ManagedWorktreeService {
         report.droppedOwnerRefs += beforeOwners - liveOwners.length
         if (liveOwners.length !== beforeOwners) {
           rec.ownerSessionIds = liveOwners
-          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+          if (!await this.registry.upsertIfUnchanged(observed, rec)) continue
         }
         continue
       }
@@ -1091,7 +1090,7 @@ export class ManagedWorktreeService {
         report.droppedOwnerRefs += beforeOwners - liveOwners.length
         if (liveOwners.length !== beforeOwners) {
           rec.ownerSessionIds = liveOwners
-          if (!this.registry.upsertIfUnchanged(observed, rec)) continue
+          if (!await this.registry.upsertIfUnchanged(observed, rec)) continue
         }
         continue
       }
@@ -1153,7 +1152,7 @@ export class ManagedWorktreeService {
         recV2.lastError = undefined
       }
       rec.state = nextState
-      if (!this.registry.upsertIfUnchanged(observed, rec)) {
+      if (!await this.registry.upsertIfUnchanged(observed, rec)) {
         // Another lifecycle operation won the registry race. Do not use this
         // stale inspection to reclaim or re-mark the checkout.
         continue
@@ -1187,7 +1186,7 @@ export class ManagedWorktreeService {
           }
           // Do not overwrite a late owner reference (or a concurrent removal
           // outcome) with this stale reconciliation snapshot.
-          this.registry.upsertIfUnchanged(rec, blockedRecord)
+          await this.registry.upsertIfUnchanged(rec, blockedRecord)
         }
       }
     }
@@ -1427,10 +1426,10 @@ export class ManagedWorktreeService {
     }
 
     if (clean) {
-      this.registry.remove(managedWorktreeId)
+      await this.registry.remove(managedWorktreeId)
     } else {
       // Retain a blocked registry record for explicit recovery.
-      this.registry.setState(managedWorktreeId, 'blocked')
+      await this.registry.setState(managedWorktreeId, 'blocked')
     }
   }
 

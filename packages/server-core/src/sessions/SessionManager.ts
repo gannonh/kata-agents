@@ -1117,11 +1117,11 @@ const DEFAULT_TOKEN_USAGE = {
  * Convert a ManagedSession to a renderer-side Session object.
  * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
  */
-function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Session {
+async function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Promise<Session> {
   let sharedOwnerCount: number | undefined
   if (m.checkout?.mode === 'managed-worktree' && m.checkout.managedWorktreeId) {
     try {
-      const count = getDefaultGitServices().worktrees.getOwnerCount(m.checkout.managedWorktreeId)
+      const count = await getDefaultGitServices().worktrees.getOwnerCount(m.checkout.managedWorktreeId)
       if (count > 0) sharedOwnerCount = count
     } catch {
       /* registry unavailable — omit */
@@ -2091,7 +2091,7 @@ export class SessionManager implements ISessionManager {
       }
 
       // Load existing sessions from disk
-      this.loadSessionsFromDisk()
+      await this.loadSessionsFromDisk()
 
       // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
       this.initGate.markReady()
@@ -2102,7 +2102,7 @@ export class SessionManager implements ISessionManager {
   }
 
   // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
-  private loadSessionsFromDisk(): void {
+  private async loadSessionsFromDisk(): Promise<void> {
     try {
       const workspaces = getWorkspaces()
       let totalSessions = 0
@@ -2556,11 +2556,11 @@ export class SessionManager implements ISessionManager {
    * Reload all sessions from disk.
    * Used after importing sessions to refresh the in-memory session list.
    */
-  reloadSessions(): void {
-    this.loadSessionsFromDisk()
+  async reloadSessions(): Promise<void> {
+    await this.loadSessionsFromDisk()
   }
 
-  getSessions(workspaceId?: string): Session[] {
+  async getSessions(workspaceId?: string): Promise<Session[]> {
     // Returns session metadata only - messages are NOT included to save memory
     // Use getSession(id) to load messages for a specific session
     let sessions = Array.from(this.sessions.values())
@@ -2570,8 +2570,7 @@ export class SessionManager implements ISessionManager {
       sessions = sessions.filter(m => m.workspace.id === workspaceId)
     }
 
-    return sessions
-      .map(m => managedToSession(m))
+    return (await Promise.all(sessions.map(m => managedToSession(m))))
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
   }
 
@@ -2643,7 +2642,7 @@ export class SessionManager implements ISessionManager {
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
 
-    return managedToSession(m, { messages: m.messages })
+    return await managedToSession(m, { messages: m.messages })
   }
 
   /**
@@ -3228,7 +3227,7 @@ export class SessionManager implements ISessionManager {
       managed.sdkCwd = parentCheckout.checkoutPath
       if (parentCheckout.mode === 'managed-worktree' && parentCheckout.managedWorktreeId) {
         try {
-          this.getGitServices().worktrees.addOwner(parentCheckout.managedWorktreeId, storedSession.id)
+          await this.getGitServices().worktrees.addOwner(parentCheckout.managedWorktreeId, storedSession.id)
           this.getGitServices().pathLeases.lease(storedSession.id, parentCheckout.checkoutPath)
         } catch (err) {
           sessionLog.warn('Failed to register conversation-branch worktree owner', {
@@ -3261,7 +3260,7 @@ export class SessionManager implements ISessionManager {
       })
     }
 
-    return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
+    return await managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -4475,13 +4474,13 @@ export class SessionManager implements ISessionManager {
             isActive: session.agent != null,
           }
         },
-        listSessionsFn: (options) => {
+        listSessionsFn: async (options) => {
           const DEFAULT_LIMIT = 20
           const MAX_LIMIT = 100
           const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
           const offset = options?.offset ?? 0
 
-          let sessions = this.getSessions(managed.workspace.id)
+          let sessions = await this.getSessions(managed.workspace.id)
 
           // Filter
           if (options?.status) {
@@ -6144,7 +6143,7 @@ export class SessionManager implements ISessionManager {
     const git = this.getGitServices()
     const ctx = await git.repository.getContext(workingDirectory)
     if (!ctx.isGitRepository || !ctx.gitCommonDir) return []
-    return git.worktrees.listManagedWorktrees(
+    return await git.worktrees.listManagedWorktrees(
       managed.workspace.id,
       ctx.gitCommonDir,
       managed.checkout?.managedWorktreeId ?? undefined,
@@ -6280,7 +6279,7 @@ export class SessionManager implements ISessionManager {
     // never mutates the checkout: it only gains an owner reference so cleanup
     // guards and shared-owner counts stay accurate.
     if (intent.managedWorktreeId) {
-      const record = git.registry.get(intent.managedWorktreeId)
+      const record = await git.registry.get(intent.managedWorktreeId)
       if (!record) {
         throw new Error('Managed worktree not found.')
       }
@@ -6312,7 +6311,7 @@ export class SessionManager implements ISessionManager {
 
       // `addOwner` is idempotent and throws while the record is not ready
       // (re-checked here under the same registry the list was derived from).
-      git.worktrees.addOwner(record.managedWorktreeId, sessionId)
+      await git.worktrees.addOwner(record.managedWorktreeId, sessionId)
 
       const checkout: import('@kata-sh/shared/protocol').SessionCheckout =
         isWorktreeV2Enabled() && record.schemaVersion === 2
@@ -6343,7 +6342,7 @@ export class SessionManager implements ISessionManager {
       } catch (bindErr) {
         // Session update failed — release the owner reference so shared-owner
         // counts and cleanup guards stay accurate.
-        git.worktrees.removeOwner(record.managedWorktreeId, sessionId)
+        await git.worktrees.removeOwner(record.managedWorktreeId, sessionId)
         throw bindErr
       }
       // Phase 2: the session leases its checkout path from the first instant,
@@ -6418,7 +6417,7 @@ export class SessionManager implements ISessionManager {
 
     try {
       this.bindCheckout(managed, checkout, record.checkoutPath)
-      git.registry.setState(record.managedWorktreeId, 'ready')
+      await git.registry.setState(record.managedWorktreeId, 'ready')
       // Phase 2: lease the new checkout path immediately.
       git.pathLeases.lease(sessionId, record.checkoutPath)
       // Durable persist so restart/resume immediately after preparation returns
@@ -6455,11 +6454,11 @@ export class SessionManager implements ISessionManager {
    * reconciliation has not completed). Sessions without a managed checkout
    * are unaffected. Session deletion remains available as the escape hatch.
    */
-  private assertSessionCheckoutReady(sessionId: string): void {
+  private async assertSessionCheckoutReady(sessionId: string): Promise<void> {
     if (!isWorktreeV2Enabled()) return
     const git = this.getGitServices()
     git.lifecycle.assertReady()
-    const { state } = git.lifecycle.recordStateForSession(sessionId)
+    const { state } = await git.lifecycle.recordStateForSession(sessionId)
     if (state !== 'ready') {
       throw new Error(
         `This session's worktree is ${state}. Open Worktrees settings to restore or resolve it before continuing.`,
@@ -6472,7 +6471,7 @@ export class SessionManager implements ISessionManager {
    * checkout metadata and the registry — never a client-supplied path/id. The
    * requesting session must be a recorded owner of the worktree.
    */
-  private resolveOwnedWorktreeId(sessionId: string): string {
+  private async resolveOwnedWorktreeId(sessionId: string): Promise<string> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
     const managedWorktreeId = managed.checkout?.managedWorktreeId
@@ -6480,7 +6479,7 @@ export class SessionManager implements ISessionManager {
       throw new Error('Session has no managed worktree to remove.')
     }
     const git = this.getGitServices()
-    const record = git.registry.get(managedWorktreeId)
+    const record = await git.registry.get(managedWorktreeId)
     if (!record) {
       throw new Error('Managed worktree record not found for this session.')
     }
@@ -6497,7 +6496,7 @@ export class SessionManager implements ISessionManager {
   async inspectManagedWorktreeRemoval(
     sessionId: string,
   ): Promise<import('@kata-sh/shared/protocol').WorktreeRemovalRisk> {
-    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    const managedWorktreeId = await this.resolveOwnedWorktreeId(sessionId)
     return this.getGitServices().worktrees.inspectRemoval(managedWorktreeId, sessionId)
   }
 
@@ -6514,13 +6513,13 @@ export class SessionManager implements ISessionManager {
     if (!isGitWorkspaceV1Enabled()) {
       throw new Error('Git workspace feature is not enabled.')
     }
-    const managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+    const managedWorktreeId = await this.resolveOwnedWorktreeId(sessionId)
     // V2 never calls branch-pruning V1 removal: the legacy RPC routes through
     // the lifecycle service with a fresh preview fingerprint, so removal is
     // snapshot-first and the branch is always retained.
     if (isWorktreeV2Enabled()) {
       const git = this.getGitServices()
-      const record = git.registry.get(managedWorktreeId)
+      const record = await git.registry.get(managedWorktreeId)
       // Shared-owner blocking is per-requesting-session (the lifecycle preview
       // is per-record): another owner still blocks removal, exactly like V1.
       const otherOwners = (record?.ownerSessionIds ?? []).filter((owner) => owner !== sessionId)
@@ -6624,7 +6623,7 @@ export class SessionManager implements ISessionManager {
     if (!isGitWorkspaceV1Enabled()) return { outcome: 'nothing-to-remove' }
     let managedWorktreeId: string
     try {
-      managedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+      managedWorktreeId = await this.resolveOwnedWorktreeId(sessionId)
     } catch {
       // No managed checkout, no registry record, or not an owner — all mean
       // there is nothing this session may remove.
@@ -6756,7 +6755,7 @@ export class SessionManager implements ISessionManager {
    * completed and the session is restored. Otherwise the hidden transaction is
    * finalized so no stale header can resurrect a dangling session.
    */
-  private recoverStagedSessionDeletions(workspaceRootPath: string): void {
+  private async recoverStagedSessionDeletions(workspaceRootPath: string): Promise<void> {
     const transactionRoot = join(workspaceRootPath, '.kata-session-deletions')
     if (!existsSync(transactionRoot)) return
     for (const entry of readdirSync(transactionRoot, { withFileTypes: true })) {
@@ -6778,7 +6777,7 @@ export class SessionManager implements ISessionManager {
           continue
         }
         const originalPath = getSessionStoragePath(workspaceRootPath, marker.sessionId)
-        const rec = this.getGitServices().registry.get(marker.managedWorktreeId)
+        const rec = await this.getGitServices().registry.get(marker.managedWorktreeId)
         if (rec && existsSync(rec.checkoutPath) && !existsSync(originalPath)) {
           renameSync(stagedPath, originalPath)
         }
@@ -7254,7 +7253,7 @@ export class SessionManager implements ISessionManager {
       let ownedWorktreeId: string | null = null
       if (isGitWorkspaceV1Enabled()) {
         try {
-          ownedWorktreeId = this.resolveOwnedWorktreeId(sessionId)
+          ownedWorktreeId = await this.resolveOwnedWorktreeId(sessionId)
         } catch {
           // The removal hint is harmless when this session owns no checkout.
         }
@@ -7313,7 +7312,7 @@ export class SessionManager implements ISessionManager {
         if (isWorktreeV2Enabled()) {
           await this.getGitServices().lifecycle.detachSession(sessionId)
         } else {
-          this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
+          await this.getGitServices().worktrees.removeOwner(managed.checkout.managedWorktreeId, sessionId)
           this.getGitServices().pathLeases.releaseSession(sessionId)
         }
       } catch (err) {
@@ -7471,7 +7470,7 @@ export class SessionManager implements ISessionManager {
     this.assertSessionForkNotFenced(sessionId)
     // Phase 2: Send stays fenced while the session's worktree record is not
     // ready (recovery required). Sessions without a managed checkout pass.
-    this.assertSessionCheckoutReady(sessionId)
+    await this.assertSessionCheckoutReady(sessionId)
     await this.awaitActiveAgentTeardown(sessionId, managed)
     if (this.sessions.get(sessionId) !== managed || this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
@@ -7583,7 +7582,7 @@ export class SessionManager implements ISessionManager {
       onAck?.(userMessage.id)
       // Phase 2: an accepted user message is server-authored activity.
       try {
-        this.getGitServices().lifecycle.touchForSession(sessionId)
+        await this.getGitServices().lifecycle.touchForSession(sessionId)
       } catch {
         /* activity touch is best-effort */
       }
@@ -7627,7 +7626,7 @@ export class SessionManager implements ISessionManager {
       onAck?.(userMessage.id)
       // Phase 2: an accepted user message is server-authored activity.
       try {
-        this.getGitServices().lifecycle.touchForSession(sessionId)
+        await this.getGitServices().lifecycle.touchForSession(sessionId)
       } catch {
         /* activity touch is best-effort */
       }
