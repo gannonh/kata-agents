@@ -12,7 +12,14 @@ export const APP_READY_SELECTOR = "#app-ready";
 /** Added in WorkspacePicker.tsx; present on the workspace-picker screen. */
 export const WORKSPACE_PICKER_SELECTOR = "#workspace-picker";
 
-export async function waitForRootMounted(page: Page, timeoutMs = E2E_TIMEOUTS.assertionMs): Promise<void> {
+/**
+ * Wait for the first real shell screen after Electron/Vite startup.
+ *
+ * This is a startup wait, not an assertion wait: a cold renderer can take
+ * longer than the per-assertion budget while the app initializes its config
+ * and session services.
+ */
+export async function waitForRootMounted(page: Page, timeoutMs = E2E_TIMEOUTS.electronWindowMs): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await page.locator(ONBOARDING_SELECTOR).isVisible().catch(() => false)) {

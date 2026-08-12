@@ -3,7 +3,7 @@ import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 describe('native Pi models', () => {
-  it('resolves GPT-5.6 Sol, Terra, and Luna from Pi 0.83 for OpenAI and Codex', async () => {
+  it('resolves GPT-5.6 Sol, Terra, and Luna from Pi 0.84.1 for OpenAI and Codex', async () => {
     const runtime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
       allowModelNetwork: false,
@@ -11,8 +11,8 @@ describe('native Pi models', () => {
     const registry = new ModelRegistry(runtime);
     const expectedCosts = {
       'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-      'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
-      'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
+      'gpt-5.6-terra': { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
+      'gpt-5.6-luna': { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
     };
 
     for (const provider of ['openai', 'openai-codex']) {

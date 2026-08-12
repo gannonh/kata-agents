@@ -51,7 +51,7 @@ import type { Credential, TextContent as PiTextContent } from '@earendil-works/p
 // Pre-register the Bedrock provider module so the Pi SDK doesn't attempt a
 // dynamic import of "./amazon-bedrock.js" — which fails in the bundled output
 // because bun collapses everything into a single file.
-// With Pi SDK 0.83, pi-ai is deduped (single hoisted
+// With Pi SDK 0.84.1, pi-ai is deduped (single hoisted
 // copy), so one registration covers both pi-ai and pi-agent-core module scopes.
 import { setBedrockProviderModule } from '@earendil-works/pi-ai/api/bedrock-converse-stream.lazy';
 import { bedrockProviderModule } from '@earendil-works/pi-ai/bedrock-provider';
@@ -575,7 +575,7 @@ async function ensureSession(): Promise<AgentSession> {
   );
   const webTools = [searchTool, webFetchTool];
 
-  // Pi SDK 0.83 registration contract:
+  // Pi SDK 0.84.1 registration contract:
   //   - `customTools` accepts ToolDefinition[] — our hook-wrapped objects go here
   //   - `tools` is a string[] name allowlist — MUST include every tool we want active,
   //     otherwise Pi SDK defaults to the built-in [read, bash, edit, write] set and
