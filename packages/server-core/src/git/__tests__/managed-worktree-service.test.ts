@@ -55,7 +55,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
     expect(branches).toContain(record.expectedBranch)
 
     // Registry persisted it.
-    expect(svc.registry.get(record.managedWorktreeId)).toBeTruthy()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeTruthy()
   })
 
   test('creates a named V2 worktree with the exact requested branch and a safe unique leaf', async () => {
@@ -126,7 +126,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       }
 
       expect(existsSync(join(svc.worktreeSettings.getSnapshot().materializationRoot, 'ws1'))).toBe(false)
-      expect(svc.registry.list()).toEqual([])
+      expect(await svc.registry.list()).toEqual([])
       expect(existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null).toBe(beforeRegistry)
     } finally {
       if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
@@ -171,7 +171,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
         }),
       ).rejects.toThrow(/injected identity failure/)
 
-      const retained = svc.registry.list()
+      const retained = await svc.registry.list()
       expect(retained).toHaveLength(1)
       expect(retained[0]).toMatchObject({
         state: 'blocked',
@@ -225,7 +225,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
         }),
       ).rejects.toMatchObject({ code: 'WORKTREE_BRANCH_OWNERSHIP_UNKNOWN' })
 
-      expect(svc.registry.list()).toEqual([])
+      expect(await svc.registry.list()).toEqual([])
       expect((await git(repo, ['branch', '--list', 'kata-agent/auth-refresh'])).trim()).toContain(
         'kata-agent/auth-refresh',
       )
@@ -261,7 +261,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
         ).rejects.toMatchObject({ code: 'WORKTREE_NAME_INVALID' })
       }
       expect((await git(repo, ['branch', '--list', 'kata-agent/*'])).trim()).toBe('')
-      expect(svc.registry.list()).toEqual([])
+      expect(await svc.registry.list()).toEqual([])
     } finally {
       if (previousV1 === undefined) delete process.env.KATA_FEATURE_GIT_WORKSPACE_V1
       else process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = previousV1
@@ -414,7 +414,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       await initRepo(repo)
       const svc = servicesFor()
       const customRoot = tmp()
-      const snapshot = svc.worktreeSettings.update({ materializationRoot: customRoot })
+      const snapshot = await svc.worktreeSettings.update({ materializationRoot: customRoot })
       const gcd = await commonDir(repo)
 
       const { record } = await svc.worktrees.createWorktree({
@@ -426,7 +426,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       })
 
       expect(record.checkoutPath.startsWith(snapshot.materializationRoot)).toBe(true)
-      expect(svc.registry.get(record.managedWorktreeId)).toMatchObject({
+      expect(await svc.registry.get(record.managedWorktreeId)).toMatchObject({
         materializationRoot: snapshot.materializationRoot,
       })
     } finally {
@@ -447,7 +447,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       await initRepo(repo)
       const svc = servicesFor()
       const customRoot = join(repo, 'inside-repository')
-      svc.worktreeSettings.update({ materializationRoot: customRoot })
+      await svc.worktreeSettings.update({ materializationRoot: customRoot })
 
       await expect(
         svc.worktrees.createWorktree({
@@ -477,7 +477,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       const svc = servicesFor()
       const customRoot = tmp()
       const outside = tmp()
-      svc.worktreeSettings.update({ materializationRoot: customRoot })
+      await svc.worktreeSettings.update({ materializationRoot: customRoot })
       symlinkSync(outside, join(customRoot, 'ws1'))
 
       await expect(
@@ -507,7 +507,7 @@ describe('ManagedWorktreeService.createWorktree', () => {
       await initRepo(repo)
       const svc = servicesFor()
       const customRoot = tmp()
-      svc.worktreeSettings.update({ materializationRoot: customRoot })
+      await svc.worktreeSettings.update({ materializationRoot: customRoot })
       process.env.KATA_FEATURE_WORKTREE_V2 = '0'
 
       const { record } = await svc.worktrees.createWorktree({
@@ -579,8 +579,8 @@ describe('shared ownership and removal', () => {
       baseRef: 'main',
     })
     // Conversation branch adds an owner.
-    svc.worktrees.addOwner(record.managedWorktreeId, 'child')
-    expect(svc.worktrees.getOwnerCount(record.managedWorktreeId)).toBe(2)
+    await svc.worktrees.addOwner(record.managedWorktreeId, 'child')
+    expect(await svc.worktrees.getOwnerCount(record.managedWorktreeId)).toBe(2)
 
     // Deleting the child: the parent still owns it → removal blocked.
     const risk = await svc.worktrees.inspectRemoval(record.managedWorktreeId, 'child')
@@ -608,7 +608,7 @@ describe('shared ownership and removal', () => {
     expect(res.removed).toBe(true)
     expect(res.branchPruned).toBe(true)
     expect(existsSync(record.checkoutPath)).toBe(false)
-    expect(svc.registry.get(record.managedWorktreeId)).toBeUndefined()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeUndefined()
     const branches = await git(repo, ['branch', '--list', record.expectedBranch])
     expect(branches.trim()).toBe('')
   })
@@ -637,7 +637,7 @@ describe('managed worktree discovery summaries', () => {
         baseRef: 'main',
       })
 
-      expect(svc.worktrees.listManagedWorktrees('ws1', gcd)).toEqual([{
+      expect(await svc.worktrees.listManagedWorktrees('ws1', gcd)).toEqual([{
         managedWorktreeId: record.managedWorktreeId,
         checkoutPath: record.checkoutPath,
         expectedBranch: record.expectedBranch,
@@ -647,7 +647,7 @@ describe('managed worktree discovery summaries', () => {
       }])
 
       process.env.KATA_FEATURE_WORKTREE_V2 = '1'
-      const versioned = svc.worktrees.listManagedWorktrees('ws1', gcd)
+      const versioned = await svc.worktrees.listManagedWorktrees('ws1', gcd)
       expect(versioned).toEqual([{
         schemaVersion: 2,
         managedWorktreeId: record.managedWorktreeId,

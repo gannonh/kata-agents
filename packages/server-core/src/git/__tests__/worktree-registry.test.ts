@@ -8,6 +8,7 @@ import {
   WorktreeRegistryError,
   getWorktreeRegistryEvidencePaths,
 } from '../worktree-registry'
+import { CrossProcessFileLock, DEFAULT_LOCK_TIMEOUT_MS } from '../mutation-lock'
 import type { ManagedWorktreeRecordV2 } from '@kata-sh/shared/protocol'
 import { cleanup, makeTmpDir } from './test-helpers'
 
@@ -44,14 +45,14 @@ function writeV1(path: string, record: ReturnType<typeof legacyRecord>): string 
 }
 
 describe('WorktreeRegistry', () => {
-  test('upgrades V1 in place with recoverable hash-bound evidence and is idempotent', () => {
+  test('upgrades V1 in place with recoverable hash-bound evidence and is idempotent', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const source = writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
 
-    registry.load()
-    const upgraded = registry.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    await registry.load()
+    const upgraded = (await registry.get('repo-aabbccdd')) as ManagedWorktreeRecordV2
     expect(upgraded.schemaVersion).toBe(2)
     expect(upgraded.managedWorktreeId).toBe('repo-aabbccdd')
     expect(upgraded.checkoutPath).toBe(legacyRecord(root).checkoutPath)
@@ -75,17 +76,17 @@ describe('WorktreeRegistry', () => {
     )
 
     const before = statSync(path).mtimeMs
-    registry.load()
+    await registry.load()
     expect(statSync(path).mtimeMs).toBe(before)
-    expect(registry.list()).toHaveLength(1)
+    expect(await registry.list()).toHaveLength(1)
   })
 
-  test('recovers a V2 registry rewritten with a V1 wrapper by an older process', () => {
+  test('recovers a V2 registry rewritten with a V1 wrapper by an older process', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
-    registry.load()
+    await registry.load()
 
     const evidencePaths = getWorktreeRegistryEvidencePaths(path)
     const originalBackup = readFileSync(evidencePaths.backupPath)
@@ -99,7 +100,7 @@ describe('WorktreeRegistry', () => {
     writeFileSync(path, JSON.stringify(downgraded, null, 2) + '\n')
 
     const recovered = new WorktreeRegistry(path)
-    expect(recovered.get('repo-aabbccdd')?.state).toBe('missing')
+    expect((await recovered.get('repo-aabbccdd'))?.state).toBe('missing')
     expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(2)
     expect(readFileSync(evidencePaths.backupPath)).toEqual(originalBackup)
     expect(recovered.getUpgradeEvidence()).toMatchObject({
@@ -108,18 +109,18 @@ describe('WorktreeRegistry', () => {
     })
   })
 
-  test('fails closed on ambiguous V1 wrappers containing V2 records', () => {
+  test('fails closed on ambiguous V1 wrappers containing V2 records', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
-    new WorktreeRegistry(path).load()
+    await new WorktreeRegistry(path).load()
 
     const mixed = JSON.parse(readFileSync(path, 'utf8'))
     mixed.version = 1
     mixed.records.push(legacyRecord(root, 'repo-eeff0011'))
     const mixedBytes = JSON.stringify(mixed, null, 2) + '\n'
     writeFileSync(path, mixedBytes)
-    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    await expect(new WorktreeRegistry(path).load()).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(mixedBytes)
 
     mixed.records.pop()
@@ -128,15 +129,15 @@ describe('WorktreeRegistry', () => {
     const evidencePaths = getWorktreeRegistryEvidencePaths(path)
     rmSync(evidencePaths.backupPath)
     rmSync(evidencePaths.markerPath)
-    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    await expect(new WorktreeRegistry(path).load()).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(noEvidenceBytes)
   })
 
-  test('fails closed when legacy rewrite evidence is not bound to its source backup', () => {
+  test('fails closed when legacy rewrite evidence is not bound to its source backup', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
-    new WorktreeRegistry(path).load()
+    await new WorktreeRegistry(path).load()
 
     const evidencePaths = getWorktreeRegistryEvidencePaths(path)
     const downgraded = JSON.parse(readFileSync(path, 'utf8'))
@@ -147,16 +148,16 @@ describe('WorktreeRegistry', () => {
     evidence.sourceHash = '0'.repeat(64)
     writeFileSync(evidencePaths.markerPath, JSON.stringify(evidence, null, 2) + '\n')
 
-    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    await expect(new WorktreeRegistry(path).load()).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(downgradedBytes)
   })
 
-  test('resumes interrupted legacy rewrite recovery with its original completion time', () => {
+  test('resumes interrupted legacy rewrite recovery with its original completion time', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const seed = new WorktreeRegistry(path)
-    seed.load()
+    await seed.load()
     const completedAt = seed.getUpgradeEvidence()!.completedAt
 
     const downgraded = JSON.parse(readFileSync(path, 'utf8'))
@@ -166,19 +167,19 @@ describe('WorktreeRegistry', () => {
     const interrupted = new WorktreeRegistry(path, undefined, {
       beforeReplace: () => writeFileSync(path, `${downgradedBytes} `),
     })
-    expect(() => interrupted.load()).toThrow(WorktreeRegistryError)
+    await expect(interrupted.load()).rejects.toThrow(WorktreeRegistryError)
 
     writeFileSync(path, downgradedBytes)
     const recovered = new WorktreeRegistry(path)
-    expect(recovered.list()).toHaveLength(1)
+    expect(await recovered.list()).toHaveLength(1)
     expect(recovered.getUpgradeEvidence()).toMatchObject({ status: 'complete', completedAt })
   })
 
-  test('fails closed on malformed V2 records beneath a V1 wrapper', () => {
+  test('fails closed on malformed V2 records beneath a V1 wrapper', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
-    new WorktreeRegistry(path).load()
+    await new WorktreeRegistry(path).load()
 
     const downgraded = JSON.parse(readFileSync(path, 'utf8'))
     downgraded.version = 1
@@ -186,85 +187,78 @@ describe('WorktreeRegistry', () => {
     const malformed = JSON.stringify(downgraded, null, 2) + '\n'
     writeFileSync(path, malformed)
 
-    expect(() => new WorktreeRegistry(path).load()).toThrow(WorktreeRegistryError)
+    await expect(new WorktreeRegistry(path).load()).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(malformed)
   })
 
-  test('fails closed on corrupt and unsupported sources without clearing source bytes', () => {
+  test('fails closed on corrupt and unsupported sources without clearing source bytes', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const corrupt = '{"version":2,"records":[}'
     writeFileSync(path, corrupt)
     const registry = new WorktreeRegistry(path)
 
-    expect(() => registry.list()).toThrow(WorktreeRegistryError)
-    try {
-      registry.list()
-    } catch (error) {
-      expect(error).toMatchObject({ name: 'WorktreeRegistryError', code: 'REGISTRY_CORRUPT' })
-    }
+    await expect(registry.list()).rejects.toMatchObject({
+      name: 'WorktreeRegistryError',
+      code: 'REGISTRY_CORRUPT',
+    })
     expect(readFileSync(path, 'utf8')).toBe(corrupt)
 
     const unsupported = JSON.stringify({ version: 99, records: [] })
     writeFileSync(path, unsupported)
-    expect(() => registry.load()).toThrow(WorktreeRegistryError)
+    await expect(registry.load()).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(unsupported)
   })
 
-  test('does not authorize stale cache after the source becomes corrupt', () => {
+  test('does not authorize stale cache after the source becomes corrupt', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
-    registry.upsert(legacyRecord(root))
+    await registry.upsert(legacyRecord(root))
     const corrupt = '{"version":2,"records":'
     writeFileSync(path, corrupt)
 
-    expect(() => registry.get('repo-aabbccdd')).toThrow(WorktreeRegistryError)
+    await expect(registry.get('repo-aabbccdd')).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(corrupt)
   })
 
-  test('recovers a missing fixed registry from the preserved V1 source backup', () => {
+  test('recovers a missing fixed registry from the preserved V1 source backup', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
-    registry.load()
+    await registry.load()
     rmSync(path)
 
     const recovered = new WorktreeRegistry(path)
-    expect(recovered.list()).toHaveLength(1)
-    expect((recovered.get('repo-aabbccdd') as ManagedWorktreeRecordV2).schemaVersion).toBe(2)
+    expect(await recovered.list()).toHaveLength(1)
+    expect(((await recovered.get('repo-aabbccdd')) as ManagedWorktreeRecordV2).schemaVersion).toBe(2)
     expect(existsSync(path)).toBe(true)
   })
 
-  test('fails closed instead of restoring an old V1 backup after later V2 mutation', () => {
+  test('fails closed instead of restoring an old V1 backup after later V2 mutation', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
-    registry.load()
-    registry.upsert(legacyRecord(root, 'repo-eeff0011'))
+    await registry.load()
+    await registry.upsert(legacyRecord(root, 'repo-eeff0011'))
     const backup = readFileSync(getWorktreeRegistryEvidencePaths(path).backupPath)
     rmSync(path)
 
     const recovered = new WorktreeRegistry(path)
-    expect(() => recovered.list()).toThrow(WorktreeRegistryError)
-    try {
-      recovered.list()
-    } catch (error) {
-      expect(error).toMatchObject({ code: 'REGISTRY_CONFLICT' })
-    }
+    await expect(recovered.list()).rejects.toMatchObject({ code: 'REGISTRY_CONFLICT' })
     expect(existsSync(path)).toBe(false)
     expect(readFileSync(getWorktreeRegistryEvidencePaths(path).backupPath)).toEqual(backup)
   })
 
-  test('rejects a divergent source against a complete registry hash marker', () => {
+  test('rejects a divergent source against a complete registry hash marker', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
-    registry.load()
-    const current = registry.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    await registry.load()
+    const current = (await registry.get('repo-aabbccdd')) as ManagedWorktreeRecordV2
     const divergent = {
       ...current,
       managedWorktreeId: 'repo-eeff0011',
@@ -275,21 +269,16 @@ describe('WorktreeRegistry', () => {
     writeFileSync(path, JSON.stringify({ version: 2, records: [current, divergent] }, null, 2) + '\n')
     const source = readFileSync(path, 'utf8')
 
-    expect(() => registry.load()).toThrow(WorktreeRegistryError)
-    try {
-      registry.load()
-    } catch (error) {
-      expect(error).toMatchObject({ code: 'REGISTRY_CONFLICT' })
-    }
+    await expect(registry.load()).rejects.toMatchObject({ code: 'REGISTRY_CONFLICT' })
     expect(readFileSync(path, 'utf8')).toBe(source)
   })
 
-  test('rejects an intervening writer instead of overwriting its new record', () => {
+  test('rejects an intervening writer instead of overwriting its new record', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const seed = new WorktreeRegistry(path)
-    seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
-    const first = seed.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    await seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
+    const first = (await seed.get('repo-aabbccdd')) as ManagedWorktreeRecordV2
     const second = {
       ...first,
       managedWorktreeId: 'repo-eeff0011',
@@ -302,20 +291,20 @@ describe('WorktreeRegistry', () => {
       beforePersist: () => writeFileSync(path, writerBytes),
     })
 
-    expect(() => racing.setState(first.managedWorktreeId, 'blocked')).toThrow(WorktreeRegistryError)
+    await expect(racing.setState(first.managedWorktreeId, 'blocked')).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(writerBytes)
-    expect(new WorktreeRegistry(path).list().map((record) => record.managedWorktreeId).sort()).toEqual([
+    expect((await new WorktreeRegistry(path).list()).map((record) => record.managedWorktreeId).sort()).toEqual([
       'repo-aabbccdd',
       'repo-eeff0011',
     ])
   })
 
-  test('aborts before rename when a writer changes the source at the deterministic race hook', () => {
+  test('aborts before rename when a writer changes the source at the deterministic race hook', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const seed = new WorktreeRegistry(path)
-    seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
-    const first = seed.get('repo-aabbccdd') as ManagedWorktreeRecordV2
+    await seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
+    const first = (await seed.get('repo-aabbccdd')) as ManagedWorktreeRecordV2
     const second = {
       ...first,
       managedWorktreeId: 'repo-eeff0011',
@@ -328,76 +317,71 @@ describe('WorktreeRegistry', () => {
       beforeReplace: () => writeFileSync(path, writerBytes),
     })
 
-    expect(() => racing.setState(first.managedWorktreeId, 'blocked')).toThrow(WorktreeRegistryError)
+    await expect(racing.setState(first.managedWorktreeId, 'blocked')).rejects.toThrow(WorktreeRegistryError)
     expect(readFileSync(path, 'utf8')).toBe(writerBytes)
   })
 
-  test('rejects a source that conflicts with prior upgrade evidence', () => {
+  test('rejects a source that conflicts with prior upgrade evidence', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     writeV1(path, legacyRecord(root))
     const registry = new WorktreeRegistry(path)
-    registry.load()
+    await registry.load()
 
     // A V1 source with a different hash after an upgrade is not safe to
     // overwrite with stale migration output.
     const changed = writeV1(path, { ...legacyRecord(root), ownerSessionIds: ['new-owner'] })
-    expect(() => registry.load()).toThrow(WorktreeRegistryError)
-    try {
-      registry.load()
-    } catch (error) {
-      expect(error).toMatchObject({ code: 'REGISTRY_CONFLICT' })
-    }
+    await expect(registry.load()).rejects.toMatchObject({ code: 'REGISTRY_CONFLICT' })
     expect(readFileSync(path, 'utf8')).toBe(changed)
   })
 
-  test('competing instances serialize owner binding and removal claims', () => {
+  test('competing instances serialize owner binding and removal claims', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const first = new WorktreeRegistry(path)
     const second = new WorktreeRegistry(path)
     const record = legacyRecord(root)
-    first.upsert(record)
+    await first.upsert(record)
 
-    expect(second.addOwnerIfReady(record.managedWorktreeId, 'session-2')).toEqual({
+    expect(await second.addOwnerIfReady(record.managedWorktreeId, 'session-2')).toEqual({
       status: 'added',
     })
-    expect(first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+    expect(await first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
       status: 'other-owner',
     })
 
-    second.removeOwner(record.managedWorktreeId, 'session-2')
-    expect(first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+    await second.removeOwner(record.managedWorktreeId, 'session-2')
+    expect(await first.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
       status: 'started',
     })
-    expect(second.addOwnerIfReady(record.managedWorktreeId, 'session-3')).toMatchObject({
+    expect(await second.addOwnerIfReady(record.managedWorktreeId, 'session-3')).toMatchObject({
       status: 'not-ready',
       state: 'removing',
     })
   })
 
-  test('missing and blocked records remain retryable for explicit removal', () => {
+  test('missing and blocked records remain retryable for explicit removal', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
     const record = legacyRecord(root)
-    registry.upsert(record)
+    await registry.upsert(record)
 
     for (const state of ['missing', 'blocked'] as const) {
-      registry.setState(record.managedWorktreeId, state)
-      expect(registry.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
+      await registry.setState(record.managedWorktreeId, state)
+      expect(await registry.beginRemoval(record.managedWorktreeId, 'session-1')).toEqual({
         status: 'started',
       })
-      registry.setState(record.managedWorktreeId, 'ready')
+      await registry.setState(record.managedWorktreeId, 'ready')
     }
   })
 
-  test('accepts and persists Phase 2 lifecycle states', () => {
+  test('accepts and persists Phase 2 lifecycle states', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
     const record = legacyRecord(root)
-    registry.upsert(record)
+    await registry.upsert(record)
 
     const states = [
       'snapshotting',
@@ -408,17 +392,17 @@ describe('WorktreeRegistry', () => {
       'unowned',
     ] as const
     for (const state of states) {
-      registry.setState(record.managedWorktreeId, state)
+      await registry.setState(record.managedWorktreeId, state)
       const reloaded = new WorktreeRegistry(path)
-      expect(reloaded.get(record.managedWorktreeId)?.state).toBe(state)
+      expect((await reloaded.get(record.managedWorktreeId))?.state).toBe(state)
     }
     // Invalid states stay rejected.
-    expect(() => registry.setState(record.managedWorktreeId, 'not-a-state' as never)).toThrow(
-      WorktreeRegistryError,
-    )
+    await expect(
+      registry.setState(record.managedWorktreeId, 'not-a-state' as never),
+    ).rejects.toThrow(WorktreeRegistryError)
   })
 
-  test('persists and validates Phase 2 record fields (snapshot, policy, archive, errors)', () => {
+  test('persists and validates Phase 2 record fields (snapshot, policy, archive, errors)', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
@@ -457,10 +441,10 @@ describe('WorktreeRegistry', () => {
         previewFingerprint: 'fp-preview',
       },
     }
-    registry.upsert(record)
+    await registry.upsert(record)
 
     const reloaded = new WorktreeRegistry(path)
-    expect(reloaded.get(record.managedWorktreeId)).toEqual(record)
+    expect(await reloaded.get(record.managedWorktreeId)).toEqual(record)
 
     // Invalid optional shapes fail closed.
     for (const invalid of [
@@ -473,7 +457,7 @@ describe('WorktreeRegistry', () => {
       { lastCleanupResult: { at: 1, outcome: 'mystery', policyVersion: 0 } },
       { stateChangedAt: Number.NaN },
     ] as Array<Partial<ManagedWorktreeRecordV2>>) {
-      expect(() => registry.upsert({ ...record, ...invalid })).toThrow(WorktreeRegistryError)
+      await expect(registry.upsert({ ...record, ...invalid })).rejects.toThrow(WorktreeRegistryError)
     }
   })
 
@@ -482,7 +466,7 @@ describe('WorktreeRegistry', () => {
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
     const record = legacyRecord(root)
-    registry.upsert(record)
+    await registry.upsert(record)
 
     const modulePath = resolve(import.meta.dir, '../worktree-registry.ts')
     const signal = join(root, 'tx-started')
@@ -499,7 +483,7 @@ describe('WorktreeRegistry', () => {
         // test as a lock-induced block.
         writeFileSync(${JSON.stringify(join(root, 'racer-attempted'))}, 'entered')
         try {
-          registry.addOwnerIfReady(${JSON.stringify(record.managedWorktreeId)}, 'racer')
+          await registry.addOwnerIfReady(${JSON.stringify(record.managedWorktreeId)}, 'racer')
           writeFileSync(${JSON.stringify(join(root, 'racer-won'))}, 'won')
         } catch (error) {
           writeFileSync(${JSON.stringify(join(root, 'racer-failed'))}, error instanceof Error ? error.message : String(error))
@@ -528,9 +512,9 @@ describe('WorktreeRegistry', () => {
     })
 
     expect(blocked).toBe('snapshotting')
-    expect(registry.get(record.managedWorktreeId)?.state).toBe('snapshotting')
+    expect((await registry.get(record.managedWorktreeId))?.state).toBe('snapshotting')
     // A second instance sees the committed state.
-    expect(new WorktreeRegistry(path).get(record.managedWorktreeId)?.state).toBe('snapshotting')
+    expect((await new WorktreeRegistry(path).get(record.managedWorktreeId))?.state).toBe('snapshotting')
   })
 
   test('runExclusive discards uncommitted changes', async () => {
@@ -538,12 +522,163 @@ describe('WorktreeRegistry', () => {
     const path = join(root, 'registry.json')
     const registry = new WorktreeRegistry(path)
     const record = legacyRecord(root)
-    registry.upsert(record)
+    await registry.upsert(record)
 
     await registry.runExclusive(async (tx) => {
       tx.get(record.managedWorktreeId)!.state = 'removing'
       // No commit: the mutation must not persist.
     })
-    expect(registry.get(record.managedWorktreeId)?.state).toBe('ready')
+    expect((await registry.get(record.managedWorktreeId))?.state).toBe('ready')
+  })
+
+  // -------------------------------------------------------------------------
+  // Async lock-contention regression tests (spec: #45 acceptance criteria)
+  // -------------------------------------------------------------------------
+
+  test('same-process contention: event loop stays responsive and read sees committed state', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    await registry.upsert(record)
+
+    const locked = join(root, 'locked')
+    const transaction = registry.runExclusive(async (tx) => {
+      tx.get(record.managedWorktreeId)!.state = 'snapshotting'
+      writeFileSync(locked, 'held')
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      tx.commit()
+      return tx.get(record.managedWorktreeId)!.state
+    })
+
+    // Wait until the transaction has actually acquired the lock, so the read
+    // below is guaranteed to contend.
+    for (let i = 0; i < 200 && !existsSync(locked); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(existsSync(locked)).toBe(true)
+
+    // Start a concurrent registry read while the lock is held.
+    const read = registry.get(record.managedWorktreeId)
+
+    // A zero-delay timer must fire while the read is still pending — proof the
+    // event loop is not blocked by lock acquisition.
+    let timerFired = false
+    await new Promise<void>((resolve) => setTimeout(() => { timerFired = true; resolve() }, 0))
+    expect(timerFired).toBe(true)
+
+    expect(await transaction).toBe('snapshotting')
+    // The read resolves with the committed state after the lock is released.
+    expect((await read)?.state).toBe('snapshotting')
+  })
+
+  test('cross-process contention: parent event loop responsive and read sees authoritative state', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const registry = new WorktreeRegistry(path)
+    const record = legacyRecord(root)
+    await registry.upsert(record)
+
+    const modulePath = resolve(import.meta.dir, '../worktree-registry.ts')
+    const childAcquired = join(root, 'child-acquired')
+    const releaseSignal = join(root, 'parent-release')
+    const script = `
+      import { writeFileSync, existsSync } from 'node:fs'
+      import { WorktreeRegistry } from ${JSON.stringify(modulePath)}
+      const registry = new WorktreeRegistry(${JSON.stringify(path)}, { timeoutMs: 10000, retryDelayMs: 5 })
+      await registry.runExclusive(async (tx) => {
+        tx.get(${JSON.stringify(record.managedWorktreeId)})!.state = 'blocked'
+        writeFileSync(${JSON.stringify(childAcquired)}, 'acquired')
+        for (let i = 0; i < 2000 && !existsSync(${JSON.stringify(releaseSignal)}); i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        tx.commit()
+      })
+    `
+    const child = spawn(process.execPath, ['-e', script], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    })
+    let childOutput = ''
+    child.stdout.on('data', (chunk) => { childOutput += String(chunk) })
+    child.stderr.on('data', (chunk) => { childOutput += String(chunk) })
+
+    try {
+      for (let i = 0; i < 200 && !existsSync(childAcquired); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(existsSync(childAcquired)).toBe(true)
+
+      // Start a concurrent registry read while the child holds the lock.
+      const read = registry.get(record.managedWorktreeId)
+
+      // A zero-delay timer must fire while the read is pending — the parent
+      // event loop continues despite cross-process lock contention.
+      let timerFired = false
+      await new Promise<void>((resolve) => setTimeout(() => { timerFired = true; resolve() }, 0))
+      expect(timerFired).toBe(true)
+
+      // Release the child; the read must resolve with the child's committed
+      // authoritative state.
+      writeFileSync(releaseSignal, 'release')
+      expect((await read)?.state).toBe('blocked')
+      expect(childOutput).toBe('')
+    } finally {
+      writeFileSync(releaseSignal, 'release')
+      if (!child.killed) child.kill('SIGKILL')
+    }
+  })
+
+  test('timeout: waiting operation rejects REGISTRY_LOCK_FAILED while the event loop stays responsive', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const record = legacyRecord(root)
+    await new WorktreeRegistry(path).upsert(record)
+
+    // Hold the registry's cross-process lock in a child process past a short
+    // parent-side timeout, without releasing.
+    const lockPath = getWorktreeRegistryEvidencePaths(path).lockPath
+    const lockModulePath = resolve(import.meta.dir, '../mutation-lock.ts')
+    const childHeld = join(root, 'child-held')
+    const script = `
+      import { writeFileSync } from 'node:fs'
+      import { CrossProcessFileLock } from ${JSON.stringify(lockModulePath)}
+      const lock = new CrossProcessFileLock(${JSON.stringify(lockPath)}, { timeoutMs: 10000, retryDelayMs: 5 })
+      await lock.run(async () => {
+        writeFileSync(${JSON.stringify(childHeld)}, 'held')
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      })
+    `
+    const child = spawn(process.execPath, ['-e', script], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    })
+    child.stdout.on('data', () => {})
+    child.stderr.on('data', () => {})
+
+    try {
+      for (let i = 0; i < 200 && !existsSync(childHeld); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(existsSync(childHeld)).toBe(true)
+
+      // A registry configured with a short timeout must reject acquisition.
+      const registry = new WorktreeRegistry(path, { timeoutMs: 300, retryDelayMs: 5 })
+      const read = registry.get(record.managedWorktreeId)
+
+      // A zero-delay timer must fire while acquisition is pending.
+      let timerFired = false
+      await new Promise<void>((resolve) => setTimeout(() => { timerFired = true; resolve() }, 0))
+      expect(timerFired).toBe(true)
+
+      await expect(read).rejects.toMatchObject({ code: 'REGISTRY_LOCK_FAILED' })
+    } finally {
+      if (!child.killed) child.kill('SIGKILL')
+    }
+
+    // The production default acquisition timeout is unchanged.
+    expect(DEFAULT_LOCK_TIMEOUT_MS).toBe(60_000)
   })
 })

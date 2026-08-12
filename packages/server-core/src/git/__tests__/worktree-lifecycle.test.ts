@@ -27,7 +27,7 @@ let activeSessions = new Set<string>()
 let flaggedSessions = new Set<string>()
 let quiesceResult = true
 
-function makeHarness(limit = 15): Harness {
+async function makeHarness(limit = 15): Promise<Harness> {
   const root = tmp()
   const repo = join(root, 'repo')
   const svc = createGitServices({
@@ -47,7 +47,7 @@ function makeHarness(limit = 15): Harness {
       touchSessionCheckout: () => undefined,
     },
   })
-  svc.worktreeSettings.update({
+  await svc.worktreeSettings.update({
     materializationRoot: join(root, 'worktrees'),
     autoDeleteEnabled: true,
     retentionLimit: limit,
@@ -59,7 +59,7 @@ beforeEach(async () => {
   activeSessions = new Set()
   flaggedSessions = new Set()
   quiesceResult = true
-  harness = makeHarness()
+  harness = await makeHarness()
   await initRepo(harness.repo)
   harness.svc.lifecycle.markReady()
 })
@@ -93,7 +93,7 @@ async function makeManagedWorktree(
     state: 'ready',
     policyVersion: 0,
   }
-  svc.registry.upsert(record)
+  await svc.registry.upsert(record)
   for (const owner of owners) svc.pathLeases.lease(owner, worktreePath)
   return record
 }
@@ -170,7 +170,7 @@ describe('manual snapshot-first delete', () => {
 
     expect(result.deleted).toBe(true)
     expect(result.state).toBe('snapshotted')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('snapshotted')
     expect(after.ownerSessionIds.sort()).toEqual(['session-1', 'session-2'])
     expect(after.snapshot).toBeTruthy()
@@ -192,7 +192,7 @@ describe('manual snapshot-first delete', () => {
     const result = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
     expect(result.deleted).toBe(false)
     expect(result.error).toContain('changed')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('ready')
     expect(existsSync(record.checkoutPath)).toBe(true)
     expect(after.snapshot).toBeUndefined()
@@ -209,7 +209,7 @@ describe('manual snapshot-first delete', () => {
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
     expect(result.deleted).toBe(false)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('ready')
     expect(existsSync(record.checkoutPath)).toBe(true)
   })
@@ -233,7 +233,7 @@ describe('manual snapshot-first delete', () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x', ['session-1'])
     await svc.lifecycle.detachSession('session-1')
-    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('unowned')
+    expect((await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('unowned')
 
     const result = await svc.lifecycle.deleteWorktree(
       record.managedWorktreeId,
@@ -255,7 +255,7 @@ describe('restore', () => {
     const preview = await svc.lifecycle.preview(record.managedWorktreeId)
     const deleted = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
     expect(deleted.deleted).toBe(true)
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     const snapshotId = snapshotted.snapshot!.snapshotId
 
     const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
@@ -264,7 +264,7 @@ describe('restore', () => {
     expect(restored.state).toBe('ready')
     expect(restored.checkoutPath).toBeTruthy()
     expect(restored.checkoutPath).not.toBe(record.checkoutPath)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('ready')
     expect(after.ownerSessionIds).toEqual(['session-1'])
     expect(after.snapshot).toBeUndefined()
@@ -285,7 +285,7 @@ describe('restore', () => {
     const record = await makeManagedWorktree('feature-x')
     const preview = await svc.lifecycle.preview(record.managedWorktreeId)
     await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
 
     // Advance the branch after capture.
     writeFile(repo, 'new.txt', 'new work\n')
@@ -296,7 +296,7 @@ describe('restore', () => {
     const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
     expect(restored.restored).toBe(false)
     expect(restored.state).toBe('restore-failed')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('restore-failed')
     expect(after.lastError).toBeTruthy()
     // Payload + ref retained for retry.
@@ -320,7 +320,7 @@ describe('restore', () => {
     // Retry re-runs the same failed step and fails again while the branch is advanced.
     expect((await svc.lifecycle.retryWorktree(record.managedWorktreeId)).state).toBe('restore-failed')
     // Restore the branch to the captured OID; retry now succeeds.
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     await git(repo, ['branch', '-f', record.expectedBranch, snapshotted.snapshot!.headOid])
     const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
     expect(retried.retried).toBe(true)
@@ -346,7 +346,7 @@ describe('permanent delete', () => {
     await svc.lifecycle.detachSession('session-1')
     const result = await svc.lifecycle.permanentDelete(record.managedWorktreeId, true)
     expect(result.deleted).toBe(true)
-    expect(svc.registry.get(record.managedWorktreeId)).toBeUndefined()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeUndefined()
     expect((await git(repo, ['rev-parse', '--verify', `refs/heads/${record.expectedBranch}`])).trim()).toHaveLength(40)
   })
 
@@ -370,7 +370,7 @@ describe('archive / unarchive', () => {
     const record = await makeManagedWorktree('feature-x', ['session-1', 'session-2'])
     const result = await svc.lifecycle.setArchived(record.managedWorktreeId, 'session-1', true)
     expect(result.cleanupEnqueued).toBe(false)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.archivedOwnerSessionIds).toEqual(['session-1'])
     expect(existsSync(record.checkoutPath)).toBe(true)
   })
@@ -389,7 +389,7 @@ describe('archive / unarchive', () => {
     expect(second.cleanupEnqueued).toBe(false)
     await svc.lifecycle.setArchived(record.managedWorktreeId, 'session-2', true)
     // Both archived, none active: the sweep runs and removes the checkout.
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('snapshotted')
     expect(existsSync(record.checkoutPath)).toBe(false)
   })
@@ -400,11 +400,11 @@ describe('archive / unarchive', () => {
     await svc.lifecycle.setArchived(record.managedWorktreeId, 'session-1', true)
     // Archive does not bump activity; UNARCHIVE does (spec: lastUsedAt updates
     // on creation, restore, owner attach, unarchive, accepted message).
-    const archived = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const archived = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(archived.lastUsedAt).toBe(record.lastUsedAt)
     await new Promise((resolve) => setTimeout(resolve, 5))
     await svc.lifecycle.setArchived(record.managedWorktreeId, 'session-1', false)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.lastUsedAt).toBeGreaterThan(record.lastUsedAt)
 
     // The preview fingerprint binds the archived-owner set: archive again,
@@ -419,7 +419,7 @@ describe('archive / unarchive', () => {
 
 describe('retention sweep (LRU)', () => {
   test('removes the least-recently-used idle worktree beyond the limit, ordered by lastUsedAt then createdAt then id', async () => {
-    harness = makeHarness(2)
+    harness = await makeHarness(2)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
@@ -428,8 +428,8 @@ describe('retention sweep (LRU)', () => {
     const second = await makeManagedWorktree('second', ['s2'])
     const third = await makeManagedWorktree('third', ['s3'])
     // Activity: first used most recently, second oldest.
-    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 10)
-    svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 1000)
+    await svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 10)
+    await svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 1000)
 
     const result = await svc.lifecycle.runCleanupSweep()
 
@@ -438,12 +438,12 @@ describe('retention sweep (LRU)', () => {
     expect(existsSync(second.checkoutPath)).toBe(false)
     expect(existsSync(first.checkoutPath)).toBe(true)
     expect(existsSync(third.checkoutPath)).toBe(true)
-    expect((svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((await svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
     void third
   })
 
   test('one sweep removes every surplus worktree beyond the retention limit', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
@@ -452,23 +452,23 @@ describe('retention sweep (LRU)', () => {
     const second = await makeManagedWorktree('second', ['s2'])
     const third = await makeManagedWorktree('third', ['s3'])
     // All three idle and unarchived; the limit is 1, so two are surplus.
-    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 3000)
-    svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 2000)
+    await svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 3000)
+    await svc.registry.updateLastUsedAt(second.managedWorktreeId, Date.now() - 2000)
 
     const result = await svc.lifecycle.runCleanupSweep()
 
     expect(result.outcome).toBe('succeeded')
     expect(result.removedWorktreeId).toBe(second.managedWorktreeId)
-    expect((svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
-    expect((svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
-    expect((svc.registry.get(third.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+    expect((await svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((await svc.registry.get(second.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((await svc.registry.get(third.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
     expect(existsSync(first.checkoutPath)).toBe(false)
     expect(existsSync(second.checkoutPath)).toBe(false)
     expect(existsSync(third.checkoutPath)).toBe(true)
   })
 
   test('skips protected (active/flagged) candidates and continues past candidate-specific blocks', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
@@ -483,7 +483,7 @@ describe('retention sweep (LRU)', () => {
   })
 
   test('skips records with foreign leases and reports when no candidate can satisfy the limit', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
@@ -502,7 +502,7 @@ describe('retention sweep (LRU)', () => {
   })
 
   test('disabling auto-delete prevents a queued sweep from starting a new candidate', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
@@ -510,11 +510,11 @@ describe('retention sweep (LRU)', () => {
     await makeManagedWorktree('first', ['s1'])
     await makeManagedWorktree('second', ['s2'])
     // Disable auto-delete; the sweep must not remove anything.
-    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
+    await svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
 
     const result = await svc.lifecycle.runCleanupSweep()
     expect(result.outcome).toBe('skipped')
-    for (const record of svc.registry.list()) {
+    for (const record of await svc.registry.list()) {
       expect(existsSync((record as ManagedWorktreeRecordV2).checkoutPath)).toBe(true)
     }
   })
@@ -528,7 +528,7 @@ describe('retention sweep (LRU)', () => {
     await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
     await new Promise((resolve) => setTimeout(resolve, 5))
     await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.lastUsedAt).toBeGreaterThan(record.lastUsedAt)
   })
 })
@@ -538,7 +538,7 @@ describe('session-delete integration', () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x', ['session-1', 'session-2'])
     await svc.lifecycle.detachSession('session-1')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.ownerSessionIds).toEqual(['session-2'])
     expect(after.state).toBe('ready')
     expect(existsSync(record.checkoutPath)).toBe(true)
@@ -546,29 +546,29 @@ describe('session-delete integration', () => {
   })
 
   test('final-owner detach leaves an unowned record and enqueues policy cleanup', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
     const record = await makeManagedWorktree('feature-x', ['session-1'])
     const other = await makeManagedWorktree('other', ['session-9'])
     // The unowned record is the least recently used.
-    svc.registry.updateLastUsedAt(record.managedWorktreeId, Date.now() - 5000)
+    await svc.registry.updateLastUsedAt(record.managedWorktreeId, Date.now() - 5000)
     // With auto-delete disabled, final-owner detach leaves the unowned record.
-    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
+    await svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
 
     await svc.lifecycle.detachSession('session-1')
 
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('unowned')
     expect(existsSync(record.checkoutPath)).toBe(true)
-    expect(svc.lifecycle.inventory().lastCleanupResult?.outcome).toBe('skipped')
+    expect((await svc.lifecycle.inventory()).lastCleanupResult?.outcome).toBe('skipped')
 
     // Re-enabling auto-delete and sweeping removes the unowned checkout
     // snapshot-first (materialized count exceeds the limit; unowned is idle).
-    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: true })
+    await svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: true })
     await svc.lifecycle.runCleanupSweep()
-    const removed = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const removed = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(removed.state).toBe('snapshotted')
     expect(existsSync(record.checkoutPath)).toBe(false)
     // The other owner's checkout survives.
@@ -597,7 +597,7 @@ describe('session-delete integration', () => {
     })
 
     expect(outcome.outcome).toBe('removed')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('snapshotted')
     expect(after.ownerSessionIds).toEqual([])
     expect(existsSync(record.checkoutPath)).toBe(false)
@@ -612,13 +612,13 @@ describe('lastUsedAt hooks', () => {
   test('touchForSession updates the owning record on accepted user messages', async () => {
     const { svc } = harness
     const record = await makeManagedWorktree('feature-x', ['session-1'])
-    const before = (svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).lastUsedAt
+    const before = (await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).lastUsedAt
     await new Promise((resolve) => setTimeout(resolve, 5))
-    svc.lifecycle.touchForSession('session-1')
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    await svc.lifecycle.touchForSession('session-1')
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.lastUsedAt).toBeGreaterThan(before)
     // A session without a worktree lease is a no-op.
-    expect(() => svc.lifecycle.touchForSession('no-lease')).not.toThrow()
+    await expect(svc.lifecycle.touchForSession('no-lease')).resolves.toBeUndefined()
   })
 })
 
@@ -633,12 +633,12 @@ describe('journal reconciliation', () => {
     svc.journal.step(entry.journalId, 'quiesced')
     svc.journal.step(entry.journalId, 'fingerprint-validated')
     svc.journal.step(entry.journalId, 'registry-snapshotting')
-    svc.registry.upsert({ ...record, state: 'snapshotting' })
+    await svc.registry.upsert({ ...record, state: 'snapshotting' })
 
     const report = await svc.lifecycle.reconcileJournal()
 
     expect(report.recovered).toBe(1)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('ready')
     expect(existsSync(record.checkoutPath)).toBe(true)
   })
@@ -656,7 +656,7 @@ describe('journal reconciliation', () => {
     const { rmSync } = await import('node:fs')
     rmSync(record.checkoutPath, { recursive: true, force: true })
     await git(repo, ['worktree', 'prune'])
-    svc.registry.upsert({ ...record, state: 'snapshotted', snapshot: captured.meta })
+    await svc.registry.upsert({ ...record, state: 'snapshotted', snapshot: captured.meta })
     const entry = svc.journal.begin({ op: 'delete', recordId: record.managedWorktreeId, sessionIds: ['session-1'], policyVersion: 0 })
     svc.journal.step(entry.journalId, 'captured')
     svc.journal.step(entry.journalId, 'registry-snapshotted')
@@ -673,12 +673,12 @@ describe('journal reconciliation', () => {
     const record = await makeManagedWorktree('feature-x')
     const entry = svc.journal.begin({ op: 'restore', recordId: record.managedWorktreeId, sessionIds: ['session-1'], policyVersion: 0 })
     svc.journal.step(entry.journalId, 'locks-acquired')
-    svc.registry.upsert({ ...record, state: 'restoring' })
+    await svc.registry.upsert({ ...record, state: 'restoring' })
 
     const report = await svc.lifecycle.reconcileJournal()
 
     expect(report.recovered).toBe(1)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('restore-failed')
   })
 })
@@ -687,7 +687,7 @@ describe('inventory', () => {
   test('aggregates counts and exposes sanitized failure text without payload bytes', async () => {
     const { svc } = harness
     await makeManagedWorktree('feature-x', ['s1'])
-    const inventory = svc.lifecycle.inventory()
+    const inventory = await svc.lifecycle.inventory()
     expect(inventory.counts.materialized).toBe(1)
     expect(inventory.counts.total).toBe(1)
     expect(inventory.policy.retentionLimit).toBe(15)
@@ -695,8 +695,8 @@ describe('inventory', () => {
     expect(inventory.rows[0]!.owners).toEqual([{ sessionId: 's1', archived: false, active: false, flagged: false }])
     expect(inventory.rows[0]!.snapshot).toBeUndefined()
     // Policy change reflects in inventory.
-    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', retentionLimit: 3 })
-    expect(svc.lifecycle.inventory().policy.retentionLimit).toBe(3)
+    await svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', retentionLimit: 3 })
+    expect((await svc.lifecycle.inventory()).policy.retentionLimit).toBe(3)
   })
 
   test('delete then permanent-delete removes the row from inventory', async () => {
@@ -706,10 +706,10 @@ describe('inventory', () => {
       record.managedWorktreeId,
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
-    expect(svc.lifecycle.inventory().counts.snapshotted).toBe(1)
+    expect((await svc.lifecycle.inventory()).counts.snapshotted).toBe(1)
     await svc.lifecycle.detachSession('s1')
     await svc.lifecycle.permanentDelete(record.managedWorktreeId, true)
-    expect(svc.lifecycle.inventory().counts.total).toBe(0)
+    expect((await svc.lifecycle.inventory()).counts.total).toBe(0)
   })
 })
 
@@ -726,7 +726,7 @@ describe('missing-record handling', () => {
 
     const result = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, 'irrelevant')
     expect(result.deleted).toBe(true)
-    expect(svc.registry.get(record.managedWorktreeId)).toBeUndefined()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeUndefined()
     expect(svc.journal.entries().pop()?.status).toBe('committed')
     // The branch survives.
     expect((await git(repo, ['rev-parse', '--verify', `refs/heads/${record.expectedBranch}`])).trim()).toHaveLength(40)
@@ -743,24 +743,24 @@ describe('review-fix regressions', () => {
       record.managedWorktreeId,
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
-    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
+    expect((await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('snapshotted')
 
     // Reconcile must keep the lifecycle-owned state, never classify the
     // removed checkout as `missing`.
     await svc.worktrees.reconcile({ knownSessionIds: new Set(['session-1']) })
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('snapshotted')
     expect(after.snapshot).toBeTruthy()
   })
 
   test('a write during capture blocks automatic removal (stability fingerprint)', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
     const first = await makeManagedWorktree('first', ['s1'])
     const second = await makeManagedWorktree('second', ['s2'])
-    svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 5000)
+    await svc.registry.updateLastUsedAt(first.managedWorktreeId, Date.now() - 5000)
 
     // Simulate an external writer racing the sweep: capture is intercepted by
     // recomputing the fingerprint after capture started. The checkout already
@@ -778,7 +778,7 @@ describe('review-fix regressions', () => {
     expect(result.removedWorktreeId).toBeUndefined()
     // The racing write is detected: the candidate's removal failed and the
     // failure is persisted (cleanup-failed) with the checkout intact.
-    const after = svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(first.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('cleanup-failed')
     expect(after.lastError).toContain('changed')
     expect(readFileSync(join(first.checkoutPath, 'work.txt'), 'utf8')).toBe('external write 2\n')
@@ -796,27 +796,27 @@ describe('review-fix regressions', () => {
     const originalRestore = svc.snapshots.restore.bind(svc.snapshots)
     const observed: { state: string | null } = { state: null }
     svc.snapshots.restore = (async (input: Parameters<typeof originalRestore>[0]) => {
-      observed.state = (svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state
+      observed.state = (await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state
       return originalRestore(input)
     }) as typeof originalRestore
 
     await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
     expect(observed.state).toBe('restoring')
-    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+    expect((await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
   })
 
   test('inventory counts unowned records separately', async () => {
-    harness = makeHarness(2)
+    harness = await makeHarness(2)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const svc = harness.svc
     const record = await makeManagedWorktree('feature-x', ['session-1'])
     await makeManagedWorktree('other', ['session-9'])
     // Disable auto-delete so the enqueued sweep does not remove the record.
-    svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
+    await svc.worktreeSettings.update({ materializationRoot: harness.root + '/worktrees', autoDeleteEnabled: false })
     await svc.lifecycle.detachSession('session-1')
 
-    const inventory = svc.lifecycle.inventory()
+    const inventory = await svc.lifecycle.inventory()
     expect(inventory.counts.unowned).toBe(1)
     expect(inventory.counts.materialized).toBe(2)
     expect(inventory.rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)?.state).toBe('unowned')
@@ -832,7 +832,7 @@ describe('review-fix regressions', () => {
     // A second enqueue must run a NEW sweep, not reuse the resolved promise.
     const second = await svc.lifecycle.enqueueCleanup()
     expect(second).toBeDefined()
-    expect(svc.lifecycle.inventory().lastCleanupResult?.at).toBeGreaterThanOrEqual(first.at)
+    expect((await svc.lifecycle.inventory()).lastCleanupResult?.at).toBeGreaterThanOrEqual(first.at)
   })
 
   test('removing a missing record releases owner leases', async () => {
@@ -857,7 +857,7 @@ describe('orphan and pending-restore cleanup', () => {
       record.managedWorktreeId,
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     const referencedPath = snapshotted.snapshot!.payloadPath
     // Orphans: an unreferenced payload dir + a stale staging dir.
     const orphanPath = join(harness.root, 'snapshots', 'deadbeefdeadbeef')
@@ -883,11 +883,11 @@ describe('orphan and pending-restore cleanup', () => {
       record.managedWorktreeId,
       (await svc.lifecycle.preview(record.managedWorktreeId)).previewFingerprint,
     )
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     const payloadPath = snapshotted.snapshot!.payloadPath
     // The managed source record is removed exactly like a managed-to-current
     // release; only the handoff journal retains the snapshot authority.
-    svc.registry.remove(record.managedWorktreeId)
+    await svc.registry.remove(record.managedWorktreeId)
     const journal = svc.journal.begin({
       op: 'handoff',
       recordId: 'deadbeefdeadbeef',
@@ -916,18 +916,18 @@ describe('orphan and pending-restore cleanup', () => {
     // Simulate the crash window: restore committed (ready) but the payload and
     // hidden ref were never removed. Restore does this itself; simulate by
     // moving the record back to ready with snapshot metadata intact.
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     const meta = snapshotted.snapshot!
     const readyWithSnapshot: ManagedWorktreeRecordV2 = {
       ...snapshotted,
       state: 'ready',
       snapshot: meta,
     }
-    svc.registry.upsert(readyWithSnapshot)
+    await svc.registry.upsert(readyWithSnapshot)
 
     await svc.lifecycle.reconcileJournal()
 
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.state).toBe('ready')
     expect(after.snapshot).toBeUndefined()
     expect(existsSync(join(meta.payloadPath, 'manifest.json'))).toBe(false)
@@ -965,7 +965,7 @@ describe('UAT regressions', () => {
     const result = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
     expect(result.deleted).toBe(false)
     expect(result.error).toContain('flagged')
-    expect((svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
+    expect((await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2).state).toBe('ready')
     expect(existsSync(record.checkoutPath)).toBe(true)
   })
 
@@ -986,14 +986,14 @@ describe('UAT regressions', () => {
     writeFile(record.checkoutPath, 'work.txt', 'work in progress\n')
     const preview = await svc.lifecycle.preview(record.managedWorktreeId)
     await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
-    const snapshotted = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const snapshotted = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(snapshotted.state).toBe('snapshotted')
     // Simulate the crash window of a release that never completed: only a
     // stray directory remains where the checkout was (no .git metadata, so no
     // working-tree fingerprint is computable).
     mkdirSync(record.checkoutPath, { recursive: true })
     writeFileSync(join(record.checkoutPath, 'stray.tmp'), 'partial release')
-    svc.registry.upsert({ ...snapshotted, state: 'cleanup-failed' })
+    await svc.registry.upsert({ ...snapshotted, state: 'cleanup-failed' })
     const retried = await svc.lifecycle.retryWorktree(record.managedWorktreeId)
     expect(retried).toMatchObject({ retried: true, state: 'snapshotted' })
     expect(existsSync(record.checkoutPath)).toBe(false)
@@ -1021,7 +1021,7 @@ describe('UAT regressions', () => {
     const failed = await svc.lifecycle.deleteWorktree(record.managedWorktreeId, preview.previewFingerprint)
     expect(failed.deleted).toBe(false)
     expect(failed.error).toContain('changed during capture')
-    const stuck = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const stuck = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(stuck.state).toBe('cleanup-failed')
     expect(stuck.snapshot).toBeDefined()
     // The checkout is fully inspectable and holds the newer content: the
@@ -1037,16 +1037,16 @@ describe('UAT regressions', () => {
     const record = await makeManagedWorktree('feature-x')
     rmSync(record.checkoutPath, { recursive: true, force: true })
     await svc.worktrees.reconcile({ knownSessionIds: new Set(['session-1']) })
-    const missing = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const missing = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(missing.state).toBe('missing')
     expect(missing.lastError ?? '').toContain('no longer on disk')
-    const row = svc.lifecycle.inventory().rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)
+    const row = (await svc.lifecycle.inventory()).rows.find((r) => r.managedWorktreeId === record.managedWorktreeId)
     expect(row?.lastError ?? '').toContain('no longer on disk')
     expect(root).toBeDefined()
   })
 
   test('session-delete removal never stamps the dropped session with owner state', async () => {
-    harness = makeHarness(1)
+    harness = await makeHarness(1)
     await initRepo(harness.repo)
     harness.svc.lifecycle.markReady()
     const stamped: string[][] = []
@@ -1089,7 +1089,7 @@ describe('UAT regressions', () => {
     const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
 
     expect(restored.restored).toBe(true)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.ownerSessionIds).toEqual([])
     expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
   })
@@ -1123,7 +1123,7 @@ describe('UAT regressions', () => {
     const restored = await svc.lifecycle.restoreWorktree(record.managedWorktreeId)
 
     expect(restored.restored).toBe(true)
-    const after = svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
+    const after = await svc.registry.get(record.managedWorktreeId) as ManagedWorktreeRecordV2
     expect(after.ownerSessionIds).toEqual([])
     expect(svc.pathLeases.leasesForSession('session-1')).toEqual([])
   })

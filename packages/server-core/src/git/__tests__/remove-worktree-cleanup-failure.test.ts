@@ -57,7 +57,7 @@ describe('removeWorktree — cleanup that did not happen is reported as failure'
       gitCommonDir: gcd,
       baseRef: 'main',
     })
-    services.registry.setState(record.managedWorktreeId, 'ready')
+    await services.registry.setState(record.managedWorktreeId, 'ready')
 
     // Git's own removal fails on a locked worktree unless `--force` is given
     // twice, and the service passes it once — a faithful stand-in for any
@@ -77,7 +77,7 @@ describe('removeWorktree — cleanup that did not happen is reported as failure'
     expect(result.blockedReason).toContain('could not be removed')
 
     // And, critically, the record survives so reconciliation can still find it.
-    const kept = services.registry.get(record.managedWorktreeId)
+    const kept = await services.registry.get(record.managedWorktreeId)
     expect(kept).toBeDefined()
     expect(kept!.state).toBe('blocked')
     expect(existsSync(record.checkoutPath)).toBe(true)

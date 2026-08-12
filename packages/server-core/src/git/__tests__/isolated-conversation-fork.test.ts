@@ -56,7 +56,7 @@ let previousV1: string | undefined
 let previousV2: string | undefined
 let harness: Harness
 
-function makeHarness(): Harness {
+async function makeHarness(): Promise<Harness> {
   const root = tmp()
   const repo = join(root, 'repo')
   const sessions = new Map<string, SessionFixture>()
@@ -98,7 +98,7 @@ function makeHarness(): Harness {
       },
     },
   })
-  svc.worktreeSettings.update({
+  await svc.worktreeSettings.update({
     materializationRoot: join(root, 'worktrees'),
     autoDeleteEnabled: false,
     retentionLimit: 15,
@@ -126,7 +126,7 @@ beforeEach(async () => {
   previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
   process.env.KATA_FEATURE_GIT_WORKSPACE_V1 = '1'
   process.env.KATA_FEATURE_WORKTREE_V2 = '1'
-  harness = makeHarness()
+  harness = await makeHarness()
   await initRepo(harness.repo)
   harness.svc.lifecycle.markReady()
   harness.adapters.set('session-1', createDeterministicStrictForkAdapter({ adapterId: 'pi-test' }))
@@ -383,7 +383,7 @@ describe('IsolatedConversationForkService preview', () => {
   test('blocks a snapshotted/missing managed source (missing-source)', async () => {
     const record = await managedSession('snap-src')
     // Snapshotted: the record leaves `ready` and its checkout is released.
-    harness.svc.registry.setState(record.managedWorktreeId, 'snapshotted')
+    await harness.svc.registry.setState(record.managedWorktreeId, 'snapshotted')
     rmSync(record.checkoutPath, { recursive: true, force: true })
 
     const p = await preview('isolated-worktree', 'demo')
@@ -481,7 +481,7 @@ describe('IsolatedConversationForkService managed/shared sources', () => {
 
   test('requires every shared-source owner to be idle (source-active on a second owner)', async () => {
     const record = await managedSession('shared-src')
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
     harness.svc.pathLeases.lease('session-2', record.checkoutPath)
 
     // Both owners idle → eligible.
@@ -497,7 +497,7 @@ describe('IsolatedConversationForkService managed/shared sources', () => {
 
   test('blocks a shared managed source with a foreign lease on the checkout (path-unleased)', async () => {
     const record = await managedSession('shared-src-2')
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
     harness.svc.pathLeases.lease('session-2', record.checkoutPath)
     // A session outside the owner set occupies the checkout path.
     harness.svc.pathLeases.lease('session-99', record.checkoutPath)
@@ -724,7 +724,7 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(result.summary.executionCwd).toBe(result.summary.checkout.checkoutPath)
 
     // Exactly one registry owner + one child session + one target worktree.
-    const records = harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/child-one')
+    const records = (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/child-one')
     expect(records).toHaveLength(1)
     expect(records[0]?.ownerSessionIds).toEqual([result.summary.sessionId])
     expect(result.summary.sessionId).toMatch(/^child-\d+$/)
@@ -778,7 +778,7 @@ describe('IsolatedConversationForkService confirm', () => {
 
   test('confirms from a shared managed source with every owner leased and leaves source owners unchanged', async () => {
     const record = await managedSession('shared-src-confirm')
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
     harness.svc.pathLeases.lease('session-2', record.checkoutPath)
     writeFile(record.checkoutPath, 'shared-state.txt', 'from source\n')
 
@@ -789,8 +789,8 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     // Source owners are unchanged; the target is owned solely by the child.
-    expect(harness.svc.registry.get(record.managedWorktreeId)?.ownerSessionIds).toEqual(['session-1', 'session-2'])
-    const targetRecord = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/shared-child')
+    expect((await harness.svc.registry.get(record.managedWorktreeId))?.ownerSessionIds).toEqual(['session-1', 'session-2'])
+    const targetRecord = (await harness.svc.registry.list()).find((r) => r.expectedBranch === 'kata-agent/shared-child')
     expect(targetRecord?.ownerSessionIds).toEqual([result.summary.sessionId])
     expect(readFileSync(join(targetRecord!.checkoutPath, 'shared-state.txt'), 'utf8')).toBe('from source\n')
     expect((await git(record.checkoutPath, ['rev-parse', 'HEAD'])).trim()).toBe(
@@ -800,7 +800,7 @@ describe('IsolatedConversationForkService confirm', () => {
 
   test('blocks confirm when a shared source owner holds no stable lease (path-unleased)', async () => {
     const record = await managedSession('unleased-src')
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
     // session-2 is deliberately NOT leased.
 
     const p = await preview('isolated-worktree', 'unleased-child')
@@ -809,14 +809,14 @@ describe('IsolatedConversationForkService confirm', () => {
 
     expect(result.outcome).toBe('blocked')
     if (result.outcome === 'blocked') expect(result.code).toBe('path-unleased')
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/unleased-child')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/unleased-child')).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
     expect(harness.childCalls).toHaveLength(0)
   })
 
   test('blocks confirm when a shared source owner becomes active (source-active)', async () => {
     const record = await managedSession('active-src')
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
     harness.svc.pathLeases.lease('session-2', record.checkoutPath)
 
     const p = await preview('isolated-worktree', 'active-child')
@@ -826,7 +826,7 @@ describe('IsolatedConversationForkService confirm', () => {
 
     expect(result.outcome).toBe('blocked')
     if (result.outcome === 'blocked') expect(result.code).toBe('source-active')
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/active-child')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/active-child')).toHaveLength(0)
     expect(harness.childCalls).toHaveLength(0)
   })
 
@@ -840,7 +840,7 @@ describe('IsolatedConversationForkService confirm', () => {
 
     expect(result.outcome).toBe('blocked')
     if (result.outcome === 'blocked') expect(result.code).toBe('name-collision')
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/collide')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/collide')).toHaveLength(0)
     expect(harness.childCalls).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
   })
@@ -866,8 +866,8 @@ describe('IsolatedConversationForkService confirm', () => {
 
     // No mutation happened for either stale confirmation.
     expect(harness.childCalls).toHaveLength(0)
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch.startsWith('kata-agent/drift'))).toHaveLength(0)
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/different-name')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch.startsWith('kata-agent/drift'))).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/different-name')).toHaveLength(0)
   })
 
   test('fails with a typed hook-not-wired error when child-session creation is not wired', async () => {
@@ -885,7 +885,7 @@ describe('IsolatedConversationForkService confirm', () => {
       },
     })
     bare.lifecycle.markReady()
-    bare.worktreeSettings.update({
+    await bare.worktreeSettings.update({
       materializationRoot: join(harness.root, 'worktrees-bare'),
       autoDeleteEnabled: false,
       retentionLimit: 15,
@@ -946,7 +946,7 @@ describe('IsolatedConversationForkService confirm', () => {
     const branchOid = (await git(harness.repo, ['rev-parse', '--verify', '--quiet', 'refs/heads/kata-agent/cas-demo'])).trim()
     expect(branchOid).toBe(externalOid)
     // The target checkout + record are gone.
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/cas-demo')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/cas-demo')).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
     // The seed is removed and the journal records the rollback.
     const rolledBack = forkJournalEntries().filter((entry) => entry.status === 'recovered')
@@ -971,7 +971,7 @@ describe('IsolatedConversationForkService confirm', () => {
     // owner commit — the transaction must compensate the created child too.
     harness.svc.fork.setHooks({
       createForkChildSession: async (input) => {
-        harness.svc.registry.setState(input.checkout.managedWorktreeId, 'snapshotted')
+        await harness.svc.registry.setState(input.checkout.managedWorktreeId, 'snapshotted')
         return 'child-created-then-failed'
       },
     })
@@ -985,7 +985,7 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(error).toBeInstanceOf(ConversationForkError)
     expect((error as ConversationForkError).code).toBe('FORK_TARGET_FAILED')
     expect(harness.deletedChildren).toEqual(['child-created-then-failed'])
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/child-cas')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/child-cas')).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
     const branch = await runGit(['rev-parse', '--verify', '--quiet', 'refs/heads/kata-agent/child-cas'], {
       cwd: harness.repo,
@@ -1020,7 +1020,7 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(error).toBeInstanceOf(ConversationForkError)
     // The interrupted attempt was fully compensated and journaled as rolled back.
     expect(forkJournalEntries().find((entry) => entry.recordId === p.transactionId)?.status).toBe('recovered')
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/replay')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/replay')).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
 
     // A repeated confirm with the same transactionId resumes from the journal
@@ -1029,7 +1029,7 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     expect(childCalls).toBe(2)
-    const records = harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/replay')
+    const records = (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/replay')
     expect(records).toHaveLength(1)
     expect(records[0]?.ownerSessionIds).toEqual([result.summary.sessionId])
     expect(await git(harness.repo, ['worktree', 'list'])).toContain(records[0]!.checkoutPath)
@@ -1050,7 +1050,7 @@ describe('IsolatedConversationForkService confirm', () => {
     if (second.outcome !== 'committed') return
     expect(second.summary.sessionId).toBe(first.summary.sessionId)
     expect(second.summary.executionCwd).toBe(first.summary.executionCwd)
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/double-submit')).toHaveLength(1)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/double-submit')).toHaveLength(1)
     expect(harness.childCalls).toHaveLength(1)
   })
 
@@ -1099,10 +1099,10 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     expect(freshChildCalls).toHaveLength(1)
-    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/forward-replay')
+    const records = (await fresh.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/forward-replay')
     expect(records).toHaveLength(1)
     expect(records[0]?.ownerSessionIds).toEqual(['child-forward-replay'])
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/forward-replay')).toHaveLength(1)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/forward-replay')).toHaveLength(1)
     expect(forkJournalEntries().filter((entry) => entry.recordId === p.transactionId && entry.status === 'committed')).toHaveLength(1)
   })
 
@@ -1208,12 +1208,12 @@ describe('IsolatedConversationForkService confirm', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     expect(freshChildCalls).toHaveLength(1)
-    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized')
+    const records = (await fresh.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/crash-materialized')
     expect(records).toHaveLength(1)
     expect(records[0]?.managedWorktreeId).toBe(created.record.managedWorktreeId)
     expect(records[0]?.ownerSessionIds).toEqual(['child-crash-resume'])
     expect(
-      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized'),
+      (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/crash-materialized'),
     ).toHaveLength(1)
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
     // The seed is released only after the durable commit.
@@ -1304,7 +1304,7 @@ async function compensationFailedFork(nameSuffix: string): Promise<ConversationF
   if (p.blocked) return p
   harness.svc.fork.setHooks({
     createForkChildSession: async (input) => {
-      harness.svc.registry.setState(input.checkout.managedWorktreeId, 'snapshotted')
+      await harness.svc.registry.setState(input.checkout.managedWorktreeId, 'snapshotted')
       return `child-${nameSuffix}`
     },
     deleteForkChildSession: async () => {
@@ -1651,7 +1651,7 @@ describe('IsolatedConversationForkService recover', () => {
     expect(rec.summary.executionCwd).toBe(first.summary.executionCwd)
     expect(rec.summary.committedAt).toBe(first.summary.committedAt)
     // Nothing re-created: still exactly one target, one child call, one owner.
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-committed')).toHaveLength(1)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/recover-committed')).toHaveLength(1)
     expect(harness.childCalls).toHaveLength(1)
   })
 
@@ -1682,7 +1682,7 @@ describe('IsolatedConversationForkService recover', () => {
     const rolledBack = forkJournalEntries().find((e) => e.recordId === p.transactionId)
     expect(rolledBack?.status).toBe('recovered')
     expect(rolledBack?.commitMarker).toBe('rolled-back')
-    expect(harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')).toHaveLength(0)
+    expect((await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')).toHaveLength(0)
     expect(existsSync(p.destination.checkoutPath)).toBe(false)
 
     // Recover re-enters the confirm machinery as a fresh attempt (the
@@ -1692,7 +1692,7 @@ describe('IsolatedConversationForkService recover', () => {
     expect(rec.outcome).toBe('committed')
     if (rec.outcome !== 'committed') return
     expect(childCalls).toBe(2)
-    const records = harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')
+    const records = (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/recover-rolled-back')
     expect(records).toHaveLength(1)
     expect(records[0]?.ownerSessionIds).toEqual([rec.summary.sessionId])
     expect(await git(harness.repo, ['worktree', 'list'])).toContain(records[0]!.checkoutPath)
@@ -1760,11 +1760,11 @@ describe('IsolatedConversationForkService recover', () => {
     expect(rec.outcome).toBe('committed')
     if (rec.outcome !== 'committed') return
     expect(freshChildCalls).toHaveLength(1)
-    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel')
+    const records = (await fresh.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel')
     expect(records).toHaveLength(1)
     expect(records[0]?.ownerSessionIds).toEqual(['child-seed-captured-recover'])
     expect(
-      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel'),
+      (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/in-progress-cancel'),
     ).toHaveLength(1)
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
     expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
@@ -1847,12 +1847,12 @@ describe('IsolatedConversationForkService recover', () => {
     expect(result.outcome).toBe('committed')
     if (result.outcome !== 'committed') return
     expect(freshChildCalls).toHaveLength(1)
-    const records = fresh.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover')
+    const records = (await fresh.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover')
     expect(records).toHaveLength(1)
     expect(records[0]?.managedWorktreeId).toBe(created.record.managedWorktreeId)
     expect(records[0]?.ownerSessionIds).toEqual(['child-crash-materialized-recover'])
     expect(
-      harness.svc.registry.list().filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover'),
+      (await harness.svc.registry.list()).filter((r) => r.expectedBranch === 'kata-agent/crash-materialized-recover'),
     ).toHaveLength(1)
     expect(forkJournalEntries().find((e) => e.recordId === p.transactionId)?.status).toBe('committed')
     expect(existsSync(join(harness.root, 'snapshots', seed.snapshotId))).toBe(false)
