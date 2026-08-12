@@ -946,6 +946,9 @@ class PermissionsConfigCache {
    */
   clear(): void {
     this.defaultConfig = undefined;
+    // The immutable-default Bash classification config derives from the same
+    // default.json file, so it must be rebuilt alongside default permissions.
+    immutableDefaultBashConfigCache = undefined;
     this.workspaceConfigs.clear();
     this.sourceConfigs.clear();
     this.mergedConfigs.clear();

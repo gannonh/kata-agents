@@ -71,7 +71,10 @@ export function classifyBashConfigWrite(
 
   // 1. Commands accepted by the immutable-default read-only classifier are
   //    unaffected — reads like `cat labels/config.json` keep existing behavior.
-  if (isReadOnlyBashCommandWithConfig(trimmed, getImmutableDefaultBashConfig())) {
+  //    In-place editors with a write flag (-i) are never read-only: a default
+  //    pattern like `^sed\s+-n\b` also matches `sed -n -i ...`, which still
+  //    edits files in place. They must fall through to mutation detection.
+  if (!hasInPlaceEditFlag(trimmed) && isReadOnlyBashCommandWithConfig(trimmed, getImmutableDefaultBashConfig())) {
     return { kind: 'continue' };
   }
 
@@ -90,6 +93,27 @@ export function classifyBashConfigWrite(
   }
 
   return { kind: 'continue' };
+}
+
+/** Commands that edit their operands in place when given `-i`. */
+const IN_PLACE_EDITORS = new Set(['sed', 'perl', 'ruby', 'awk']);
+
+/**
+ * True when the command invokes an in-place editor (`sed`, `perl`, `ruby`,
+ * `awk`) with an `-i` flag. Such commands are never read-only, even when a
+ * default read-only pattern (e.g. `^sed\s+-n\b`) happens to match: `sed -n -i`
+ * still edits the file in place, and GNU awk's `-i inplace` mutates too.
+ *
+ * Detected before the read-only fast path so these commands reach mutation
+ * detection instead of continuing as "read-only".
+ */
+function hasInPlaceEditFlag(command: string): boolean {
+  const head = command.split('\n')[0] ?? command;
+  const tokens = tokenizeShellLine(head);
+  const consumer = tokens?.[0]?.text ?? '';
+  const basename = consumer.split('/').pop();
+  if (!basename || !IN_PLACE_EDITORS.has(basename)) return false;
+  return tokens?.some((t) => t.kind === 'word' && t.text.startsWith('-i') && t.text.length > 1) ?? false;
 }
 
 // ============================================================
@@ -329,15 +353,38 @@ function isStaticTarget(target: string): boolean {
 // ============================================================
 
 /**
+ * A candidate looks like a config-file path when it contains a path separator
+ * (`/` or `\`), ends in `.json`/`.jsonl`, or is the validator-recognized
+ * `SKILL.md` basename (e.g. `sed -i ... SKILL.md` from a skill directory).
+ */
+function looksPathLike(candidate: string): boolean {
+  return (
+    candidate.includes('/') ||
+    candidate.includes('\\') ||
+    /\.(json|jsonl)$/i.test(candidate) ||
+    candidate === 'SKILL.md'
+  );
+}
+
+// Static shell assignments collected during the opaque scan, so `$VAR`
+// references resolve without executing the command. Module-level so the inner
+// candidate helper stays small; reset once per scan.
+const opaqueAssignments = new Map<string, string>();
+
+/**
  * Find a recognized config target among statically identifiable opaque write
  * mutations. Returns the first recognized detection, or null.
  *
  * Combines the existing redirect extractors with a token scan that uses the
  * same static-target policy as the removed config-domain guard: any
- * quoted/unquoted token that looks path-like (contains `/` or `\`, or ends in
- * `.json`/`.jsonl`) is a candidate. This covers `tee`, `sed -i`, script
- * arguments, PowerShell/CMD writes, and similar forms that the redirect
- * extractors do not model.
+ * quoted/unquoted token (or whitespace-separated fragment of a quoted token,
+ * e.g. inside a wrapper-shell string) that looks path-like is a candidate.
+ * This covers `tee`, `sed -i`, script arguments, PowerShell/CMD writes, and
+ * similar forms that the redirect extractors do not model.
+ *
+ * Static `VAR=value` assignments are tracked so later `$VAR` / `${VAR}`
+ * references (e.g. `target=labels/config.json; echo x > "$target"`) resolve
+ * without executing the command.
  */
 function findOpaqueRecognizedTarget(
   command: string,
@@ -345,6 +392,7 @@ function findOpaqueRecognizedTarget(
   workingDirectory?: string
 ): ConfigFileDetection | null {
   const candidates = new Set<string>();
+  opaqueAssignments.clear();
 
   const bashTarget = extractBashWriteTarget(command);
   if (bashTarget) candidates.add(bashTarget);
@@ -357,10 +405,14 @@ function findOpaqueRecognizedTarget(
   while ((match = tokenRegex.exec(command)) !== null) {
     const candidate = (match[1] ?? match[2] ?? match[3] ?? '').trim();
     if (!candidate) continue;
-    if (!candidate.includes('/') && !candidate.includes('\\') && !/\.(json|jsonl)$/i.test(candidate)) {
-      continue;
+
+    // Quoted tokens can embed several arguments (e.g. `bash -c "sed -i 's/x/y/'
+    // labels/config.json"`); examine each whitespace-separated fragment so
+    // path-like parts are candidates individually.
+    for (const part of candidate.split(/\s+/)) {
+      if (part.length === 0) continue;
+      classifyOpaqueCandidate(part, candidates);
     }
-    candidates.add(candidate);
   }
 
   for (const candidate of candidates) {
@@ -368,6 +420,55 @@ function findOpaqueRecognizedTarget(
     if (detection) return detection;
   }
   return null;
+}
+
+/**
+ * Classify a single opaque-scan token as a potential config-write target.
+ *
+ * - `VAR=value` with a static value: remember the assignment and treat the
+ *   value as a candidate (it may be the config path being written).
+ * - Pure `$VAR` / `${VAR}` references: resolve from earlier assignments.
+ * - Path-like fragments with embedded `$VAR` (e.g. `$dir/config.json`): add
+ *   the expanded form.
+ * - Otherwise, path-like tokens are candidates directly.
+ */
+function classifyOpaqueCandidate(candidate: string, candidates: Set<string>): void {
+  // Static assignment — record it for reference resolution below.
+  const assignMatch = candidate.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+  if (assignMatch) {
+    const value = assignMatch[2] ?? '';
+    if (value.length > 0 && isStaticTarget(value)) {
+      opaqueAssignments.set(assignMatch[1]!, value);
+      if (looksPathLike(value)) candidates.add(value);
+    }
+    return;
+  }
+
+  // Pure `$VAR` / `${VAR}` reference — resolve from an earlier assignment.
+  const braceRef = candidate.match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+  if (braceRef) {
+    const value = opaqueAssignments.get(braceRef[1]!);
+    if (value) candidates.add(value);
+    return;
+  }
+  const simpleRef = candidate.match(/^\$([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (simpleRef) {
+    const value = opaqueAssignments.get(simpleRef[1]!);
+    if (value) candidates.add(value);
+    return;
+  }
+
+  // Embedded `$VAR` inside a path (e.g. `$dir/config.json` after
+  // `dir=labels`) — expand and re-check.
+  const expanded = candidate.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_whole, name: string) =>
+    opaqueAssignments.get(name) ?? `$${name}`
+  );
+  if (expanded !== candidate) {
+    if (looksPathLike(expanded)) candidates.add(expanded);
+    return;
+  }
+
+  if (looksPathLike(candidate)) candidates.add(candidate);
 }
 
 /**
@@ -394,8 +495,10 @@ function resolveTarget(target: string, workspaceRootPath: string, workingDirecto
 
 function buildOpaqueBlockReason(detection: ConfigFileDetection): string {
   return (
-    `Bash mutation targeting \`${detection.displayFile}\` is blocked because it would bypass config validation.\n\n` +
-    `Use the validated \`Write\` or \`Edit\` tool to update this file instead, or use an applicable ` +
-    `configuration tool (e.g. \`kata-agents-cli invoke ...\`) when one exists.`
+    `Bash command targeting \`${detection.displayFile}\` could not be proven read-only, so it is blocked ` +
+    `because it could bypass config validation.\n\n` +
+    `Use the validated \`Write\` or \`Edit\` tool to update this file, or an applicable ` +
+    `configuration tool (e.g. \`kata-agents-cli invoke ...\`) when one exists. ` +
+    `Read-only commands allowed by your permissions (\`permissions/default.json\`) continue to work.`
   );
 }

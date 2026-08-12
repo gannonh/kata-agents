@@ -522,6 +522,7 @@ describe('runPreToolUseChecks', () => {
   describe('step 5d: Bash config write mutation guard', () => {
     const labelsDetection = { type: 'labels' as const, displayFile: 'labels/config.json' };
     const sourceDetection = { type: 'source' as const, slug: 'linear', displayFile: 'sources/linear/config.json' };
+    const skillDetection = { type: 'skill' as const, slug: 'myskill', displayFile: 'skills/myskill/SKILL.md' };
 
     beforeEach(() => {
       mockEffectivePermissionMode = 'allow-all';
@@ -655,6 +656,12 @@ describe('runPreToolUseChecks', () => {
       // A merged workspace pattern would normally whitelist this redirect, but
       // the guard must classify with immutable defaults only.
       mockReadOnlyBashPatterns = [{ regex: /^echo\s+.*>\s*labels\/config\.json$/ }];
+      // Return true ONLY for the merged patterns — proving the classifier did
+      // not receive them. If the guard passed merged workspace config, the
+      // command would be accepted and the test would fail to see a block.
+      mockIsReadOnlyBashCommandWithConfig.mockImplementation((_cmd: string, config: any) => {
+        return config?.readOnlyBashPatterns === mockReadOnlyBashPatterns;
+      });
       mockExtractBashWriteTarget.mockImplementation(() => 'labels/config.json');
       mockDetectConfigFileType.mockImplementation(() => labelsDetection);
 
@@ -664,10 +671,64 @@ describe('runPreToolUseChecks', () => {
         permissionMode: 'allow-all',
       }));
 
+      // The classifier was consulted with the immutable-default config (mock
+      // returns false for it, since immutable patterns differ from merged) →
+      // the redirect reaches the guard and is blocked.
+      expect(mockGetImmutableDefaultBashConfig).toHaveBeenCalled();
       expect(result.type).toBe('block');
-      // The immutable classifier was consulted (mock returns false → not read-only).
-      const configsPassed = mockIsReadOnlyBashCommandWithConfig.mock.calls.map((c) => c[1]);
-      expect(configsPassed.length).toBeGreaterThan(0);
+    });
+
+    it('blocks in-place editors (-i) even when the read-only classifier would accept them', () => {
+      // `sed -n -i` matches the default `^sed\s+-n\b` read-only pattern, but
+      // the `-i` flag edits in place. The in-place gate must run before the
+      // read-only fast path: the classifier here always says read-only, yet
+      // the command must still reach mutation detection and be blocked.
+      mockIsReadOnlyBashCommandWithConfig.mockImplementation(() => true);
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: "sed -n -i 's/x/y/' labels/config.json" },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('labels/config.json');
+      }
+    });
+
+    it('blocks a redirect whose target comes from a preceding static assignment', () => {
+      mockDetectConfigFileType.mockImplementation(() => labelsDetection);
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: 'target=labels/config.json; echo \'{ invalid\' > "$target"' },
+        permissionMode: 'allow-all',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('labels/config.json');
+      }
+    });
+
+    it('blocks a bare SKILL.md target when the working directory is the skill folder', () => {
+      mockDetectConfigFileType.mockImplementation((path: string) => {
+        return path.endsWith('skills/myskill/SKILL.md') ? skillDetection : null;
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Bash',
+        input: { command: "sed -i 's/x/y/' SKILL.md" },
+        permissionMode: 'allow-all',
+        workingDirectory: '/test/workspace/skills/myskill',
+      }));
+
+      expect(result.type).toBe('block');
+      if (result.type === 'block') {
+        expect(result.reason).toContain('skills/myskill/SKILL.md');
+      }
     });
 
     it('blocks an identifiable redirect targeting a recognized config', () => {

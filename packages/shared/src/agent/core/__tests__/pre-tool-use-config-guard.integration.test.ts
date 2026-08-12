@@ -16,6 +16,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 
 // ── Hermetic config dir: MUST be set before config path modules load ────────
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..', '..', '..');
+const PRIOR_KATA_CONFIG_DIR = process.env.KATA_CONFIG_DIR;
 const APP_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'kata-agents-guard-it-'));
 process.env.KATA_CONFIG_DIR = APP_CONFIG_DIR;
 
@@ -35,9 +36,11 @@ import type { PreToolUseInput } from '../pre-tool-use.ts';
 
 type PreToolUseModule = typeof import('../pre-tool-use.ts');
 type ModeManagerModule = typeof import('../../mode-manager.ts');
+type PermissionsConfigModule = typeof import('../../permissions-config.ts');
 
 let runPreToolUseChecks: PreToolUseModule['runPreToolUseChecks'];
 let initializeModeState: ModeManagerModule['initializeModeState'];
+let permissionsConfigCache: PermissionsConfigModule['permissionsConfigCache'];
 
 const SESSION_ALLOW_ALL = 'guard-it-allow-all';
 const SESSION_ASK = 'guard-it-ask';
@@ -101,8 +104,10 @@ function createBashInput(command: string, overrides?: Partial<PreToolUseInput>):
 beforeAll(async () => {
   const preToolUse = await import('../pre-tool-use.ts');
   const modeManager = await import('../../mode-manager.ts');
+  const permissionsConfig = await import('../../permissions-config.ts');
   runPreToolUseChecks = preToolUse.runPreToolUseChecks;
   initializeModeState = modeManager.initializeModeState;
+  permissionsConfigCache = permissionsConfig.permissionsConfigCache;
   initializeModeState(SESSION_ALLOW_ALL, 'allow-all');
   initializeModeState(SESSION_ASK, 'ask');
   initializeModeState(SESSION_SAFE, 'safe');
@@ -111,6 +116,14 @@ beforeAll(async () => {
 afterAll(() => {
   rmSync(APP_CONFIG_DIR, { recursive: true, force: true });
   rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
+  // Restore the process-global config dir (including the previously-unset
+  // case) so later test files in the same process resolve config paths
+  // against the original environment.
+  if (PRIOR_KATA_CONFIG_DIR === undefined) {
+    delete process.env.KATA_CONFIG_DIR;
+  } else {
+    process.env.KATA_CONFIG_DIR = PRIOR_KATA_CONFIG_DIR;
+  }
 });
 
 // ============================================================
@@ -297,6 +310,9 @@ describe('mode coverage', () => {
       join(WORKSPACE_ROOT, 'permissions.json'),
       JSON.stringify({ allowedBashPatterns: [{ pattern: '^python3\\s+update\\.py' }] })
     );
+    // Mirror ConfigWatcher: a workspace permissions.json change invalidates the
+    // merged-config cache so step 1 (safe mode) picks up the new pattern.
+    permissionsConfigCache.invalidateWorkspace(WORKSPACE_ROOT);
 
     const result = runPreToolUseChecks(
       createBashInput('python3 update.py labels/config.json', {
@@ -307,8 +323,85 @@ describe('mode coverage', () => {
 
     expect(result.type).toBe('block');
     if (result.type === 'block') {
+      // Step 1 (safe mode, merged config) whitelisted the command via the
+      // workspace pattern; only the Bash guard could produce this block, so
+      // assert its signature (path + reason + validated-tool guidance).
+      expect(result.reason).toContain('labels/config.json');
+      expect(result.reason).toContain('bypass config validation');
+      expect(result.reason).toContain('Write');
+      expect(result.reason).toContain('could not be proven read-only');
+    }
+  });
+
+  it('safe mode: sed -n -i cannot bypass the guard via the read-only pattern', () => {
+    // `^sed\s+-n\b` in default.json whitelists plain `sed -n`, and the AST
+    // validator matches `sed -n -i` too — but `-i` edits in place. The
+    // in-place-edit gate must skip the read-only fast path so the guard
+    // blocks instead of continuing.
+    const result = runPreToolUseChecks(
+      createBashInput("sed -n -i 's/x/y/' labels/config.json", {
+        sessionId: SESSION_SAFE,
+        permissionMode: 'safe',
+      })
+    );
+
+    expect(result.type).toBe('block');
+    if (result.type === 'block') {
+      expect(result.reason).toContain('labels/config.json');
+      expect(result.reason).toContain('bypass config validation');
+    }
+  });
+
+  it('leaves read-only sed -n usage unaffected', () => {
+    const result = runPreToolUseChecks(createBashInput("sed -n 's/x/y/p' labels/config.json"));
+    expect(result.type).toBe('allow');
+  });
+
+  it('resolves a bare SKILL.md target against the skill working directory', () => {
+    const skillDir = join(WORKSPACE_ROOT, 'skills', 'myskill');
+    const result = runPreToolUseChecks(
+      createBashInput("sed -i 's/x/y/' SKILL.md", {
+        workingDirectory: skillDir,
+      })
+    );
+
+    expect(result.type).toBe('block');
+    if (result.type === 'block') {
+      expect(result.reason).toContain('skills/myskill/SKILL.md');
+      expect(result.reason).toContain('bypass config validation');
+    }
+  });
+
+  it('resolves redirect targets that come from a preceding static assignment', () => {
+    const result = runPreToolUseChecks(
+      createBashInput('target=labels/config.json; echo \'{ invalid\' > "$target"')
+    );
+
+    expect(result.type).toBe('block');
+    if (result.type === 'block') {
       expect(result.reason).toContain('labels/config.json');
     }
+  });
+
+  it('expands variable-prefixed redirect targets ($dir/config.json)', () => {
+    const result = runPreToolUseChecks(createBashInput('dir=labels; echo \'{ invalid\' > $dir/config.json'));
+
+    expect(result.type).toBe('block');
+    if (result.type === 'block') {
+      expect(result.reason).toContain('labels/config.json');
+    }
+  });
+
+  it('does not leak assignments between separate commands', () => {
+    // First command assigns and mutates — blocked.
+    const first = runPreToolUseChecks(createBashInput('x=labels/config.json; echo a > "$x"'));
+    expect(first.type).toBe('block');
+
+    // A later command referencing the same variable name has no assignment of
+    // its own — `$x` is unresolved in the shell and must NOT resolve to the
+    // earlier command's assignment.
+    const second = runPreToolUseChecks(createBashInput('printf \'%s\' x > $x'));
+    expect(second.type).toBe('allow');
   });
 
   it('ask mode: guard blocks before prompting', () => {
