@@ -10,7 +10,7 @@ import type { ThinkingLevel } from '../../thinking-levels.ts';
 
 /**
  * Map Kata's {@link ThinkingLevel} to Pi's `ThinkingLevel`.
- * Pi 0.83 supports the native `max` reasoning level.
+ * Pi 0.84.1 supports the native `max` reasoning level.
  */
 export const THINKING_TO_PI: Record<ThinkingLevel, PiThinkingLevel> = {
   off: 'off',

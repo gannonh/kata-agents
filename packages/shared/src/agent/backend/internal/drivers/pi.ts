@@ -52,28 +52,31 @@ async function listModelsViaHttp(
   const oauth = githubCopilotProvider().auth.oauth;
   if (!oauth) throw new Error('Pi SDK did not configure GitHub Copilot OAuth');
 
-  // Step 1: Exchange GitHub OAuth token → Copilot API token
-  const creds = await oauth.refresh({
-    type: 'oauth',
-    access: '',
-    refresh: githubToken,
-    expires: 0,
-  });
-  const copilotToken = creds.access;
-
-  // Step 2: Extract base URL from token
-  const baseUrl = getBaseUrlFromToken(copilotToken);
-  if (!baseUrl) {
-    throw new Error('Could not extract API base URL from Copilot token (missing proxy-ep)');
-  }
-
-  console.warn(`[listModelsViaHttp] token exchange OK, baseUrl=${baseUrl}`);
-
-  // Step 3: GET /models
+  // The Pi 0.84 OAuth contract requires a cancellation signal. Share the
+  // bounded request lifetime across both the token exchange and model fetch so
+  // a stalled exchange cannot consume the entire model-discovery timeout.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    // Step 1: Exchange GitHub OAuth token → Copilot API token
+    const creds = await oauth.refresh({
+      type: 'oauth',
+      access: '',
+      refresh: githubToken,
+      expires: 0,
+    }, controller.signal);
+    const copilotToken = creds.access;
+
+    // Step 2: Extract base URL from token
+    const baseUrl = getBaseUrlFromToken(copilotToken);
+    if (!baseUrl) {
+      throw new Error('Could not extract API base URL from Copilot token (missing proxy-ep)');
+    }
+
+    console.warn(`[listModelsViaHttp] token exchange OK, baseUrl=${baseUrl}`);
+
+    // Step 3: GET /models
     const res = await fetch(`${baseUrl}/models`, {
       method: 'GET',
       signal: controller.signal,

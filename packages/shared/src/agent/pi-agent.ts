@@ -116,13 +116,16 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'browser_tool',
 ]);
 
+/** Pi 0.84 OAuth refreshes require a cancellation signal. */
+const PI_OAUTH_REFRESH_TIMEOUT_MS = 15_000;
+
 export type PiAuthCredential =
   | { type: 'api_key'; key: string }
   | { type: 'oauth'; access: string; refresh: string; expires: number };
 
 /**
  * Convert an app-managed OAuth record to the credential shape expected by Pi.
- * ChatGPT/Codex is OAuth-only in Pi 0.83; an access token without its refresh
+ * ChatGPT/Codex is OAuth-only in Pi 0.84.1; an access token without its refresh
  * token must not be mislabeled as an API key.
  */
 export function buildPiAuthCredential(
@@ -794,7 +797,7 @@ export class PiAgent extends BaseAgent {
             access: '',
             refresh: stored.refreshToken,
             expires: 0,
-          });
+          }, AbortSignal.timeout(PI_OAUTH_REFRESH_TIMEOUT_MS));
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,

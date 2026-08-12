@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Updated provider runtimes** — Pi packages now use 0.84.1 and the Claude Agent SDK uses 0.3.228, bringing current model catalogs, cancellable OAuth refreshes, and upstream provider fixes to provider-backed sessions ([#55](https://github.com/gannonh/kata-agents/issues/55)).
+
 ## Bug Fixes
 
 - Restored a focused Bash config-write guard in pre-tool-use: syntactically identifiable Bash mutations targeting validator-recognized config files (derivable `cat <<'DELIM' > target` heredocs and opaque forms like redirects, `tee`, `sed -i`, wrapper shells, or script arguments) are now validated or blocked instead of bypassing config validation. Read-only commands and non-config targets are unaffected.
