@@ -1348,5 +1348,57 @@ describe('BrowserPaneManager', () => {
       expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith('https://example.com/after-detach')
       expect(manager.listInstances()[0].id).toBe('panel-tools')
     })
+
+    it('pushes toolbar surface after returning to the panel', () => {
+      manager.createInstance('panel-toolbar')
+      const instance = markToolbarReady('panel-toolbar')
+      manager.detachToWindow('panel-toolbar')
+      instance.toolbarView.webContents.send.mockClear()
+
+      manager.attachToPanel('panel-toolbar')
+
+      const updates = instance.toolbarView.webContents.send.mock.calls.filter(
+        (call: unknown[]) => call[0] === 'browser-toolbar:state-update',
+      )
+      expect(updates.at(-1)?.[1]).toMatchObject({ surface: 'panel' })
+    })
+
+    it('keeps panel views on the host when close is intercepted', () => {
+      manager.createInstance('panel-host-close')
+      const instance = markToolbarReady('panel-host-close')
+      const host = new BrowserWindow() as any
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+      } as any)
+      manager.focus('panel-host-close')
+      manager.setPanelBounds('panel-host-close', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      host._emit('close', { preventDefault: mock(() => {}) })
+
+      expect(host.removeBrowserView).not.toHaveBeenCalled()
+      expect(instance.hostWindow).toBe(host)
+    })
+
+    it('parks panel views before the host window is destroyed', () => {
+      manager.createInstance('panel-host-destroy')
+      const instance = markToolbarReady('panel-host-destroy')
+      const host = new BrowserWindow() as any
+      let willDestroy: ((window: unknown) => void) | null = null
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+        onWillDestroyWindow: (listener: (window: unknown) => void) => {
+          willDestroy = listener
+          return () => { willDestroy = null }
+        },
+      } as any)
+      manager.focus('panel-host-destroy')
+      manager.setPanelBounds('panel-host-destroy', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      expect(typeof willDestroy).toBe('function')
+      willDestroy!(host)
+
+      expect(host.removeBrowserView).toHaveBeenCalledWith(instance.pageView)
+      expect(instance.hostWindow).toBe(instance.window)
+    })
   })
 })

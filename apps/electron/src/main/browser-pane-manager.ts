@@ -152,7 +152,6 @@ interface BrowserInstance {
   surface: BrowserSurface
   panelBounds: BrowserViewRect | null
   hostWebContentsId: number | null
-  hostCloseCleanup: (() => void) | null
   toolbarView: BrowserView
   pageView: BrowserView
   nativeOverlayView: BrowserView
@@ -353,9 +352,17 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private popupParentByWebContentsId = new Map<number, string>()
   private windowManager: WindowManager | null = null
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
+  private hostWillDestroyCleanup: (() => void) | null = null
 
   setWindowManager(windowManager: WindowManager): void {
+    this.hostWillDestroyCleanup?.()
+    this.hostWillDestroyCleanup = null
     this.windowManager = windowManager
+    if (typeof windowManager.onWillDestroyWindow === 'function') {
+      this.hostWillDestroyCleanup = windowManager.onWillDestroyWindow((host) => {
+        this.parkPanelViewsFromHost(host)
+      })
+    }
   }
 
   setSessionPathResolver(fn: (sessionId: string) => string | null): void {
@@ -465,7 +472,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       surface,
       panelBounds: null,
       hostWebContentsId: null,
-      hostCloseCleanup: null,
       toolbarView,
       pageView,
       nativeOverlayView,
@@ -900,6 +906,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
     instance.isVisible = true
     this.emitStateChange(instance)
+    this.pushToolbarState(instance)
   }
 
   setPanelBounds(id: string, bounds: BrowserViewRect, hostWebContentsId: number): void {
@@ -2104,26 +2111,11 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     remove(instance.toolbarView)
   }
 
-  private clearHostCloseWatch(instance: BrowserInstance): void {
-    instance.hostCloseCleanup?.()
-    instance.hostCloseCleanup = null
-  }
-
-  private watchHostWindowClose(instance: BrowserInstance, host: BrowserWindow): void {
-    this.clearHostCloseWatch(instance)
-    const onClose = () => {
-      if (instance.hostWindow === host && this.instances.has(instance.id)) {
+  private parkPanelViewsFromHost(host: BrowserWindow): void {
+    for (const instance of this.instances.values()) {
+      if (instance.hostWindow === host && host !== instance.window) {
         this.parkViewsOnDedicatedWindow(instance)
       }
-    }
-    host.on('close', onClose)
-    instance.hostCloseCleanup = () => {
-      try {
-        host.removeListener('close', onClose)
-      } catch {
-        // Mock windows and already-destroyed hosts may not implement removeListener.
-      }
-      instance.hostCloseCleanup = null
     }
   }
 
@@ -2131,7 +2123,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const current = instance.hostWindow
     if (current && current !== target && !current.isDestroyed()) {
       this.removeInstanceViews(current, instance)
-      this.clearHostCloseWatch(instance)
     }
     if (target.isDestroyed()) return
     if (current !== target) {
@@ -2139,16 +2130,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       target.addBrowserView(instance.nativeOverlayView)
       target.addBrowserView(instance.toolbarView)
       instance.hostWindow = target
-      if (target !== instance.window) {
-        this.watchHostWindowClose(instance, target)
-      }
     }
     this.layoutViewsInBounds(instance, bounds)
   }
 
   private parkViewsOnDedicatedWindow(instance: BrowserInstance): void {
     if (instance.window.isDestroyed()) return
-    this.clearHostCloseWatch(instance)
     this.moveViewsToWindow(instance, instance.window, this.dedicatedWindowBounds(instance))
     instance.panelBounds = null
     instance.hostWebContentsId = null
@@ -2294,7 +2281,6 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
 
     this.destroyingIds.delete(instance.id)
-    runCleanup('hostCloseCleanup', () => instance.hostCloseCleanup?.())
     runCleanup('closePopupsForParent', () => this.closePopupsForParent(instance.id, 'parent_destroy'))
     runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
     runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))

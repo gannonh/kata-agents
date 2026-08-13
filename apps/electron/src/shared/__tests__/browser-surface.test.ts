@@ -2,11 +2,13 @@ import { describe, expect, it } from 'bun:test'
 import type { BrowserInstanceInfo } from '@kata-sh/shared/protocol'
 import {
   BROWSER_TOOLBAR_HEIGHT,
+  browserPanelBoundsChanged,
   browserPanelRoute,
   layoutBrowserSurfaceRects,
   parseBrowserInstanceIdFromRoute,
   reconcileBrowserPanels,
   resolveCreateSurface,
+  roundBrowserPanelBounds,
 } from '../browser-surface'
 
 function makeInstance(id: string, overrides?: Partial<BrowserInstanceInfo>): BrowserInstanceInfo {
@@ -79,6 +81,7 @@ describe('reconcileBrowserPanels', () => {
     )
     expect(result.toOpen).toEqual(['a'])
     expect(result.toClose).toEqual([])
+    expect(result.toPark).toEqual([])
   })
 
   it('closes panels whose instances are hidden, detached, or gone', () => {
@@ -91,6 +94,7 @@ describe('reconcileBrowserPanels', () => {
     )
     expect(result.toOpen).toEqual([])
     expect(result.toClose.sort()).toEqual(['detached', 'gone', 'hidden'])
+    expect(result.toPark).toEqual([])
   })
 
   it('treats a missing surface as detached so older servers do not auto-open panels', () => {
@@ -102,6 +106,40 @@ describe('reconcileBrowserPanels', () => {
 
   it('is a no-op when open panels already match visible panel instances', () => {
     const result = reconcileBrowserPanels([makeInstance('a')], ['a'])
-    expect(result).toEqual({ toOpen: [], toClose: [] })
+    expect(result).toEqual({ toOpen: [], toClose: [], toPark: [] })
+  })
+
+  it('parks a still-visible panel instance that the workspace filter dropped', () => {
+    const all = [makeInstance('foreign', { workspaceId: 'ws-b' })]
+    const result = reconcileBrowserPanels([], ['foreign'], all)
+    expect(result).toEqual({ toOpen: [], toClose: ['foreign'], toPark: ['foreign'] })
+  })
+
+  it('does not park a panel that detached into a native window', () => {
+    const all = [makeInstance('detached', { surface: 'detached' })]
+    const result = reconcileBrowserPanels(all, ['detached'], all)
+    expect(result).toEqual({ toOpen: [], toClose: ['detached'], toPark: [] })
+  })
+
+  it('does not park a panel that is already hidden or destroyed', () => {
+    const hidden = reconcileBrowserPanels(
+      [makeInstance('hidden', { isVisible: false })],
+      ['hidden', 'gone'],
+    )
+    expect(hidden.toPark).toEqual([])
+  })
+})
+
+describe('browser panel bounds reporting', () => {
+  it('treats a missing previous rect as a change', () => {
+    expect(browserPanelBoundsChanged(null, { x: 1, y: 2, width: 3, height: 4 })).toBe(true)
+  })
+
+  it('detects origin-only movement with unchanged size', () => {
+    const prev = roundBrowserPanelBounds({ x: 34.2, y: 80, width: 400, height: 600 })
+    const next = roundBrowserPanelBounds({ x: 244.4, y: 80, width: 400, height: 600 })
+    expect(prev).toEqual({ x: 34, y: 80, width: 400, height: 600 })
+    expect(browserPanelBoundsChanged(prev, next)).toBe(true)
+    expect(browserPanelBoundsChanged(next, { ...next })).toBe(false)
   })
 })

@@ -8,6 +8,11 @@
 
 import { useEffect, useRef } from 'react'
 import { Panel } from '@/components/app-shell/Panel'
+import {
+  browserPanelBoundsChanged,
+  roundBrowserPanelBounds,
+  type BrowserViewRect,
+} from '../../../shared/browser-surface'
 
 interface BrowserPanelProps {
   instanceId: string
@@ -21,21 +26,31 @@ export function BrowserPanel({ instanceId }: BrowserPanelProps) {
     const setBounds = window.electronAPI?.browserPane?.setPanelBounds
     if (!el || !setBounds) return
 
+    let last: BrowserViewRect | null = null
+    let frame = 0
+    let stopped = false
+
     const report = () => {
-      const rect = el.getBoundingClientRect()
-      void setBounds(instanceId, {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      })
+      const next = roundBrowserPanelBounds(el.getBoundingClientRect())
+      if (!browserPanelBoundsChanged(last, next)) return
+      last = next
+      void setBounds(instanceId, next)
+    }
+
+    const loop = () => {
+      if (stopped) return
+      report()
+      frame = requestAnimationFrame(loop)
     }
 
     report()
+    frame = requestAnimationFrame(loop)
     const observer = new ResizeObserver(report)
     observer.observe(el)
     window.addEventListener('resize', report)
     return () => {
+      stopped = true
+      cancelAnimationFrame(frame)
       observer.disconnect()
       window.removeEventListener('resize', report)
     }

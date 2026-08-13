@@ -68,15 +68,20 @@ export function useReconcileBrowserPanels(
     const openIds = panelStack
       .map((entry) => parseBrowserInstanceIdFromRoute(entry.route))
       .filter((id): id is string => id !== null)
-    const { toOpen, toClose } = reconcileBrowserPanels(instances, openIds)
+    const { toOpen, toClose, toPark } = reconcileBrowserPanels(instances, openIds, allInstances)
+    const hide = window.electronAPI?.browserPane?.hide
 
     for (const id of toOpen) {
       pushPanel({ route: routes.view.browser(id) })
+    }
+
+    for (const id of toPark) {
+      void hide?.(id)
     }
 
     for (const id of toClose) {
       const entry = panelStack.find((p) => parseBrowserInstanceIdFromRoute(p.route) === id)
       if (entry) closePanel(entry.id)
     }
-  }, [instances, panelStack, pushPanel, closePanel])
+  }, [allInstances, instances, panelStack, pushPanel, closePanel])
 }

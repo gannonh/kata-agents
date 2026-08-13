@@ -61,15 +61,48 @@ export function isPanelSurface(surface: BrowserSurface | null | undefined): bool
 export function reconcileBrowserPanels(
   instances: Array<{ id: string; isVisible: boolean; surface?: BrowserSurface | null }>,
   openPanelInstanceIds: string[],
-): { toOpen: string[]; toClose: string[] } {
+  allInstances: Array<{ id: string; isVisible: boolean; surface?: BrowserSurface | null }> = instances,
+): { toOpen: string[]; toClose: string[]; toPark: string[] } {
   const panelVisible = new Set(
     instances
       .filter((instance) => instance.isVisible && isPanelSurface(instance.surface))
       .map((instance) => instance.id),
   )
   const open = new Set(openPanelInstanceIds)
+  const toOpen = [...panelVisible].filter((id) => !open.has(id))
+  const toClose = [...open].filter((id) => !panelVisible.has(id))
+  const byId = new Map(allInstances.map((instance) => [instance.id, instance]))
   return {
-    toOpen: [...panelVisible].filter((id) => !open.has(id)),
-    toClose: [...open].filter((id) => !panelVisible.has(id)),
+    toOpen,
+    toClose,
+    toPark: toClose.filter((id) => shouldParkBrowserPanelOnClose(byId.get(id))),
   }
+}
+
+/**
+ * Workspace switches close the React panel without detaching or hiding the
+ * instance. Those still-visible panel instances must be parked so native views
+ * do not remain over the newly selected workspace.
+ */
+export function shouldParkBrowserPanelOnClose(
+  instance: { isVisible: boolean; surface?: BrowserSurface | null } | undefined,
+): boolean {
+  return Boolean(instance?.isVisible && isPanelSurface(instance.surface))
+}
+
+export function roundBrowserPanelBounds(rect: BrowserViewRect): BrowserViewRect {
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  }
+}
+
+export function browserPanelBoundsChanged(
+  prev: BrowserViewRect | null,
+  next: BrowserViewRect,
+): boolean {
+  if (!prev) return true
+  return prev.x !== next.x || prev.y !== next.y || prev.width !== next.width || prev.height !== next.height
 }

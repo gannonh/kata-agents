@@ -110,6 +110,9 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
   })
 
   server.handle(RPC_CHANNELS.browserPane.HIDE, (_ctx, id: string) => {
+    // Workspace isolation is renderer-side (filterInstancesForWorkspace).
+    // Same contract as FOCUS/DESTROY/LIST: ctx.workspaceId is always the local
+    // id and would miss remote-mirror-stamped panes.
     browserPaneManager.hide(id)
   })
 
