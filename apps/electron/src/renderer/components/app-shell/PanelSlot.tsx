@@ -62,9 +62,13 @@ export function PanelSlot({
   const navState = parseRouteToNavigationState(entry.route)
 
   const handleClose = useCallback(() => {
-    void hideBrowserInstanceForPanel(entry).finally(() => {
-      closePanel(entry.id)
-    })
+    void hideBrowserInstanceForPanel(entry)
+      .then(() => {
+        closePanel(entry.id)
+      })
+      .catch((error) => {
+        console.warn('[PanelSlot] Failed to hide browser panel:', error)
+      })
   }, [closePanel, entry])
 
   // Build close button for PanelHeader (via context override)

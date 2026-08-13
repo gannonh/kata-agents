@@ -161,12 +161,16 @@ function BrowserToolbarApp() {
 
   const handleDetachToWindow = useCallback(() => {
     setWindowMenuOpen(false)
-    void api?.detachToWindow()
+    void api?.detachToWindow()?.catch((error) => {
+      console.warn('[BrowserToolbar] Failed to detach browser:', error)
+    })
   }, [api])
 
   const handleAttachToPanel = useCallback(() => {
     setWindowMenuOpen(false)
-    void api?.attachToPanel()
+    void api?.attachToPanel()?.catch((error) => {
+      console.warn('[BrowserToolbar] Failed to attach browser:', error)
+    })
   }, [api])
 
   const handleCloseWindowEntirely = useCallback(() => {

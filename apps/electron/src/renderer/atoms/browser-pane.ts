@@ -54,6 +54,25 @@ export function filterInstancesForWorkspace(
   )
 }
 
+/**
+ * Apply state/removal events that arrived while an in-flight `list()` was
+ * outstanding so the snapshot cannot clobber a newer update.
+ */
+export function mergeBrowserListSnapshot<T extends { id: string }>(
+  items: T[],
+  pendingUpdates: Map<string, T>,
+  pendingRemoved: Set<string>,
+): T[] {
+  const merged = items
+    .filter((item) => !pendingRemoved.has(item.id))
+    .map((item) => pendingUpdates.get(item.id) ?? item)
+  for (const [id, info] of pendingUpdates) {
+    if (pendingRemoved.has(id)) continue
+    if (!merged.some((item) => item.id === id)) merged.push(info)
+  }
+  return merged
+}
+
 /** Currently active browser instance ID (selected/focused by user interactions) */
 export const activeBrowserInstanceIdAtom = atom<string | null>(null)
 

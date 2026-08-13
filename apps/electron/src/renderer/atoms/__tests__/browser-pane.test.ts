@@ -4,6 +4,7 @@ import type { BrowserInstanceInfo } from '../../../shared/types'
 import {
   browserInstancesAtom,
   filterInstancesForWorkspace,
+  mergeBrowserListSnapshot,
   removeBrowserInstanceAtom,
   setBrowserInstancesAtom,
   updateBrowserInstanceAtom,
@@ -114,6 +115,25 @@ describe('browser pane atoms', () => {
       ]
       expect(filterInstancesForWorkspace(all, null, 'remote-ws').map((i) => i.id)).toEqual([
         'remote-tab',
+      ])
+    })
+  })
+
+  describe('mergeBrowserListSnapshot', () => {
+    it('overlays state updates and drops removals that arrived during list()', () => {
+      const items = [makeInstance('a', { url: 'https://old.example' }), makeInstance('gone')]
+      const pendingUpdates = new Map([['a', makeInstance('a', { url: 'https://new.example' })]])
+      const pendingRemoved = new Set(['gone'])
+      expect(mergeBrowserListSnapshot(items, pendingUpdates, pendingRemoved)).toEqual([
+        makeInstance('a', { url: 'https://new.example' }),
+      ])
+    })
+
+    it('keeps instances created while list() was in flight', () => {
+      const pendingUpdates = new Map([['b', makeInstance('b')]])
+      expect(mergeBrowserListSnapshot([makeInstance('a')], pendingUpdates, new Set()).map((i) => i.id)).toEqual([
+        'a',
+        'b',
       ])
     })
   })

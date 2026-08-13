@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import {
   browserInstancesAtom,
   filterInstancesForWorkspace,
+  mergeBrowserListSnapshot,
   removeBrowserInstanceAtom,
   setBrowserInstancesAtom,
   updateBrowserInstanceAtom,
@@ -39,21 +40,46 @@ export function useReconcileBrowserPanels(
       return
     }
 
-    void browserPaneApi.list()
-      .then((items) => setInstances(items))
-      .catch((error) => {
-        console.warn('[browser-panel] Failed to list browser panes:', error)
-        setInstances([])
-      })
+    let cancelled = false
+    let listSettled = false
+    const pendingUpdates = new Map<string, BrowserInstanceInfo>()
+    const pendingRemoved = new Set<string>()
 
     const cleanupState = browserPaneApi.onStateChanged((info: BrowserInstanceInfo) => {
+      if (cancelled) return
+      if (!listSettled) {
+        pendingUpdates.set(info.id, info)
+        pendingRemoved.delete(info.id)
+        return
+      }
       updateInstance(info)
     })
     const cleanupRemoved = browserPaneApi.onRemoved((id: string) => {
+      if (cancelled) return
+      if (!listSettled) {
+        pendingRemoved.add(id)
+        pendingUpdates.delete(id)
+        return
+      }
       removeInstance(id)
     })
 
+    void browserPaneApi.list()
+      .then((items) => {
+        if (cancelled) return
+        const merged = mergeBrowserListSnapshot(items, pendingUpdates, pendingRemoved)
+        listSettled = true
+        setInstances(merged)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        console.warn('[browser-panel] Failed to list browser panes:', error)
+        setInstances([])
+        listSettled = true
+      })
+
     return () => {
+      cancelled = true
       cleanupState()
       cleanupRemoved()
     }
@@ -70,18 +96,35 @@ export function useReconcileBrowserPanels(
       .filter((id): id is string => id !== null)
     const { toOpen, toClose, toPark } = reconcileBrowserPanels(instances, openIds, allInstances)
     const hide = window.electronAPI?.browserPane?.hide
+    const parkSet = new Set(toPark)
 
     for (const id of toOpen) {
       pushPanel({ route: routes.view.browser(id) })
     }
 
-    for (const id of toPark) {
-      void hide?.(id)
-    }
-
     for (const id of toClose) {
+      if (parkSet.has(id)) continue
       const entry = panelStack.find((p) => parseBrowserInstanceIdFromRoute(p.route) === id)
       if (entry) closePanel(entry.id)
+    }
+
+    let cancelled = false
+    void (async () => {
+      for (const id of toPark) {
+        try {
+          await hide?.(id)
+        } catch (error) {
+          console.warn('[browser-panel] Failed to park browser pane:', error)
+          continue
+        }
+        if (cancelled) return
+        const entry = panelStack.find((p) => parseBrowserInstanceIdFromRoute(p.route) === id)
+        if (entry) closePanel(entry.id)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [allInstances, instances, panelStack, pushPanel, closePanel])
 }

@@ -914,6 +914,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     if (!instance || instance.window.isDestroyed()) return
     if (instance.surface !== 'panel' || !instance.isVisible) return
 
+    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return
+
     if (bounds.width < 1 || bounds.height < 1) {
       this.parkViewsOnDedicatedWindow(instance)
       return

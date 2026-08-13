@@ -1400,5 +1400,21 @@ describe('BrowserPaneManager', () => {
       expect(host.removeBrowserView).toHaveBeenCalledWith(instance.pageView)
       expect(instance.hostWindow).toBe(instance.window)
     })
+
+    it('ignores non-finite panel bounds', () => {
+      manager.createInstance('panel-nan')
+      const instance = markToolbarReady('panel-nan')
+      const host = new BrowserWindow() as any
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+      } as any)
+      manager.focus('panel-nan')
+      manager.setPanelBounds('panel-nan', { x: 40, y: 80, width: 800, height: 600 }, 99)
+      instance.pageView.setBounds.mockClear()
+
+      manager.setPanelBounds('panel-nan', { x: 40, y: 80, width: Number.NaN, height: 600 }, 99)
+
+      expect(instance.pageView.setBounds).not.toHaveBeenCalled()
+    })
   })
 })

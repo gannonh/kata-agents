@@ -55,9 +55,13 @@ export function useWindowCloseHandler() {
         : panelStack[panelStack.length - 1]
       if (target) {
         window.electronAPI.cancelCloseWindow()
-        void hideBrowserInstanceForPanel(target).finally(() => {
-          closePanel(target.id)
-        })
+        void hideBrowserInstanceForPanel(target)
+          .then(() => {
+            closePanel(target.id)
+          })
+          .catch((error) => {
+            console.warn('[window-close] Failed to hide browser panel:', error)
+          })
       } else {
         // No panels, no modals — close the window
         window.electronAPI.confirmCloseWindow()
