@@ -40,6 +40,7 @@ import type {
   ConversationForkStatusInput,
   ConversationForkStrategy,
   ManagedWorktreeRecordV2,
+  ManagedWorktreeRecordVersioned,
   ManagedWorktreeSnapshotMeta,
   SessionCheckout,
   SessionCheckoutV2,
@@ -646,7 +647,8 @@ export class IsolatedConversationForkService {
       return this.blockedPreview(input, 'missing-source', 'The source session could not be resolved.', this.sessionFactsFallback(input.sessionId, this.deps.serverId))
     }
     const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
-    const facts = await this.gatherFacts(input, session, capability)
+    // Preview runs outside the registry lock, so it reads the registry directly.
+    const facts = await this.gatherFacts(input, session, capability, (id) => this.deps.registry.get(id))
 
     const blocked = facts.blocker
       ? { blocked: true as const, code: facts.blocker, reason: facts.blockerReason ?? '' }
@@ -836,8 +838,10 @@ export class IsolatedConversationForkService {
     input: ConversationForkPreviewInput,
     session: ForkSessionInfo,
     capability: ConversationForkProviderCapability | null,
+    // Required so the lock scope is explicit at every call site. The registry
+    // lock is not reentrant: a transaction MUST pass `(id) => tx.get(id)` here.
+    recordLookup: (id: string) => ManagedWorktreeRecordVersioned | undefined | Promise<ManagedWorktreeRecordVersioned | undefined>,
     transactionIdToAllow?: string,
-    recordLookup?: (id: string) => ManagedWorktreeRecordV2 | undefined | Promise<ManagedWorktreeRecordV2 | undefined>,
     options?: { allowOwnedDestination?: boolean; ownedLeaseId?: string },
   ): Promise<ForkFacts> {
     const fail = (code: ConversationForkBlockerCode, reason: string, overrides: Partial<ForkFacts> = {}): ForkFacts =>
@@ -915,7 +919,7 @@ export class IsolatedConversationForkService {
     // be idle, quiesceable, and covered by a stable path lease during capture.
     let ownerSessionIds = [input.sessionId]
     if (session.checkout?.mode === 'managed-worktree' && session.checkout.managedWorktreeId) {
-      const record = await (recordLookup ?? ((id: string) => this.deps.registry.get(id)))(session.checkout.managedWorktreeId)
+      const record = await recordLookup(session.checkout.managedWorktreeId)
       if (!record || record.state !== 'ready' || !existsSync(record.checkoutPath)) {
         return fail('missing-source', 'The managed worktree is snapshotted or missing; restore it before forking.')
       }
@@ -1271,8 +1275,8 @@ export class IsolatedConversationForkService {
         },
         session,
         capability,
-        txn.transactionId,
         (id: string) => tx.get(id),
+        txn.transactionId,
         {
           // A transaction that already materialized its target must not be
           // blocked by its own destination when resuming after a crash.

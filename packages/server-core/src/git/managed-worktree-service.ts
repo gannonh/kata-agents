@@ -895,8 +895,9 @@ export class ManagedWorktreeService {
       }
 
       // Ownership is mutable registry state and the authoritative inspection
-      // performs async Git work. Re-read it synchronously after the last guard
-      // await so an owner added during inspection cannot lose its checkout.
+      // performs async Git work. Re-read it after the last guard await so an
+      // owner added during inspection is observed. This read is advisory: the
+      // authoritative ownership fence is the locked beginRemoval() claim below.
       const currentRecord = await this.registry.get(managedWorktreeId)
       const currentOwners = currentRecord?.ownerSessionIds ?? []
       const currentOtherOwners = currentOwners.filter(

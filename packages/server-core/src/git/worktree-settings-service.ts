@@ -272,70 +272,103 @@ export class WorktreeSettingsService {
     }
   }
 
-  /** Persist a validated root update and return the next immutable snapshot. */
+  /** Compute the normalized pending update (root + policy) for a stored state. */
+  private computePendingUpdate(
+    input: WorktreeSettingsUpdateInput,
+    stored: StoredWorktreeSettings,
+  ): { requested: string; autoDeleteEnabled: boolean; retentionLimit: number; isNoOp: boolean } {
+    const requested = this.validateRequestedRoot(input.materializationRoot, stored.materializationRoot)
+    const autoDeleteEnabled = this.validateAutoDeletePolicy(
+      input.autoDeleteEnabled,
+      stored.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED,
+    )
+    const retentionLimit = this.validateRetentionLimit(
+      input.retentionLimit,
+      stored.retentionLimit ?? DEFAULT_RETENTION_LIMIT,
+    )
+    const isNoOp =
+      requested === stored.materializationRoot &&
+      autoDeleteEnabled === (stored.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED) &&
+      retentionLimit === (stored.retentionLimit ?? DEFAULT_RETENTION_LIMIT)
+    return { requested, autoDeleteEnabled, retentionLimit, isNoOp }
+  }
+
+  /**
+   * Persist a validated root update and return the next immutable snapshot.
+   *
+   * The candidate root is validated against the authoritative registry BEFORE
+   * the settings lock is taken, so the settings lock is never held while the
+   * registry lock is acquired. Handoff and fork hold the registry lock and then
+   * read a snapshot under the settings lock; acquiring both in the opposite
+   * order here would deadlock both until their timeouts expire.
+   */
   async update(input: WorktreeSettingsUpdateInput, serverId = this.serverId): Promise<WorktreeSettingsSnapshot> {
     try {
-      let snapshot!: WorktreeSettingsSnapshot
-      await this.lock.run(async () => {
-        const current = this.readStoredSettings()
-        const requested = this.validateRequestedRoot(input.materializationRoot, current.materializationRoot)
-        const autoDeleteEnabled = this.validateAutoDeletePolicy(
-          input.autoDeleteEnabled,
-          current.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED,
-        )
-        const retentionLimit = this.validateRetentionLimit(
-          input.retentionLimit,
-          current.retentionLimit ?? DEFAULT_RETENTION_LIMIT,
-        )
-        if (
-          requested === current.materializationRoot &&
-          autoDeleteEnabled === (current.autoDeleteEnabled ?? DEFAULT_AUTO_DELETE_ENABLED) &&
-          retentionLimit === (current.retentionLimit ?? DEFAULT_RETENTION_LIMIT)
-        ) {
+      while (true) {
+        const observed = this.readStoredSettings()
+        const candidate = this.computePendingUpdate(input, observed)
+        // The fixed default root is intentionally allowed to contain the
+        // existing registry/checkouts; resetting to it must remain possible.
+        if (!candidate.isNoOp && candidate.requested !== this.defaultRoot) {
+          await this.validateAgainstRegistry(candidate.requested)
+        }
+
+        let snapshot!: WorktreeSettingsSnapshot
+        let committed = false
+        await this.lock.run(async () => {
+          const current = this.readStoredSettings()
+          if (current.version !== observed.version) {
+            // A concurrent update landed between our registry validation and
+            // acquiring the settings lock. Retry with fresh observed state so
+            // the root we persist is always the root we validated.
+            return
+          }
+          const pending = this.computePendingUpdate(input, current)
+          if (pending.isNoOp) {
+            snapshot = freezeSnapshot({
+              schemaVersion: SETTINGS_SCHEMA_VERSION,
+              serverId,
+              version: current.version,
+              materializationRoot: current.materializationRoot,
+              capturedAt: Date.now(),
+              autoDeleteEnabled: pending.autoDeleteEnabled,
+              retentionLimit: pending.retentionLimit,
+            })
+            committed = true
+            return
+          }
+
+          this.ensureRootUsable(pending.requested, pending.requested === this.defaultRoot)
+          const next: StoredWorktreeSettings = {
+            schemaVersion: SETTINGS_SCHEMA_VERSION,
+            version: current.version + 1,
+            materializationRoot: pending.requested,
+            autoDeleteEnabled: pending.autoDeleteEnabled,
+            retentionLimit: pending.retentionLimit,
+          }
+          try {
+            writeAtomically(this.settingsPath, JSON.stringify(next, null, 2) + '\n')
+          } catch (error) {
+            throw new WorktreeSettingsError(
+              'WORKTREE_SETTINGS_WRITE_FAILED',
+              'Unable to persist the managed-worktree root setting.',
+              this.settingsPath,
+              error,
+            )
+          }
           snapshot = freezeSnapshot({
             schemaVersion: SETTINGS_SCHEMA_VERSION,
             serverId,
-            version: current.version,
-            materializationRoot: current.materializationRoot,
+            version: next.version,
+            materializationRoot: next.materializationRoot,
             capturedAt: Date.now(),
-            autoDeleteEnabled,
-            retentionLimit,
+            autoDeleteEnabled: pending.autoDeleteEnabled,
+            retentionLimit: pending.retentionLimit,
           })
-          return
-        }
-
-        // The fixed default root is intentionally allowed to contain the
-        // existing registry/checkouts; resetting to it must remain possible.
-        if (requested !== this.defaultRoot) await this.validateAgainstRegistry(requested)
-        this.ensureRootUsable(requested, requested === this.defaultRoot)
-        const next: StoredWorktreeSettings = {
-          schemaVersion: SETTINGS_SCHEMA_VERSION,
-          version: current.version + 1,
-          materializationRoot: requested,
-          autoDeleteEnabled,
-          retentionLimit,
-        }
-        try {
-          writeAtomically(this.settingsPath, JSON.stringify(next, null, 2) + '\n')
-        } catch (error) {
-          throw new WorktreeSettingsError(
-            'WORKTREE_SETTINGS_WRITE_FAILED',
-            'Unable to persist the managed-worktree root setting.',
-            this.settingsPath,
-            error,
-          )
-        }
-        snapshot = freezeSnapshot({
-          schemaVersion: SETTINGS_SCHEMA_VERSION,
-          serverId,
-          version: next.version,
-          materializationRoot: next.materializationRoot,
-          capturedAt: Date.now(),
-          autoDeleteEnabled,
-          retentionLimit,
+          committed = true
         })
-      })
-      return snapshot
+        if (committed) return snapshot
+      }
     } catch (error) {
       throw this.wrapLockError(error)
     }

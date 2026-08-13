@@ -210,7 +210,7 @@ describe('WorktreeSettingsService', () => {
     expect(reset.version).toBe(2)
   })
 
-  test('serializes updates from separate service instances', async () => {
+  test('serializes concurrent updates from separate service instances', async () => {
     const { root, defaultRoot } = makeSettings()
     const settingsPath = join(defaultRoot, 'settings.json')
     const registryPath = join(defaultRoot, 'registry.json')
@@ -227,8 +227,17 @@ describe('WorktreeSettingsService', () => {
       registry: new WorktreeRegistry(registryPath),
     })
 
-    expect((await first.update({ materializationRoot: join(root, 'one') })).version).toBe(1)
-    expect((await second.update({ materializationRoot: join(root, 'two') })).version).toBe(2)
-    expect(first.getSnapshot().materializationRoot).toBe(first.expandPath(join(root, 'two')))
+    // Start both writers before awaiting either, so the settings lock must
+    // actually serialize two overlapping update attempts.
+    const [a, b] = await Promise.all([
+      first.update({ materializationRoot: join(root, 'one') }),
+      second.update({ materializationRoot: join(root, 'two') }),
+    ])
+    // The lock serializes both writers, so the versions are 1 and 2 with no
+    // duplicate and no gap, regardless of which acquired the lock first.
+    expect([a.version, b.version].sort()).toEqual([1, 2])
+    // The version-2 writer committed last, so its root is the persisted root.
+    const winner = a.version === 2 ? a : b
+    expect(first.getSnapshot().materializationRoot).toBe(winner.materializationRoot)
   })
 })

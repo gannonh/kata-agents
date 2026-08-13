@@ -2110,7 +2110,11 @@ export class SessionManager implements ISessionManager {
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
-        this.recoverStagedSessionDeletions(workspaceRootPath)
+        // Recovery consults the registry (async) to decide whether a staged
+        // deletion should be restored. Await it before scanning stored sessions
+        // so a restored session is visible during this same startup pass instead
+        // of being silently omitted until a later restart.
+        await this.recoverStagedSessionDeletions(workspaceRootPath)
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
