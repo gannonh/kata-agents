@@ -1,5 +1,6 @@
 import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload } from '../../shared/types'
 import type { BrowserScreenshotOptions } from '../browser-pane-manager'
+import type { BrowserViewRect } from '../../shared/browser-surface'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
 
@@ -13,6 +14,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.RELOAD,
   RPC_CHANNELS.browserPane.STOP,
   RPC_CHANNELS.browserPane.FOCUS,
+  RPC_CHANNELS.browserPane.HIDE,
+  RPC_CHANNELS.browserPane.DETACH,
+  RPC_CHANNELS.browserPane.ATTACH,
+  RPC_CHANNELS.browserPane.SET_BOUNDS,
   RPC_CHANNELS.browserPane.LAUNCH,
   RPC_CHANNELS.browserPane.SNAPSHOT,
   RPC_CHANNELS.browserPane.CLICK,
@@ -45,7 +50,11 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
       })
     }
 
-    return browserPaneManager.createInstance(input?.id, { show: input?.show, workspaceId })
+    return browserPaneManager.createInstance(input?.id, {
+      show: input?.show,
+      workspaceId,
+      surface: input?.surface,
+    })
   })
 
   server.handle(RPC_CHANNELS.browserPane.DESTROY, (_ctx, id: string) => {
@@ -98,6 +107,24 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
 
   server.handle(RPC_CHANNELS.browserPane.FOCUS, (_ctx, id: string) => {
     browserPaneManager.focus(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.HIDE, (_ctx, id: string) => {
+    browserPaneManager.hide(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.DETACH, (_ctx, id: string) => {
+    browserPaneManager.detachToWindow(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.ATTACH, (_ctx, id: string) => {
+    browserPaneManager.attachToPanel(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.SET_BOUNDS, (ctx, id: string, bounds: BrowserViewRect) => {
+    const hostWebContentsId = ctx.webContentsId
+    if (typeof hostWebContentsId !== 'number') return
+    browserPaneManager.setPanelBounds(id, bounds, hostWebContentsId)
   })
 
   server.handle(RPC_CHANNELS.browserPane.LAUNCH, async (ctx, payload: BrowserEmptyStateLaunchPayload) => {

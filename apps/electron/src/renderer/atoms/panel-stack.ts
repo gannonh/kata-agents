@@ -13,7 +13,7 @@ function generatePanelId(): string {
   return `panel-${++nextPanelId}-${Date.now()}`
 }
 
-export type PanelType = 'session' | 'source' | 'settings' | 'skills' | 'other'
+export type PanelType = 'session' | 'source' | 'settings' | 'skills' | 'browser' | 'other'
 export type PanelLaneId = 'main'
 export type OpenIntent = 'implicit' | 'explicit'
 
@@ -29,7 +29,7 @@ export const PANEL_LANE_POLICIES: Record<PanelLaneId, PanelLanePolicy> = {
   main: {
     id: 'main',
     order: 0,
-    allowedTypes: ['session', 'source', 'settings', 'skills', 'other'],
+    allowedTypes: ['session', 'source', 'settings', 'skills', 'browser', 'other'],
     locked: false,
     singleton: false,
   },
@@ -75,6 +75,8 @@ export function getPanelTypeFromRoute(route: ViewRoute): PanelType {
       return 'settings'
     case 'skills':
       return 'skills'
+    case 'browser':
+      return 'browser'
     default:
       return 'other'
   }
@@ -270,6 +272,34 @@ export const updateFocusedPanelRouteAtom = atom(
 
     const focusedId = get(focusedPanelIdAtom)
     const focused = stack.find(p => p.id === focusedId) ?? stack[0]
+
+    // Browser panels host a live BrowserView. Implicit navigation must not
+    // replace their route — that would unmount the bounds host while the
+    // instance is still on the panel surface.
+    if (focused.panelType === 'browser' && route !== focused.route) {
+      const existing = stack.find((p) => p.route === route)
+      if (existing) {
+        set(focusedPanelIdAtom, existing.id)
+        return
+      }
+
+      const replaceable = stack.find((p) => p.panelType !== 'browser')
+      if (replaceable) {
+        const updated = stack.map((p) =>
+          p.id === replaceable.id
+            ? { ...createEntry(route, p.proportion, p.id), proportion: p.proportion }
+            : p
+        )
+        set(panelStackAtom, updated)
+        set(focusedPanelIdAtom, replaceable.id)
+        return
+      }
+
+      const newEntry = createEntry(route, 0)
+      set(panelStackAtom, normalizeProportions([...stack, newEntry]))
+      set(focusedPanelIdAtom, newEntry.id)
+      return
+    }
 
     const updated = stack.map((p) =>
       p.id === focused.id

@@ -182,6 +182,9 @@ export const routes = {
       subpage
         ? `settings/${subpage}` as const
         : 'settings' as const,
+
+    /** Integrated browser panel for a live browser instance */
+    browser: (instanceId: string) => `browser/${instanceId}` as const,
   },
 } as const
 

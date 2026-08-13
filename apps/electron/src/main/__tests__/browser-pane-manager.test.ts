@@ -124,6 +124,7 @@ function createMockWindow(opts?: { width?: number; height?: number; minWidth?: n
     }),
     setBrowserView: mock((_view: any) => {}),
     addBrowserView: mock((_view: any) => {}),
+    removeBrowserView: mock((_view: any) => {}),
     setTopBrowserView: mock((_view: any) => {}),
     getContentSize: mock(() => [contentWidth, contentHeight]),
     setContentSize: mock((width: number, height: number) => {
@@ -237,6 +238,7 @@ mock.module('../browser-cdp', () => ({
 }))
 
 const { BrowserPaneManager } = await import('../browser-pane-manager')
+const { BrowserWindow } = await import('electron')
 
 describe('BrowserPaneManager', () => {
   let manager: InstanceType<typeof BrowserPaneManager>
@@ -573,7 +575,7 @@ describe('BrowserPaneManager', () => {
   })
 
   it('focus brings the instance window to front when the toolbar finishes loading', () => {
-    manager.createInstance('f1')
+    manager.createInstance('f1', { surface: 'detached' })
     manager.focus('f1')
 
     const instance = (manager as any).instances.get('f1')
@@ -585,7 +587,7 @@ describe('BrowserPaneManager', () => {
   })
 
   it('dedupes repeated focus calls before the toolbar finishes loading', () => {
-    manager.createInstance('f2')
+    manager.createInstance('f2', { surface: 'detached' })
 
     manager.focus('f2')
     manager.focus('f2')
@@ -600,7 +602,7 @@ describe('BrowserPaneManager', () => {
   })
 
   it('cancels deferred pre-ready focus when hide happens first', () => {
-    manager.createInstance('f-hide-race')
+    manager.createInstance('f-hide-race', { surface: 'detached' })
 
     manager.focus('f-hide-race')
     manager.hide('f-hide-race')
@@ -617,7 +619,7 @@ describe('BrowserPaneManager', () => {
   })
 
   it('user close hides window and keeps instance alive', () => {
-    manager.createInstance('h1')
+    manager.createInstance('h1', { surface: 'detached' })
     const instance = (manager as any).instances.get('h1')
 
     const closeEvent = { preventDefault: mock(() => {}) }
@@ -763,7 +765,7 @@ describe('BrowserPaneManager', () => {
   })
 
   it('replays toolbar state with theme color when window is shown', () => {
-    manager.createInstance('theme-show-replay')
+    manager.createInstance('theme-show-replay', { surface: 'detached' })
     const instance = (manager as any).instances.get('theme-show-replay')
 
     instance.currentUrl = 'https://example.com'
@@ -785,6 +787,7 @@ describe('BrowserPaneManager', () => {
         canGoBack: true,
         canGoForward: false,
         themeColor: '#123456',
+        surface: 'detached',
       },
     ])
   })
@@ -816,6 +819,7 @@ describe('BrowserPaneManager', () => {
         canGoBack: true,
         canGoForward: true,
         themeColor: '#654321',
+        surface: 'panel',
       },
     ])
   })
@@ -844,7 +848,7 @@ describe('BrowserPaneManager', () => {
 
   it('keeps focus deferred until a valid toolbar document loads', () => {
     toolbarLoadFailuresRemaining = 20
-    manager.createInstance('toolbar-focus-guard')
+    manager.createInstance('toolbar-focus-guard', { surface: 'detached' })
     const instance = (manager as any).instances.get('toolbar-focus-guard')
 
     manager.focus('toolbar-focus-guard')
@@ -1113,7 +1117,7 @@ describe('BrowserPaneManager', () => {
     })
 
     it('reapplies native overlay after hide/show while control is active', async () => {
-      manager.createInstance('ac-show-reapply')
+      manager.createInstance('ac-show-reapply', { surface: 'detached' })
       manager.bindSession('ac-show-reapply', 'sess-show-reapply')
 
       manager.setAgentControl('sess-show-reapply', { displayName: 'Click Button', intent: 'Clicking submit' })
@@ -1252,6 +1256,97 @@ describe('BrowserPaneManager', () => {
         ref: '@e3',
         status: 'failed',
       })
+    })
+  })
+
+  describe('panel surface and detach', () => {
+    function markToolbarReady(id: string) {
+      const instance = (manager as any).instances.get(id)
+      instance.toolbarView.webContents.getURL = mock(() => 'file:///mock/renderer/browser-toolbar.html')
+      instance.toolbarView.webContents._emit('did-finish-load')
+      return instance
+    }
+
+    it('creates instances on the panel surface by default', () => {
+      manager.createInstance('panel-default')
+      const info = manager.listInstances().find((item) => item.id === 'panel-default')
+      expect(info?.surface).toBe('panel')
+    })
+
+    it('focus on a panel instance marks it visible without showing the dedicated window', () => {
+      manager.createInstance('panel-focus')
+      manager.focus('panel-focus')
+      const instance = markToolbarReady('panel-focus')
+
+      expect(manager.listInstances().find((item) => item.id === 'panel-focus')?.isVisible).toBe(true)
+      expect(instance.window.show).not.toHaveBeenCalled()
+    })
+
+    it('detaches into a native window and returns to the panel without replacing the page view', async () => {
+      manager.createInstance('panel-roundtrip')
+      const instance = markToolbarReady('panel-roundtrip')
+      const pageView = instance.pageView
+      await manager.navigate('panel-roundtrip', 'https://example.com/kept')
+      instance.pageView.webContents._emit('did-navigate', 'https://example.com/kept')
+
+      manager.detachToWindow('panel-roundtrip')
+      expect(manager.listInstances().find((item) => item.id === 'panel-roundtrip')).toMatchObject({
+        surface: 'detached',
+        url: 'https://example.com/kept',
+      })
+      expect(instance.window.show).toHaveBeenCalled()
+      expect(instance.pageView).toBe(pageView)
+
+      manager.attachToPanel('panel-roundtrip')
+      expect(manager.listInstances().find((item) => item.id === 'panel-roundtrip')).toMatchObject({
+        surface: 'panel',
+        url: 'https://example.com/kept',
+        isVisible: true,
+      })
+      expect(instance.pageView).toBe(pageView)
+      expect(instance.window.hide).toHaveBeenCalled()
+    })
+
+    it('lays panel views onto the host window at the reported bounds', () => {
+      manager.createInstance('panel-bounds')
+      const instance = markToolbarReady('panel-bounds')
+      const host = new BrowserWindow() as any
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+      } as any)
+
+      manager.focus('panel-bounds')
+      manager.setPanelBounds('panel-bounds', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      expect(host.addBrowserView).toHaveBeenCalledWith(instance.pageView)
+      expect(host.addBrowserView).toHaveBeenCalledWith(instance.toolbarView)
+      expect(instance.toolbarView.setBounds).toHaveBeenCalledWith({ x: 40, y: 80, width: 800, height: 48 })
+      expect(instance.pageView.setBounds).toHaveBeenCalledWith({ x: 40, y: 128, width: 800, height: 552 })
+    })
+
+    it('hides a panel instance without destroying it', () => {
+      manager.createInstance('panel-hide')
+      markToolbarReady('panel-hide')
+      manager.focus('panel-hide')
+      manager.hide('panel-hide')
+
+      expect(manager.listInstances()).toHaveLength(1)
+      expect(manager.listInstances()[0]).toMatchObject({
+        id: 'panel-hide',
+        isVisible: false,
+        surface: 'panel',
+      })
+    })
+
+    it('keeps automation targeting the same instance after detach', async () => {
+      manager.createInstance('panel-tools')
+      const instance = markToolbarReady('panel-tools')
+      await manager.navigate('panel-tools', 'https://example.com/start')
+      manager.detachToWindow('panel-tools')
+      await manager.navigate('panel-tools', 'https://example.com/after-detach')
+
+      expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith('https://example.com/after-detach')
+      expect(manager.listInstances()[0].id).toBe('panel-tools')
     })
   })
 })
