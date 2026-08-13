@@ -177,7 +177,7 @@ function throwTypedConversationForkError(error: unknown): never {
  * until reconciliation, restore, or an explicit allowed resolution succeeds
  * (spec: recovery fencing). Sessions without a managed checkout are unaffected.
  */
-function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void {
+async function assertSessionWorktreeUsable(git: GitServices, sessionId: string): Promise<void> {
   if (!isWorktreeV2Enabled()) return
   if (git.handoff?.isSessionFenced?.(sessionId)) {
     throw new CodedError(WORKTREE_HANDOFF_PENDING_CODE, i18n.t('git.handoff.pendingFence'))
@@ -186,7 +186,7 @@ function assertSessionWorktreeUsable(git: GitServices, sessionId: string): void 
     throw new CodedError(WORKTREE_FORK_PENDING_CODE, i18n.t('git.fork.pendingFence'))
   }
   git.lifecycle.assertReady()
-  const { state } = git.lifecycle.recordStateForSession(sessionId)
+  const { state } = await git.lifecycle.recordStateForSession(sessionId)
   if (state !== 'ready') {
     throw new Error(
       i18n.t('git.worktree.usableFence', {
@@ -256,8 +256,8 @@ export function checkManagedCheckoutIdentity(input: {
  * others fall back to the session working directory.
  */
 function makeSessionResolver(deps: HandlerDeps) {
-  return (sessionId: string): ResolvedSession | null => {
-    const sessions = deps.sessionManager.getSessions()
+  return async (sessionId: string): Promise<ResolvedSession | null> => {
+    const sessions = await deps.sessionManager.getSessions()
     const session = sessions.find((s) => s.id === sessionId)
     if (!session) return null
     const checkoutPath = session.checkout?.checkoutPath ?? session.workingDirectory
@@ -288,7 +288,7 @@ async function resolveMutationContext(
     checkout: resolved.checkout,
     liveContext: ctx,
     record: resolved.checkout?.managedWorktreeId
-      ? git.registry.get(resolved.checkout.managedWorktreeId) ?? null
+      ? (await git.registry.get(resolved.checkout.managedWorktreeId)) ?? null
       : null,
   })
   if (identityError) throw new Error(identityError)
@@ -351,7 +351,7 @@ export function registerGitHandlers(
   const startupReconciliation = (async () => {
     try {
       await deps.sessionManager.waitForInit?.()
-      const sessions = deps.sessionManager.getSessions()
+      const sessions = await deps.sessionManager.getSessions()
       const knownSessionIds = new Set(sessions.map((s) => s.id))
       const sessionCheckouts = new Map(
         sessions
@@ -457,7 +457,7 @@ export function registerGitHandlers(
       assertWorktreeV2Enabled()
       if (!worktreeSettings) throw new WorktreeV2CapabilityError()
       try {
-        const next = worktreeSettings.update(input, serverId)
+        const next = await worktreeSettings.update(input, serverId)
         // A policy change fences new cleanup candidates at the new version.
         if (input.autoDeleteEnabled !== undefined || input.retentionLimit !== undefined) {
           void git.lifecycle.enqueueCleanup()
@@ -479,7 +479,7 @@ export function registerGitHandlers(
   server.handle(RPC_CHANNELS.git.WORKTREE_INVENTORY, async () => {
     assertWorktreeV2Enabled()
     git.lifecycle.assertReady()
-    return git.lifecycle.inventory()
+    return await git.lifecycle.inventory()
   })
 
   server.handle(RPC_CHANNELS.git.WORKTREE_PREVIEW, async (_ctx, managedWorktreeId: string) => {
@@ -755,8 +755,8 @@ export function registerGitHandlers(
   // server-side; the path is validated against the current status snapshot
   // before any file is read (spec: Changes panel data flow, path safety).
   server.handle(RPC_CHANNELS.git.GET_DIFF, async (_ctx, sessionId: string, path: string) => {
-    assertSessionWorktreeUsable(git, sessionId)
-    const resolved = resolveSession(sessionId)
+    await assertSessionWorktreeUsable(git, sessionId)
+    const resolved = await resolveSession(sessionId)
     if (!resolved) throw new Error('Session checkout could not be resolved.')
     const status = await git.repository.getStatus(resolved.checkoutPath)
     if (!status.isGitRepository) {
@@ -810,7 +810,7 @@ export function registerGitHandlers(
     op: (dir: string) => Promise<GitActionResult>,
   ): Promise<GitActionResult> {
     assertFeatureEnabled()
-    const initialResolved = resolveSession(sessionId)
+    const initialResolved = await resolveSession(sessionId)
     if (!initialResolved) throw new Error('Session checkout could not be resolved.')
     const initialContext = await resolveMutationContext(git, initialResolved)
     try {
@@ -818,8 +818,8 @@ export function registerGitHandlers(
         // Re-resolve identity and fences after acquiring the common-directory
         // lock. A mutation that was queued behind a handoff must never act on
         // the pre-handoff checkout path.
-        assertSessionWorktreeUsable(git, sessionId)
-        const resolved = resolveSession(sessionId)
+        await assertSessionWorktreeUsable(git, sessionId)
+        const resolved = await resolveSession(sessionId)
         if (!resolved) throw new Error('Session checkout could not be resolved.')
         const ctx = await resolveMutationContext(git, resolved)
         // The lock key is the repository identity captured before the lock.
@@ -856,13 +856,13 @@ export function registerGitHandlers(
   // Capability + PR lookup are read-only; PR lookup never throws so it cannot
   // block commit/push (spec: AC15).
   server.handle(RPC_CHANNELS.git.GITHUB_STATUS, async (_ctx, sessionId: string) => {
-    const resolved = resolveSession(sessionId)
+    const resolved = await resolveSession(sessionId)
     if (!resolved) throw new Error('Session checkout could not be resolved.')
     return git.github.getCapability(resolved.checkoutPath)
   })
 
   server.handle(RPC_CHANNELS.git.FIND_PULL_REQUEST, async (_ctx, sessionId: string) => {
-    const resolved = resolveSession(sessionId)
+    const resolved = await resolveSession(sessionId)
     if (!resolved) return null
     return git.github.findPullRequest(resolved.checkoutPath)
   })
@@ -885,10 +885,10 @@ export function registerGitHandlers(
 async function createPullRequest(
   git: GitServices,
   statusSubscription: GitStatusSubscription,
-  resolveSession: (sessionId: string) => ResolvedSession | null,
+  resolveSession: (sessionId: string) => Promise<ResolvedSession | null>,
   input: CreatePullRequestInput,
 ): Promise<GitActionResult> {
-  const resolved = resolveSession(input.sessionId)
+  const resolved = await resolveSession(input.sessionId)
   if (!resolved) throw new Error('Session checkout could not be resolved.')
   const ctx = await resolveMutationContext(git, resolved)
   const dir = ctx.repositoryRoot ?? resolved.checkoutPath

@@ -58,7 +58,7 @@ export interface SessionScopedToolCallbacks {
   /** Get detailed info about a session (defaults to current). */
   getSessionInfoFn?: (sessionId?: string) => import('@kata-sh/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
-  listSessionsFn?: (options?: import('@kata-sh/session-tools-core').ListSessionsOptions) => import('@kata-sh/session-tools-core').ListSessionsResult;
+  listSessionsFn?: (options?: import('@kata-sh/session-tools-core').ListSessionsOptions) => import('@kata-sh/session-tools-core').ListSessionsResult | Promise<import('@kata-sh/session-tools-core').ListSessionsResult>;
   /** Resolve label display names to IDs. */
   resolveLabelsFn?: (labels: string[]) => import('@kata-sh/session-tools-core').ResolvedLabelsResult;
   /** Resolve a status display name to its ID. */

@@ -99,7 +99,7 @@ describe('SessionManager.prepareCheckout — managed worktree', () => {
       const first = await sm.prepareCheckout('named-repeat', intent)
       const second = await sm.prepareCheckout('named-repeat', intent)
       expect(second.checkout).toEqual(first.checkout)
-      expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+      expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
 
       await expect(
         sm.prepareCheckout('named-repeat', { ...intent, worktreeNameSuffix: 'other-name' }),
@@ -339,7 +339,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
     expect(result.checkout.managedWorktreeId).toBe(first.checkout.managedWorktreeId)
     expect(result.checkout.expectedBranch).toBe(first.checkout.expectedBranch)
     expect(result.checkout.baseRef).toBe('main')
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
     // The checkout itself was not recreated: same path, and no second branch.
     expect(existsSync(result.checkout.checkoutPath)).toBe(true)
     const branches = await git(repo, ['branch', '--list', 'kata-agent/*'])
@@ -368,7 +368,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
     const repeated = await sm.prepareCheckout('sessSharer2', intent)
     expect(repeated.checkout.checkoutPath).toBe(second.checkout.checkoutPath)
     // The owner reference was added exactly once.
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(2)
   })
 
   test('rejects an unknown managedWorktreeId', async () => {
@@ -446,7 +446,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
       workingDirectory: repo,
       baseRef: 'main',
     })
-    services.registry.setState(first.checkout.managedWorktreeId!, 'blocked')
+    await services.registry.setState(first.checkout.managedWorktreeId!, 'blocked')
 
     injectSession(sm, 'sessBlocked', wsRoot)
     await expect(
@@ -482,7 +482,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
         managedWorktreeId: first.checkout.managedWorktreeId!,
       }),
     ).rejects.toThrow(/no longer exists/i)
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
   })
 
   test('rejects binding when the live checkout switched branches after the record became ready', async () => {
@@ -508,7 +508,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
         managedWorktreeId: first.checkout.managedWorktreeId!,
       }),
     ).rejects.toThrow(/unexpected branch/i)
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
   })
 
   test('re-checks the empty-session gate after context resolution (concurrent first-message race)', async () => {
@@ -551,7 +551,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
       ;(services.repository as any).getContext = originalGetContext
     }
     // Ownership was never added and the checkout was never rebound.
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
     expect(sharer.checkout).toBeUndefined()
   })
 
@@ -583,7 +583,7 @@ describe('SessionManager.prepareCheckout — existing managed worktree (shared o
     } finally {
       ;(sm as any).bindCheckout = original
     }
-    expect(services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
+    expect(await services.registry.getOwnerCount(first.checkout.managedWorktreeId!)).toBe(1)
   })
 })
 
@@ -647,7 +647,7 @@ describe('SessionManager.listManagedWorktrees — discovery for new sessions', (
     const forA = await sm.listManagedWorktrees('sessA', repo)
     expect(forA.map((w) => w.managedWorktreeId)).toEqual([inB.checkout.managedWorktreeId!])
     // A blocked worktree is not offered.
-    services.registry.setState(inB.checkout.managedWorktreeId!, 'blocked')
+    await services.registry.setState(inB.checkout.managedWorktreeId!, 'blocked')
     const forA2 = await sm.listManagedWorktrees('sessA', repo)
     expect(forA2).toHaveLength(0)
   })

@@ -203,17 +203,17 @@ export class WorktreeLifecycleService {
    * Lifecycle state of the record a session's checkout points at. Sessions
    * without a managed checkout are always ready (no fencing applies).
    */
-  recordStateForSession(sessionId: string): { managedWorktreeId: string | null; state: ManagedWorktreeState } {
+  async recordStateForSession(sessionId: string): Promise<{ managedWorktreeId: string | null; state: ManagedWorktreeState }> {
     const leasedPaths = this.deps.leases.leasesForSession(sessionId)
     for (const path of leasedPaths) {
-      const record = this.deps.registry.findByCheckoutPath(path)
+      const record = await this.deps.registry.findByCheckoutPath(path)
       if (record) return { managedWorktreeId: record.managedWorktreeId, state: record.state }
     }
     // Fall back to the owner set: a restore moves the checkout to a new path
     // before the owner leases are rebound, so in that window the session's
     // lease still names the old path and the record must stay reachable for
     // detach and fencing decisions.
-    for (const record of this.listRecords()) {
+    for (const record of await this.listRecords()) {
       if (record.ownerSessionIds.includes(sessionId)) {
         return { managedWorktreeId: record.managedWorktreeId, state: record.state }
       }
@@ -222,21 +222,21 @@ export class WorktreeLifecycleService {
   }
 
   /** True when the session's worktree record is usable for normal work. */
-  isSessionRecordReady(sessionId: string): boolean {
-    return this.recordStateForSession(sessionId).state === 'ready'
+  async isSessionRecordReady(sessionId: string): Promise<boolean> {
+    return (await this.recordStateForSession(sessionId)).state === 'ready'
   }
 
   /** True when a record may be bound by new owners (ready and on disk). */
-  isRecordReady(id: string): boolean {
-    const record = this.getRecord(id)
+  async isRecordReady(id: string): Promise<boolean> {
+    const record = await this.getRecord(id)
     return record?.state === 'ready'
   }
 
   /** Touch the owning record's lastUsedAt (accepted user message). */
-  touchForSession(sessionId: string): void {
-    const { managedWorktreeId } = this.recordStateForSession(sessionId)
+  async touchForSession(sessionId: string): Promise<void> {
+    const { managedWorktreeId } = await this.recordStateForSession(sessionId)
     if (!managedWorktreeId) return
-    this.deps.registry.updateLastUsedAt(managedWorktreeId, Date.now())
+    await this.deps.registry.updateLastUsedAt(managedWorktreeId, Date.now())
     this.deps.touchSessionCheckout?.(sessionId)
   }
 
@@ -245,13 +245,13 @@ export class WorktreeLifecycleService {
   // -------------------------------------------------------------------------
 
   /** The registry upgrades every record to V2 in place. */
-  private getRecord(id: string): ManagedWorktreeRecordV2 | undefined {
-    const record = this.deps.registry.get(id)
+  private async getRecord(id: string): Promise<ManagedWorktreeRecordV2 | undefined> {
+    const record = await this.deps.registry.get(id)
     return record ? asV2(record) : undefined
   }
 
-  private listRecords(): ManagedWorktreeRecordV2[] {
-    return this.deps.registry.list().map(asV2)
+  private async listRecords(): Promise<ManagedWorktreeRecordV2[]> {
+    return (await this.deps.registry.list()).map(asV2)
   }
 
   private ownerRuntime(record: ManagedWorktreeRecordV2): LifecycleOwnerRuntime[] {
@@ -330,9 +330,9 @@ export class WorktreeLifecycleService {
   }
 
   /** Per-server inventory across every workspace/repository/root. */
-  inventory(): WorktreeInventory {
+  async inventory(): Promise<WorktreeInventory> {
     const policy = this.deps.settings.getSnapshot()
-    const records = this.listRecords()
+    const records = await this.listRecords()
     const counts = {
       total: records.length,
       materialized: 0,
@@ -382,7 +382,7 @@ export class WorktreeLifecycleService {
 
   /** Fresh risk preview naming every owner and the ignored-file policy. */
   async preview(managedWorktreeId: string): Promise<WorktreePreviewResult> {
-    const record = this.getRecord(managedWorktreeId)
+    const record = await this.getRecord(managedWorktreeId)
     if (!record) {
       return {
         managedWorktreeId,
@@ -465,7 +465,7 @@ export class WorktreeLifecycleService {
    */
   async deleteWorktree(managedWorktreeId: string, previewFingerprint: string): Promise<WorktreeDeleteResult> {
     this.assertReady()
-    const record = this.getRecord(managedWorktreeId)
+    const record = await this.getRecord(managedWorktreeId)
     if (!record) {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
@@ -506,7 +506,7 @@ export class WorktreeLifecycleService {
         policyVersion: policy.version,
       })
       this.deps.journal.step(journalEntry.journalId, 'missing-verified')
-      this.deps.registry.remove(record.managedWorktreeId)
+      await this.deps.registry.remove(record.managedWorktreeId)
       // The confirmed removal releases every owner lease and stamps their
       // sessions with the missing recovery state so the UI keeps showing the
       // stale checkout as unrecoverable instead of silently ready.
@@ -533,7 +533,7 @@ export class WorktreeLifecycleService {
    */
   async restoreWorktree(managedWorktreeId: string): Promise<WorktreeRestoreResult> {
     this.assertReady()
-    const record = this.getRecord(managedWorktreeId)
+    const record = await this.getRecord(managedWorktreeId)
     if (!record) {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
@@ -666,7 +666,7 @@ export class WorktreeLifecycleService {
    */
   async retryWorktree(managedWorktreeId: string): Promise<WorktreeRetryResult> {
     this.assertReady()
-    const record = this.getRecord(managedWorktreeId)
+    const record = await this.getRecord(managedWorktreeId)
     if (!record) {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
@@ -708,7 +708,7 @@ export class WorktreeLifecycleService {
         'Permanent snapshot deletion requires the irreversibility confirmation.',
       )
     }
-    const record = this.getRecord(managedWorktreeId)
+    const record = await this.getRecord(managedWorktreeId)
     if (!record) {
       throw new WorktreeLifecycleError('LIFECYCLE_RECORD_MISSING', 'The worktree record no longer exists.')
     }
@@ -737,7 +737,7 @@ export class WorktreeLifecycleService {
         const snapshot = record.snapshot!
         await this.deps.snapshots.permanentDelete(record.repositoryRoot, snapshot)
         this.deps.journal.step(journalEntry.journalId, 'payload-removed')
-        this.deps.registry.remove(record.managedWorktreeId)
+        await this.deps.registry.remove(record.managedWorktreeId)
         this.deps.journal.commit(journalEntry.journalId, 'record-removed')
         return { deleted: true }
       } catch (error) {
@@ -794,7 +794,7 @@ export class WorktreeLifecycleService {
    * enqueues policy cleanup.
    */
   async detachSession(sessionId: string): Promise<void> {
-    const { managedWorktreeId } = this.recordStateForSession(sessionId)
+    const { managedWorktreeId } = await this.recordStateForSession(sessionId)
     if (!managedWorktreeId) return
     let remainingCount = 0
     await this.deps.registry.runExclusive(async (tx) => {
@@ -823,7 +823,7 @@ export class WorktreeLifecycleService {
     sessionId: string
     managedWorktreeId: string
   }): Promise<{ outcome: 'removed' } | { outcome: 'blocked'; reason: string; reasonCode?: string }> {
-    const record = this.getRecord(input.managedWorktreeId)
+    const record = await this.getRecord(input.managedWorktreeId)
     if (!record) return { outcome: 'removed' }
     const otherOwners = record.ownerSessionIds.filter((owner) => owner !== input.sessionId)
     if (otherOwners.length > 0) {
@@ -911,7 +911,7 @@ export class WorktreeLifecycleService {
     }
 
     const startedPolicyVersion = policy.version
-    const records = this.listRecords()
+    const records = await this.listRecords()
     const byId = new Map(records.map((record) => [record.managedWorktreeId, record]))
 
     // Archive candidates: every owner archived, none protected.
@@ -1306,7 +1306,7 @@ export class WorktreeLifecycleService {
     await this.gcOrphanedSnapshots(report)
     const inProgress = this.deps.journal.inProgress()
     for (const entry of inProgress) {
-      const record = this.getRecord(entry.recordId)
+      const record = await this.getRecord(entry.recordId)
       let snapshotVerified = false
       let refVerified = false
       if (record?.snapshot) {
@@ -1338,7 +1338,7 @@ export class WorktreeLifecycleService {
             lastError: 'Interrupted deletion was rolled back.',
             stateChangedAt: Date.now(),
           }
-          this.deps.registry.upsert(reverted)
+          await this.deps.registry.upsert(reverted)
           this.deps.journal.recover(entry.journalId, 'rolled-back')
           report.recovered += 1
           continue
@@ -1383,10 +1383,10 @@ export class WorktreeLifecycleService {
             try {
               this.deps.snapshots.removePayload(record.snapshot)
               await this.deps.snapshots.casDeleteRef(record.repositoryRoot, record.snapshot)
-              const cleared = this.getRecord(record.managedWorktreeId)
+              const cleared = await this.getRecord(record.managedWorktreeId)
               if (cleared?.snapshot) {
                 const next: ManagedWorktreeRecordV2 = { ...cleared, snapshot: undefined }
-                this.deps.registry.upsert(next)
+                await this.deps.registry.upsert(next)
               }
             } catch {
               /* retained for a later retry; the record stays ready */
@@ -1407,7 +1407,7 @@ export class WorktreeLifecycleService {
               lastError: 'Interrupted restore; retry it.',
               stateChangedAt: Date.now(),
             }
-            this.deps.registry.upsert(reverted)
+            await this.deps.registry.upsert(reverted)
           }
           this.deps.journal.recover(entry.journalId, 'restore-interrupted')
           report.recovered += 1
@@ -1418,7 +1418,7 @@ export class WorktreeLifecycleService {
         if (record && entry.steps.includes('payload-removed')) {
           // The payload and hidden ref are gone; only the record removal is
           // pending. Complete it with the journal evidence.
-          this.deps.registry.remove(entry.recordId)
+          await this.deps.registry.remove(entry.recordId)
           this.deps.journal.recover(entry.journalId, 'permanent-delete-completed')
           report.resumed += 1
         } else if (!record && entry.steps.includes('payload-removed')) {
@@ -1438,16 +1438,16 @@ export class WorktreeLifecycleService {
    */
   private async cleanupPendingRestores(report: { recovered: number; resumed: number }): Promise<void> {
     await this.hostLock.run(async () => {
-      for (const record of this.listRecords()) {
+      for (const record of await this.listRecords()) {
         if (record.state !== 'ready' || !record.snapshot) continue
         try {
           this.deps.snapshots.verifyPayload(record.snapshot)
           this.deps.snapshots.removePayload(record.snapshot)
           await this.deps.snapshots.casDeleteRef(record.repositoryRoot, record.snapshot)
-          const current = this.getRecord(record.managedWorktreeId)
+          const current = await this.getRecord(record.managedWorktreeId)
           if (current?.snapshot) {
             const next: ManagedWorktreeRecordV2 = { ...current, snapshot: undefined }
-            this.deps.registry.upsert(next)
+            await this.deps.registry.upsert(next)
           }
           report.resumed += 1
         } catch {
@@ -1475,7 +1475,7 @@ export class WorktreeLifecycleService {
         return
       }
       const referenced = new Set(
-        this.listRecords()
+        (await this.listRecords())
           .map((record) => record.snapshot?.snapshotId)
           .filter((id): id is string => !!id),
       )

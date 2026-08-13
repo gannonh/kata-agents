@@ -95,7 +95,7 @@ describe('Pi session self-management regression (#511)', () => {
     expect(info).toBeTruthy();
     expect(info!.id).toBe(sessionId);
 
-    const list = ctx.listSessions!();
+    const list = await ctx.listSessions!();
     expect(list.total).toBe(1);
 
     const resolved = ctx.resolveLabels!(['bug']);

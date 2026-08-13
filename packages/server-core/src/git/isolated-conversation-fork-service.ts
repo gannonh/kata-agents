@@ -40,6 +40,7 @@ import type {
   ConversationForkStatusInput,
   ConversationForkStrategy,
   ManagedWorktreeRecordV2,
+  ManagedWorktreeRecordVersioned,
   ManagedWorktreeSnapshotMeta,
   SessionCheckout,
   SessionCheckoutV2,
@@ -646,7 +647,8 @@ export class IsolatedConversationForkService {
       return this.blockedPreview(input, 'missing-source', 'The source session could not be resolved.', this.sessionFactsFallback(input.sessionId, this.deps.serverId))
     }
     const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
-    const facts = await this.gatherFacts(input, session, capability)
+    // Preview runs outside the registry lock, so it reads the registry directly.
+    const facts = await this.gatherFacts(input, session, capability, (id) => this.deps.registry.get(id))
 
     const blocked = facts.blocker
       ? { blocked: true as const, code: facts.blocker, reason: facts.blockerReason ?? '' }
@@ -836,8 +838,10 @@ export class IsolatedConversationForkService {
     input: ConversationForkPreviewInput,
     session: ForkSessionInfo,
     capability: ConversationForkProviderCapability | null,
+    // Required so the lock scope is explicit at every call site. The registry
+    // lock is not reentrant: a transaction MUST pass `(id) => tx.get(id)` here.
+    recordLookup: (id: string) => ManagedWorktreeRecordVersioned | undefined | Promise<ManagedWorktreeRecordVersioned | undefined>,
     transactionIdToAllow?: string,
-    recordLookup?: (id: string) => ManagedWorktreeRecordV2 | undefined,
     options?: { allowOwnedDestination?: boolean; ownedLeaseId?: string },
   ): Promise<ForkFacts> {
     const fail = (code: ConversationForkBlockerCode, reason: string, overrides: Partial<ForkFacts> = {}): ForkFacts =>
@@ -915,7 +919,7 @@ export class IsolatedConversationForkService {
     // be idle, quiesceable, and covered by a stable path lease during capture.
     let ownerSessionIds = [input.sessionId]
     if (session.checkout?.mode === 'managed-worktree' && session.checkout.managedWorktreeId) {
-      const record = (recordLookup ?? ((id: string) => this.deps.registry.get(id)))(session.checkout.managedWorktreeId)
+      const record = await recordLookup(session.checkout.managedWorktreeId)
       if (!record || record.state !== 'ready' || !existsSync(record.checkoutPath)) {
         return fail('missing-source', 'The managed worktree is snapshotted or missing; restore it before forking.')
       }
@@ -1271,8 +1275,8 @@ export class IsolatedConversationForkService {
         },
         session,
         capability,
-        txn.transactionId,
         (id: string) => tx.get(id),
+        txn.transactionId,
         {
           // A transaction that already materialized its target must not be
           // blocked by its own destination when resuming after a crash.
@@ -1447,7 +1451,7 @@ export class IsolatedConversationForkService {
         this.journalStep(txn, 'target-materialized')
         txn.state = 'target-materialized'
       }
-      const targetRecord = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      const targetRecord = txn.managedWorktreeId ? await this.deps.registry.get(txn.managedWorktreeId) : undefined
       if (!targetRecord || targetRecord.schemaVersion !== 2 || targetRecord.state !== 'ready') {
         throw new Error('The materialized fork target record is missing or not ready.')
       }
@@ -1671,7 +1675,7 @@ export class IsolatedConversationForkService {
     }
     // 2. Target worktree + registry record (only the record this transaction created).
     if (txn.steps.includes('target-materialized')) {
-      const record = txn.managedWorktreeId ? this.deps.registry.get(txn.managedWorktreeId) : undefined
+      const record = txn.managedWorktreeId ? await this.deps.registry.get(txn.managedWorktreeId) : undefined
       if (record && record.schemaVersion === 2) {
         const ownersAreOurs =
           record.ownerSessionIds.length === 1 && record.ownerSessionIds[0] === txn.sessionId
@@ -1687,7 +1691,7 @@ export class IsolatedConversationForkService {
         if (!released) {
           throw new ConversationForkError('FORK_COMPENSATION_FAILED', 'The interrupted fork target checkout could not be removed.')
         }
-        this.deps.registry.remove(record.managedWorktreeId)
+        await this.deps.registry.remove(record.managedWorktreeId)
       } else if (existsSync(txn.destinationPath) || lstatSyncSafe(txn.destinationPath) === 'symlink') {
         // Crash between the provisional record and the ready record: remove
         // the reserved path only when it is beneath the server root.

@@ -45,7 +45,7 @@ function makeHarness(sessions: Record<string, { checkoutPath: string; workspaceI
       calls.push(dir)
       return statuses.get(dir) ?? makeSnapshot({ checkoutPath: dir })
     },
-    resolveSession: (sessionId) => sessions[sessionId] ?? null,
+    resolveSession: async (sessionId) => sessions[sessionId] ?? null,
     publish: (event, workspaceId) => events.push({ event, workspaceId }),
     pollIntervalMs: 3000,
     timerFactory: (fn, ms) => {

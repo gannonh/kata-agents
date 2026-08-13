@@ -72,7 +72,7 @@ describe('ManagedWorktreeService.reconcile', () => {
 
     const report = await svc.worktrees.reconcile({ knownSessionIds: new Set<string>() })
 
-    const rec = svc.registry.get(record.managedWorktreeId)
+    const rec = await svc.registry.get(record.managedWorktreeId)
     expect(rec).toBeTruthy()
     expect(rec!.ownerSessionIds).toEqual([])
     expect(report.repairedOwnerRefs).toBe(0)
@@ -92,8 +92,8 @@ describe('ManagedWorktreeService.reconcile', () => {
       baseRef: 'main',
     })
     // Simulate a lost owner reference in the registry.
-    svc.registry.removeOwner(record.managedWorktreeId, 'owner')
-    expect(svc.registry.getOwnerCount(record.managedWorktreeId)).toBe(0)
+    await svc.registry.removeOwner(record.managedWorktreeId, 'owner')
+    expect(await svc.registry.getOwnerCount(record.managedWorktreeId)).toBe(0)
 
     const report = await svc.worktrees.reconcile({
       knownSessionIds: new Set(['owner']),
@@ -114,7 +114,7 @@ describe('ManagedWorktreeService.reconcile', () => {
       ]),
     })
 
-    expect(svc.registry.getOwnerCount(record.managedWorktreeId)).toBe(1)
+    expect(await svc.registry.getOwnerCount(record.managedWorktreeId)).toBe(1)
     expect(report.repairedOwnerRefs).toBe(1)
   })
 
@@ -136,7 +136,7 @@ describe('ManagedWorktreeService.reconcile', () => {
 
     await svc.worktrees.reconcile({ knownSessionIds: new Set(['owner']) })
 
-    expect(svc.registry.get(record.managedWorktreeId)!.state).toBe('missing')
+    expect((await svc.registry.get(record.managedWorktreeId))!.state).toBe('missing')
   })
 
   test('does not reopen a worktree already claimed by removal', async () => {
@@ -151,12 +151,12 @@ describe('ManagedWorktreeService.reconcile', () => {
       gitCommonDir: gcd,
       baseRef: 'main',
     })
-    svc.registry.setState(record.managedWorktreeId, 'removing')
+    await svc.registry.setState(record.managedWorktreeId, 'removing')
 
     await svc.worktrees.reconcile({ knownSessionIds: new Set(['owner']) })
 
-    expect(svc.registry.get(record.managedWorktreeId)!.state).toBe('removing')
-    expect(() => svc.worktrees.addOwner(record.managedWorktreeId, 'late')).toThrow(
+    expect((await svc.registry.get(record.managedWorktreeId))!.state).toBe('removing')
+    await expect(svc.worktrees.addOwner(record.managedWorktreeId, 'late')).rejects.toThrow(
       /while it is removing/,
     )
   })
@@ -177,7 +177,7 @@ describe('ManagedWorktreeService.reconcile', () => {
       baseRef: 'main',
     })
     await svc.worktrees.reconcile({ knownSessionIds: new Set<string>(['owner']) })
-    expect(svc.registry.get(record.managedWorktreeId)).toBeTruthy()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeTruthy()
     expect(existsSync(record.checkoutPath)).toBe(true)
   })
 })
@@ -195,7 +195,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
       gitCommonDir: await commonDir(repo),
       baseRef: 'main',
     })
-    services.registry.setState(record.managedWorktreeId, 'ready')
+    await services.registry.setState(record.managedWorktreeId, 'ready')
     return record
   }
 
@@ -211,7 +211,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
     expect(report.reclaimedUnowned).toBe(1)
     expect(report.retainedUnownedWithWork).toBe(0)
     expect(existsSync(rec.checkoutPath)).toBe(false)
-    expect(services.registry.get(rec.managedWorktreeId)).toBeUndefined()
+    expect(await services.registry.get(rec.managedWorktreeId)).toBeUndefined()
     const branches = await git(repo, ['branch', '--list', rec.expectedBranch])
     expect(branches.trim()).toBe('')
   })
@@ -229,7 +229,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
     expect(report.reclaimedUnowned).toBe(0)
     expect(report.retainedUnownedWithWork).toBe(1)
     expect(existsSync(rec.checkoutPath)).toBe(true)
-    expect(services.registry.get(rec.managedWorktreeId)!.state).toBe('blocked')
+    expect((await services.registry.get(rec.managedWorktreeId))!.state).toBe('blocked')
   })
 
   test('does not drop an owner bound while reclaiming a stale snapshot', async () => {
@@ -244,7 +244,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
     const originalInspect = services.worktrees.inspectRemoval.bind(services.worktrees)
     services.worktrees.inspectRemoval = (async (...args: Parameters<typeof originalInspect>) => {
       const risk = await originalInspect(...args)
-      otherServices.worktrees.addOwner(rec.managedWorktreeId, 'late-owner')
+      await otherServices.worktrees.addOwner(rec.managedWorktreeId, 'late-owner')
       return risk
     }) as typeof services.worktrees.inspectRemoval
 
@@ -252,7 +252,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
 
     expect(report.reclaimedUnowned).toBe(0)
     expect(report.retainedUnownedWithWork).toBe(1)
-    expect(services.registry.get(rec.managedWorktreeId)!.ownerSessionIds).toEqual(['late-owner'])
+    expect((await services.registry.get(rec.managedWorktreeId))!.ownerSessionIds).toEqual(['late-owner'])
     expect(existsSync(rec.checkoutPath)).toBe(true)
   })
 
@@ -282,7 +282,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
 
     expect(report.reclaimedUnowned).toBe(0)
     expect(existsSync(rec.checkoutPath)).toBe(true)
-    expect(services.registry.get(rec.managedWorktreeId)!.ownerSessionIds).toEqual(['alive'])
+    expect((await services.registry.get(rec.managedWorktreeId))!.ownerSessionIds).toEqual(['alive'])
   })
 
   test('does not reclaim a checkout whose owner reference is repaired from session metadata', async () => {
@@ -292,7 +292,7 @@ describe('reconcile — reclaiming leaked (unowned) checkouts', () => {
     const rec = await makeWorktree(services, repo, 'owner')
     // Registry lost the owner reference, but the session's persisted checkout
     // still points at this worktree — the repair pass must win over reclamation.
-    services.registry.removeOwner(rec.managedWorktreeId, 'owner')
+    await services.registry.removeOwner(rec.managedWorktreeId, 'owner')
 
     const report = await services.worktrees.reconcile({
       knownSessionIds: new Set(['owner']),

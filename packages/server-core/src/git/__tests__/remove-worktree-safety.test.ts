@@ -178,7 +178,7 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
       ownerSessionIds: ['only'],
       state: 'ready',
     }
-    svc.registry.upsert(rogue)
+    await svc.registry.upsert(rogue)
 
     const res = await svc.worktrees.removeWorktree('rogue-1', 'only')
     expect(res.removed).toBe(false)
@@ -208,7 +208,7 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
     expect(res.blocked).toBe(true)
     expect(res.blockedReason).toContain('could not be inspected safely')
     expect(existsSync(record.checkoutPath)).toBe(true)
-    expect(svc.registry.get(record.managedWorktreeId)).toBeDefined()
+    expect(await svc.registry.get(record.managedWorktreeId)).toBeDefined()
   })
 
   test('fails closed when strict context discovery transiently reports non-Git', async () => {
@@ -274,7 +274,7 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
     const originalInspect = svc.worktrees.inspectRemoval.bind(svc.worktrees)
     svc.worktrees.inspectRemoval = (async (...args: Parameters<typeof originalInspect>) => {
       const risk = await originalInspect(...args)
-      otherService.worktrees.addOwner(record.managedWorktreeId, 'late-owner')
+      await otherService.worktrees.addOwner(record.managedWorktreeId, 'late-owner')
       return risk
     }) as typeof svc.worktrees.inspectRemoval
 
@@ -284,7 +284,7 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
     expect(res.blocked).toBe(true)
     expect(res.blockedReason).toContain('Another session')
     expect(existsSync(record.checkoutPath)).toBe(true)
-    expect(svc.registry.get(record.managedWorktreeId)!.ownerSessionIds).toEqual([
+    expect((await svc.registry.get(record.managedWorktreeId))!.ownerSessionIds).toEqual([
       'first',
       'late-owner',
     ])
@@ -302,14 +302,14 @@ describe('ManagedWorktreeService.removeWorktree — identity revalidation', () =
       gitCommonDir: gcd,
       baseRef: 'main',
     })
-    expect(svc.registry.beginRemoval(record.managedWorktreeId, 'first')).toEqual({
+    expect(await svc.registry.beginRemoval(record.managedWorktreeId, 'first')).toEqual({
       status: 'started',
     })
 
-    expect(() =>
+    await expect(
       svc.worktrees.addOwner(record.managedWorktreeId, 'late-owner'),
-    ).toThrow(/while it is removing/)
-    expect(svc.registry.get(record.managedWorktreeId)!.ownerSessionIds).toEqual(['first'])
+    ).rejects.toThrow(/while it is removing/)
+    expect((await svc.registry.get(record.managedWorktreeId))!.ownerSessionIds).toEqual(['first'])
   })
 })
 
@@ -346,7 +346,7 @@ describe('SessionManager.removeManagedWorktree — session-resolved identity', (
       baseRef: 'main',
     })
     // A conversation branch adds a second owner.
-    services.worktrees.addOwner(prep.checkout.managedWorktreeId!, 'child')
+    await services.worktrees.addOwner(prep.checkout.managedWorktreeId!, 'child')
 
     const res = await sm.removeManagedWorktree('parent')
     expect(res.removed).toBe(false)
@@ -422,7 +422,7 @@ describe('ManagedWorktreeService.removeWorktree — dry run', () => {
     expect(allowed.blocked).toBe(false)
     expect(allowed.removed).toBe(false)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    expect(services.registry.get(id)).toBeDefined()
+    expect(await services.registry.get(id)).toBeDefined()
 
     // Uncommitted work: the same block the real call would report.
     writeFile(prep.checkout.checkoutPath, 'dirty.txt', 'work\n')
@@ -475,11 +475,11 @@ describe('ManagedWorktreeService.removeWorktree — dry run', () => {
       baseRef: 'main',
     })
     const id = prep.checkout.managedWorktreeId!
-    services.worktrees.addOwner(id, 'b')
+    await services.worktrees.addOwner(id, 'b')
 
     const res = await services.worktrees.removeWorktree(id, 'a', { dryRun: true, force: true })
     expect(res.blocked).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    expect(services.registry.get(id)!.ownerSessionIds).toEqual(['a', 'b'])
+    expect((await services.registry.get(id))!.ownerSessionIds).toEqual(['a', 'b'])
   })
 })

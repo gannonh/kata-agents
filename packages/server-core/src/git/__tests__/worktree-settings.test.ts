@@ -71,10 +71,10 @@ describe('WorktreeSettingsService', () => {
     expect(existsSync(defaultRoot)).toBe(true)
   })
 
-  test('persists auto-delete policy and retention limit per server', () => {
+  test('persists auto-delete policy and retention limit per server', async () => {
     const { root, settings } = makeSettings()
 
-    const updated = settings.update({
+    const updated = await settings.update({
       materializationRoot: join(root, 'custom-worktrees'),
       autoDeleteEnabled: false,
       retentionLimit: 3,
@@ -96,21 +96,21 @@ describe('WorktreeSettingsService', () => {
     expect(snapshot.version).toBe(1)
   })
 
-  test('rejects out-of-range retention limits and non-boolean auto-delete policy', () => {
+  test('rejects out-of-range retention limits and non-boolean auto-delete policy', async () => {
     const { settings } = makeSettings()
 
-    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 0 })).toThrow(
+    await expect(settings.update({ materializationRoot: '~/x', retentionLimit: 0 })).rejects.toThrow(
       WorktreeSettingsError,
     )
-    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 1001 })).toThrow(
+    await expect(settings.update({ materializationRoot: '~/x', retentionLimit: 1001 })).rejects.toThrow(
       WorktreeSettingsError,
     )
-    expect(() => settings.update({ materializationRoot: '~/x', retentionLimit: 2.5 })).toThrow(
+    await expect(settings.update({ materializationRoot: '~/x', retentionLimit: 2.5 })).rejects.toThrow(
       WorktreeSettingsError,
     )
-    expect(() =>
+    await expect(
       settings.update({ materializationRoot: '~/x', autoDeleteEnabled: 'yes' as never }),
-    ).toThrow(WorktreeSettingsError)
+    ).rejects.toThrow(WorktreeSettingsError)
   })
 
   test('loads policy defaults when an existing settings file lacks them', () => {
@@ -136,11 +136,11 @@ describe('WorktreeSettingsService', () => {
     expect(snapshot.retentionLimit).toBe(15)
   })
 
-  test('persists canonical absolute roots and increments the revision', () => {
+  test('persists canonical absolute roots and increments the revision', async () => {
     const { root, settings } = makeSettings()
     const customRoot = join(root, 'custom-worktrees')
 
-    const updated = settings.update({ materializationRoot: customRoot })
+    const updated = await settings.update({ materializationRoot: customRoot })
     const reloaded = new WorktreeSettingsService({
       serverId: 'server-a',
       defaultRoot: join(root, 'worktrees'),
@@ -155,22 +155,22 @@ describe('WorktreeSettingsService', () => {
     expect(existsSync(customRoot)).toBe(true)
   })
 
-  test('expands a leading tilde and rejects relative or empty roots', () => {
+  test('expands a leading tilde and rejects relative or empty roots', async () => {
     const { settings } = makeSettings()
 
-    expect(() => settings.update({ materializationRoot: '' })).toThrow(WorktreeSettingsError)
-    expect(() => settings.update({ materializationRoot: 'relative/path' })).toThrow(WorktreeSettingsError)
-    expect(() => settings.update({ materializationRoot: '   ' })).toThrow(WorktreeSettingsError)
+    await expect(settings.update({ materializationRoot: '' })).rejects.toThrow(WorktreeSettingsError)
+    await expect(settings.update({ materializationRoot: 'relative/path' })).rejects.toThrow(WorktreeSettingsError)
+    await expect(settings.update({ materializationRoot: '   ' })).rejects.toThrow(WorktreeSettingsError)
     expect(settings.expandPath('~/kata-worktrees')).toMatch(/kata-worktrees$/)
   })
 
-  test('rejects protected, repository-overlapping, and registered-checkout roots', () => {
+  test('rejects protected, repository-overlapping, and registered-checkout roots', async () => {
     const { root, registry, settings } = makeSettings()
     const repositoryRoot = join(root, 'repository')
     const checkoutPath = join(root, 'existing-checkout')
     mkdirSync(repositoryRoot, { recursive: true })
     mkdirSync(checkoutPath, { recursive: true })
-    registry.upsert({
+    await registry.upsert({
       managedWorktreeId: 'repo-aabbccdd',
       workspaceId: 'workspace',
       repositoryRoot,
@@ -183,14 +183,14 @@ describe('WorktreeSettingsService', () => {
       state: 'ready',
     })
 
-    expect(() => settings.update({ materializationRoot: join(root, 'snapshots', 'nested') })).toThrow(/protected/i)
-    expect(() => settings.update({ materializationRoot: join(repositoryRoot, 'nested') })).toThrow(/repository/i)
-    expect(() => settings.update({ materializationRoot: join(checkoutPath, 'nested') })).toThrow(/checkout/i)
+    await expect(settings.update({ materializationRoot: join(root, 'snapshots', 'nested') })).rejects.toThrow(/protected/i)
+    await expect(settings.update({ materializationRoot: join(repositoryRoot, 'nested') })).rejects.toThrow(/repository/i)
+    await expect(settings.update({ materializationRoot: join(checkoutPath, 'nested') })).rejects.toThrow(/checkout/i)
   })
 
-  test('allows resetting to the default root after managed checkouts exist', () => {
+  test('allows resetting to the default root after managed checkouts exist', async () => {
     const { root, defaultRoot, registry, settings } = makeSettings()
-    registry.upsert({
+    await registry.upsert({
       managedWorktreeId: 'repo-aabbccdd',
       workspaceId: 'workspace',
       repositoryRoot: join(root, 'repository'),
@@ -202,15 +202,15 @@ describe('WorktreeSettingsService', () => {
       ownerSessionIds: ['session'],
       state: 'ready',
     })
-    settings.update({ materializationRoot: join(root, 'custom') })
+    await settings.update({ materializationRoot: join(root, 'custom') })
 
-    const reset = settings.update({ materializationRoot: defaultRoot })
+    const reset = await settings.update({ materializationRoot: defaultRoot })
 
     expect(reset.materializationRoot).toBe(settings.expandPath(defaultRoot))
     expect(reset.version).toBe(2)
   })
 
-  test('serializes updates from separate service instances', () => {
+  test('serializes concurrent updates from separate service instances', async () => {
     const { root, defaultRoot } = makeSettings()
     const settingsPath = join(defaultRoot, 'settings.json')
     const registryPath = join(defaultRoot, 'registry.json')
@@ -227,8 +227,17 @@ describe('WorktreeSettingsService', () => {
       registry: new WorktreeRegistry(registryPath),
     })
 
-    expect(first.update({ materializationRoot: join(root, 'one') }).version).toBe(1)
-    expect(second.update({ materializationRoot: join(root, 'two') }).version).toBe(2)
-    expect(first.getSnapshot().materializationRoot).toBe(first.expandPath(join(root, 'two')))
+    // Start both writers before awaiting either, so the settings lock must
+    // actually serialize two overlapping update attempts.
+    const [a, b] = await Promise.all([
+      first.update({ materializationRoot: join(root, 'one') }),
+      second.update({ materializationRoot: join(root, 'two') }),
+    ])
+    // The lock serializes both writers, so the versions are 1 and 2 with no
+    // duplicate and no gap, regardless of which acquired the lock first.
+    expect([a.version, b.version].sort()).toEqual([1, 2])
+    // The version-2 writer committed last, so its root is the persisted root.
+    const winner = a.version === 2 ? a : b
+    expect(first.getSnapshot().materializationRoot).toBe(winner.materializationRoot)
   })
 })

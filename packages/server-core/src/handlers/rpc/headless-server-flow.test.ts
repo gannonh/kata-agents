@@ -160,11 +160,11 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
       materializationRoot: canonicalRoot,
     })
     expect(prep.checkout.checkoutPath.startsWith(canonicalRoot)).toBe(true)
-    expect(services.registry.get(prep.checkout.managedWorktreeId)).toMatchObject({
+    expect(await services.registry.get(prep.checkout.managedWorktreeId)).toMatchObject({
       displayName: 'auth-refresh',
       materializationRoot: canonicalRoot,
     })
-    expect(sm.getSessions().find((session) => session.id === 'remote-v2')?.checkout).toMatchObject({
+    expect((await sm.getSessions()).find((session) => session.id === 'remote-v2')?.checkout).toMatchObject({
       schemaVersion: 2,
       displayName: 'auth-refresh',
       expectedBranch: 'kata-agent/auth-refresh',
@@ -207,7 +207,7 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     expect(existsSync(checkoutPath)).toBe(true)
 
     // The server now owns the resolved checkout; the client never passes it.
-    const session = sm.getSessions().find((s) => s.id === 'remote1')!
+    const session = (await sm.getSessions()).find((s) => s.id === 'remote1')!
     expect(session.checkout?.checkoutPath).toBe(checkoutPath)
     const expectedBranch = session.checkout!.expectedBranch!
     expect(expectedBranch).toMatch(/^kata-agent\//)
@@ -288,7 +288,7 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     }
     expect(res.removed).toBe(true)
     expect(existsSync(checkoutPath)).toBe(false)
-    expect(services.registry.get(managedWorktreeId)).toBeUndefined()
+    expect(await services.registry.get(managedWorktreeId)).toBeUndefined()
   })
 
   test('emits session_updated when lifecycle mutates an owner session checkout (AC14 sync)', async () => {
@@ -329,7 +329,7 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     // The owner session's checkout DTO changed server-side; the renderer must
     // be told to re-fetch it (this is what surfaces the recovery badge).
     expect(events).toContainEqual({ type: 'session_updated', sessionId: 'evt-owner' })
-    const session = sm.getSessions().find((s) => s.id === 'evt-owner')!
+    const session = (await sm.getSessions()).find((s) => s.id === 'evt-owner')!
     expect(session.checkout).toMatchObject({
       mode: 'managed-worktree',
       managedWorktreeId,
@@ -340,7 +340,7 @@ describe('headless-server Git flow (remote ownership) — AC17/AC21', () => {
     // Restore clears the recovery state and re-emits.
     await handlers.get(RPC_CHANNELS.git.WORKTREE_RESTORE)!(ctx, managedWorktreeId)
     expect(events.filter((e) => e.type === 'session_updated')).toHaveLength(2)
-    const restored = sm.getSessions().find((s) => s.id === 'evt-owner')!
+    const restored = (await sm.getSessions()).find((s) => s.id === 'evt-owner')!
     expect(restored.checkout?.recoveryState).toBeUndefined()
     expect(restored.checkout?.checkoutPath).not.toBe(checkoutPath)
   })

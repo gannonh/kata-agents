@@ -87,7 +87,7 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
     // Archive must never remove the checkout (spec: out of scope — automatic
     // worktree removal on archive).
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    const rec = services.registry.get(id)
+    const rec = await services.registry.get(id)
     expect(rec).toBeDefined()
     expect(rec!.ownerSessionIds).toContain('arch1')
   })
@@ -110,7 +110,7 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
 
     // The checkout is NOT removed on delete; the owner reference is dropped.
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    const rec = services.registry.get(id)
+    const rec = await services.registry.get(id)
     expect(rec).toBeDefined()
     expect(rec!.ownerSessionIds).not.toContain('del1')
   })
@@ -130,12 +130,12 @@ describe('SessionManager lifecycle — worktree preservation (AC18)', () => {
     })
     const id = prep.checkout.managedWorktreeId!
     // Conversation branch: a second owner shares the worktree.
-    services.worktrees.addOwner(id, 'child')
+    await services.worktrees.addOwner(id, 'child')
 
     await sm.deleteSession('parent')
 
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    const rec = services.registry.get(id)!
+    const rec = (await services.registry.get(id))!
     expect(rec.ownerSessionIds).toEqual(['child'])
   })
 })
@@ -286,7 +286,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
-    expect(services.registry.get(id)).toBeUndefined()
+    expect(await services.registry.get(id)).toBeUndefined()
     expect((sm as any).sessions.has('combo')).toBe(false)
   })
 
@@ -305,7 +305,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     })
     const id = prep.checkout.managedWorktreeId!
     // A second session shares the worktree, so removal is blocked.
-    services.worktrees.addOwner(id, 'sharer')
+    await services.worktrees.addOwner(id, 'sharer')
 
     const result = await sm.deleteSession('owner', { removeManagedWorktree: true })
 
@@ -316,7 +316,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     expect(result.worktreeRemoval?.blocked).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
     expect((sm as any).sessions.has('owner')).toBe(true)
-    expect(services.registry.get(id)!.ownerSessionIds).toContain('owner')
+    expect((await services.registry.get(id))!.ownerSessionIds).toContain('owner')
   })
 
   test('a session-storage staging failure blocks checkout removal and preserves the session', async () => {
@@ -398,7 +398,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
       'purge-staged',
       id,
     )
-    services.registry.remove(id)
+    await services.registry.remove(id)
 
     expect(listStoredSessions(wsRoot).some(session => session.id === 'purge-staged')).toBe(false)
     ;(sm as any).recoverStagedSessionDeletions(wsRoot)
@@ -768,7 +768,7 @@ describe('SessionManager.deleteSession — server-owned removal ordering (AC18�
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval).toBeUndefined()
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    expect(services.registry.get(id)!.ownerSessionIds).not.toContain('keep')
+    expect((await services.registry.get(id))!.ownerSessionIds).not.toContain('keep')
   })
 })
 
@@ -859,7 +859,7 @@ describe('SessionManager.deleteSession — removeManagedWorktree is safe for any
     expect(result.deleted).toBe(true)
     expect(result.worktreeRemoval?.removed).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(false)
-    expect(services.registry.get(id)).toBeUndefined()
+    expect(await services.registry.get(id)).toBeUndefined()
   })
 
   test('keeps both the session and the checkout when the worktree holds work', async () => {
@@ -901,7 +901,7 @@ describe('SessionManager.deleteSession — removeManagedWorktree is safe for any
       baseRef: 'main',
     })
     const id = prep.checkout.managedWorktreeId!
-    services.worktrees.addOwner(id, 'secondary')
+    await services.worktrees.addOwner(id, 'secondary')
 
     // `secondary` shares the worktree but is not its recorded checkout owner in
     // its own session record, so it has nothing to remove: it is deleted and the
@@ -909,7 +909,7 @@ describe('SessionManager.deleteSession — removeManagedWorktree is safe for any
     const result = await sm.deleteSession('secondary', { removeManagedWorktree: true })
     expect(result.deleted).toBe(true)
     expect(existsSync(prep.checkout.checkoutPath)).toBe(true)
-    expect(services.registry.get(id)!.ownerSessionIds).toContain('primary')
+    expect((await services.registry.get(id))!.ownerSessionIds).toContain('primary')
   })
 })
 

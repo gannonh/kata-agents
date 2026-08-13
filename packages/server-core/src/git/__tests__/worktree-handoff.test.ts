@@ -46,7 +46,7 @@ interface Harness {
 let harness: Harness
 let previousV2: string | undefined
 
-function makeHarness(): Harness {
+async function makeHarness(): Promise<Harness> {
   const root = tmp()
   const repo = join(root, 'repo')
   const sessions = new Map<string, SessionFixture>()
@@ -88,7 +88,7 @@ function makeHarness(): Harness {
       },
     },
   })
-  svc.worktreeSettings.update({
+  await svc.worktreeSettings.update({
     materializationRoot: join(root, 'worktrees'),
     autoDeleteEnabled: false,
     retentionLimit: 15,
@@ -121,7 +121,7 @@ function makeHarness(): Harness {
 beforeEach(async () => {
   previousV2 = process.env.KATA_FEATURE_WORKTREE_V2
   process.env.KATA_FEATURE_WORKTREE_V2 = '1'
-  harness = makeHarness()
+  harness = await makeHarness()
   await initRepo(harness.repo)
   harness.svc.lifecycle.markReady()
   harness.capabilities.set('session-1', { adapterId: 'pi-test', executionCwdRebindable: true })
@@ -519,8 +519,8 @@ describe('handoff preview — managed-to-current', () => {
 
   test('blocks a shared managed worktree (shared-owners)', async () => {
     await managedSession()
-    const record = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/demo')!
-    harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
+    const record = (await harness.svc.registry.list()).find((r) => r.expectedBranch === 'kata-agent/demo')!
+    await harness.svc.worktrees.addOwner(record.managedWorktreeId, 'session-2')
 
     const p = await preview('managed-to-current')
 
@@ -654,7 +654,7 @@ describe('handoff confirm — hand-back', () => {
       checkout: { mode: 'managed-worktree', managedWorktreeId: record.managedWorktreeId },
     })
     expect(harness.rebinds.at(-1)).toBe(record.checkoutPath)
-    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('ready')
+    expect((await harness.svc.registry.get(record.managedWorktreeId))?.state).toBe('ready')
     expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
     expect(
       harness.svc.journal.entries().filter((entry) => entry.op === 'handoff' && entry.status === 'committed').length,
@@ -677,7 +677,7 @@ describe('handoff confirm — hand-back', () => {
     if (result.outcome !== 'recovery-required') return
     expect(result.retainedSnapshotId).toBeTruthy()
     expect((await git(harness.repo, ['branch', '--show-current'])).trim()).toBe('main')
-    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('snapshotted')
+    expect((await harness.svc.registry.get(record.managedWorktreeId))?.state).toBe('snapshotted')
     expect(await harness.svc.handoff.status('session-1')).toMatchObject({
       active: true,
       state: 'recovery-required',
@@ -874,7 +874,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
     expect(result.outcome).toBe('recovery-required')
     if (result.outcome !== 'recovery-required') return
     expect((await git(harness.repo, ['status', '--porcelain'])).trim()).toBe('')
-    const targetRecord = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/rollback-c2m')
+    const targetRecord = (await harness.svc.registry.list()).find((r) => r.expectedBranch === 'kata-agent/rollback-c2m')
     expect(targetRecord).toBeDefined()
     expect(existsSync(targetRecord!.checkoutPath)).toBe(true)
 
@@ -882,7 +882,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
 
     expect(rec).toMatchObject({ outcome: 'blocked', code: 'handoff-rolled-back' })
     expect(existsSync(targetRecord!.checkoutPath)).toBe(false)
-    expect(harness.svc.registry.get(targetRecord!.managedWorktreeId)).toBeUndefined()
+    expect(await harness.svc.registry.get(targetRecord!.managedWorktreeId)).toBeUndefined()
     expect(await git(harness.repo, ['branch', '--list'])).not.toContain('kata-agent/rollback-c2m')
     // The cleaned source is restored byte-for-byte from the retained snapshot.
     expect(readFileSync(join(harness.repo, 'tracked.txt'), 'utf8')).toBe('changed\n')
@@ -916,7 +916,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
     expect((await git(harness.repo, ['status', '--porcelain'])).trim()).toBe('')
     expect(existsSync(record.checkoutPath)).toBe(true)
     expect(readFileSync(join(record.checkoutPath, 'managed.txt'), 'utf8')).toBe('managed state\n')
-    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('ready')
+    expect((await harness.svc.registry.get(record.managedWorktreeId))?.state).toBe('ready')
     expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
   })
 
@@ -942,7 +942,7 @@ describe('handoff recover — snapshot-backed rollback', () => {
     expect((await git(harness.repo, ['branch', '--show-current'])).trim()).toBe('kata-agent/recover-handback')
     expect(readFileSync(join(harness.repo, 'handback.txt'), 'utf8')).toBe('roundtrip\n')
     expect(existsSync(record.checkoutPath)).toBe(false)
-    expect(harness.svc.registry.get(record.managedWorktreeId)?.state).toBe('snapshotted')
+    expect((await harness.svc.registry.get(record.managedWorktreeId))?.state).toBe('snapshotted')
     expect(await harness.svc.handoff.status('session-1')).toEqual({ active: false })
   })
 
@@ -1109,7 +1109,7 @@ describe('handoff cancel', () => {
     })
     expect(result.outcome).toBe('recovery-required')
     if (result.outcome !== 'recovery-required') return
-    const targetRecord = harness.svc.registry.list().find((r) => r.expectedBranch === 'kata-agent/delete-demo')
+    const targetRecord = (await harness.svc.registry.list()).find((r) => r.expectedBranch === 'kata-agent/delete-demo')
     expect(targetRecord).toBeDefined()
     expect(existsSync(targetRecord!.checkoutPath)).toBe(true)
 
@@ -1119,7 +1119,7 @@ describe('handoff cancel', () => {
     expect(harness.svc.handoff.isSessionFenced('session-1')).toBe(false)
     expect(harness.svc.handoff.isPathFenced(harness.repo)).toBe(false)
     expect(existsSync(targetRecord!.checkoutPath)).toBe(false)
-    expect(harness.svc.registry.get(targetRecord!.managedWorktreeId)).toBeUndefined()
+    expect(await harness.svc.registry.get(targetRecord!.managedWorktreeId)).toBeUndefined()
     expect(readFileSync(join(harness.repo, 'tracked.txt'), 'utf8')).toBe('changed\n')
     expect(harness.svc.journal.entries().find((entry) => entry.op === 'handoff')?.status).toBe('recovered')
   })

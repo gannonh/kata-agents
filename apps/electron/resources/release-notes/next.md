@@ -7,6 +7,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Improvements
 
 - **Updated provider runtimes** — Pi packages now use 0.84.1 and the Claude Agent SDK uses 0.3.228, bringing current model catalogs, cancellable OAuth refreshes, and upstream provider fixes to provider-backed sessions ([#55](https://github.com/gannonh/kata-agents/issues/55)).
+- **Eliminated managed-worktree event-loop stalls** — Worktree registry reads and mutations now acquire their cross-process lock asynchronously, so a held lock no longer blocks the Node event loop for the full acquisition timeout. Sessions stay responsive while another process holds the registry lock during worktree handoff, fork, and cleanup ([#45](https://github.com/gannonh/kata-agents/issues/45)).
 
 ## Bug Fixes
 
