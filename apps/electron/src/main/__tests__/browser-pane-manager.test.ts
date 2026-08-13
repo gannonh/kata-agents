@@ -1307,7 +1307,7 @@ describe('BrowserPaneManager', () => {
       expect(instance.window.hide).toHaveBeenCalled()
     })
 
-    it('lays panel views onto the host window at the reported bounds', () => {
+    it('lays only the page onto the host so HTML panel chrome can paint', () => {
       manager.createInstance('panel-bounds')
       const instance = markToolbarReady('panel-bounds')
       const host = new BrowserWindow() as any
@@ -1319,9 +1319,28 @@ describe('BrowserPaneManager', () => {
       manager.setPanelBounds('panel-bounds', { x: 40, y: 80, width: 800, height: 600 }, 99)
 
       expect(host.addBrowserView).toHaveBeenCalledWith(instance.pageView)
-      expect(host.addBrowserView).toHaveBeenCalledWith(instance.toolbarView)
-      expect(instance.toolbarView.setBounds).toHaveBeenCalledWith({ x: 40, y: 80, width: 800, height: 48 })
-      expect(instance.pageView.setBounds).toHaveBeenCalledWith({ x: 40, y: 128, width: 800, height: 552 })
+      expect(host.addBrowserView).not.toHaveBeenCalledWith(instance.toolbarView)
+      expect(instance.pageView.setBounds).toHaveBeenCalledWith({ x: 40, y: 80, width: 800, height: 600 })
+    })
+
+    it('does not resurrect panel views after hide', () => {
+      manager.createInstance('panel-ghost')
+      const instance = markToolbarReady('panel-ghost')
+      const host = new BrowserWindow() as any
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+      } as any)
+      manager.focus('panel-ghost')
+      manager.setPanelBounds('panel-ghost', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      manager.hide('panel-ghost')
+      host.addBrowserView.mockClear()
+      instance.pageView.setBounds.mockClear()
+
+      manager.setPanelBounds('panel-ghost', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      expect(host.addBrowserView).not.toHaveBeenCalled()
+      expect(instance.pageView.setBounds).not.toHaveBeenCalled()
     })
 
     it('hides a panel instance without destroying it', () => {
@@ -1372,6 +1391,7 @@ describe('BrowserPaneManager', () => {
       } as any)
       manager.focus('panel-host-close')
       manager.setPanelBounds('panel-host-close', { x: 40, y: 80, width: 800, height: 600 }, 99)
+      host.removeBrowserView.mockClear()
 
       host._emit('close', { preventDefault: mock(() => {}) })
 
@@ -1415,6 +1435,25 @@ describe('BrowserPaneManager', () => {
       manager.setPanelBounds('panel-nan', { x: 40, y: 80, width: Number.NaN, height: 600 }, 99)
 
       expect(instance.pageView.setBounds).not.toHaveBeenCalled()
+    })
+
+    it('parks panel views for a zero-area report without hiding the instance', () => {
+      manager.createInstance('panel-overlay')
+      const instance = markToolbarReady('panel-overlay')
+      const host = new BrowserWindow() as any
+      manager.setWindowManager({
+        getWindowByWebContentsId: () => host,
+      } as any)
+      manager.focus('panel-overlay')
+      manager.setPanelBounds('panel-overlay', { x: 40, y: 80, width: 800, height: 600 }, 99)
+
+      manager.setPanelBounds('panel-overlay', { x: 40, y: 80, width: 0, height: 0 }, 99)
+
+      expect(host.removeBrowserView).toHaveBeenCalledWith(instance.pageView)
+      expect(manager.listInstances().find((item) => item.id === 'panel-overlay')).toMatchObject({
+        isVisible: true,
+        surface: 'panel',
+      })
     })
   })
 })

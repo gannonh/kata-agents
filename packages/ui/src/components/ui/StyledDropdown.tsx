@@ -108,9 +108,10 @@ export const StyledDropdownMenuContent = React.forwardRef<
   StyledDropdownMenuContentProps
 >(({ className, minWidth = 'min-w-40', light = false, sideOffset = 4, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
+      <DropdownMenuPrimitive.Content
+        ref={ref}
+        data-slot="dropdown-menu-content"
+        sideOffset={sideOffset}
       className={cn(
         // shadcn base layer
         'popover-styled overflow-x-hidden overflow-y-auto p-1 z-dropdown',
@@ -210,9 +211,10 @@ export const StyledDropdownMenuSubContent = React.forwardRef<
   StyledDropdownMenuSubContentProps
 >(({ className, minWidth = 'min-w-36', sideOffset = -4, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.SubContent
-      ref={ref}
-      sideOffset={sideOffset}
+      <DropdownMenuPrimitive.SubContent
+        ref={ref}
+        data-slot="dropdown-menu-sub-content"
+        sideOffset={sideOffset}
       className={cn(
         'popover-styled w-fit font-sans whitespace-nowrap text-xs flex flex-col gap-0.5 z-dropdown overflow-x-hidden overflow-y-auto p-1',
         'max-h-(--radix-dropdown-menu-content-available-height)',

@@ -31,7 +31,7 @@ import {
 import { useAppShellContext } from '@/context/AppShellContext'
 import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
-import { getHostname } from './utils'
+import { browserDisplayLabel } from './utils'
 import { navigate, routes } from '@/lib/navigate'
 
 const DEFAULT_MAX_VISIBLE_BADGES = 3
@@ -247,16 +247,28 @@ export function BrowserTabStrip({
       ? t('browser.openSessionUsingThisWindow')
       : t('browser.openSessionWhichUsedThisWindow')
     const isPanel = instance.surface === 'panel'
+    const showInPanel = isPanel && !instance.isVisible
 
     return (
       <>
-        <StyledDropdownMenuItem
-          disabled={!canUseLiveWindowActions}
-          onSelect={() => focusBrowserWindow(instance)}
-        >
-          {isPanel ? <Icons.PanelLeft className="h-3.5 w-3.5" /> : <Icons.Monitor className="h-3.5 w-3.5" />}
-          {isPanel ? t('browser.showInPanel') : t('browser.showBrowserWindow')}
-        </StyledDropdownMenuItem>
+        {showInPanel && (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => focusBrowserWindow(instance)}
+          >
+            <Icons.PanelLeft className="h-3.5 w-3.5" />
+            {t('browser.showInPanel')}
+          </StyledDropdownMenuItem>
+        )}
+        {!isPanel && (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => focusBrowserWindow(instance)}
+          >
+            <Icons.Monitor className="h-3.5 w-3.5" />
+            {t('browser.showBrowserWindow')}
+          </StyledDropdownMenuItem>
+        )}
 
         {isPanel ? (
           <StyledDropdownMenuItem
@@ -332,8 +344,7 @@ export function BrowserTabStrip({
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end" minWidth="min-w-64">
             {overflow.map((instance) => {
-              const hostname = getHostname(instance.url)
-              const displayLabel = instance.title.trim() || hostname || 'Local File'
+              const displayLabel = browserDisplayLabel(instance, t('browser.tabLabel'))
               return (
                 <DropdownMenuSub key={instance.id}>
                   <StyledDropdownMenuSubTrigger>

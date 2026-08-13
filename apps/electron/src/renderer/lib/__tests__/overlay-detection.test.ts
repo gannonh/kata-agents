@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { setDismissibleLayerBridge } from '../dismissible-layer-bridge'
-import { hasOpenOverlay } from '../overlay-detection'
+import { hasOpenOverlay, getOpenOverlayRects } from '../overlay-detection'
 
 const originalDocument = globalThis.document
 
@@ -46,5 +46,50 @@ describe('hasOpenOverlay', () => {
     }
 
     expect(hasOpenOverlay()).toBe(false)
+  })
+})
+
+describe('getOpenOverlayRects', () => {
+  it('collects visible overlay rectangles', () => {
+    ;(globalThis as unknown as { document: { querySelectorAll: (_selector: string) => Array<{ getBoundingClientRect: () => DOMRect }> } }).document = {
+      querySelectorAll: () => [
+        {
+          getBoundingClientRect: () => ({ x: 720, y: 36, width: 220, height: 220 } as DOMRect),
+        },
+        {
+          getBoundingClientRect: () => ({ x: 0, y: 0, width: 0, height: 0 } as DOMRect),
+        },
+      ],
+    }
+
+    expect(getOpenOverlayRects()).toEqual([{ x: 720, y: 36, width: 220, height: 220 }])
+  })
+
+  it('collects open menu rectangles without a data-slot attribute', () => {
+    ;(globalThis as unknown as { document: { querySelectorAll: (selector: string) => Array<{ getBoundingClientRect: () => DOMRect }> } }).document = {
+      querySelectorAll: (selector: string) => {
+        if (!selector.includes('[role="menu"]')) return []
+        return [
+          {
+            getBoundingClientRect: () => ({ x: 640, y: 40, width: 180, height: 160 } as DOMRect),
+          },
+        ]
+      },
+    }
+
+    expect(getOpenOverlayRects()).toEqual([{ x: 640, y: 40, width: 180, height: 160 }])
+  })
+
+  it('ignores closed overlay nodes that remain in the DOM', () => {
+    ;(globalThis as unknown as { document: { querySelectorAll: (_selector: string) => Array<{ getAttribute: (name: string) => string; getBoundingClientRect: () => DOMRect }> } }).document = {
+      querySelectorAll: () => [
+        {
+          getAttribute: (name: string) => name === 'data-state' ? 'closed' : '',
+          getBoundingClientRect: () => ({ x: 640, y: 40, width: 180, height: 160 } as DOMRect),
+        },
+      ],
+    }
+
+    expect(getOpenOverlayRects()).toEqual([])
   })
 })

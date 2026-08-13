@@ -106,3 +106,34 @@ export function browserPanelBoundsChanged(
   if (!prev) return true
   return prev.x !== next.x || prev.y !== next.y || prev.width !== next.width || prev.height !== next.height
 }
+
+export function rectsOverlap(a: BrowserViewRect, b: BrowserViewRect): boolean {
+  return a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0
+    && a.x < b.x + b.width
+    && a.x + a.width > b.x
+    && a.y < b.y + b.height
+    && a.y + a.height > b.y
+}
+
+export function isBlankBrowserUrl(url: string | null | undefined): boolean {
+  if (url == null) return false
+  const trimmed = url.trim()
+  return trimmed === '' || trimmed === 'about:blank' || trimmed.startsWith('about:blank#')
+}
+
+/**
+ * Native BrowserViews paint above the renderer, so HTML panel chrome
+ * (dropdowns, empty state, plus-menus) would be covered. Collapse the
+ * reported host to zero area so main parks the views until the hole is
+ * free again.
+ */
+export function browserPanelReportedBounds(
+  host: BrowserViewRect,
+  overlays: BrowserViewRect[],
+  url?: string | null,
+): BrowserViewRect {
+  if (isBlankBrowserUrl(url) || overlays.some((overlay) => rectsOverlap(host, overlay))) {
+    return { ...host, width: 0, height: 0 }
+  }
+  return host
+}

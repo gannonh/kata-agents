@@ -127,6 +127,7 @@
   "browser.showBrowserWindow": "Böngészőablak megjelenítése",
   "browser.showInPanel": "Megjelenítés panelen",
   "browser.stopLoading": "Betöltés leállítása",
+  "browser.tabLabel": "Böngésző",
   "browser.terminateBrowser": "Böngésző leállítása",
   "browser.urlPlaceholder": "Írj be egy URL-t vagy keress…",
   "browser.windowOptions": "Böngészőbeállítások",

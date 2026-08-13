@@ -127,6 +127,7 @@
   "browser.showBrowserWindow": "ブラウザウィンドウを表示",
   "browser.showInPanel": "パネルで表示",
   "browser.stopLoading": "読み込み停止",
+  "browser.tabLabel": "ブラウザ",
   "browser.terminateBrowser": "ブラウザを終了",
   "browser.urlPlaceholder": "URL を入力または検索...",
   "browser.windowOptions": "ブラウザオプション",

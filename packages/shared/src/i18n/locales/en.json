@@ -127,6 +127,7 @@
   "browser.showBrowserWindow": "Show Browser Window",
   "browser.showInPanel": "Show in Panel",
   "browser.stopLoading": "Stop loading",
+  "browser.tabLabel": "Browser",
   "browser.terminateBrowser": "Terminate Browser",
   "browser.urlPlaceholder": "Enter URL or search…",
   "browser.windowOptions": "Browser options",

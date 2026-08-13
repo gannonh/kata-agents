@@ -3,7 +3,9 @@ import type { BrowserInstanceInfo } from '@kata-sh/shared/protocol'
 import {
   BROWSER_TOOLBAR_HEIGHT,
   browserPanelBoundsChanged,
+  browserPanelReportedBounds,
   browserPanelRoute,
+  isBlankBrowserUrl,
   layoutBrowserSurfaceRects,
   parseBrowserInstanceIdFromRoute,
   reconcileBrowserPanels,
@@ -44,6 +46,13 @@ describe('browser surface layout', () => {
     expect(layoutBrowserSurfaceRects({ x: 10.9, y: 20.2, width: 100.4, height: 30 })).toEqual({
       toolbar: { x: 10, y: 20, width: 100, height: 30 },
       page: { x: 10, y: 50, width: 100, height: 0 },
+    })
+  })
+
+  it('gives the page the full host when toolbar height is zero', () => {
+    expect(layoutBrowserSurfaceRects({ x: 40, y: 80, width: 800, height: 600 }, 0)).toEqual({
+      toolbar: { x: 40, y: 80, width: 800, height: 0 },
+      page: { x: 40, y: 80, width: 800, height: 600 },
     })
   })
 })
@@ -141,5 +150,58 @@ describe('browser panel bounds reporting', () => {
     expect(prev).toEqual({ x: 34, y: 80, width: 400, height: 600 })
     expect(browserPanelBoundsChanged(prev, next)).toBe(true)
     expect(browserPanelBoundsChanged(next, { ...next })).toBe(false)
+  })
+})
+
+describe('browser panel overlay suppression', () => {
+  const panel = { x: 40, y: 80, width: 800, height: 600 }
+
+  it('collapses reported bounds when a top-bar dropdown overlaps the panel', () => {
+    const tabMenu = { x: 720, y: 36, width: 220, height: 220 }
+    expect(browserPanelReportedBounds(panel, [tabMenu])).toEqual({
+      ...panel,
+      width: 0,
+      height: 0,
+    })
+  })
+
+  it('keeps native views attached when a sidebar menu does not overlap the panel', () => {
+    const sessionMenu = { x: 8, y: 80, width: 240, height: 320 }
+    expect(browserPanelReportedBounds({ x: 280, y: 80, width: 700, height: 600 }, [sessionMenu])).toEqual({
+      x: 280,
+      y: 80,
+      width: 700,
+      height: 600,
+    })
+  })
+
+  it('keeps native views attached when no overlay is open', () => {
+    expect(browserPanelReportedBounds(panel, [])).toEqual(panel)
+  })
+
+  it('parks native views on a blank URL so HTML empty state can paint', () => {
+    expect(browserPanelReportedBounds(panel, [], 'about:blank')).toEqual({
+      ...panel,
+      width: 0,
+      height: 0,
+    })
+  })
+
+  it('does not treat a loaded page as blank', () => {
+    expect(browserPanelReportedBounds(panel, [], 'https://example.com')).toEqual(panel)
+  })
+})
+
+describe('isBlankBrowserUrl', () => {
+  it('treats empty and about:blank as blank', () => {
+    expect(isBlankBrowserUrl('')).toBe(true)
+    expect(isBlankBrowserUrl('about:blank')).toBe(true)
+    expect(isBlankBrowserUrl('about:blank#blocked')).toBe(true)
+  })
+
+  it('does not treat an unknown URL as blank', () => {
+    expect(isBlankBrowserUrl(undefined)).toBe(false)
+    expect(isBlankBrowserUrl(null)).toBe(false)
+    expect(isBlankBrowserUrl('https://example.com')).toBe(false)
   })
 })

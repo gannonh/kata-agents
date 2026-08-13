@@ -1,4 +1,5 @@
 import { getDismissibleLayerBridge } from './dismissible-layer-bridge'
+import { roundBrowserPanelBounds, type BrowserViewRect } from '../../shared/browser-surface'
 
 /**
  * Overlay Detection Utilities
@@ -23,6 +24,8 @@ const OVERLAY_SELECTORS = [
 
   // Dropdown menus
   '[data-slot="dropdown-menu-content"]',
+  '[data-slot="dropdown-menu-sub-content"]',
+  '[role="menu"]',
 
   // Context menus (right-click)
   '[data-slot="context-menu-content"]',
@@ -58,4 +61,27 @@ export function hasOpenOverlay(): boolean {
 
   const selector = OVERLAY_SELECTORS.join(', ')
   return document.querySelector(selector) !== null
+}
+
+export function getOpenOverlayRects(): BrowserViewRect[] {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+    return []
+  }
+
+  const nodes = document.querySelectorAll(OVERLAY_SELECTORS.join(', '))
+  const rects: BrowserViewRect[] = []
+  nodes.forEach((node) => {
+    if (!('getBoundingClientRect' in node)) return
+    const el = node as Element
+    if (typeof el.getAttribute === 'function' && el.getAttribute('data-state') === 'closed') return
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 1 || rect.height < 1) return
+    rects.push(roundBrowserPanelBounds({
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    }))
+  })
+  return rects
 }

@@ -127,6 +127,7 @@
   "browser.showBrowserWindow": "显示浏览器窗口",
   "browser.showInPanel": "在面板中显示",
   "browser.stopLoading": "停止加载",
+  "browser.tabLabel": "浏览器",
   "browser.terminateBrowser": "终止浏览器",
   "browser.urlPlaceholder": "输入网址或搜索…",
   "browser.windowOptions": "浏览器选项",

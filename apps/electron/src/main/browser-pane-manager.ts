@@ -869,13 +869,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     }
 
+    // Flip visibility before parking so an in-flight setPanelBounds cannot
+    // reattach views onto the app window (ghost chrome after Hide/Close).
+    instance.isVisible = false
+
     if (instance.surface === 'panel') {
       this.parkViewsOnDedicatedWindow(instance)
     } else {
       win.hide()
     }
-
-    instance.isVisible = false
 
     // Defer the state-change callback so native window teardown completes before
     // listeners (which may touch BrowserView/Chromium internals) run.
@@ -912,7 +914,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   setPanelBounds(id: string, bounds: BrowserViewRect, hostWebContentsId: number): void {
     const instance = this.instances.get(id)
     if (!instance || instance.window.isDestroyed()) return
-    if (instance.surface !== 'panel' || !instance.isVisible) return
+    if (instance.surface !== 'panel' || !instance.isVisible || instance.isHiding) return
 
     if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return
 
@@ -2128,12 +2130,49 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     }
     if (target.isDestroyed()) return
     if (current !== target) {
-      target.addBrowserView(instance.pageView)
-      target.addBrowserView(instance.nativeOverlayView)
-      target.addBrowserView(instance.toolbarView)
+      this.addViewsToWindow(instance, target)
       instance.hostWindow = target
     }
+    this.keepNativeToolbarOffAppWindow(instance, target)
     this.layoutViewsInBounds(instance, bounds)
+  }
+
+  private shouldAttachNativeToolbar(instance: BrowserInstance, target: BrowserWindow): boolean {
+    return instance.surface !== 'panel' || target === instance.window
+  }
+
+  private addViewsToWindow(instance: BrowserInstance, target: BrowserWindow): void {
+    target.addBrowserView(instance.pageView)
+    target.addBrowserView(instance.nativeOverlayView)
+    if (this.shouldAttachNativeToolbar(instance, target)) {
+      target.addBrowserView(instance.toolbarView)
+    }
+  }
+
+  /**
+   * Panel chrome is HTML (PanelHeader + address bar). The native toolbar
+   * BrowserView must stay on the hidden dedicated window so it cannot cover
+   * menus, the close button, or neighboring panels.
+   */
+  private keepNativeToolbarOffAppWindow(instance: BrowserInstance, viewHost: BrowserWindow): void {
+    if (this.shouldAttachNativeToolbar(instance, viewHost)) return
+    try {
+      viewHost.removeBrowserView(instance.toolbarView)
+    } catch {
+      // Toolbar may already be off this window.
+    }
+    if (!instance.window.isDestroyed()) {
+      try {
+        instance.window.addBrowserView(instance.toolbarView)
+      } catch {
+        // Already parented to the dedicated window.
+      }
+    }
+  }
+
+  private isPanelOnAppWindow(instance: BrowserInstance): boolean {
+    const host = this.getViewHost(instance)
+    return instance.surface === 'panel' && !!host && host !== instance.window
   }
 
   private parkViewsOnDedicatedWindow(instance: BrowserInstance): void {
@@ -2159,18 +2198,36 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.emitStateChange(instance)
   }
 
+  private toolbarHeightForLayout(instance: BrowserInstance, bounds: BrowserViewRect): number {
+    if (this.isPanelOnAppWindow(instance)) return 0
+    return this.getToolbarEffectiveHeight(instance, bounds)
+  }
+
   private layoutViewsInBounds(instance: BrowserInstance, bounds: BrowserViewRect): void {
-    const toolbarHeight = this.getToolbarEffectiveHeight(instance, bounds)
+    const toolbarHeight = this.toolbarHeightForLayout(instance, bounds)
     const rects = layoutBrowserSurfaceRects(bounds, toolbarHeight)
-    instance.toolbarView.setBounds(rects.toolbar)
-    instance.toolbarView.setAutoResize({ width: true, height: false })
+    if (this.isPanelOnAppWindow(instance)) {
+      const dedicated = this.dedicatedWindowBounds(instance)
+      const parkedToolbar = layoutBrowserSurfaceRects(dedicated, TOOLBAR_HEIGHT)
+      instance.toolbarView.setBounds(parkedToolbar.toolbar)
+      instance.toolbarView.setAutoResize({ width: true, height: false })
+    } else {
+      instance.toolbarView.setBounds(rects.toolbar)
+      instance.toolbarView.setAutoResize({ width: true, height: false })
+    }
     instance.pageView.setBounds(rects.page)
     instance.pageView.setAutoResize({ width: true, height: true })
     this.updateNativeOverlayState(instance)
+  }
+
+  private raiseTopBrowserView(instance: BrowserInstance, preferOverlay: boolean): void {
     const host = this.getViewHost(instance)
-    if (host && !host.isDestroyed()) {
-      host.setTopBrowserView(instance.toolbarView)
+    if (!host || host.isDestroyed()) return
+    if (this.isPanelOnAppWindow(instance)) {
+      host.setTopBrowserView(preferOverlay ? instance.nativeOverlayView : instance.pageView)
+      return
     }
+    host.setTopBrowserView(instance.toolbarView)
   }
 
   private layoutToolbarView(instance: BrowserInstance): void {
@@ -2186,17 +2243,15 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     if (!shouldShow || !instance.nativeOverlayReady || !host || host.isDestroyed()) {
       instance.nativeOverlayView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
-      if (host && !host.isDestroyed()) {
-        host.setTopBrowserView(instance.toolbarView)
-      }
+      this.raiseTopBrowserView(instance, false)
       return
     }
 
     const bounds = this.getLayoutBounds(instance)
-    const { page } = layoutBrowserSurfaceRects(bounds, TOOLBAR_HEIGHT)
+    const { page } = layoutBrowserSurfaceRects(bounds, this.toolbarHeightForLayout(instance, bounds))
     instance.nativeOverlayView.setBounds(page)
     instance.nativeOverlayView.setAutoResize({ width: true, height: true })
-    host.setTopBrowserView(instance.toolbarView)
+    this.raiseTopBrowserView(instance, true)
 
     if (agentActive) {
       const label = this.getAgentControlLabel(control)

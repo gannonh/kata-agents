@@ -4,7 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
-- **Integrated browser panel** — New Browser now opens in the app shell by default. Detach to a native window and return to the panel without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
+- **Integrated browser panel** — New Browser now opens in the app shell by default, with HTML address-bar chrome and a close control. Detach to a native window and return without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
 
 ## Improvements
 

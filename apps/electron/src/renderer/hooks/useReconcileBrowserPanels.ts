@@ -74,8 +74,8 @@ export function useReconcileBrowserPanels(
       .catch((error) => {
         if (cancelled) return
         console.warn('[browser-panel] Failed to list browser panes:', error)
-        setInstances([])
         listSettled = true
+        setInstances([])
       })
 
     return () => {

@@ -20,7 +20,7 @@ import { useTranslation, Trans } from 'react-i18next'
 import { Spinner } from '@kata-sh/ui'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
-import { getHostname, getThemeLuminance } from '@/components/browser/utils'
+import { browserDisplayLabel, getThemeLuminance } from '@/components/browser/utils'
 import { browserInstancesAtom, filterInstancesForWorkspace } from '@/atoms/browser-pane'
 import { useAppShellContext } from '@/context/AppShellContext'
 import type { BrowserInstanceInfo } from '../../../../shared/types'
@@ -123,7 +123,7 @@ function BrowserStatusBar({
   onClick: () => void
 }) {
   const { t } = useTranslation()
-  const hostname = getHostname(instance.url)
+  const hostname = browserDisplayLabel(instance, t('browser.tabLabel'))
   const themeColor = instance.themeColor
   const themeLuminance = themeColor ? getThemeLuminance(themeColor) : null
   const isDarkTheme = themeLuminance !== null && themeLuminance < 0.42

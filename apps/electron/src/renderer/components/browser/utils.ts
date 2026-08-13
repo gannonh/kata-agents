@@ -2,9 +2,13 @@
  * Shared browser component utilities
  */
 
+import { isBlankBrowserUrl } from '../../../shared/browser-surface'
+
+const PLACEHOLDER_TITLES = new Set(['', 'New Tab', 'Browser'])
+
 export function getHostname(url: string): string {
   try {
-    if (url === 'about:blank' || !url) return 'New Tab'
+    if (isBlankBrowserUrl(url)) return ''
     const parsed = new URL(url)
 
     if (parsed.protocol === 'file:') {
@@ -23,6 +27,16 @@ export function getHostname(url: string): string {
   } catch {
     return url
   }
+}
+
+export function browserDisplayLabel(
+  instance: { title: string; url: string },
+  blankLabel: string,
+): string {
+  const title = instance.title.trim()
+  if (title && !PLACEHOLDER_TITLES.has(title)) return title
+  if (isBlankBrowserUrl(instance.url)) return blankLabel
+  return getHostname(instance.url) || blankLabel
 }
 
 /**
