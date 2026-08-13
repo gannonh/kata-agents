@@ -18,6 +18,8 @@ const CHANNELS = {
   FORCE_CLOSE_MENU: 'browser-toolbar:force-close-menu',
   HIDE: 'browser-toolbar:hide',
   DESTROY: 'browser-toolbar:destroy',
+  DETACH: 'browser-toolbar:detach',
+  ATTACH: 'browser-toolbar:attach',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
 } as const
@@ -35,6 +37,8 @@ contextBridge.exposeInMainWorld('browserToolbar', {
   setMenuGeometry: (open: boolean, height = 0) => ipcRenderer.invoke(CHANNELS.MENU_GEOMETRY, instanceId, open, height),
   hideWindow: () => ipcRenderer.invoke(CHANNELS.HIDE, instanceId),
   closeWindowEntirely: () => ipcRenderer.invoke(CHANNELS.DESTROY, instanceId),
+  detachToWindow: () => ipcRenderer.invoke(CHANNELS.DETACH, instanceId),
+  attachToPanel: () => ipcRenderer.invoke(CHANNELS.ATTACH, instanceId),
   onStateUpdate: (callback: (state: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state)
     ipcRenderer.on(CHANNELS.STATE_UPDATE, handler)

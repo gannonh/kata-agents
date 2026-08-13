@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import { Spinner } from '@kata-sh/ui'
 import {
@@ -30,7 +31,7 @@ import {
 import { useAppShellContext } from '@/context/AppShellContext'
 import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
-import { getHostname } from './utils'
+import { browserDisplayLabel } from './utils'
 import { navigate, routes } from '@/lib/navigate'
 
 const DEFAULT_MAX_VISIBLE_BADGES = 3
@@ -46,6 +47,7 @@ export function BrowserTabStrip({
   instancesOverride,
   maxVisibleBadges = DEFAULT_MAX_VISIBLE_BADGES,
 }: BrowserTabStripProps) {
+  const { t } = useTranslation()
   // Filter the badge strip to the workspace currently in focus. Remote-connected
   // workspaces have a different `remoteWorkspaceId` (what the remote agent
   // stamps onto its tabs) than the local `activeWorkspaceId` (what locally-
@@ -189,9 +191,27 @@ export function BrowserTabStrip({
     }
 
     void browserPaneApi.focus(instance.id).catch((error) => {
-      console.warn(`[BrowserTabStrip] Failed to focus browser window ${instance.id}:`, error)
+      console.warn(`[BrowserTabStrip] Failed to focus browser ${instance.id}:`, error)
     })
   }, [instancesOverride, setActiveInstanceId])
+
+  const detachBrowserWindow = useCallback((instance: BrowserInstanceInfo) => {
+    if (instancesOverride) return
+    const browserPaneApi = window.electronAPI?.browserPane
+    if (!browserPaneApi?.detach) return
+    void browserPaneApi.detach(instance.id).catch((error) => {
+      console.warn(`[BrowserTabStrip] Failed to detach browser ${instance.id}:`, error)
+    })
+  }, [instancesOverride])
+
+  const attachBrowserToPanel = useCallback((instance: BrowserInstanceInfo) => {
+    if (instancesOverride) return
+    const browserPaneApi = window.electronAPI?.browserPane
+    if (!browserPaneApi?.attachToPanel) return
+    void browserPaneApi.attachToPanel(instance.id).catch((error) => {
+      console.warn(`[BrowserTabStrip] Failed to attach browser ${instance.id}:`, error)
+    })
+  }, [instancesOverride])
 
   const openSessionUsingWindow = useCallback((instance: BrowserInstanceInfo) => {
     const sessionId = instance.boundSessionId ?? instance.ownerSessionId
@@ -224,18 +244,49 @@ export function BrowserTabStrip({
     const targetSessionId = instance.boundSessionId ?? instance.ownerSessionId
     const canOpenSession = !!targetSessionId
     const openSessionLabel = instance.agentControlActive
-      ? 'Open Session Using this Window'
-      : 'Open Session Which Used this Window'
+      ? t('browser.openSessionUsingThisWindow')
+      : t('browser.openSessionWhichUsedThisWindow')
+    const isPanel = instance.surface === 'panel'
+    const showInPanel = isPanel && !instance.isVisible
 
     return (
       <>
-        <StyledDropdownMenuItem
-          disabled={!canUseLiveWindowActions}
-          onSelect={() => focusBrowserWindow(instance)}
-        >
-          <Icons.Monitor className="h-3.5 w-3.5" />
-          Show Browser Window
-        </StyledDropdownMenuItem>
+        {showInPanel && (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => focusBrowserWindow(instance)}
+          >
+            <Icons.PanelLeft className="h-3.5 w-3.5" />
+            {t('browser.showInPanel')}
+          </StyledDropdownMenuItem>
+        )}
+        {!isPanel && (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => focusBrowserWindow(instance)}
+          >
+            <Icons.Monitor className="h-3.5 w-3.5" />
+            {t('browser.showBrowserWindow')}
+          </StyledDropdownMenuItem>
+        )}
+
+        {isPanel ? (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => detachBrowserWindow(instance)}
+          >
+            <Icons.AppWindow className="h-3.5 w-3.5" />
+            {t('browser.detachToWindow')}
+          </StyledDropdownMenuItem>
+        ) : (
+          <StyledDropdownMenuItem
+            disabled={!canUseLiveWindowActions}
+            onSelect={() => attachBrowserToPanel(instance)}
+          >
+            <Icons.PanelLeft className="h-3.5 w-3.5" />
+            {t('browser.returnToPanel')}
+          </StyledDropdownMenuItem>
+        )}
 
         <StyledDropdownMenuItem
           disabled={!canOpenSession}
@@ -253,11 +304,11 @@ export function BrowserTabStrip({
           onSelect={() => terminateBrowserWindow(instance)}
         >
           <Icons.XCircle className="h-3.5 w-3.5" />
-          Terminate Browser
+          {t('browser.terminateBrowser')}
         </StyledDropdownMenuItem>
       </>
     )
-  }, [instancesOverride, focusBrowserWindow, openSessionUsingWindow, terminateBrowserWindow])
+  }, [instancesOverride, focusBrowserWindow, detachBrowserWindow, attachBrowserToPanel, openSessionUsingWindow, terminateBrowserWindow, t])
 
   if (orderedInstances.length === 0) return null
 
@@ -293,8 +344,7 @@ export function BrowserTabStrip({
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end" minWidth="min-w-64">
             {overflow.map((instance) => {
-              const hostname = getHostname(instance.url)
-              const displayLabel = instance.title.trim() || hostname || 'Local File'
+              const displayLabel = browserDisplayLabel(instance, t('browser.tabLabel'))
               return (
                 <DropdownMenuSub key={instance.id}>
                   <StyledDropdownMenuSubTrigger>

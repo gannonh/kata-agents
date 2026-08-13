@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Integrated browser panel** — New Browser now opens in the app shell by default, with HTML address-bar chrome and a close control. Detach to a native window and return without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
+
 ## Improvements
 
 - **Updated provider runtimes** — Pi packages now use 0.84.1 and the Claude Agent SDK uses 0.3.228, bringing current model catalogs, cancellable OAuth refreshes, and upstream provider fixes to provider-backed sessions ([#55](https://github.com/gannonh/kata-agents/issues/55)).

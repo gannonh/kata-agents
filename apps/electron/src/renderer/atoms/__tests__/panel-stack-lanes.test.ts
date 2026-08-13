@@ -29,6 +29,16 @@ describe('panel stack single-lane behavior', () => {
     expect(stack.every((p) => p.laneId === 'main')).toBe(true)
   })
 
+  it('classifies a browser instance route as a browser panel', () => {
+    const store = createStore()
+    store.set(pushPanelAtom, { route: 'browser/browser-1' })
+
+    const stack = getStack(store)
+    expect(stack).toHaveLength(1)
+    expect(stack[0].panelType).toBe('browser')
+    expect(stack[0].route).toBe('browser/browser-1')
+  })
+
   it('implicit navigation updates focused panel route', () => {
     const store = createStore()
 
@@ -60,6 +70,37 @@ describe('panel stack single-lane behavior', () => {
     expect(stack[0].route).toBe('allSessions/session/s1')
     expect(stack[1].route).toBe('sources/source/linear')
     expect(stack[2].route).toBe('allSessions/session/s2')
+  })
+
+  it('does not replace a focused browser panel with implicit navigation', () => {
+    const store = createStore()
+
+    store.set(pushPanelAtom, { route: 'allSessions/session/s1' })
+    store.set(pushPanelAtom, { route: 'browser/browser-1' })
+
+    const browserPanel = getStack(store).find((p) => p.route === 'browser/browser-1')
+    expect(browserPanel).toBeDefined()
+    store.set(focusedPanelIdAtom, browserPanel!.id)
+
+    store.set(updateFocusedPanelRouteAtom, 'allSessions/session/s2')
+
+    const stack = getStack(store)
+    expect(stack.some((p) => p.route === 'browser/browser-1')).toBe(true)
+    expect(stack.some((p) => p.route === 'allSessions/session/s2')).toBe(true)
+    expect(stack.find((p) => p.id === browserPanel!.id)?.route).toBe('browser/browser-1')
+  })
+
+  it('pushes a sibling panel when the only open panel is a browser', () => {
+    const store = createStore()
+    store.set(pushPanelAtom, { route: 'browser/browser-1' })
+
+    store.set(updateFocusedPanelRouteAtom, 'allSessions/session/s1')
+
+    const stack = getStack(store)
+    expect(stack).toHaveLength(2)
+    expect(stack[0].route).toBe('browser/browser-1')
+    expect(stack[1].route).toBe('allSessions/session/s1')
+    expect(store.get(focusedPanelIdAtom)).toBe(stack[1].id)
   })
 
   it('reconcile focuses by focusedIndex first when duplicate routes exist', () => {

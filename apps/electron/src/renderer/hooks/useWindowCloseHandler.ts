@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { useModalRegistry } from '@/context/ModalContext'
 import { useDismissibleLayerRegistry } from '@/context/DismissibleLayerContext'
 import { panelStackAtom, closePanelAtom, focusedPanelIdAtom } from '@/atoms/panel-stack'
+import { hideBrowserInstanceForPanel } from '@/lib/hide-browser-panel'
 import type { WindowCloseRequest } from '../../shared/types'
 
 /**
@@ -53,8 +54,14 @@ export function useWindowCloseHandler() {
         ? panelStack.find(p => p.id === focusedPanelId)
         : panelStack[panelStack.length - 1]
       if (target) {
-        closePanel(target.id)
         window.electronAPI.cancelCloseWindow()
+        void hideBrowserInstanceForPanel(target)
+          .then(() => {
+            closePanel(target.id)
+          })
+          .catch((error) => {
+            console.warn('[window-close] Failed to hide browser panel:', error)
+          })
       } else {
         // No panels, no modals — close the window
         window.electronAPI.confirmCloseWindow()

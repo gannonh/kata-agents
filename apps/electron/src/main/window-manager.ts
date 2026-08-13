@@ -62,6 +62,31 @@ export class WindowManager {
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
+  private willDestroyWindowListeners = new Set<(window: BrowserWindow) => void>()
+
+  /**
+   * Called immediately before a managed window is actually destroyed.
+   * `close` is often preventDefault'd (Cmd+W dismisses a panel), so listeners
+   * that need to reparent BrowserViews must use this hook instead.
+   */
+  onWillDestroyWindow(listener: (window: BrowserWindow) => void): () => void {
+    this.willDestroyWindowListeners.add(listener)
+    return () => {
+      this.willDestroyWindowListeners.delete(listener)
+    }
+  }
+
+  private destroyManagedWindow(window: BrowserWindow): void {
+    if (window.isDestroyed()) return
+    for (const listener of this.willDestroyWindowListeners) {
+      try {
+        listener(window)
+      } catch (error) {
+        windowLog.warn(`will-destroy window listener failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    window.destroy()
+  }
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
@@ -479,7 +504,7 @@ export class WindowManager {
 
         this.pendingCloseTimeouts.set(wcId, setTimeout(() => {
           this.pendingCloseTimeouts.delete(wcId)
-          if (!window.isDestroyed()) window.destroy()
+          if (!window.isDestroyed()) this.destroyManagedWindow(window)
         }, 3000))
       }
       // If renderer not ready, allow default close behavior
@@ -594,9 +619,8 @@ export class WindowManager {
 
     const managed = this.windows.get(webContentsId)
     if (managed && !managed.window.isDestroyed()) {
-      // Remove close listener temporarily to avoid infinite loop,
-      // then destroy the window directly
-      managed.window.destroy()
+      // Bypass the intercepted `close` listener and destroy the window directly.
+      this.destroyManagedWindow(managed.window)
     }
   }
 

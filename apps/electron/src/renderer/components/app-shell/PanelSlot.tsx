@@ -24,6 +24,7 @@ import { useAppShellContext, AppShellProvider } from '@/context/AppShellContext'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { MainContentPanel } from './MainContentPanel'
 import { PANEL_MIN_WIDTH, RADIUS_EDGE, RADIUS_INNER } from './panel-constants'
+import { hideBrowserInstanceForPanel } from '@/lib/hide-browser-panel'
 
 interface PanelSlotProps {
   entry: PanelStackEntry
@@ -61,8 +62,14 @@ export function PanelSlot({
   const navState = parseRouteToNavigationState(entry.route)
 
   const handleClose = useCallback(() => {
-    closePanel(entry.id)
-  }, [closePanel, entry.id])
+    void hideBrowserInstanceForPanel(entry)
+      .then(() => {
+        closePanel(entry.id)
+      })
+      .catch((error) => {
+        console.warn('[PanelSlot] Failed to hide browser panel:', error)
+      })
+  }, [closePanel, entry])
 
   // Build close button for PanelHeader (via context override)
   const closeButton = useMemo(() => {

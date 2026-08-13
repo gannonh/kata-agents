@@ -675,6 +675,9 @@ export interface WindowCloseRequest {
 // Browser / navigation types (data shapes used by BroadcastEventMap)
 // ---------------------------------------------------------------------------
 
+/** Where a browser instance is currently presented. Independent of the instance itself. */
+export type BrowserSurface = 'panel' | 'detached'
+
 export interface BrowserInstanceInfo {
   id: string
   url: string
@@ -697,6 +700,10 @@ export interface BrowserInstanceInfo {
    * and main processes that pre-date the field working unchanged.
    */
   workspaceId?: string | null
+  /**
+   * Presentation surface. Missing on older main processes — treat as `detached`.
+   */
+  surface?: BrowserSurface
 }
 
 export interface DeepLinkNavigation {

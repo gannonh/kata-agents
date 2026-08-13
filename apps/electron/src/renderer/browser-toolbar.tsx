@@ -8,9 +8,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
-import { initReactI18next } from 'react-i18next'
+import { initReactI18next, useTranslation } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
-import { EyeOff, X, XCircle } from 'lucide-react'
+import { EyeOff, X, XCircle, AppWindow, PanelLeft } from 'lucide-react'
 import { setupI18n } from '@kata-sh/shared/i18n'
 import { BrowserControls } from '@kata-sh/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
@@ -35,6 +35,7 @@ interface ToolbarState {
   canGoBack: boolean
   canGoForward: boolean
   themeColor?: string | null
+  surface?: 'panel' | 'detached'
 }
 
 declare global {
@@ -49,6 +50,8 @@ declare global {
       setMenuGeometry: (open: boolean, height?: number) => Promise<void>
       hideWindow: () => Promise<void>
       closeWindowEntirely: () => Promise<void>
+      detachToWindow: () => Promise<void>
+      attachToPanel: () => Promise<void>
       onStateUpdate: (callback: (state: ToolbarState) => void) => () => void
       onThemeColor: (callback: (color: string | null) => void) => () => void
       onForceCloseMenu: (callback: (payload: { reason?: string }) => void) => () => void
@@ -61,12 +64,14 @@ declare global {
 /* ------------------------------------------------------------------ */
 
 function BrowserToolbarApp() {
+  const { t } = useTranslation()
   const [state, setState] = useState<ToolbarState>({
     url: 'about:blank',
     title: 'New Tab',
     isLoading: false,
     canGoBack: false,
     canGoForward: false,
+    surface: 'panel',
   })
   const [themeColor, setThemeColor] = useState<string | null>(null)
   const [windowMenuOpen, setWindowMenuOpen] = useState(false)
@@ -154,10 +159,26 @@ function BrowserToolbarApp() {
     void api?.hideWindow()
   }, [api])
 
+  const handleDetachToWindow = useCallback(() => {
+    setWindowMenuOpen(false)
+    void api?.detachToWindow()?.catch((error) => {
+      console.warn('[BrowserToolbar] Failed to detach browser:', error)
+    })
+  }, [api])
+
+  const handleAttachToPanel = useCallback(() => {
+    setWindowMenuOpen(false)
+    void api?.attachToPanel()?.catch((error) => {
+      console.warn('[BrowserToolbar] Failed to attach browser:', error)
+    })
+  }, [api])
+
   const handleCloseWindowEntirely = useCallback(() => {
     setWindowMenuOpen(false)
     void api?.closeWindowEntirely()
   }, [api])
+
+  const isPanel = state.surface === 'panel'
 
   return (
     <>
@@ -192,7 +213,7 @@ function BrowserToolbarApp() {
               <DropdownMenuTrigger asChild>
                 <HeaderIconButton
                   icon={<X className="h-3.5 w-3.5" />}
-                  aria-label="Browser window options"
+                  aria-label={t('browser.windowOptions')}
                   className={themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5'}
                   style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
                 />
@@ -208,11 +229,22 @@ function BrowserToolbarApp() {
               >
                 <StyledDropdownMenuItem onSelect={handleHideWindow}>
                   <EyeOff className="h-3.5 w-3.5" />
-                  Hide Window
+                  {t('browser.hideBrowser')}
                 </StyledDropdownMenuItem>
+                {isPanel ? (
+                  <StyledDropdownMenuItem onSelect={handleDetachToWindow}>
+                    <AppWindow className="h-3.5 w-3.5" />
+                    {t('browser.detachToWindow')}
+                  </StyledDropdownMenuItem>
+                ) : (
+                  <StyledDropdownMenuItem onSelect={handleAttachToPanel}>
+                    <PanelLeft className="h-3.5 w-3.5" />
+                    {t('browser.returnToPanel')}
+                  </StyledDropdownMenuItem>
+                )}
                 <StyledDropdownMenuItem variant="destructive" onSelect={handleCloseWindowEntirely}>
                   <XCircle className="h-3.5 w-3.5" />
-                  Close Window Entirely
+                  {t('browser.closeBrowser')}
                 </StyledDropdownMenuItem>
               </StyledDropdownMenuContent>
             </DropdownMenu>
