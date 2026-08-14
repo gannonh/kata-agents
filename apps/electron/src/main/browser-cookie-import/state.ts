@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { BrowserCookieImportState } from '@kata-sh/shared/protocol'
 import { DEFAULT_KATA_BROWSER_PROFILE_ID } from '@kata-sh/shared/protocol'
@@ -20,6 +20,16 @@ export type CookieImportStateStore = {
 
 export function cookieImportStatePath(userDataPath: string): string {
   return join(userDataPath, 'browser-cookie-import.json')
+}
+
+function discardStagedCookieDatabase(path: string): void {
+  for (const ext of ['', '-wal', '-shm'] as const) {
+    try {
+      unlinkSync(`${path}${ext}`)
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
 export function createFileCookieImportStateStore(userDataPath: string): CookieImportStateStore {
@@ -63,6 +73,10 @@ export function getLastImport(
 
 export function setPendingCookieImport(store: CookieImportStateStore, partition: string, stagingPath: string): void {
   const current = store.load()
+  const previous = current.pendingCookieImports[partition]
+  if (previous && previous !== stagingPath) {
+    discardStagedCookieDatabase(previous)
+  }
   store.save({
     ...current,
     pendingCookieImports: { ...current.pendingCookieImports, [partition]: stagingPath },

@@ -14,6 +14,7 @@ export type ValidatedCookie = {
 
 const CHROMIUM_EPOCH_OFFSET = 11644473600n
 
+/** Chromium Cookies SQLite `samesite` uses CookieSameSiteForStorage: 0 unspecified, 1 none, 2 lax, 3 strict. */
 export function chromiumSameSite(raw: number): CookieSameSite {
   switch (raw) {
     case 1:
