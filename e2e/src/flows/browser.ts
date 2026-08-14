@@ -65,6 +65,18 @@ export async function hideBrowser(page: Page, instanceId: string): Promise<void>
   }, instanceId);
 }
 
+export async function navigateBrowser(page: Page, instanceId: string, url: string): Promise<void> {
+  await page.evaluate(async ({ id, nextUrl }) => {
+    const api = (window as unknown as {
+      electronAPI?: { browserPane?: { navigate: (instanceId: string, url: string) => Promise<unknown> } }
+    }).electronAPI?.browserPane
+    if (!api) {
+      throw new Error("E2E browser: window.electronAPI.browserPane is unavailable. See e2e/README.md.")
+    }
+    await api.navigate(id, nextUrl)
+  }, { id: instanceId, nextUrl: url })
+}
+
 export async function listBrowserInstances(page: Page): Promise<Array<{ id: string; surface?: string }>> {
   return await page.evaluate(async () => {
     const api = (window as unknown as {

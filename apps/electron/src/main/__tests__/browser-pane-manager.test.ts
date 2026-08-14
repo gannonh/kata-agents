@@ -81,6 +81,7 @@ function createMockBrowserView() {
     webContents,
     setBounds: mock(() => {}),
     setAutoResize: mock(() => {}),
+    getBounds: mock(() => ({ x: 0, y: 0, width: 800, height: 600 })),
   }
 }
 
@@ -558,6 +559,14 @@ describe('BrowserPaneManager', () => {
     expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith(
       'https://duckduckgo.com/?q=kata%20agents%20browser%20tools'
     )
+  })
+
+  it('navigate keeps data URLs instead of sending them to search', async () => {
+    manager.createInstance('nav-data')
+    const dataUrl = 'data:text/html;charset=utf-8,<h1>Annotate fixture</h1>'
+    await manager.navigate('nav-data', dataUrl)
+    const instance = (manager as any).instances.get('nav-data')
+    expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith(dataUrl)
   })
 
   it('clears navigation timeout timer on success', async () => {

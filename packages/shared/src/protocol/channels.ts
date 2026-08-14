@@ -422,6 +422,13 @@ export const RPC_CHANNELS = {
     DETECT_COOKIE_SOURCES: 'browser-pane:detect-cookie-sources',
     IMPORT_COOKIES_FROM_BROWSER: 'browser-pane:import-cookies-from-browser',
     GET_COOKIE_IMPORT_STATE: 'browser-pane:get-cookie-import-state',
+    SET_ANNOTATE_MODE: 'browser-pane:set-annotate-mode',
+    CANCEL_ANNOTATE: 'browser-pane:cancel-annotate',
+    CANCEL_PENDING_ANNOTATION: 'browser-pane:cancel-pending-annotation',
+    DELETE_ANNOTATION: 'browser-pane:delete-annotation',
+    CLEAR_ANNOTATIONS: 'browser-pane:clear-annotations',
+    LIST_ANNOTATIONS: 'browser-pane:list-annotations',
+    ANNOTATION_STATE_CHANGED: 'browser-pane:annotation-state-changed',
   },
   automations: {
     GET: 'automations:get',

@@ -36,6 +36,12 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.DETECT_COOKIE_SOURCES,
   RPC_CHANNELS.browserPane.IMPORT_COOKIES_FROM_BROWSER,
   RPC_CHANNELS.browserPane.GET_COOKIE_IMPORT_STATE,
+  RPC_CHANNELS.browserPane.SET_ANNOTATE_MODE,
+  RPC_CHANNELS.browserPane.CANCEL_ANNOTATE,
+  RPC_CHANNELS.browserPane.CANCEL_PENDING_ANNOTATION,
+  RPC_CHANNELS.browserPane.DELETE_ANNOTATION,
+  RPC_CHANNELS.browserPane.CLEAR_ANNOTATIONS,
+  RPC_CHANNELS.browserPane.LIST_ANNOTATIONS,
 ] as const
 
 export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -247,6 +253,30 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
     )
   })
 
+  server.handle(RPC_CHANNELS.browserPane.SET_ANNOTATE_MODE, async (_ctx, id: string, enabled: boolean) => {
+    return browserPaneManager.setAnnotateMode(id, enabled)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.CANCEL_ANNOTATE, (_ctx, id: string) => {
+    browserPaneManager.cancelAnnotate(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.CANCEL_PENDING_ANNOTATION, (_ctx, id: string) => {
+    browserPaneManager.cancelPendingAnnotation(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.DELETE_ANNOTATION, (_ctx, id: string, annotationId: string) => {
+    browserPaneManager.deleteAnnotation(id, annotationId)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.CLEAR_ANNOTATIONS, (_ctx, id: string) => {
+    browserPaneManager.clearAnnotations(id)
+  })
+
+  server.handle(RPC_CHANNELS.browserPane.LIST_ANNOTATIONS, (_ctx, id: string) => {
+    return browserPaneManager.getAnnotationState(id)
+  })
+
   // Forward browser events to all locally-connected renderers. Workspace
   // isolation is enforced renderer-side (filterInstancesForWorkspace), which
   // handles both the local workspace id and the remote-mirror workspace id.
@@ -269,5 +299,9 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
 
   browserPaneManager.onInteracted((id) => {
     pushTyped(server, RPC_CHANNELS.browserPane.INTERACTED, { to: 'all' }, id)
+  })
+
+  browserPaneManager.onAnnotationStateChange((state) => {
+    pushTyped(server, RPC_CHANNELS.browserPane.ANNOTATION_STATE_CHANGED, { to: 'all' }, state)
   })
 }

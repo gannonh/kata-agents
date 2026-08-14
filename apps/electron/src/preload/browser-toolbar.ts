@@ -22,6 +22,9 @@ const CHANNELS = {
   ATTACH: 'browser-toolbar:attach',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
+  SET_ANNOTATE_MODE: 'browser-toolbar:set-annotate-mode',
+  ANNOTATION_STATE: 'browser-toolbar:annotation-state',
+  CLEAR_ANNOTATIONS: 'browser-toolbar:clear-annotations',
 } as const
 
 // Instance ID is passed via query parameter by BrowserPaneManager
@@ -39,6 +42,8 @@ contextBridge.exposeInMainWorld('browserToolbar', {
   closeWindowEntirely: () => ipcRenderer.invoke(CHANNELS.DESTROY, instanceId),
   detachToWindow: () => ipcRenderer.invoke(CHANNELS.DETACH, instanceId),
   attachToPanel: () => ipcRenderer.invoke(CHANNELS.ATTACH, instanceId),
+  setAnnotateMode: (enabled: boolean) => ipcRenderer.invoke(CHANNELS.SET_ANNOTATE_MODE, instanceId, enabled),
+  clearAnnotations: () => ipcRenderer.invoke(CHANNELS.CLEAR_ANNOTATIONS, instanceId),
   onStateUpdate: (callback: (state: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state)
     ipcRenderer.on(CHANNELS.STATE_UPDATE, handler)
@@ -53,5 +58,10 @@ contextBridge.exposeInMainWorld('browserToolbar', {
     const handler = (_event: Electron.IpcRendererEvent, payload: { reason?: string }) => callback(payload)
     ipcRenderer.on(CHANNELS.FORCE_CLOSE_MENU, handler)
     return () => { ipcRenderer.removeListener(CHANNELS.FORCE_CLOSE_MENU, handler) }
+  },
+  onAnnotationState: (callback: (state: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state)
+    ipcRenderer.on(CHANNELS.ANNOTATION_STATE, handler)
+    return () => { ipcRenderer.removeListener(CHANNELS.ANNOTATION_STATE, handler) }
   },
 })

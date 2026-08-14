@@ -761,9 +761,16 @@ export interface ElectronAPI {
     detectCookieSources(): Promise<BrowserCookieSource[]>
     importCookiesFromBrowser(args: ImportCookiesFromBrowserArgs): Promise<BrowserCookieImportResult>
     getCookieImportState(profileId?: string): Promise<BrowserCookieImportState | null>
+    setAnnotateMode(id: string, enabled: boolean): Promise<import('@kata-sh/shared/protocol').BrowserSetAnnotateModeResult>
+    cancelAnnotate(id: string): Promise<void>
+    cancelPendingAnnotation(id: string): Promise<void>
+    deleteAnnotation(id: string, annotationId: string): Promise<boolean>
+    clearAnnotations(id: string): Promise<void>
+    listAnnotations(id: string): Promise<import('@kata-sh/shared/protocol').BrowserAnnotationState>
     onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
     onRemoved(callback: (id: string) => void): () => void
     onInteracted(callback: (id: string) => void): () => void
+    onAnnotationStateChanged(callback: (state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void): () => void
   }
 
   // LLM Connections (provider configurations)

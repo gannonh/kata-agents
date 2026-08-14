@@ -10,10 +10,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { initReactI18next, useTranslation } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
-import { EyeOff, X, XCircle, AppWindow, PanelLeft } from 'lucide-react'
+import { EyeOff, X, XCircle, AppWindow, PanelLeft, Copy, MessageSquarePlus, Trash2 } from 'lucide-react'
 import { setupI18n } from '@kata-sh/shared/i18n'
 import { BrowserControls } from '@kata-sh/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
+import { isBlankBrowserUrl } from '../shared/browser-surface'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -38,6 +39,13 @@ interface ToolbarState {
   surface?: 'panel' | 'detached'
 }
 
+interface ToolbarAnnotationState {
+  mode: 'idle' | 'selecting' | 'composing'
+  count: number
+  pendingLabel: string | null
+  markdown: string
+}
+
 declare global {
   interface Window {
     browserToolbar: {
@@ -52,9 +60,12 @@ declare global {
       closeWindowEntirely: () => Promise<void>
       detachToWindow: () => Promise<void>
       attachToPanel: () => Promise<void>
+      setAnnotateMode: (enabled: boolean) => Promise<{ ok: boolean; reason?: string }>
+      clearAnnotations: () => Promise<void>
       onStateUpdate: (callback: (state: ToolbarState) => void) => () => void
       onThemeColor: (callback: (color: string | null) => void) => () => void
       onForceCloseMenu: (callback: (payload: { reason?: string }) => void) => () => void
+      onAnnotationState: (callback: (state: ToolbarAnnotationState) => void) => () => void
     }
   }
 }
@@ -75,7 +86,15 @@ function BrowserToolbarApp() {
   })
   const [themeColor, setThemeColor] = useState<string | null>(null)
   const [windowMenuOpen, setWindowMenuOpen] = useState(false)
+  const [annotationState, setAnnotationState] = useState<ToolbarAnnotationState>({
+    mode: 'idle',
+    count: 0,
+    pendingLabel: null,
+    markdown: '',
+  })
+  const [copied, setCopied] = useState(false)
   const menuContentRef = useRef<HTMLDivElement | null>(null)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const api = window.browserToolbar
 
@@ -100,6 +119,11 @@ function BrowserToolbarApp() {
     return api.onForceCloseMenu(() => {
       setWindowMenuOpen(false)
     })
+  }, [api])
+
+  useEffect(() => {
+    if (!api) return
+    return api.onAnnotationState(setAnnotationState)
   }, [api])
 
   useEffect(() => {
@@ -178,7 +202,27 @@ function BrowserToolbarApp() {
     void api?.closeWindowEntirely()
   }, [api])
 
+  const handleToggleAnnotate = useCallback(() => {
+    void api?.setAnnotateMode(annotationState.mode === 'idle')
+  }, [api, annotationState.mode])
+
+  const handleCopyAnnotations = useCallback(() => {
+    const markdown = annotationState.markdown.trim()
+    if (!markdown) return
+    void navigator.clipboard.writeText(markdown).then(() => {
+      setCopied(true)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 1400)
+    })
+  }, [annotationState.markdown])
+
+  const handleClearAnnotations = useCallback(() => {
+    void api?.clearAnnotations()
+  }, [api])
+
   const isPanel = state.surface === 'panel'
+  const annotateActive = annotationState.mode !== 'idle'
+  const annotateDisabled = isBlankBrowserUrl(state.url)
 
   return (
     <>
@@ -209,6 +253,43 @@ function BrowserToolbarApp() {
         onStop={handleStop}
         trailingContent={(
           <div className="ml-2 flex items-center gap-1.5 titlebar-no-drag">
+            <HeaderIconButton
+              id="browser-annotate-toggle"
+              icon={(
+                <span className="relative inline-flex">
+                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                  {annotationState.count > 0 ? (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-foreground px-0.5 text-[9px] font-semibold leading-none text-background">
+                      {annotationState.count}
+                    </span>
+                  ) : null}
+                </span>
+              )}
+              aria-label={t('browser.annotate')}
+              aria-pressed={annotateActive}
+              disabled={annotateDisabled}
+              onClick={handleToggleAnnotate}
+              className={annotateActive ? 'text-foreground bg-foreground/8' : (themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5')}
+              style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
+            />
+            {annotationState.count > 0 ? (
+              <>
+                <HeaderIconButton
+                  icon={<Copy className="h-3.5 w-3.5" />}
+                  aria-label={copied ? t('browser.annotationCopied') : t('browser.annotationCopy')}
+                  onClick={handleCopyAnnotations}
+                  className={themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5'}
+                  style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
+                />
+                <HeaderIconButton
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                  aria-label={t('browser.annotationClear')}
+                  onClick={handleClearAnnotations}
+                  className={themeColor ? '' : 'bg-background shadow-minimal hover:bg-foreground/5'}
+                  style={themeColor ? { color: 'var(--tb-fg)' } : undefined}
+                />
+              </>
+            ) : null}
             <DropdownMenu open={windowMenuOpen} onOpenChange={setWindowMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <HeaderIconButton
@@ -237,7 +318,12 @@ function BrowserToolbarApp() {
                     {t('browser.detachToWindow')}
                   </StyledDropdownMenuItem>
                 ) : (
-                  <StyledDropdownMenuItem onSelect={handleAttachToPanel}>
+                  <StyledDropdownMenuItem
+                    onSelect={handleAttachToPanel}
+                    aria-label={annotationState.count > 0
+                      ? `${t('browser.returnToPanel')}. ${t('browser.annotationSendInPanel')}`
+                      : t('browser.returnToPanel')}
+                  >
                     <PanelLeft className="h-3.5 w-3.5" />
                     {t('browser.returnToPanel')}
                   </StyledDropdownMenuItem>

@@ -402,9 +402,16 @@ export const CHANNEL_MAP = {
   'browserPane.detectCookieSources': invoke(RPC_CHANNELS.browserPane.DETECT_COOKIE_SOURCES),
   'browserPane.importCookiesFromBrowser': invoke(RPC_CHANNELS.browserPane.IMPORT_COOKIES_FROM_BROWSER),
   'browserPane.getCookieImportState': invoke(RPC_CHANNELS.browserPane.GET_COOKIE_IMPORT_STATE),
+  'browserPane.setAnnotateMode': invoke(RPC_CHANNELS.browserPane.SET_ANNOTATE_MODE),
+  'browserPane.cancelAnnotate': invoke(RPC_CHANNELS.browserPane.CANCEL_ANNOTATE),
+  'browserPane.cancelPendingAnnotation': invoke(RPC_CHANNELS.browserPane.CANCEL_PENDING_ANNOTATION),
+  'browserPane.deleteAnnotation': invoke(RPC_CHANNELS.browserPane.DELETE_ANNOTATION),
+  'browserPane.clearAnnotations': invoke(RPC_CHANNELS.browserPane.CLEAR_ANNOTATIONS),
+  'browserPane.listAnnotations': invoke(RPC_CHANNELS.browserPane.LIST_ANNOTATIONS),
   'browserPane.onStateChanged': listener(RPC_CHANNELS.browserPane.STATE_CHANGED),
   'browserPane.onRemoved': listener(RPC_CHANNELS.browserPane.REMOVED),
   'browserPane.onInteracted': listener(RPC_CHANNELS.browserPane.INTERACTED),
+  'browserPane.onAnnotationStateChanged': listener(RPC_CHANNELS.browserPane.ANNOTATION_STATE_CHANGED),
 
   // LLM Connections
   listLlmConnections: invoke(RPC_CHANNELS.llmConnections.LIST),
