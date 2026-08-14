@@ -1,7 +1,3 @@
-import { createRequire } from 'node:module'
-
-const require = createRequire(import.meta.url)
-
 export type OpenCookieDatabaseOptions = {
   readOnly?: boolean
   readBigInts?: boolean
@@ -23,6 +19,30 @@ export type OpenCookieDatabase = (
   options?: OpenCookieDatabaseOptions,
 ) => CookieSqliteDatabase
 
+type BunSqliteModule = {
+  Database: new (
+    filename: string,
+    options?: { readonly?: boolean; safeIntegers?: boolean },
+  ) => CookieSqliteDatabase
+}
+
+type NodeSqliteModule = {
+  DatabaseSync: new (
+    filename: string,
+    options?: { readOnly?: boolean; readBigInts?: boolean },
+  ) => CookieSqliteDatabase
+}
+
+function loadSqliteBinding(moduleId: 'bun:sqlite' | 'node:sqlite'): BunSqliteModule | NodeSqliteModule {
+  // Use the ambient CJS `require` (bun tests and esbuild main.cjs). Do not use
+  // createRequire(import.meta.url): esbuild CJS compiles that to
+  // createRequire(undefined) and crashes Electron before any window opens.
+  if (typeof require !== 'function') {
+    throw new Error(`Cannot load ${moduleId}: no CJS require in this runtime`)
+  }
+  return require(moduleId) as BunSqliteModule | NodeSqliteModule
+}
+
 /**
  * Open a Chromium cookies SQLite database.
  * Electron/Node uses `node:sqlite`; bun tests use `bun:sqlite`.
@@ -30,17 +50,13 @@ export type OpenCookieDatabase = (
 export const openCookieDatabase: OpenCookieDatabase = (path, options = {}) => {
   const moduleId = typeof process.versions.bun === 'string' ? 'bun:sqlite' : 'node:sqlite'
   if (moduleId === 'bun:sqlite') {
-    const { Database } = require(moduleId) as {
-      Database: new (filename: string, options?: { readonly?: boolean; safeIntegers?: boolean }) => CookieSqliteDatabase
-    }
+    const { Database } = loadSqliteBinding(moduleId) as BunSqliteModule
     return new Database(path, {
       readonly: options.readOnly ?? false,
       safeIntegers: options.readBigInts ?? false,
     })
   }
-  const { DatabaseSync } = require(moduleId) as {
-    DatabaseSync: new (filename: string, options?: { readOnly?: boolean; readBigInts?: boolean }) => CookieSqliteDatabase
-  }
+  const { DatabaseSync } = loadSqliteBinding(moduleId) as NodeSqliteModule
   return new DatabaseSync(path, {
     readOnly: options.readOnly ?? false,
     readBigInts: options.readBigInts ?? false,

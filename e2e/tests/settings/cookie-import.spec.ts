@@ -12,7 +12,7 @@ const SECRET_PATTERNS = [
 test.describe(`Chrome cookie import settings ${E2E_TAGS.settings}`, () => {
   test("shows a Chrome profile picker without secret paths or keychain details", async ({
     authenticatedAppWindow,
-  }) => {
+  }, testInfo) => {
     await openBrowserSettings(authenticatedAppWindow);
 
     const page = authenticatedAppWindow.getByTestId("browser-settings-page");
@@ -28,5 +28,10 @@ test.describe(`Chrome cookie import settings ${E2E_TAGS.settings}`, () => {
     for (const pattern of SECRET_PATTERNS) {
       expect(copy).not.toMatch(pattern);
     }
+
+    await testInfo.attach("cookie-import-settings", {
+      body: await authenticatedAppWindow.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
   });
 });
