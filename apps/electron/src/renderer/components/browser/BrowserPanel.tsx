@@ -31,6 +31,7 @@ import {
   BrowserAnnotationTray,
   useBrowserAnnotationState,
 } from './BrowserAnnotationChrome'
+import { isAnnotateChromeDisabled } from './annotation-ui'
 
 const PARKED_BOUNDS: BrowserViewRect = { x: 0, y: 0, width: 0, height: 0 }
 
@@ -98,7 +99,7 @@ export function BrowserPanel({ instanceId }: BrowserPanelProps) {
           leadingAction={leadingAction}
           closeButton={rightSidebarButton}
           annotationState={annotationState}
-          annotateDisabled={isBlank}
+          annotateDisabled={isAnnotateChromeDisabled(isBlank, instance?.agentControlActive)}
           onNavigate={(nextUrl) => {
             setRequestedUrl(nextUrl)
           }}

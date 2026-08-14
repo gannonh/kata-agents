@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { clampGrabPayload } from '../grab-payload'
+import { annotationDocumentKey, clampGrabPayload, sanitizeGrabUrl } from '../grab-payload'
 
 function makeRawPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -168,5 +168,30 @@ describe('clampGrabPayload', () => {
       }),
     )
     expect(payload?.page.sanitizedUrl).toBe('')
+  })
+
+  it('strips HTTP credentials from persisted annotation URLs', () => {
+    expect(sanitizeGrabUrl('https://user:password@example.com/page?token=1#hash')).toBe(
+      'https://example.com/page',
+    )
+    expect(clampGrabPayload(
+      makeRawPayload({
+        page: {
+          ...(makeRawPayload().page as Record<string, unknown>),
+          sanitizedUrl: 'https://user:password@example.com/account',
+        },
+      }),
+    )?.page.sanitizedUrl).toBe('https://example.com/account')
+  })
+})
+
+describe('annotationDocumentKey', () => {
+  it('keeps query identity while stripping credentials and hash', () => {
+    expect(annotationDocumentKey('https://user:password@example.com/record?id=1#top')).toBe(
+      'https://example.com/record?id=1',
+    )
+    expect(annotationDocumentKey('https://example.com/record?id=1')).not.toBe(
+      annotationDocumentKey('https://example.com/record?id=2'),
+    )
   })
 })

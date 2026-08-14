@@ -798,6 +798,7 @@ describe('BrowserPaneManager', () => {
         canGoForward: false,
         themeColor: '#123456',
         surface: 'detached',
+        agentControlActive: false,
       },
     ])
   })
@@ -830,6 +831,7 @@ describe('BrowserPaneManager', () => {
         canGoForward: true,
         themeColor: '#654321',
         surface: 'panel',
+        agentControlActive: false,
       },
     ])
   })
@@ -1093,6 +1095,17 @@ describe('BrowserPaneManager', () => {
       expect(instance.nativeOverlayView.setBounds).toHaveBeenCalledWith({ x: 0, y: 48, width: 1200, height: 852 })
       expect(instance.nativeOverlayView.webContents.focus).not.toHaveBeenCalled()
       expect(manager.listInstances().find(i => i.id === 'ac-idle')?.agentControlActive).toBe(true)
+    })
+
+    it('rejects annotate mode while agent control owns the page', async () => {
+      manager.createInstance('ac-annotate')
+      manager.bindSession('ac-annotate', 'sess-annotate')
+      manager.setAgentControl('sess-annotate', { displayName: 'Navigate Page' })
+
+      expect(await manager.setAnnotateMode('ac-annotate', true)).toEqual({
+        ok: false,
+        reason: 'not-authorized',
+      })
     })
 
     it('emits state change when agent control is set and cleared', () => {

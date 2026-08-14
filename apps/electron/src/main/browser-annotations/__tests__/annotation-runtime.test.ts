@@ -344,4 +344,72 @@ describe('BrowserAnnotationRuntime', () => {
     expect(guest.overlayScripts.some((code) => code.includes('__kataGrab'))).toBe(true)
     expect(guest.isolatedScripts.some((code) => code.includes('const enabled = false'))).toBe(true)
   })
+
+  it('hides markers when only the query string changes', async () => {
+    let currentUrl = 'https://example.com/record?id=1'
+    const guest = createGuest()
+    const runtime = new BrowserAnnotationRuntime(() => ({
+      guest,
+      overlay: createGuest(),
+      viewportSize: () => ({ width: 800, height: 600 }),
+      currentUrl: () => currentUrl,
+    }), labels)
+    const added = runtime.add('page-a', 'Keep this note', 'change', makePayload())
+    expect(added).not.toBeNull()
+    await Promise.resolve()
+
+    currentUrl = 'https://example.com/record?id=2'
+    runtime.handleNavigated('page-a', true)
+    await Promise.resolve()
+    const last = guest.isolatedScripts.at(-1) ?? ''
+    expect(last).toContain('const markers = []')
+    expect(last).not.toContain(added!.id)
+    expect(runtime.list('page-a')).toHaveLength(1)
+  })
+
+  it('does not persist a composer submit after document navigation', async () => {
+    const payload = makePayload()
+    let resolveComposer: ((value: unknown) => void) | undefined
+    let grabCalls = 0
+    const guest = createGuest({
+      executeJavaScript: async (code) => {
+        if (code.includes('Grab not armed')) {
+          grabCalls += 1
+          if (grabCalls === 1) return payload
+          return new Promise(() => {})
+        }
+        return true
+      },
+    })
+    const overlay = createGuest({
+      executeJavaScript: async (code) => {
+        if (code.includes('__kataAnnotationComposerResolve = resolve')) {
+          return new Promise((resolve) => {
+            resolveComposer = resolve
+          })
+        }
+        return true
+      },
+    })
+    let currentUrl = 'https://example.com/pricing'
+    const runtime = new BrowserAnnotationRuntime(() => ({
+      guest,
+      overlay,
+      viewportSize: () => ({ width: 800, height: 600 }),
+      currentUrl: () => currentUrl,
+    }), labels)
+
+    expect(await runtime.setEnabled('page-a', true)).toEqual({ ok: true })
+    await waitForMode(runtime, 'page-a', 'composing')
+    for (let i = 0; i < 20 && !resolveComposer; i += 1) {
+      await Promise.resolve()
+    }
+    expect(resolveComposer).toBeDefined()
+    currentUrl = 'https://example.com/checkout'
+    runtime.handleNavigated('page-a', true)
+    resolveComposer?.({ kind: 'submit', comment: 'stale note from previous page', intent: 'fix' })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(runtime.list('page-a')).toEqual([])
+  })
 })

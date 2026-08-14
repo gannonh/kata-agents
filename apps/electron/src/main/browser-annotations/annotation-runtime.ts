@@ -26,7 +26,7 @@ import {
 } from '../../shared/browser-annotations/store'
 import { BrowserGrabSessionController } from './grab-session-controller'
 import { buildGuestOverlayScript } from './grab-guest-script'
-import { sanitizeGrabUrl } from './grab-payload'
+import { annotationDocumentKey } from './grab-payload'
 import {
   buildAwaitAnnotationComposerScript,
   buildHideAnnotationComposerScript,
@@ -70,6 +70,7 @@ export class BrowserAnnotationRuntime {
   private readonly store: BrowserAnnotationStore
   private readonly grab = new BrowserGrabSessionController()
   private readonly sessions = new Map<string, SessionState>()
+  private readonly documentKeys = new Map<string, string>()
   private stateCallback: ((state: BrowserAnnotationState) => void) | null = null
 
   constructor(
@@ -129,6 +130,11 @@ export class BrowserAnnotationRuntime {
       createdAt: new Date().toISOString(),
       payload: createBrowserAnnotationPayload(payload),
     })
+    if (!annotation) return null
+    this.documentKeys.set(
+      annotation.id,
+      annotationDocumentKey(this.resolvePage(instanceId)?.currentUrl?.() ?? payload.page.sanitizedUrl),
+    )
     this.ensure(instanceId)
     this.emit(instanceId)
     void this.syncMarkers(instanceId)
@@ -138,6 +144,7 @@ export class BrowserAnnotationRuntime {
   delete(instanceId: string, annotationId: string): boolean {
     const deleted = this.store.delete(instanceId, annotationId)
     if (deleted) {
+      this.documentKeys.delete(annotationId)
       this.emit(instanceId)
       void this.syncMarkers(instanceId)
     }
@@ -145,6 +152,7 @@ export class BrowserAnnotationRuntime {
   }
 
   clear(instanceId: string): void {
+    this.forgetDocumentKeys(instanceId)
     this.store.clear(instanceId)
     this.emit(instanceId)
     void this.syncMarkers(instanceId)
@@ -157,6 +165,7 @@ export class BrowserAnnotationRuntime {
   destroy(instanceId: string): void {
     const session = this.sessions.get(instanceId)
     if (session) session.syncEpoch += 1
+    this.forgetDocumentKeys(instanceId)
     this.store.clear(instanceId)
     this.stop(instanceId)
     this.sessions.delete(instanceId)
@@ -172,18 +181,27 @@ export class BrowserAnnotationRuntime {
         void page.overlay.executeJavaScript(buildHideAnnotationComposerScript())
       }
     }
-    if (session.mode !== 'idle') {
+    if (documentChanged) {
+      const currentKey = annotationDocumentKey(this.resolvePage(instanceId)?.currentUrl?.() ?? '')
+      session.hiddenMarkerIds = new Set(
+        this.store.list(instanceId)
+          .filter((item) => (this.documentKeys.get(item.id) ?? item.payload.page.sanitizedUrl) !== currentKey)
+          .map((item) => item.id),
+      )
+      if (session.mode !== 'idle') {
+        session.generation += 1
+        session.mode = 'selecting'
+        session.pending = null
+        session.loopRunning = false
+        this.emit(instanceId)
+        void this.syncMarkers(instanceId)
+        void this.runLoop(instanceId)
+        return
+      }
+    } else if (session.mode !== 'idle') {
       session.mode = 'selecting'
       session.pending = null
       this.emit(instanceId)
-    }
-    if (documentChanged) {
-      const currentUrl = sanitizeGrabUrl(this.resolvePage(instanceId)?.currentUrl?.() ?? '')
-      session.hiddenMarkerIds = new Set(
-        this.store.list(instanceId)
-          .filter((item) => item.payload.page.sanitizedUrl !== currentUrl)
-          .map((item) => item.id),
-      )
     }
     void this.syncMarkers(instanceId)
   }
@@ -291,6 +309,7 @@ export class BrowserAnnotationRuntime {
         session.pending = result.payload
         this.emit(instanceId)
         await this.syncMarkers(instanceId)
+        if (this.sessions.get(instanceId)?.generation !== generation) break
         const outcome = await this.collectComposer(instanceId, page, result.payload)
         if (this.sessions.get(instanceId)?.generation !== generation) break
         if (outcome.kind === 'submit') {
@@ -310,8 +329,6 @@ export class BrowserAnnotationRuntime {
         }
         this.emit(instanceId)
         void this.syncMarkers(instanceId)
-      } else {
-        session.loopRunning = false
       }
     }
   }
@@ -401,6 +418,12 @@ export class BrowserAnnotationRuntime {
       BROWSER_ANNOTATION_VIEWPORT_BRIDGE_WORLD_ID,
       [{ code: buildBrowserAnnotationViewportBridgeScript(options) }],
     )
+  }
+
+  private forgetDocumentKeys(instanceId: string): void {
+    for (const item of this.store.list(instanceId)) {
+      this.documentKeys.delete(item.id)
+    }
   }
 
   private emit(instanceId: string): void {

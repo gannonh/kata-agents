@@ -72,6 +72,30 @@ describe('annotation marker geometry', () => {
     expect(cramped.below).toBe(false)
     expect(cramped.y).toBe(500)
   })
+
+  it('keeps the centered composer card inside horizontal viewport bounds', () => {
+    const card = { width: 352, height: 280 }
+    const nearLeft = placeAnnotationComposer(
+      { x: 4, y: 40, width: 20, height: 20 },
+      { width: 800, height: 720 },
+      card,
+    )
+    expect(nearLeft.x).toBe(188)
+
+    const nearRight = placeAnnotationComposer(
+      { x: 780, y: 40, width: 16, height: 20 },
+      { width: 800, height: 720 },
+      card,
+    )
+    expect(nearRight.x).toBe(612)
+
+    const narrow = placeAnnotationComposer(
+      { x: 10, y: 40, width: 20, height: 20 },
+      { width: 300, height: 720 },
+      card,
+    )
+    expect(narrow.x).toBe(150)
+  })
 })
 
 describe('viewport bridge script', () => {

@@ -22,6 +22,10 @@ export function isAnnotateModeActive(mode: BrowserAnnotateMode): boolean {
   return mode !== 'idle'
 }
 
+export function isAnnotateChromeDisabled(isBlankUrl: boolean, agentControlActive = false): boolean {
+  return isBlankUrl || agentControlActive
+}
+
 export function annotationListLabel(annotation: BrowserPageAnnotation): string {
   return (
     annotation.payload.target.accessibility.accessibleName ||

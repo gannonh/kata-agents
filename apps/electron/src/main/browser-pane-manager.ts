@@ -431,6 +431,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   }
 
   async setAnnotateMode(id: string, enabled: boolean) {
+    if (enabled) {
+      const instance = this.instances.get(id)
+      if (instance?.agentControl?.active) {
+        return { ok: false as const, reason: 'not-authorized' as const }
+      }
+    }
     return this.annotations.setEnabled(id, enabled)
   }
 
@@ -2651,6 +2657,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       canGoForward: instance.canGoForward,
       themeColor: instance.themeColor,
       surface: instance.surface,
+      agentControlActive: !!instance.agentControl?.active,
     }
     instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.STATE_UPDATE, state)
     this.pushToolbarAnnotationState(instance)
@@ -3154,6 +3161,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           displayName: meta.displayName,
           intent: meta.intent,
         }
+        void this.annotations.setEnabled(instance.id, false)
 
         // Backfill workspaceId for instances that were created before the
         // workspace was known (legacy callers / pre-workspaceId code paths).
@@ -3165,6 +3173,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
         this.reapplyAgentControlVisual(instance)
         this.emitStateChange(instance)
+        this.pushToolbarState(instance)
 
         mainLog.info(`[browser-pane] agent control activated session=${sessionId} label=${label}`)
         return
@@ -3183,6 +3192,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         this.applyAgentControlLock(instance, false)
         this.updateNativeOverlayState(instance)
         this.emitStateChange(instance)
+        this.pushToolbarState(instance)
         mainLog.info(`[browser-pane] agent control released session=${sessionId}`)
       }
     }
@@ -3212,6 +3222,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.applyAgentControlLock(instance, false)
     this.updateNativeOverlayState(instance)
     this.emitStateChange(instance)
+    this.pushToolbarState(instance)
     mainLog.info(`[browser-pane] agent control released instance=${instanceId}${sessionId ? ` session=${sessionId}` : ''}`)
 
     return { released: true }

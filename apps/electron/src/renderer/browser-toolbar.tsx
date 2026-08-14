@@ -15,6 +15,7 @@ import { setupI18n } from '@kata-sh/shared/i18n'
 import { BrowserControls } from '@kata-sh/ui'
 import { HeaderIconButton } from '@/components/ui/HeaderIconButton'
 import { isBlankBrowserUrl } from '../shared/browser-surface'
+import { isAnnotateChromeDisabled } from './components/browser/annotation-ui'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -37,6 +38,7 @@ interface ToolbarState {
   canGoForward: boolean
   themeColor?: string | null
   surface?: 'panel' | 'detached'
+  agentControlActive?: boolean
 }
 
 interface ToolbarAnnotationState {
@@ -222,7 +224,7 @@ function BrowserToolbarApp() {
 
   const isPanel = state.surface === 'panel'
   const annotateActive = annotationState.mode !== 'idle'
-  const annotateDisabled = isBlankBrowserUrl(state.url)
+  const annotateDisabled = isAnnotateChromeDisabled(isBlankBrowserUrl(state.url), state.agentControlActive)
 
   return (
     <>

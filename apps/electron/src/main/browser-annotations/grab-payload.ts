@@ -7,25 +7,43 @@ import {
 
 const SAFE_GRAB_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:'])
 
-export function sanitizeGrabUrl(rawUrl: unknown): string {
+function parseSafeGrabUrl(rawUrl: unknown): URL | 'about:blank' | null {
   const str = typeof rawUrl === 'string' ? rawUrl : ''
   if (!str) {
-    return ''
+    return null
   }
   try {
     const url = new URL(str)
     if (url.protocol === 'about:') {
-      return url.toString() === 'about:blank' ? 'about:blank' : ''
+      return url.toString() === 'about:blank' ? 'about:blank' : null
     }
     if (!SAFE_GRAB_URL_PROTOCOLS.has(url.protocol)) {
-      return ''
+      return null
     }
-    url.search = ''
+    url.username = ''
+    url.password = ''
     url.hash = ''
-    return url.toString()
+    return url
   } catch {
-    return ''
+    return null
   }
+}
+
+/** Origin + path only. Query, hash, and HTTP credentials are stripped. */
+export function sanitizeGrabUrl(rawUrl: unknown): string {
+  const parsed = parseSafeGrabUrl(rawUrl)
+  if (parsed === 'about:blank') return 'about:blank'
+  if (!parsed) return ''
+  parsed.search = ''
+  return parsed.toString()
+}
+
+/** In-memory document identity: keeps query, strips credentials and hash. */
+export function annotationDocumentKey(rawUrl: unknown): string {
+  const parsed = parseSafeGrabUrl(rawUrl)
+  if (parsed === 'about:blank') return 'about:blank'
+  if (!parsed) return ''
+  return parsed.toString()
 }
 
 export function clampGrabPayload(raw: unknown): BrowserGrabPayload | null {

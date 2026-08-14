@@ -8,6 +8,7 @@ import {
   sendAnnotationMarkdown,
   sessionPickerLabel,
   shouldEnableAnnotateMode,
+  isAnnotateChromeDisabled,
   workspaceSessionsForPicker,
   type AnnotationSessionOption,
 } from '../annotation-ui'
@@ -86,6 +87,9 @@ describe('annotation UI helpers', () => {
     expect(shouldEnableAnnotateMode('composing')).toBe(false)
     expect(isAnnotateModeActive('idle')).toBe(false)
     expect(isAnnotateModeActive('selecting')).toBe(true)
+    expect(isAnnotateChromeDisabled(true)).toBe(true)
+    expect(isAnnotateChromeDisabled(false, true)).toBe(true)
+    expect(isAnnotateChromeDisabled(false, false)).toBe(false)
   })
 
   it('filters picker sessions to the active workspace', () => {

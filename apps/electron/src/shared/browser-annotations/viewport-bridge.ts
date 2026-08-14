@@ -77,10 +77,14 @@ export function placeAnnotationComposer(
   card: { width: number; height: number } = { width: 352, height: 280 },
 ): { x: number; y: number; below: boolean } {
   const below = rect.y + rect.height + 10 + card.height < size.height - 12
-  const x = Math.min(
-    Math.max(12, rect.x + rect.width / 2),
-    Math.max(12, size.width - 12),
-  )
+  const margin = 12
+  const halfWidth = card.width / 2
+  const minX = halfWidth + margin
+  const maxX = size.width - halfWidth - margin
+  const preferredX = rect.x + rect.width / 2
+  const x = maxX < minX
+    ? size.width / 2
+    : Math.min(Math.max(minX, preferredX), maxX)
   const y = below
     ? Math.min(rect.y + rect.height, size.height - 12)
     : Math.max(12, rect.y)
