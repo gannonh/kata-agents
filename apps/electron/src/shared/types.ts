@@ -208,6 +208,11 @@ import type {
   WorkspaceSettings,
   PermissionModeState,
   BrowserInstanceInfo,
+  BrowserCookieSource,
+  BrowserCookieImportResult,
+  BrowserCookieImportState,
+  CookieImportErrorCode,
+  ImportCookiesFromBrowserArgs,
   DeepLinkNavigation,
   TestAutomationPayload,
   TestAutomationResult,
@@ -753,6 +758,9 @@ export interface ElectronAPI {
     attachToPanel(id: string): Promise<void>
     setPanelBounds(id: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
     emptyStateLaunch(payload: BrowserEmptyStateLaunchPayload): Promise<BrowserEmptyStateLaunchResult>
+    detectCookieSources(): Promise<BrowserCookieSource[]>
+    importCookiesFromBrowser(args: ImportCookiesFromBrowserArgs): Promise<BrowserCookieImportResult>
+    getCookieImportState(profileId?: string): Promise<BrowserCookieImportState | null>
     onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
     onRemoved(callback: (id: string) => void): () => void
     onInteracted(callback: (id: string) => void): () => void

@@ -380,6 +380,7 @@ export interface SettingsMenuItem {
  */
 const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   app: 'ToggleRight',
+  browser: 'Globe',
   ai: 'Sparkles',
   appearance: 'Palette',
   input: 'Keyboard',

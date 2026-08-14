@@ -5,6 +5,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Features
 
 - **Integrated browser panel** — New Browser now opens in the app shell by default, with HTML address-bar chrome and a close control. Detach to a native window and return without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
+- **Import Chrome cookies** — Import cookies from a local Google Chrome profile into Kata's shared browser session so signed-in sites work in the integrated panel and detached windows ([#30](https://github.com/gannonh/kata-agents/issues/30)).
 
 ## Improvements
 

@@ -27,6 +27,7 @@ import {
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@kata-sh/shared/config'
 import { CodedError } from '@kata-sh/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
+import { prepareBrowserCookiePartition } from './browser-cookie-import/electron-runtime'
 import type {
   IBrowserPaneManager,
   BrowserInstanceSnapshot,
@@ -388,6 +389,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const ownerSessionId = ownerType === 'session' ? (options?.ownerSessionId ?? null) : null
     const workspaceId = options?.workspaceId ?? null
     const surface = resolveCreateSurface(options)
+
+    prepareBrowserCookiePartition()
 
     if (this.instances.has(instanceId)) {
       mainLog.warn(`[browser-pane] Instance already exists, reusing: ${instanceId}`)

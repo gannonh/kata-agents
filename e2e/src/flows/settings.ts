@@ -5,12 +5,24 @@ import { E2E_TIMEOUTS } from "../config/timeouts.ts";
 export type ThemeMode = "system" | "light" | "dark";
 
 /**
- * Open the Appearance settings page via the renderer navigation event.
- * Mirrors navigate(routes.view.settings('appearance')) in
+ * Open a settings page via the renderer navigation event.
+ * Mirrors navigate(routes.view.settings(...)) in
  * apps/electron/src/renderer/lib/navigate.ts: the NavigationContext listens for
  * the 'kata-agent-navigate' event with detail `{ route }`. Driving navigation
  * directly avoids depending on the i18n-dependent top-bar menu DOM.
  */
+export async function openBrowserSettings(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent("kata-agent-navigate", { detail: { route: "settings/browser" } }),
+    );
+  });
+  await page.getByTestId("browser-settings-page").waitFor({
+    state: "visible",
+    timeout: E2E_TIMEOUTS.authMs,
+  });
+}
+
 export async function openAppearanceSettings(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.dispatchEvent(
