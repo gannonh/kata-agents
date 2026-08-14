@@ -43,9 +43,17 @@ export type CookieSetDetails = {
   expirationDate?: number
 }
 
+export type SessionCookie = {
+  name: string
+  domain?: string
+  path?: string
+  secure?: boolean
+}
+
 export type CookieImportSession = {
   cookies: {
     set: (details: CookieSetDetails) => Promise<void>
+    get: (filter?: { url?: string }) => Promise<SessionCookie[]>
     remove: (url: string, name: string) => Promise<void>
     flushStore: () => Promise<void>
   }
@@ -343,7 +351,7 @@ export async function importCookiesFromDetectedBrowser(
       return fail('empty-import')
     }
 
-    await targetSession.clearStorageData({ storages: ['cookies'] })
+    const existingCookies = await readExistingCookies(targetSession)
 
     let memoryLoaded = 0
     let memoryFailed = 0
@@ -374,13 +382,17 @@ export async function importCookiesFromDetectedBrowser(
 
     log('memory load', { loaded: memoryLoaded, failed: memoryFailed, domains: domainSet.size })
 
-    let warning: BrowserCookieImportSummary['warning']
-    if (memoryFailed > 0 && stagingAvailable) {
-      setPendingCookieImport(store, partition, stagingCookiesPath)
-    } else if (memoryLoaded === 0) {
+    if (memoryLoaded === 0) {
       clearPendingCookieImport(store, partition)
       discardFile(stagingCookiesPath)
       return fail('session-unavailable')
+    }
+
+    await removeUnreplacedCookies(targetSession, existingCookies, decryptedCookies)
+
+    let warning: BrowserCookieImportSummary['warning']
+    if (memoryFailed > 0 && stagingAvailable) {
+      setPendingCookieImport(store, partition, stagingCookiesPath)
     } else if (memoryFailed > 0) {
       clearPendingCookieImport(store, partition)
       discardFile(stagingCookiesPath)
@@ -434,6 +446,37 @@ export async function importCookiesFromDetectedBrowser(
   } finally {
     try {
       sourceSnapshot.cleanup()
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+function cookieIdentity(name: string, domain: string | undefined, path: string | undefined): string {
+  const host = (domain ?? '').startsWith('.') ? (domain ?? '').slice(1) : (domain ?? '')
+  return `${name}\0${host}\0${path && path.length > 0 ? path : '/'}`
+}
+
+async function readExistingCookies(session: CookieImportSession): Promise<SessionCookie[]> {
+  try {
+    return await session.cookies.get({})
+  } catch {
+    return []
+  }
+}
+
+async function removeUnreplacedCookies(
+  session: CookieImportSession,
+  existing: SessionCookie[],
+  imported: Array<{ name: string; domain: string; path: string }>,
+): Promise<void> {
+  const importedKeys = new Set(imported.map((cookie) => cookieIdentity(cookie.name, cookie.domain, cookie.path)))
+  for (const cookie of existing) {
+    if (importedKeys.has(cookieIdentity(cookie.name, cookie.domain, cookie.path))) continue
+    const url = deriveUrl(cookie.domain ?? '', cookie.secure === true)
+    if (!url) continue
+    try {
+      await session.cookies.remove(url, cookie.name)
     } catch {
       /* best-effort */
     }

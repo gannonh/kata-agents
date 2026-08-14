@@ -26,6 +26,7 @@ describe('cookie import RPC boundary', () => {
         getSession: () => ({
           cookies: {
             set: async () => {},
+            get: async () => [],
             remove: async () => {},
             flushStore: async () => {},
           },

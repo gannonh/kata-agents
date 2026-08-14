@@ -30,7 +30,7 @@ export function cookieImportStatusI18n(lastImport: BrowserCookieImportState | nu
       values: {
         source: lastImport.source.label,
         profile: lastImport.source.profileName,
-        loaded: lastImport.summary.warning.loadedCookies,
+        count: lastImport.summary.warning.loadedCookies,
         failed: lastImport.summary.warning.failedCookies,
       },
     }

@@ -23,18 +23,25 @@ function chromeBrowser(cookiesPath: string): DetectedBrowser {
 
 function makeRuntime(userDataPath: string, logs: string[] = []): CookieImportRuntime & {
   cookiesSet: ReturnType<typeof mock>
+  cookiesGet: ReturnType<typeof mock>
+  cookiesRemove: ReturnType<typeof mock>
   clearStorageData: ReturnType<typeof mock>
 } {
   const cookiesSet = mock(async () => {})
+  const cookiesGet = mock(async () => [])
+  const cookiesRemove = mock(async () => {})
   const clearStorageData = mock(async () => {})
   return {
     cookiesSet,
+    cookiesGet,
+    cookiesRemove,
     clearStorageData,
     getUserDataPath: () => userDataPath,
     getSession: () => ({
       cookies: {
         set: cookiesSet,
-        remove: mock(async () => {}),
+        get: cookiesGet,
+        remove: cookiesRemove,
         flushStore: mock(async () => {}),
       },
       clearStorageData,
@@ -74,7 +81,7 @@ describe('importCookiesFromDetectedBrowser', () => {
       expect(result.summary.importedCookies).toBe(2)
       expect(result.summary.domains).toContain('example.com')
       expect(result.source.profileName).toBe('Person 1')
-      expect(runtime.clearStorageData).toHaveBeenCalled()
+      expect(runtime.clearStorageData).not.toHaveBeenCalled()
       expect(runtime.cookiesSet).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'sid', value: 'encrypted-session' }),
       )
@@ -311,6 +318,60 @@ describe('importCookiesFromDetectedBrowser', () => {
       expect(runtime.cookiesSet).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'sid', value: 'source-value' }),
       )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves the live session when every cookie write fails, including when staging is available', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kata-cookie-preserve-'))
+    try {
+      const sourcePath = join(dir, 'Chrome', 'Default', 'Network', 'Cookies')
+      const targetPath = join(dir, 'userData', 'Partitions', 'browser-pane', 'Network', 'Cookies')
+      createChromiumCookieTestDatabase(sourcePath, [
+        { name: 'sid', value: 'one' },
+        { name: 'aid', value: 'two' },
+      ]).close()
+      createChromiumCookieTestDatabase(targetPath, [{ name: 'existing', value: 'keep-me' }]).close()
+      const runtime = makeRuntime(join(dir, 'userData'))
+      runtime.cookiesGet.mockImplementation(async () => [
+        { name: 'existing', domain: '.live.example', path: '/', secure: true },
+      ])
+      runtime.cookiesSet.mockImplementation(async () => {
+        throw new Error('session write failed')
+      })
+
+      expect(await importCookiesFromDetectedBrowser(chromeBrowser(sourcePath), {
+        ...runtime,
+        partition: 'persist:browser-pane',
+      })).toEqual({ ok: false, code: 'session-unavailable' })
+      expect(runtime.clearStorageData).not.toHaveBeenCalled()
+      expect(runtime.cookiesRemove).not.toHaveBeenCalled()
+      expect(runtime.store?.load().pendingCookieImports).toEqual({})
+      expect(runtime.store?.load().lastImport).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('removes cookies that were not in the import after replacement writes succeed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kata-cookie-replace-'))
+    try {
+      const sourcePath = join(dir, 'Chrome', 'Default', 'Network', 'Cookies')
+      const targetPath = join(dir, 'userData', 'Partitions', 'browser-pane', 'Network', 'Cookies')
+      createChromiumCookieTestDatabase(sourcePath, [{ name: 'sid', value: 'source-value' }]).close()
+      createChromiumCookieTestDatabase(targetPath, [{ name: 'old', value: 'stale' }]).close()
+      const runtime = makeRuntime(join(dir, 'userData'))
+      runtime.cookiesGet.mockImplementation(async () => [
+        { name: 'old', domain: '.example.com', path: '/', secure: true },
+      ])
+
+      const result = await importCookiesFromDetectedBrowser(chromeBrowser(sourcePath), runtime)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.summary.importedCookies).toBe(1)
+      expect(runtime.clearStorageData).not.toHaveBeenCalled()
+      expect(runtime.cookiesRemove).toHaveBeenCalledWith('https://example.com/', 'old')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

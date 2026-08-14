@@ -27,6 +27,7 @@ export function createElectronCookieImportRuntime(): CookieImportRuntime {
       return {
         cookies: {
           set: (details) => target.cookies.set(details),
+          get: (filter) => target.cookies.get(filter ?? {}),
           remove: (url, name) => target.cookies.remove(url, name),
           flushStore: () => target.cookies.flushStore(),
         },

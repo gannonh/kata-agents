@@ -43,6 +43,12 @@ describe('cookie import i18n mapping', () => {
       },
     })
     expect(withWarning.key).toBe('browser.cookieImport.warning.restartFallbackUnavailable')
+    expect(withWarning.values).toEqual({
+      source: 'Google Chrome',
+      profile: 'Person 1',
+      count: 1,
+      failed: 1,
+    })
     expect(JSON.stringify(withWarning)).not.toMatch(/sid=|cookie-value|secret/i)
   })
 })
