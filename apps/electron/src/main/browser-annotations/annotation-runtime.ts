@@ -63,6 +63,7 @@ type SessionState = {
   token: string
   loopRunning: boolean
   hiddenMarkerIds: Set<string>
+  syncEpoch: number
 }
 
 export class BrowserAnnotationRuntime {
@@ -128,6 +129,7 @@ export class BrowserAnnotationRuntime {
       createdAt: new Date().toISOString(),
       payload: createBrowserAnnotationPayload(payload),
     })
+    this.ensure(instanceId)
     this.emit(instanceId)
     void this.syncMarkers(instanceId)
     return annotation
@@ -153,8 +155,10 @@ export class BrowserAnnotationRuntime {
   }
 
   destroy(instanceId: string): void {
-    this.stop(instanceId)
+    const session = this.sessions.get(instanceId)
+    if (session) session.syncEpoch += 1
     this.store.clear(instanceId)
+    this.stop(instanceId)
     this.sessions.delete(instanceId)
   }
 
@@ -217,6 +221,7 @@ export class BrowserAnnotationRuntime {
       token: createBrowserAnnotationViewportToken(),
       loopRunning: false,
       hiddenMarkerIds: new Set(),
+      syncEpoch: 0,
     }
     this.sessions.set(instanceId, created)
     return created
@@ -360,8 +365,9 @@ export class BrowserAnnotationRuntime {
 
   private async syncMarkers(instanceId: string): Promise<void> {
     const page = this.resolvePage(instanceId)
-    const session = this.ensure(instanceId)
-    if (!page || page.guest.isDestroyed()) return
+    const session = this.sessions.get(instanceId)
+    if (!page || page.guest.isDestroyed() || !session) return
+    const epoch = session.syncEpoch
     const markers = this.store.list(instanceId).flatMap((annotation, index) => (
       session.hiddenMarkerIds.has(annotation.id)
         ? []
@@ -374,6 +380,7 @@ export class BrowserAnnotationRuntime {
         }]
     ))
     const enabled = markers.length > 0 || session.mode !== 'idle'
+    if (this.sessions.get(instanceId) !== session || session.syncEpoch !== epoch) return
     try {
       await this.injectViewportBridge(page.guest, {
         enabled,

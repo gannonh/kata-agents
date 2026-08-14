@@ -323,4 +323,25 @@ describe('BrowserAnnotationRuntime', () => {
     ))
     expect(after.length).toBeGreaterThan(before)
   })
+
+  it('tears down grab overlay, viewport markers, and stored notes on destroy', async () => {
+    const guest = createGuest()
+    const overlay = createGuest()
+    const runtime = new BrowserAnnotationRuntime(() => ({
+      guest,
+      overlay,
+      viewportSize: () => ({ width: 800, height: 600 }),
+    }), labels)
+    expect(runtime.add('page-a', 'Keep this note', 'change', makePayload())).not.toBeNull()
+    await Promise.resolve()
+    guest.overlayScripts.length = 0
+    overlay.overlayScripts.length = 0
+
+    runtime.destroy('page-a')
+    await Promise.resolve()
+    expect(runtime.list('page-a')).toEqual([])
+    expect(runtime.getState('page-a').mode).toBe('idle')
+    expect(guest.overlayScripts.some((code) => code.includes('__kataGrab'))).toBe(true)
+    expect(guest.isolatedScripts.some((code) => code.includes('const enabled = false'))).toBe(true)
+  })
 })
