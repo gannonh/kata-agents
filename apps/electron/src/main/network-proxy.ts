@@ -13,6 +13,7 @@ import { getNetworkProxySettings, setNetworkProxySettings } from '@kata-sh/share
 import type { NetworkProxySettings } from '@kata-sh/shared/config/types';
 import { BROWSER_PANE_SESSION_PARTITION } from './browser-pane-manager';
 import log from './logger';
+import { prepareBrowserCookiePartition } from './browser-cookie-import/electron-runtime';
 
 // Track the current dispatcher so we can close it when reconfiguring
 let currentProxyDispatcher: Dispatcher | null = null;
@@ -109,6 +110,8 @@ function configureNodeProxy(settings: NetworkProxySettings | undefined): void {
  */
 async function configureElectronProxy(settings: NetworkProxySettings | undefined): Promise<void> {
   if (!app.isReady()) return;
+
+  prepareBrowserCookiePartition();
 
   const proxyConfig = settings?.enabled
     ? buildElectronProxyConfig(settings)

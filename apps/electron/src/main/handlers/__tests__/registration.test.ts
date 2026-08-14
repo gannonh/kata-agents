@@ -12,6 +12,8 @@ mock.module('electron', () => ({
   // Minimal stubs for symbols imported by IPC domain modules
   app: {
     isPackaged: false,
+    isReady: () => false,
+    getPath: () => '/tmp/mock-userData',
     getAppPath: () => '/',
     quit: () => {},
     dock: { setIcon: () => {}, setBadge: () => {} },

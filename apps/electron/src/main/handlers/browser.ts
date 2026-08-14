@@ -1,8 +1,15 @@
-import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload } from '../../shared/types'
+import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload, type ImportCookiesFromBrowserArgs } from '../../shared/types'
 import type { BrowserScreenshotOptions } from '../browser-pane-manager'
 import type { BrowserViewRect } from '../../shared/browser-surface'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
+import { createElectronCookieImportRuntime } from '../browser-cookie-import/electron-runtime'
+import {
+  getCookieImportState,
+  importCookiesFromBrowserArgs,
+  listRendererCookieSources,
+} from '../browser-cookie-import/rpc'
+import { DEFAULT_KATA_BROWSER_PROFILE_ID } from '@kata-sh/shared/protocol'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.CREATE,
@@ -26,6 +33,9 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.SCREENSHOT,
   RPC_CHANNELS.browserPane.EVALUATE,
   RPC_CHANNELS.browserPane.SCROLL,
+  RPC_CHANNELS.browserPane.DETECT_COOKIE_SOURCES,
+  RPC_CHANNELS.browserPane.IMPORT_COOKIES_FROM_BROWSER,
+  RPC_CHANNELS.browserPane.GET_COOKIE_IMPORT_STATE,
 ] as const
 
 export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -209,6 +219,32 @@ export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): v
       platform.logger.error(`[browser-pane] scroll failed for ${id}:`, err)
       throw err
     }
+  })
+
+  const cookieImportRuntime = createElectronCookieImportRuntime()
+
+  server.handle(RPC_CHANNELS.browserPane.DETECT_COOKIE_SOURCES, () => listRendererCookieSources())
+
+  server.handle(
+    RPC_CHANNELS.browserPane.IMPORT_COOKIES_FROM_BROWSER,
+    async (_ctx, args: ImportCookiesFromBrowserArgs) => {
+      try {
+        return await importCookiesFromBrowserArgs(
+          args ?? { browserFamily: 'chrome' },
+          cookieImportRuntime,
+        )
+      } catch {
+        platform.logger.error('[browser-pane] cookie import failed')
+        return { ok: false as const, code: 'malformed-records' as const }
+      }
+    },
+  )
+
+  server.handle(RPC_CHANNELS.browserPane.GET_COOKIE_IMPORT_STATE, (_ctx, profileId?: string) => {
+    return getCookieImportState(
+      cookieImportRuntime.getUserDataPath(),
+      profileId ?? DEFAULT_KATA_BROWSER_PROFILE_ID,
+    )
   })
 
   // Forward browser events to all locally-connected renderers. Workspace

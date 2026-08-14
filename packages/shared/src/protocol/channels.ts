@@ -419,6 +419,9 @@ export const RPC_CHANNELS = {
     STATE_CHANGED: 'browser-pane:state-changed',
     REMOVED: 'browser-pane:removed',
     INTERACTED: 'browser-pane:interacted',
+    DETECT_COOKIE_SOURCES: 'browser-pane:detect-cookie-sources',
+    IMPORT_COOKIES_FROM_BROWSER: 'browser-pane:import-cookies-from-browser',
+    GET_COOKIE_IMPORT_STATE: 'browser-pane:get-cookie-import-state',
   },
   automations: {
     GET: 'automations:get',

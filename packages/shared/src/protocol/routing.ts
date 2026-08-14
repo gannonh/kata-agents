@@ -196,6 +196,9 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.browserPane.STATE_CHANGED,
   RPC_CHANNELS.browserPane.REMOVED,
   RPC_CHANNELS.browserPane.INTERACTED,
+  RPC_CHANNELS.browserPane.DETECT_COOKIE_SOURCES,
+  RPC_CHANNELS.browserPane.IMPORT_COOKIES_FROM_BROWSER,
+  RPC_CHANNELS.browserPane.GET_COOKIE_IMPORT_STATE,
 
   // gitbash — Windows-specific local
   RPC_CHANNELS.gitbash.CHECK,

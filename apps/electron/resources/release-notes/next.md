@@ -5,6 +5,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Features
 
 - **Integrated browser panel** — New Browser now opens in the app shell by default, with HTML address-bar chrome and a close control. Detach to a native window and return without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
+- **Import Chrome cookies** — Import cookies from a local Google Chrome profile into Kata's shared browser session so signed-in sites work in the integrated panel and detached windows ([#30](https://github.com/gannonh/kata-agents/issues/30)).
 
 ## Improvements
 
@@ -13,6 +14,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- Failed Chrome cookie imports no longer wipe the live Kata browser session. New cookies are written first, leftover cookies are removed only after at least one replacement lands, and a total write failure reports an error instead of success with zero imported cookies ([#30](https://github.com/gannonh/kata-agents/issues/30)).
 - Restored a focused Bash config-write guard in pre-tool-use: syntactically identifiable Bash mutations targeting validator-recognized config files (derivable `cat <<'DELIM' > target` heredocs and opaque forms like redirects, `tee`, `sed -i`, wrapper shells, or script arguments) are now validated or blocked instead of bypassing config validation. Read-only commands and non-config targets are unaffected.
 
 ## Breaking Changes

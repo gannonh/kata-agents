@@ -43,6 +43,8 @@ export interface SettingsSelectProps {
   className?: string
   /** Whether the select is inside a card (affects padding) */
   inCard?: boolean
+  /** Optional test id on the trigger */
+  testId?: string
 }
 
 /**
@@ -67,6 +69,7 @@ export function SettingsSelect({
   disabled,
   className,
   inCard = false,
+  testId,
 }: SettingsSelectProps) {
   const id = React.useId()
 
@@ -89,7 +92,7 @@ export function SettingsSelect({
         </div>
       )}
       <Select value={value} onValueChange={onValueChange} disabled={disabled}>
-        <SelectTrigger id={id} className="w-full bg-muted/50">
+        <SelectTrigger id={id} className="w-full bg-muted/50" data-testid={testId}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

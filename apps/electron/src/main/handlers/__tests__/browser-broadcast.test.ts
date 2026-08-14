@@ -20,6 +20,8 @@ import type { BrowserInstanceInfo } from '@kata-sh/shared/protocol'
 
 mock.module('electron', () => ({
   ipcMain: { handle: () => {}, on: () => {} },
+  app: { isReady: () => false, getPath: () => '/tmp/mock-userData' },
+  session: { fromPartition: () => ({}) },
 }))
 
 type HandlerFn = (...args: unknown[]) => unknown

@@ -106,3 +106,4 @@ e2e/playwright-report/
 
 kata-agents.code-workspace
 .pi-subagents
+.pi/subagents

@@ -9,6 +9,7 @@
 import {
   Building2,
   GitBranch,
+  Globe,
   Keyboard,
   MessageSquare,
   Palette,
@@ -24,6 +25,7 @@ import type { SettingsSubpage } from '../../../shared/types'
 type IconProps = { className?: string }
 
 export const AppSettingsIcon = ({ className }: IconProps) => <ToggleRight className={className} />
+export const BrowserSettingsIcon = ({ className }: IconProps) => <Globe className={className} />
 export const AiSettingsIcon = ({ className }: IconProps) => <Sparkles className={className} />
 export const AppearanceIcon = ({ className }: IconProps) => <Palette className={className} />
 export const InputIcon = ({ className }: IconProps) => <Keyboard className={className} />
@@ -42,6 +44,7 @@ export const PreferencesIcon = ({ className }: IconProps) => <UserCircle classNa
  */
 export const SETTINGS_ICONS: Record<SettingsSubpage, React.ComponentType<IconProps>> = {
   app: AppSettingsIcon,
+  browser: BrowserSettingsIcon,
   ai: AiSettingsIcon,
   appearance: AppearanceIcon,
   input: InputIcon,

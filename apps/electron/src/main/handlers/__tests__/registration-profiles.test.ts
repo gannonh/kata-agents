@@ -11,6 +11,8 @@ mock.module('electron', () => ({
   },
   app: {
     isPackaged: false,
+    isReady: () => false,
+    getPath: () => '/tmp/mock-userData',
     getAppPath: () => '/',
     quit: () => {},
     dock: { setIcon: () => {}, setBadge: () => {} },

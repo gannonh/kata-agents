@@ -706,6 +706,86 @@ export interface BrowserInstanceInfo {
   surface?: BrowserSurface
 }
 
+/** Default Kata browser profile. Maps to the shared `persist:browser-pane` partition. */
+export const DEFAULT_KATA_BROWSER_PROFILE_ID = 'default'
+
+/**
+ * Cookie import source family. Chrome is the required product source.
+ * Additional Chromium families can be added without changing the import pipeline.
+ */
+export type BrowserCookieSourceFamily = 'chrome'
+
+export interface BrowserCookieProfile {
+  name: string
+  directory: string
+}
+
+/** Renderer-safe detected browser. Never includes filesystem paths or keychain identifiers. */
+export interface BrowserCookieSource {
+  family: BrowserCookieSourceFamily
+  label: string
+  profiles: BrowserCookieProfile[]
+  selectedProfile: string
+}
+
+export const COOKIE_IMPORT_ERROR_CODES = [
+  'chrome-not-found',
+  'cookies-locked',
+  'cookies-missing',
+  'empty-import',
+  'invalid-profile',
+  'keychain-denied',
+  'malformed-records',
+  'session-unavailable',
+  'unsupported-encryption',
+  'unsupported-platform',
+] as const
+
+export type CookieImportErrorCode = (typeof COOKIE_IMPORT_ERROR_CODES)[number]
+
+export interface BrowserCookieImportSummary {
+  totalCookies: number
+  importedCookies: number
+  skippedCookies: number
+  domains: string[]
+  warning?: {
+    code: 'restart-fallback-unavailable'
+    loadedCookies: number
+    failedCookies: number
+  }
+}
+
+export interface BrowserCookieImportSource {
+  family: BrowserCookieSourceFamily
+  label: string
+  profileName: string
+}
+
+export type BrowserCookieImportResult =
+  | {
+      ok: true
+      profileId: string
+      summary: BrowserCookieImportSummary
+      source: BrowserCookieImportSource
+    }
+  | {
+      ok: false
+      code: CookieImportErrorCode
+    }
+
+export interface BrowserCookieImportState {
+  profileId: string
+  source: BrowserCookieImportSource
+  importedAt: number
+  summary: BrowserCookieImportSummary
+}
+
+export interface ImportCookiesFromBrowserArgs {
+  profileId?: string
+  browserFamily: string
+  browserProfile?: string
+}
+
 export interface DeepLinkNavigation {
   view?: string
   tabType?: string

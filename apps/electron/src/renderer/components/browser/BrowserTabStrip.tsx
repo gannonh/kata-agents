@@ -33,6 +33,8 @@ import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 import { browserDisplayLabel } from './utils'
 import { navigate, routes } from '@/lib/navigate'
+import { CookieImportMenu } from './CookieImportMenu'
+import { useChromeCookieImport } from './useChromeCookieImport'
 
 const DEFAULT_MAX_VISIBLE_BADGES = 3
 
@@ -64,6 +66,7 @@ export function BrowserTabStrip({
   const updateInstance = useSetAtom(updateBrowserInstanceAtom)
   const removeInstance = useSetAtom(removeBrowserInstanceAtom)
   const [activeInstanceId, setActiveInstanceId] = useAtom(activeBrowserInstanceIdAtom)
+  const cookieImport = useChromeCookieImport()
   const effectiveInstances = instancesOverride ?? instances
   const instancesRef = useRef(effectiveInstances)
   const removeReconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -298,6 +301,10 @@ export function BrowserTabStrip({
 
         <StyledDropdownMenuSeparator />
 
+        <CookieImportMenu {...cookieImport} />
+
+        <StyledDropdownMenuSeparator />
+
         <StyledDropdownMenuItem
           variant="destructive"
           disabled={!canUseLiveWindowActions}
@@ -308,7 +315,7 @@ export function BrowserTabStrip({
         </StyledDropdownMenuItem>
       </>
     )
-  }, [instancesOverride, focusBrowserWindow, detachBrowserWindow, attachBrowserToPanel, openSessionUsingWindow, terminateBrowserWindow, t])
+  }, [instancesOverride, focusBrowserWindow, detachBrowserWindow, attachBrowserToPanel, openSessionUsingWindow, terminateBrowserWindow, cookieImport, t])
 
   if (orderedInstances.length === 0) return null
 
