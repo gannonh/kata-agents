@@ -5,7 +5,7 @@
 #   cd ../kata-agents-feature
 #   ./scripts/worktree-setup.sh
 #
-# Installs deps, ensures the Electron runtime, and copies .env from the central
+# Installs deps, ensures the Electron runtime, and symlinks .env from the central
 # dotfiles store. Idempotent: safe to re-run.
 
 set -euo pipefail
@@ -20,12 +20,8 @@ bun run ensure:electron
 bun run electron:build
 
 if [[ -f "$env_source" ]]; then
-  env_temp="$(mktemp "$worktree_root/.env.tmp.XXXXXX")"
-  trap 'rm -f "$env_temp"' EXIT
-  cp "$env_source" "$env_temp"
-  mv -f "$env_temp" "$worktree_root/.env"
-  trap - EXIT
-  echo "copied .env ← $env_source"
+  ln -sfn "$env_source" "$worktree_root/.env"
+  echo "linked .env ← $env_source"
 else
-  echo "warn: central env not found at $env_source — .env not copied" >&2
+  echo "warn: central env not found at $env_source — .env not linked" >&2
 fi
