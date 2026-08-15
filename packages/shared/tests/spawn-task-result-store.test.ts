@@ -118,6 +118,31 @@ describe('spawn-task result artifacts', () => {
     expect(() => store.readResultChunk(completed.taskId, 0, SPAWN_TASK_LIMITS.resultReadBytes + 1)).toThrow('64 KiB');
   });
 
+  it('caps the serialized canonical chunk response at 64 KiB', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_chunk_envelope' });
+    const processing = processingTask(store);
+    const completed = store.commitResult(processing.taskId, 'x'.repeat(100_000), { committedAt: later });
+
+    const chunk = store.readResultChunk(completed.taskId, 0, SPAWN_TASK_LIMITS.resultReadBytes);
+    if ('integrityError' in chunk) throw new Error('unexpected integrity error');
+    const serializedBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8');
+    expect(serializedBytes).toBeLessThanOrEqual(SPAWN_TASK_LIMITS.resultReadBytes);
+    expect(serializedBytes).toBeGreaterThan(65_000);
+    expect(chunk.byteLength).toBeLessThan(SPAWN_TASK_LIMITS.resultReadBytes);
+    expect(chunk.nextOffset).toBe(chunk.byteLength);
+    expect(chunk.truncated).toBe(true);
+    expect(Buffer.from(chunk.dataBase64, 'base64').equals(Buffer.alloc(chunk.byteLength, 'x'))).toBe(true);
+
+    const expanded = {
+      ...chunk,
+      byteLength: chunk.byteLength + 4,
+      nextOffset: chunk.nextOffset + 4,
+      dataBase64: Buffer.alloc(chunk.byteLength + 4, 'x').toString('base64'),
+    };
+    expect(Buffer.byteLength(JSON.stringify(expanded), 'utf8')).toBeGreaterThan(SPAWN_TASK_LIMITS.resultReadBytes);
+  });
+
   it('requires the result commit API for completed store transitions', () => {
     const root = workspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_no_bypass' });

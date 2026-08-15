@@ -87,16 +87,40 @@ export function createSpawnTaskResultChunk(
     throw new RangeError('Spawned-task result limit must be between 0 and 64 KiB');
   }
 
-  const chunk = Buffer.from(bytes).subarray(offset, Math.min(offset + limit, bytes.byteLength));
-  const nextOffset = offset + chunk.byteLength;
-  return {
-    taskId,
-    offset,
-    nextOffset,
-    byteLength: chunk.byteLength,
-    totalByteLength: result.byteLength,
-    sha256: result.sha256,
-    dataBase64: chunk.toString('base64'),
-    truncated: nextOffset < result.byteLength,
+  const artifact = Buffer.from(bytes);
+  const availableBytes = Math.min(limit, artifact.byteLength - offset);
+  const viewForLength = (byteLength: number): SpawnTaskResultChunkView => {
+    const chunk = artifact.subarray(offset, offset + byteLength);
+    const nextOffset = offset + byteLength;
+    return {
+      taskId,
+      offset,
+      nextOffset,
+      byteLength,
+      totalByteLength: result.byteLength,
+      sha256: result.sha256,
+      dataBase64: chunk.toString('base64'),
+      truncated: nextOffset < result.byteLength,
+    };
   };
+  const serializedBytes = (view: SpawnTaskResultChunkView): number =>
+    Buffer.byteLength(JSON.stringify(view), 'utf8');
+
+  const requested = viewForLength(availableBytes);
+  if (serializedBytes(requested) <= SPAWN_TASK_LIMITS.resultReadBytes) return requested;
+
+  let low = 0;
+  let high = availableBytes;
+  let best = viewForLength(0);
+  while (low <= high) {
+    const candidateLength = Math.floor((low + high) / 2);
+    const candidate = viewForLength(candidateLength);
+    if (serializedBytes(candidate) <= SPAWN_TASK_LIMITS.resultReadBytes) {
+      best = candidate;
+      low = candidateLength + 1;
+    } else {
+      high = candidateLength - 1;
+    }
+  }
+  return best;
 }
