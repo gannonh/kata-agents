@@ -17,6 +17,7 @@ import {
   writeDurableFile,
 } from './durable-fs.ts';
 import {
+  assertGenerationName,
   CURRENT_FILE,
   RECORD_FILE,
   reconcileTaskGenerations,
@@ -33,7 +34,8 @@ export type SpawnTaskStoreFaultPoint =
   | 'before-artifact-write'
   | 'after-artifact-write'
   | 'after-generation-publish'
-  | 'before-current-publish';
+  | 'before-current-publish'
+  | 'after-current-publish';
 
 export interface PublishTaskGenerationInput {
   readonly tasksPath: string;
@@ -47,6 +49,7 @@ export interface PublishTaskGenerationInput {
 
 export interface PublishTaskGenerationResult {
   readonly generation: string;
+  readonly postCommitWarning?: string;
   readonly reconciliationError?: string;
 }
 
@@ -84,6 +87,7 @@ export function publishTaskGeneration(input: PublishTaskGenerationInput): Publis
   const nonce = assertSpawnTaskId(input.randomId(), 'generation nonce');
   const stagePath = join(generationsPath, `.stage-${nonce}`);
   const generation = `g-${String(task.version).padStart(10, '0')}-${nonce}`;
+  assertGenerationName(generation);
   const generationPath = join(generationsPath, generation);
   const currentTemp = join(taskPath, `.CURRENT-${nonce}.tmp`);
   assertNotSymlink(stagePath, 'spawned-task staging path');
@@ -118,20 +122,28 @@ export function publishTaskGeneration(input: PublishTaskGenerationInput): Publis
     writeDurableFile(currentTemp, `${generation}\n`);
     input.faults?.('before-current-publish', task);
     renameSync(currentTemp, currentPath);
-    syncDirectory(taskPath);
-    if (!currentTask) syncDirectory(tasksPath);
   } catch (error) {
     rmSync(stagePath, { recursive: true, force: true });
     rmSync(currentTemp, { force: true });
     throw error;
   }
 
+  let postCommitWarning: string | undefined;
+  try {
+    input.faults?.('after-current-publish', task);
+    syncDirectory(taskPath);
+    if (!currentTask) syncDirectory(tasksPath);
+  } catch (error) {
+    postCommitWarning = error instanceof Error ? error.message : String(error);
+  }
+
   try {
     reconcileTaskGenerations(taskPath, generation, diskGeneration);
-    return { generation };
+    return { generation, ...(postCommitWarning ? { postCommitWarning } : {}) };
   } catch (error) {
     return {
       generation,
+      ...(postCommitWarning ? { postCommitWarning } : {}),
       reconciliationError: error instanceof Error ? error.message : String(error),
     };
   }

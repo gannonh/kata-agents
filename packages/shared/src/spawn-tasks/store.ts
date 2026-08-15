@@ -40,8 +40,8 @@ import {
   syncDirectory,
 } from './durable-fs.ts';
 import {
+  assertGenerationName,
   CURRENT_FILE,
-  GENERATION_SEGMENT,
   RECORD_FILE,
   reconcileTaskGenerations,
 } from './generation-layout.ts';
@@ -459,9 +459,7 @@ export class SpawnTaskStore {
         if (!existsSync(currentPath)) continue;
         assertRegularFile(currentPath, 'spawned-task CURRENT');
         const generation = readFileSync(currentPath, 'utf8').trim();
-        if (!GENERATION_SEGMENT.test(generation) || generation === '.' || generation === '..') {
-          throw new Error(`Invalid spawned-task generation pointer for ${entry.name}`);
-        }
+        assertGenerationName(generation);
         const generationsPath = join(taskPath, 'generations');
         assertDirectory(generationsPath, 'spawned-task generations directory');
         const generationPath = join(generationsPath, generation);
@@ -533,9 +531,8 @@ export class SpawnTaskStore {
       artifactFiles: options.artifactFiles,
     });
     this.index(task, published.generation);
-    if (published.reconciliationError) {
-      this.loadErrors.set(task.taskId, published.reconciliationError);
-    }
+    const warnings = [published.postCommitWarning, published.reconciliationError].filter(Boolean);
+    if (warnings.length > 0) this.loadErrors.set(task.taskId, warnings.join('; '));
   }
 
   private readCurrentFile(taskId: string, name: string): Buffer | null {

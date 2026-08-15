@@ -207,6 +207,40 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(reloaded.reload().finalized).toEqual([]);
   });
 
+  it('reports recovery even when durability sync fails after CURRENT publication', () => {
+    const root = workspace();
+    const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_post_current_report' });
+    const processing = processingTask(initial);
+    const interrupted = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_post_current_report',
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.runtimeState === 'completed') throw new Error('leave pending');
+      },
+    });
+    expect(() => interrupted.commitResult(processing.taskId, 'recover with report', { committedAt: later })).toThrow('leave pending');
+
+    let injected = 0;
+    const recovered = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_post_current_report',
+      faults: (point) => {
+        if (point === 'after-current-publish') {
+          injected += 1;
+          throw new Error('post-current sync failure');
+        }
+      },
+    });
+    const completed = recovered.get(processing.taskId)!;
+    expect(injected).toBe(1);
+    expect(completed.runtimeState).toBe('completed');
+    expect(recovered.getLastStartupReport().finalized).toEqual([{
+      taskId: processing.taskId,
+      previousRuntimeState: 'processing',
+      version: completed.version,
+    }]);
+  });
+
   it('finalizes verified artifacts from queued and awaiting-input recovery states', () => {
     for (const state of ['queued', 'awaiting-input'] as const) {
       const root = workspace();
@@ -411,11 +445,15 @@ describe('spawn-task artifact recovery and retention', () => {
     writeFileSync(join(taskRoot, '.CURRENT-orphan.tmp'), 'orphan', 'utf8');
     mkdirSync(join(generationsRoot, 'g-9999999999-orphan'));
     writeFileSync(join(generationsRoot, 'g-9999999999-orphan', 'record.json'), '{}', 'utf8');
+    mkdirSync(join(generationsRoot, 'junk-directory'));
+    writeFileSync(join(generationsRoot, 'junk-file'), 'junk', 'utf8');
 
     const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cleanup' });
     expect(reloaded.get(processing.taskId)?.parentDeletedAt).toBe(later);
     expect(existsSync(join(generationsRoot, '.stage-orphan'))).toBe(false);
     expect(existsSync(join(taskRoot, '.CURRENT-orphan.tmp'))).toBe(false);
+    expect(existsSync(join(generationsRoot, 'junk-directory'))).toBe(false);
+    expect(existsSync(join(generationsRoot, 'junk-file'))).toBe(false);
     expect(generationNames(root, processing.taskId)).toHaveLength(2);
   });
 

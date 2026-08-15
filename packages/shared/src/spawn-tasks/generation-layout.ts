@@ -4,8 +4,11 @@ import { assertDirectory } from './durable-fs.ts';
 
 export const CURRENT_FILE = 'CURRENT';
 export const RECORD_FILE = 'record.json';
-export const GENERATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
-const GENERATION_NAME = /^g-(\d{10})-[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+const GENERATION_NAME = /^g-(\d{10,16})-[A-Za-z0-9][A-Za-z0-9._-]{0,230}$/;
+
+export function assertGenerationName(name: string): void {
+  if (!GENERATION_NAME.test(name)) throw new Error(`Invalid spawned-task generation name: ${name}`);
+}
 
 function generationVersion(name: string): number | null {
   const match = GENERATION_NAME.exec(name);
@@ -23,6 +26,7 @@ export function reconcileTaskGenerations(
   priorGeneration?: string,
 ): void {
   assertDirectory(taskPath, 'spawned-task directory');
+  assertGenerationName(currentGeneration);
   const generationsPath = join(taskPath, 'generations');
   assertDirectory(generationsPath, 'spawned-task generations directory');
 
@@ -50,11 +54,9 @@ export function reconcileTaskGenerations(
   }
 
   for (const entry of readdirSync(generationsPath, { withFileTypes: true })) {
-    if (entry.name.startsWith('.stage-')) continue;
-    if (entry.name === currentGeneration || entry.name === prior) continue;
-    if (entry.isSymbolicLink() || generationVersion(entry.name) !== null) {
-      removeEntry(join(generationsPath, entry.name));
-    }
+    if (entry.name === currentGeneration) continue;
+    if (entry.name === prior && !entry.isSymbolicLink() && entry.isDirectory()) continue;
+    removeEntry(join(generationsPath, entry.name));
   }
 
   const currentPath = join(generationsPath, currentGeneration);

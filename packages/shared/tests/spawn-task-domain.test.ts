@@ -124,15 +124,15 @@ describe('spawn-task validation and terminal metadata', () => {
   it('redacts likely secrets from persisted failure messages', () => {
     const failure = createSpawnTaskFailure({
       code: 'provider_error',
-      message: 'Provider rejected Authorization: Bearer sk-live-secret-123 and api_key=super-secret; password: "hunter2".',
+      message: 'Provider rejected Authorization: token opaque-secret-123; payload={"apiKey":"json-secret-456"}; password: "hunter2".',
       retryable: false,
       committedAt: at,
     });
 
     expect(failure.message).toContain('Provider rejected');
     expect(failure.message).toContain('[redacted]');
-    expect(failure.message).not.toContain('sk-live-secret-123');
-    expect(failure.message).not.toContain('super-secret');
+    expect(failure.message).not.toContain('opaque-secret-123');
+    expect(failure.message).not.toContain('json-secret-456');
     expect(failure.message).not.toContain('hunter2');
   });
 
@@ -195,6 +195,23 @@ describe('spawn-task validation and terminal metadata', () => {
       committedAt: at,
     });
     expect(manyDetails.details?.truncated).toBe(true);
+
+    const nestedSecrets = createSpawnTaskFailure({
+      code: 'provider_error',
+      message: 'Nested details failed.',
+      retryable: false,
+      details: {
+        response: 'Authorization: Custom opaque-detail-secret',
+        error: 'Provider returned sk-detail-secret-123',
+        payload: '{"password":"json-detail-secret"}',
+      },
+      committedAt: at,
+    });
+    const persistedDetails = JSON.stringify(nestedSecrets.details);
+    expect(persistedDetails).not.toContain('opaque-detail-secret');
+    expect(persistedDetails).not.toContain('sk-detail-secret-123');
+    expect(persistedDetails).not.toContain('json-detail-secret');
+    expect(persistedDetails).toContain('[redacted]');
   });
 
   it('allows only read, deletion, and integrity changes after terminal state', () => {
@@ -245,6 +262,22 @@ describe('spawn-task reservation store', () => {
     );
     expect(() => store.reserve({ parentSessionId: 'parent_safe', delegatedPrompt: 'bad nonce', childConfig: {} })).toThrow(
       'generation nonce',
+    );
+
+    const longValues = [
+      'task-long',
+      'child-long',
+      'message-long',
+      'attempt-long',
+      'x'.repeat(232),
+    ];
+    const longNonceStore = new SpawnTaskStore({
+      workspaceRoot: tempWorkspace(),
+      workspaceId: 'ws_long_nonce',
+      randomId: () => longValues.shift()!,
+    });
+    expect(() => longNonceStore.reserve({ parentSessionId: 'parent_safe', delegatedPrompt: 'long nonce', childConfig: {} })).toThrow(
+      'generation name',
     );
   });
 

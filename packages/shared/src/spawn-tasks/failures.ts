@@ -10,16 +10,18 @@ import {
 import { truncateUtf8 } from './utf8.ts';
 
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|secret|token|api[-_]?key)/i;
-const AUTHORIZATION_SECRET = /(\bauthorization\s*[:=]\s*(?:bearer|basic)\s+)([^\s,;]+)/gi;
-const NAMED_SECRET = /(\b(?:api[-_]?key|cookie|credential|password|secret|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
-const OTHER_AUTHORIZATION = /(\bauthorization\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const JSON_NAMED_SECRET = /("(?:authorization|api[-_]?key|apiKey|cookie|credential|password|secret|token)"\s*:\s*)"(?:\\.|[^"\\])*"/gi;
+const AUTHORIZATION_SECRET = /(\bauthorization\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r\n,;]+)/gi;
+const NAMED_SECRET = /(\b(?:api[-_ ]?key|cookie|credential|password|secret|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const NAMED_SECRET_WORD = /(\b(?:api[-_ ]?key|password|secret|token)\s+)[A-Za-z0-9._~+/=-]{6,}/gi;
 const LIKELY_BARE_SECRET = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
 
 function sanitizeMessage(value: string): string {
   return value
+    .replace(JSON_NAMED_SECRET, '$1"[redacted]"')
     .replace(AUTHORIZATION_SECRET, '$1[redacted]')
     .replace(NAMED_SECRET, '$1[redacted]')
-    .replace(OTHER_AUTHORIZATION, '$1[redacted]')
+    .replace(NAMED_SECRET_WORD, '$1[redacted]')
     .replace(LIKELY_BARE_SECRET, '[redacted]');
 }
 
@@ -38,8 +40,9 @@ interface SanitizeState {
 function sanitizeValue(value: unknown, depth: number, state: SanitizeState): SpawnTaskJsonValue | undefined {
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'string') {
-    const truncated = truncateUtf8(value, 1024);
-    if (truncated !== value) state.truncated = true;
+    const sanitized = sanitizeMessage(value);
+    const truncated = truncateUtf8(sanitized, 1024);
+    if (truncated !== sanitized) state.truncated = true;
     return truncated;
   }
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
