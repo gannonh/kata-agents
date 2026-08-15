@@ -13,6 +13,19 @@ export function updateSpawnTaskMetadata(
   task: SpawnTask,
   update: SpawnTaskMetadataUpdate,
 ): SpawnTask {
+  if (update.resultReadAt !== undefined && task.runtimeState !== 'completed') {
+    throw new Error('Result read metadata requires a completed spawned task');
+  }
+  if (update.integrityError !== undefined && task.runtimeState !== 'completed') {
+    throw new Error('Integrity metadata requires a completed spawned task');
+  }
+  if (task.parentDeletedAt && update.parentDeletedAt && task.parentDeletedAt !== update.parentDeletedAt) {
+    throw new Error('Parent deletion marker is immutable once set');
+  }
+  if (task.childDeletedAt && update.childDeletedAt && task.childDeletedAt !== update.childDeletedAt) {
+    throw new Error('Child deletion marker is immutable once set');
+  }
+
   return {
     ...task,
     version: task.version + 1,

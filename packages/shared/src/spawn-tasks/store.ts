@@ -9,16 +9,32 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type {
-  SpawnTask,
-  SpawnTaskDispatchState,
-  SpawnTaskJsonValue,
+import {
+  SPAWN_TASK_LIMITS,
+  SPAWN_TASK_SCHEMA_VERSION,
+  type SpawnTask,
+  type SpawnTaskDispatchState,
+  type SpawnTaskIntegrityView,
+  type SpawnTaskJsonValue,
+  type SpawnTaskResultChunkView,
 } from '@kata-sh/core';
 import { getWorkspaceSpawnTasksPath } from '../workspaces/storage.ts';
 import { reserveSpawnTaskIds } from './ids.ts';
 import { transitionSpawnTask, type SpawnTaskTransition } from './transitions.ts';
 import { updateSpawnTaskMetadata, type SpawnTaskMetadataUpdate } from './metadata.ts';
 import { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
+import { createSpawnTaskFailure } from './failures.ts';
+import {
+  buildSpawnTaskResultArtifact,
+  createSpawnTaskResultChunk,
+  parseVerifiedResult,
+  serializeVerifiedResult,
+  SPAWN_TASK_RESULT_FILE,
+  SPAWN_TASK_VERIFIED_RESULT_FILE,
+  SpawnTaskResultTooLargeError,
+  verifySpawnTaskResult,
+  type BuildSpawnTaskResultOptions,
+} from './result-artifact.ts';
 
 const CURRENT_FILE = 'CURRENT';
 const RECORD_FILE = 'record.json';
@@ -28,6 +44,8 @@ const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 export type SpawnTaskStoreFaultPoint =
   | 'before-record-write'
   | 'after-record-write'
+  | 'before-artifact-write'
+  | 'after-artifact-write'
   | 'after-generation-publish'
   | 'before-current-publish';
 
@@ -43,6 +61,10 @@ export interface ReserveSpawnTaskInput {
   readonly parentSessionId: string;
   readonly delegatedPrompt: string;
   readonly childConfig: Readonly<Record<string, SpawnTaskJsonValue>>;
+}
+
+interface CommitOptions {
+  readonly artifactFiles?: ReadonlyMap<string, Buffer | string>;
 }
 
 function clone<T>(value: T): T {
@@ -79,6 +101,7 @@ export class SpawnTaskStore {
     this.faults = options.faults;
     mkdirSync(this.tasksPath(), { recursive: true });
     this.reload();
+    this.validateArtifactsOnStartup();
   }
 
   reserve(input: ReserveSpawnTaskInput): SpawnTask {
@@ -86,7 +109,7 @@ export class SpawnTaskStore {
     const ids = reserveSpawnTaskIds(this.randomId);
     const now = this.clock();
     const task: SpawnTask = {
-      schemaVersion: 1,
+      schemaVersion: SPAWN_TASK_SCHEMA_VERSION,
       version: 1,
       taskId: ids.taskId,
       workspaceId: this.workspaceId,
@@ -154,6 +177,171 @@ export class SpawnTaskStore {
     return clone(next);
   }
 
+  commitResult(taskId: string, content: string, options: BuildSpawnTaskResultOptions): SpawnTask {
+    const current = this.require(taskId);
+    if (current.runtimeState !== 'processing') {
+      throw new Error(`Cannot commit a result from spawned-task state ${current.runtimeState}`);
+    }
+
+    let artifact;
+    try {
+      artifact = buildSpawnTaskResultArtifact(content, options);
+    } catch (error) {
+      if (!(error instanceof SpawnTaskResultTooLargeError)) throw error;
+      const byteLength = Buffer.byteLength(content, 'utf8');
+      const failure = createSpawnTaskFailure({
+        code: 'result_too_large',
+        message: `Spawned-task result exceeds the ${SPAWN_TASK_LIMITS.resultBytes} byte limit.`,
+        retryable: false,
+        details: {
+          byteLength,
+          maxByteLength: SPAWN_TASK_LIMITS.resultBytes,
+          ...(options.sourceMessageId ? { sourceMessageId: options.sourceMessageId } : {}),
+        },
+        committedAt: options.committedAt,
+      });
+      return this.transition(taskId, {
+        runtimeState: 'failed',
+        at: options.committedAt,
+        failure,
+      });
+    }
+
+    // Publish a verified artifact with the nonterminal record first. If the
+    // process stops before terminal publication, startup can finalize it once.
+    const artifactCommitted: SpawnTask = {
+      ...current,
+      version: current.version + 1,
+      stateTimestamps: {
+        ...current.stateTimestamps,
+        updatedAt: options.committedAt,
+      },
+    };
+    const files = new Map<string, Buffer | string>([
+      [SPAWN_TASK_RESULT_FILE, artifact.bytes],
+      [SPAWN_TASK_VERIFIED_RESULT_FILE, serializeVerifiedResult(artifact.result)],
+    ]);
+    this.commit(artifactCommitted, { artifactFiles: files });
+
+    const completed = transitionSpawnTask(artifactCommitted, {
+      runtimeState: 'completed',
+      at: options.committedAt,
+      result: artifact.result,
+    });
+    this.commit(completed);
+    return clone(completed);
+  }
+
+  readResultChunk(
+    taskId: string,
+    offset: number,
+    limit: number,
+  ): SpawnTaskResultChunkView | SpawnTaskIntegrityView {
+    let current = this.require(taskId);
+    if (current.runtimeState !== 'completed' || !current.result) {
+      throw new Error(`Spawned task ${taskId} has no completed result`);
+    }
+    const verified = this.readVerifiedArtifact(current);
+    if (!verified) {
+      current = this.markIntegrityError(current, 'Spawned-task result artifact is missing or does not match its digest.');
+      return {
+        taskId: current.taskId,
+        runtimeState: 'completed',
+        result: current.result!,
+        integrityError: current.integrityError!,
+      };
+    }
+    if (current.integrityError) {
+      return {
+        taskId: current.taskId,
+        runtimeState: 'completed',
+        result: current.result,
+        integrityError: current.integrityError,
+      };
+    }
+    return createSpawnTaskResultChunk(taskId, verified, current.result, offset, limit);
+  }
+
+  markResultRead(taskId: string, at: string): SpawnTask {
+    return this.updateMetadata(taskId, { at, resultReadAt: at });
+  }
+
+  markParentDeleted(taskId: string, at: string): SpawnTask {
+    return this.updateMetadata(taskId, { at, parentDeletedAt: at });
+  }
+
+  markChildDeleted(taskId: string, at: string): SpawnTask {
+    return this.updateMetadata(taskId, { at, childDeletedAt: at });
+  }
+
+  repairResult(taskId: string, content: string, at: string): SpawnTask {
+    const current = this.require(taskId);
+    if (current.runtimeState !== 'completed' || !current.result || !current.integrityError) {
+      throw new Error('Spawned-task result repair requires a completed task with an integrity error');
+    }
+    const bytes = Buffer.from(content, 'utf8');
+    if (!verifySpawnTaskResult(bytes, current.result)) {
+      throw new Error('Replacement artifact does not match the committed result digest and length');
+    }
+    const repaired = updateSpawnTaskMetadata(current, { at, integrityError: null });
+    this.commit(repaired, {
+      artifactFiles: new Map<string, Buffer | string>([
+        [SPAWN_TASK_RESULT_FILE, bytes],
+        [SPAWN_TASK_VERIFIED_RESULT_FILE, serializeVerifiedResult(current.result)],
+      ]),
+    });
+    return clone(repaired);
+  }
+
+  purgeTask(taskId: string): boolean {
+    const current = this.tasks.get(assertSpawnTaskId(taskId, 'taskId'));
+    if (!current) return false;
+    rmSync(join(this.tasksPath(), taskId), { recursive: true, force: true });
+    this.tasks.delete(taskId);
+    this.generations.delete(taskId);
+    this.byParent.get(current.parentSessionId)?.delete(taskId);
+    this.byChild.delete(current.childSessionId);
+    return true;
+  }
+
+  purgeWorkspace(): void {
+    rmSync(this.rootPath, { recursive: true, force: true });
+    mkdirSync(this.tasksPath(), { recursive: true });
+    this.tasks.clear();
+    this.generations.clear();
+    this.byParent.clear();
+    this.byChild.clear();
+  }
+
+  validateArtifactsOnStartup(): SpawnTask[] {
+    const changed: SpawnTask[] = [];
+    for (const snapshot of [...this.tasks.values()]) {
+      if (snapshot.runtimeState === 'completed' && snapshot.result) {
+        if (!this.readVerifiedArtifact(snapshot) && !snapshot.integrityError) {
+          changed.push(this.markIntegrityError(
+            snapshot,
+            'Spawned-task result artifact is missing or does not match its digest.',
+          ));
+        }
+        continue;
+      }
+
+      if (snapshot.runtimeState !== 'processing') continue;
+      const pending = this.readVerifiedManifest(snapshot);
+      if (!pending) continue;
+      const bytes = this.readCurrentFile(snapshot.taskId, SPAWN_TASK_RESULT_FILE);
+      if (!bytes || !verifySpawnTaskResult(bytes, pending)) continue;
+      const completed = transitionSpawnTask(snapshot, {
+        runtimeState: 'completed',
+        at: pending.committedAt,
+        result: pending,
+      });
+      this.commit(completed);
+      changed.push(clone(completed));
+    }
+    return changed;
+  }
+
   updateDispatch(taskId: string, state: SpawnTaskDispatchState, at: string): SpawnTask {
     const current = this.require(taskId);
     if (TERMINAL_STATES.has(current.runtimeState)) {
@@ -210,7 +398,7 @@ export class SpawnTaskStore {
     return task;
   }
 
-  private commit(task: SpawnTask): void {
+  private commit(task: SpawnTask, options: CommitOptions = {}): void {
     assertSpawnTask(task);
     if (task.workspaceId !== this.workspaceId) throw new Error('Spawned-task workspace ownership cannot change');
     const current = this.tasks.get(task.taskId);
@@ -237,6 +425,16 @@ export class SpawnTaskStore {
       writeFileSync(join(stagePath, RECORD_FILE), `${JSON.stringify(task, null, 2)}\n`, 'utf8');
       this.copyGenerationFiles(current, stagePath);
       this.faults?.('after-record-write', task);
+      if (options.artifactFiles) {
+        this.faults?.('before-artifact-write', task);
+        for (const [name, content] of options.artifactFiles) {
+          if (name !== SPAWN_TASK_RESULT_FILE && name !== SPAWN_TASK_VERIFIED_RESULT_FILE) {
+            throw new Error(`Unsupported spawned-task artifact file: ${name}`);
+          }
+          writeFileSync(join(stagePath, name), content);
+        }
+        this.faults?.('after-artifact-write', task);
+      }
       renameSync(stagePath, generationPath);
       this.faults?.('after-generation-publish', task);
       writeFileSync(currentTemp, `${generation}\n`, 'utf8');
@@ -249,6 +447,49 @@ export class SpawnTaskStore {
     }
 
     this.index(task, generation);
+  }
+
+  private readCurrentFile(taskId: string, name: string): Buffer | null {
+    const generation = this.generations.get(taskId);
+    if (!generation) return null;
+    const filePath = join(this.tasksPath(), taskId, 'generations', generation, name);
+    if (!existsSync(filePath)) return null;
+    try {
+      return readFileSync(filePath);
+    } catch {
+      return null;
+    }
+  }
+
+  private readVerifiedManifest(task: SpawnTask) {
+    const manifest = this.readCurrentFile(task.taskId, SPAWN_TASK_VERIFIED_RESULT_FILE);
+    if (!manifest) return null;
+    try {
+      return parseVerifiedResult(manifest.toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private readVerifiedArtifact(task: SpawnTask): Buffer | null {
+    if (!task.result) return null;
+    const bytes = this.readCurrentFile(task.taskId, SPAWN_TASK_RESULT_FILE);
+    return bytes && verifySpawnTaskResult(bytes, task.result) ? bytes : null;
+  }
+
+  private markIntegrityError(task: SpawnTask, message: string): SpawnTask {
+    if (task.integrityError) return task;
+    const detectedAt = this.clock();
+    const next = updateSpawnTaskMetadata(task, {
+      at: detectedAt,
+      integrityError: {
+        code: 'result_persist_failed',
+        message,
+        detectedAt,
+      },
+    });
+    this.commit(next);
+    return next;
   }
 
   private copyGenerationFiles(current: SpawnTask | undefined, stagePath: string): void {

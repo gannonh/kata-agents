@@ -59,6 +59,18 @@ describe('spawn-task runtime transitions', () => {
     const interrupted = transitionSpawnTask(awaitingForFailure, { runtimeState: 'failed', at, failure });
     expect(interrupted.failure?.code).toBe('input_interrupted');
     expect(interrupted.failure?.details?.kind).toBe('authentication');
+    const permissionFlowFailure = createSpawnTaskFailure({
+      code: 'provider_error',
+      message: 'Permission flow failed.',
+      retryable: false,
+      details: { kind: 'permission' },
+      committedAt: at,
+    });
+    expect(transitionSpawnTask(awaitingForFailure, {
+      runtimeState: 'failed',
+      at,
+      failure: permissionFlowFailure,
+    }).failure?.details?.kind).toBe('permission');
     expect(transitionSpawnTask(awaitingForFailure, { runtimeState: 'cancelled', at, cancellation }).runtimeState).toBe('cancelled');
 
     for (const key of immutableKeys) {
@@ -107,7 +119,12 @@ describe('spawn-task validation and terminal metadata', () => {
   });
 
   it('allows only read, deletion, and integrity changes after terminal state', () => {
-    const completed = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed) as SpawnTask;
+    const processing = transitionSpawnTask(reservedTask(), { runtimeState: 'processing', at });
+    const completed = transitionSpawnTask(processing, {
+      runtimeState: 'completed',
+      at,
+      result: SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed.result,
+    });
     const updated = updateSpawnTaskMetadata(completed, {
       at,
       resultReadAt: at,
@@ -169,6 +186,25 @@ describe('spawn-task reservation store', () => {
     );
     expect(reloaded.getByChildSessionId(first.childSessionId)?.taskId).toBe(first.taskId);
     expect(reloaded.listAll()).toHaveLength(2);
+  });
+
+  it('persists ordered dispatch metadata and rejects terminal dispatch changes', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch', clock: () => at });
+    const reserved = store.reserve({ parentSessionId: 'parent_dispatch', delegatedPrompt: 'dispatch', childConfig: {} });
+    const ready = store.updateDispatch(reserved.taskId, 'ready', at);
+    const claimed = store.updateDispatch(ready.taskId, 'claimed', at);
+    const sent = store.updateDispatch(claimed.taskId, 'sent', at);
+    const processing = store.transition(sent.taskId, { runtimeState: 'processing', at });
+    const cancelled = store.transition(processing.taskId, {
+      runtimeState: 'cancelled',
+      at,
+      cancellation: { requestedAt: at, reason: 'requested' },
+    });
+
+    expect(sent.dispatch).toMatchObject({ state: 'sent', readyAt: at, claimedAt: at, sentAt: at });
+    expect(() => store.updateDispatch(cancelled.taskId, 'sent', at)).toThrow('after terminal');
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch' }).get(cancelled.taskId)).toEqual(cancelled);
   });
 
   it('keeps the previous committed record readable when replacement publication faults', () => {

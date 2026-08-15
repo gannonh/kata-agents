@@ -17,3 +17,13 @@ export type {
   SpawnTaskStoreFaultPoint,
   ReserveSpawnTaskInput,
 } from './store.ts';
+export {
+  buildSpawnTaskResultArtifact,
+  createSpawnTaskResultChunk,
+  SpawnTaskResultTooLargeError,
+  verifySpawnTaskResult,
+} from './result-artifact.ts';
+export type {
+  BuildSpawnTaskResultOptions,
+  SpawnTaskResultArtifact,
+} from './result-artifact.ts';
