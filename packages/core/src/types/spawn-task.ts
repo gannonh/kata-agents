@@ -6,6 +6,7 @@
  */
 
 export const SPAWN_TASK_SCHEMA_VERSION = 1 as const;
+export const SPAWN_TASK_RESULT_ARTIFACT_PATH = 'result.md' as const;
 
 export const SPAWN_TASK_RUNTIME_STATES = [
   'queued',
@@ -92,7 +93,7 @@ export interface SpawnTaskCancellation {
 }
 
 export interface SpawnTaskResult {
-  readonly artifactPath: 'result.md';
+  readonly artifactPath: typeof SPAWN_TASK_RESULT_ARTIFACT_PATH;
   readonly byteLength: number;
   readonly sha256: string;
   readonly sourceMessageId?: string;

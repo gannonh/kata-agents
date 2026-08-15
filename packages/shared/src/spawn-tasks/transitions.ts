@@ -37,6 +37,10 @@ export function canTransitionSpawnTask(
   return LEGAL_TRANSITIONS[from].includes(to);
 }
 
+export function isSpawnTaskTerminal(state: SpawnTaskRuntimeState): boolean {
+  return LEGAL_TRANSITIONS[state].length === 0;
+}
+
 export function transitionSpawnTask(task: SpawnTask, transition: SpawnTaskTransition): SpawnTask {
   const nextState = transition.runtimeState;
   if (!canTransitionSpawnTask(task.runtimeState, nextState)) {
@@ -75,5 +79,9 @@ export function transitionSpawnTask(task: SpawnTask, transition: SpawnTaskTransi
       return { ...next, failure: transition.failure };
     case 'cancelled':
       return { ...next, cancellation: transition.cancellation };
+    default: {
+      const exhaustive: never = nextState;
+      throw new Error(`Unhandled spawned-task runtime state: ${exhaustive}`);
+    }
   }
 }

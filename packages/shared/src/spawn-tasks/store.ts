@@ -1,6 +1,9 @@
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -10,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  SPAWN_TASK_DISPATCH_STATES,
   SPAWN_TASK_LIMITS,
   SPAWN_TASK_SCHEMA_VERSION,
   type SpawnTask,
@@ -20,7 +24,11 @@ import {
 } from '@kata-sh/core';
 import { getWorkspaceSpawnTasksPath } from '../workspaces/storage.ts';
 import { reserveSpawnTaskIds } from './ids.ts';
-import { transitionSpawnTask, type SpawnTaskTransition } from './transitions.ts';
+import {
+  isSpawnTaskTerminal,
+  transitionSpawnTask,
+  type SpawnTaskTransition,
+} from './transitions.ts';
 import { updateSpawnTaskMetadata, type SpawnTaskMetadataUpdate } from './metadata.ts';
 import { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
 import { createSpawnTaskFailure } from './failures.ts';
@@ -39,7 +47,6 @@ import {
 const CURRENT_FILE = 'CURRENT';
 const RECORD_FILE = 'record.json';
 const GENERATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
-const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled']);
 
 export type SpawnTaskStoreFaultPoint =
   | 'before-record-write'
@@ -71,6 +78,29 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function writeDurableFile(path: string, content: Buffer | string): void {
+  const descriptor = openSync(path, 'w');
+  try {
+    writeFileSync(descriptor, content);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function syncDirectory(path: string): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(path, 'r');
+    fsyncSync(descriptor);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EISDIR') throw error;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function sameIdentity(left: SpawnTask, right: SpawnTask): boolean {
   return left.taskId === right.taskId
     && left.workspaceId === right.workspaceId
@@ -91,6 +121,7 @@ export class SpawnTaskStore {
   private readonly generations = new Map<string, string>();
   private readonly byParent = new Map<string, Set<string>>();
   private readonly byChild = new Map<string, string>();
+  private readonly loadErrors = new Map<string, string>();
 
   constructor(options: SpawnTaskStoreOptions) {
     assertSpawnTaskId(options.workspaceId, 'workspaceId');
@@ -101,7 +132,6 @@ export class SpawnTaskStore {
     this.faults = options.faults;
     mkdirSync(this.tasksPath(), { recursive: true });
     this.reload();
-    this.validateArtifactsOnStartup();
   }
 
   reserve(input: ReserveSpawnTaskInput): SpawnTask {
@@ -141,6 +171,10 @@ export class SpawnTaskStore {
     return task ? clone(task) : null;
   }
 
+  getLoadErrors(): Readonly<Record<string, string>> {
+    return Object.freeze(Object.fromEntries(this.loadErrors));
+  }
+
   listAll(): SpawnTask[] {
     return [...this.tasks.values()]
       .sort((left, right) => left.stateTimestamps.createdAt.localeCompare(right.stateTimestamps.createdAt)
@@ -164,6 +198,9 @@ export class SpawnTaskStore {
   }
 
   transition(taskId: string, transition: SpawnTaskTransition): SpawnTask {
+    if (transition.runtimeState === 'completed') {
+      throw new Error('Use commitResult to atomically publish a completed spawned-task result');
+    }
     const current = this.require(taskId);
     const next = transitionSpawnTask(current, transition);
     this.commit(next);
@@ -171,6 +208,9 @@ export class SpawnTaskStore {
   }
 
   updateMetadata(taskId: string, update: SpawnTaskMetadataUpdate): SpawnTask {
+    if (update.integrityError !== undefined) {
+      throw new Error('Integrity metadata is store-owned; use repairResult to clear it');
+    }
     const current = this.require(taskId);
     const next = updateSpawnTaskMetadata(current, update);
     this.commit(next);
@@ -311,43 +351,48 @@ export class SpawnTaskStore {
     this.generations.clear();
     this.byParent.clear();
     this.byChild.clear();
+    this.loadErrors.clear();
   }
 
   validateArtifactsOnStartup(): SpawnTask[] {
     const changed: SpawnTask[] = [];
     for (const snapshot of [...this.tasks.values()]) {
-      if (snapshot.runtimeState === 'completed' && snapshot.result) {
-        if (!this.readVerifiedArtifact(snapshot) && !snapshot.integrityError) {
-          changed.push(this.markIntegrityError(
-            snapshot,
-            'Spawned-task result artifact is missing or does not match its digest.',
-          ));
+      try {
+        if (snapshot.runtimeState === 'completed' && snapshot.result) {
+          if (!this.readVerifiedArtifact(snapshot) && !snapshot.integrityError) {
+            changed.push(this.markIntegrityError(
+              snapshot,
+              'Spawned-task result artifact is missing or does not match its digest.',
+            ));
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (snapshot.runtimeState !== 'processing') continue;
-      const pending = this.readVerifiedManifest(snapshot);
-      if (!pending) continue;
-      const bytes = this.readCurrentFile(snapshot.taskId, SPAWN_TASK_RESULT_FILE);
-      if (!bytes || !verifySpawnTaskResult(bytes, pending)) continue;
-      const completed = transitionSpawnTask(snapshot, {
-        runtimeState: 'completed',
-        at: pending.committedAt,
-        result: pending,
-      });
-      this.commit(completed);
-      changed.push(clone(completed));
+        if (snapshot.runtimeState !== 'processing') continue;
+        const pending = this.readVerifiedManifest(snapshot);
+        if (!pending) continue;
+        const bytes = this.readCurrentFile(snapshot.taskId, SPAWN_TASK_RESULT_FILE);
+        if (!bytes || !verifySpawnTaskResult(bytes, pending)) continue;
+        const completed = transitionSpawnTask(snapshot, {
+          runtimeState: 'completed',
+          at: pending.committedAt,
+          result: pending,
+        });
+        this.commit(completed);
+        changed.push(clone(completed));
+      } catch (error) {
+        this.loadErrors.set(snapshot.taskId, error instanceof Error ? error.message : String(error));
+      }
     }
     return changed;
   }
 
   updateDispatch(taskId: string, state: SpawnTaskDispatchState, at: string): SpawnTask {
     const current = this.require(taskId);
-    if (TERMINAL_STATES.has(current.runtimeState)) {
+    if (isSpawnTaskTerminal(current.runtimeState)) {
       throw new Error(`Cannot update dispatch metadata after terminal state ${current.runtimeState}`);
     }
-    const order: readonly SpawnTaskDispatchState[] = ['reserved', 'ready', 'claimed', 'sent'];
+    const order: readonly SpawnTaskDispatchState[] = SPAWN_TASK_DISPATCH_STATES;
     if (order.indexOf(state) !== order.indexOf(current.dispatch.state) + 1) {
       throw new Error(`Illegal spawned-task dispatch transition: ${current.dispatch.state} -> ${state}`);
     }
@@ -367,24 +412,31 @@ export class SpawnTaskStore {
     this.generations.clear();
     this.byParent.clear();
     this.byChild.clear();
+    this.loadErrors.clear();
 
     for (const entry of readdirSync(this.tasksPath(), { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      assertSpawnTaskId(entry.name, 'task directory');
-      const taskPath = join(this.tasksPath(), entry.name);
-      const currentPath = join(taskPath, CURRENT_FILE);
-      if (!existsSync(currentPath)) continue;
-      const generation = readFileSync(currentPath, 'utf8').trim();
-      if (!GENERATION_SEGMENT.test(generation) || generation === '.' || generation === '..') {
-        throw new Error(`Invalid spawned-task generation pointer for ${entry.name}`);
+      try {
+        assertSpawnTaskId(entry.name, 'task directory');
+        const taskPath = join(this.tasksPath(), entry.name);
+        const currentPath = join(taskPath, CURRENT_FILE);
+        if (!existsSync(currentPath)) continue;
+        const generation = readFileSync(currentPath, 'utf8').trim();
+        if (!GENERATION_SEGMENT.test(generation) || generation === '.' || generation === '..') {
+          throw new Error(`Invalid spawned-task generation pointer for ${entry.name}`);
+        }
+        const recordPath = join(taskPath, 'generations', generation, RECORD_FILE);
+        const task = assertSpawnTask(JSON.parse(readFileSync(recordPath, 'utf8')));
+        if (task.taskId !== entry.name || task.workspaceId !== this.workspaceId) {
+          throw new Error(`Spawned-task ownership mismatch for ${entry.name}`);
+        }
+        this.index(task, generation);
+      } catch (error) {
+        this.loadErrors.set(entry.name, error instanceof Error ? error.message : String(error));
       }
-      const recordPath = join(taskPath, 'generations', generation, RECORD_FILE);
-      const task = assertSpawnTask(JSON.parse(readFileSync(recordPath, 'utf8')));
-      if (task.taskId !== entry.name || task.workspaceId !== this.workspaceId) {
-        throw new Error(`Spawned-task ownership mismatch for ${entry.name}`);
-      }
-      this.index(task, generation);
     }
+
+    this.validateArtifactsOnStartup();
   }
 
   private tasksPath(): string {
@@ -410,9 +462,16 @@ export class SpawnTaskStore {
     }
 
     const taskPath = join(this.tasksPath(), task.taskId);
+    const currentPath = join(taskPath, CURRENT_FILE);
+    const diskGeneration = existsSync(currentPath) ? readFileSync(currentPath, 'utf8').trim() : undefined;
+    const indexedGeneration = this.generations.get(task.taskId);
+    if (diskGeneration !== indexedGeneration) {
+      throw new Error(`Cannot replace spawned task ${task.taskId} from a stale store view`);
+    }
+
     const generationsPath = join(taskPath, 'generations');
     mkdirSync(generationsPath, { recursive: true });
-    const nonce = this.randomId();
+    const nonce = assertSpawnTaskId(this.randomId(), 'generation nonce');
     const stageName = `.stage-${nonce}`;
     const stagePath = join(generationsPath, stageName);
     const generation = `g-${String(task.version).padStart(10, '0')}-${nonce}`;
@@ -422,7 +481,7 @@ export class SpawnTaskStore {
     try {
       this.faults?.('before-record-write', task);
       mkdirSync(stagePath);
-      writeFileSync(join(stagePath, RECORD_FILE), `${JSON.stringify(task, null, 2)}\n`, 'utf8');
+      writeDurableFile(join(stagePath, RECORD_FILE), `${JSON.stringify(task, null, 2)}\n`);
       this.copyGenerationFiles(current, stagePath);
       this.faults?.('after-record-write', task);
       if (options.artifactFiles) {
@@ -431,15 +490,18 @@ export class SpawnTaskStore {
           if (name !== SPAWN_TASK_RESULT_FILE && name !== SPAWN_TASK_VERIFIED_RESULT_FILE) {
             throw new Error(`Unsupported spawned-task artifact file: ${name}`);
           }
-          writeFileSync(join(stagePath, name), content);
+          writeDurableFile(join(stagePath, name), content);
         }
         this.faults?.('after-artifact-write', task);
       }
+      syncDirectory(stagePath);
       renameSync(stagePath, generationPath);
+      syncDirectory(generationsPath);
       this.faults?.('after-generation-publish', task);
-      writeFileSync(currentTemp, `${generation}\n`, 'utf8');
+      writeDurableFile(currentTemp, `${generation}\n`);
       this.faults?.('before-current-publish', task);
-      renameSync(currentTemp, join(taskPath, CURRENT_FILE));
+      renameSync(currentTemp, currentPath);
+      syncDirectory(taskPath);
     } catch (error) {
       rmSync(stagePath, { recursive: true, force: true });
       rmSync(currentTemp, { force: true });
@@ -501,7 +563,7 @@ export class SpawnTaskStore {
     const source = join(this.tasksPath(), current.taskId, 'generations', generation);
     for (const entry of readdirSync(source, { withFileTypes: true })) {
       if (!entry.isFile() || entry.name === RECORD_FILE) continue;
-      writeFileSync(join(stagePath, entry.name), readFileSync(join(source, entry.name)));
+      writeDurableFile(join(stagePath, entry.name), readFileSync(join(source, entry.name)));
     }
   }
 

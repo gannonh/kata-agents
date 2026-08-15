@@ -19,27 +19,41 @@ export interface CreateSpawnTaskFailureInput {
   readonly committedAt: string;
 }
 
-function sanitizeValue(value: unknown, depth: number): SpawnTaskJsonValue | undefined {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    return typeof value === 'string' ? truncateUtf8(value, 1024) : value;
+interface SanitizeState {
+  truncated: boolean;
+}
+
+function sanitizeValue(value: unknown, depth: number, state: SanitizeState): SpawnTaskJsonValue | undefined {
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const truncated = truncateUtf8(value, 1024);
+    if (truncated !== value) state.truncated = true;
+    return truncated;
   }
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
-  if (depth >= 4) return '[truncated]';
+  if (depth >= 4) {
+    state.truncated = true;
+    return '[truncated]';
+  }
   if (Array.isArray(value)) {
+    if (value.length > 32) state.truncated = true;
     return value.slice(0, 32)
-      .map((entry) => sanitizeValue(entry, depth + 1))
+      .map((entry) => sanitizeValue(entry, depth + 1, state))
       .filter((entry): entry is SpawnTaskJsonValue => entry !== undefined);
   }
   if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value);
+    if (entries.length > 64) state.truncated = true;
     const sanitized: Record<string, SpawnTaskJsonValue> = {};
-    for (const [rawKey, rawValue] of Object.entries(value).slice(0, 64)) {
+    for (const [rawKey, rawValue] of entries.slice(0, 64)) {
       const key = truncateUtf8(rawKey, 128);
+      if (key !== rawKey) state.truncated = true;
       if (!key) continue;
       if (SENSITIVE_KEY.test(key)) {
         sanitized[key] = '[redacted]';
         continue;
       }
-      const next = sanitizeValue(rawValue, depth + 1);
+      const next = sanitizeValue(rawValue, depth + 1, state);
       if (next !== undefined) sanitized[key] = next;
     }
     return sanitized;
@@ -52,13 +66,19 @@ function inputKind(value: unknown): SpawnTaskAwaitingInputKind | undefined {
 }
 
 function sanitizeDetails(details: unknown): SpawnTaskFailureDetails | undefined {
-  const sanitized = sanitizeValue(details, 0);
+  const state: SanitizeState = { truncated: false };
+  const sanitized = sanitizeValue(details, 0, state);
   if (!sanitized || Array.isArray(sanitized) || typeof sanitized !== 'object') return undefined;
 
   const kind = inputKind((details as { kind?: unknown } | null)?.kind);
-  const serialized = JSON.stringify(sanitized);
+  const candidate: SpawnTaskFailureDetails = {
+    ...(sanitized as SpawnTaskFailureDetails),
+    ...(kind ? { kind } : {}),
+    ...(state.truncated ? { truncated: true } : {}),
+  };
+  const serialized = JSON.stringify(candidate);
   if (Buffer.byteLength(serialized, 'utf8') <= SPAWN_TASK_LIMITS.failureDetailsBytes) {
-    return sanitized as SpawnTaskFailureDetails;
+    return candidate;
   }
 
   return {

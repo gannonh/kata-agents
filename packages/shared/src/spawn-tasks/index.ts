@@ -1,5 +1,6 @@
 export {
   canTransitionSpawnTask,
+  isSpawnTaskTerminal,
   transitionSpawnTask,
   SpawnTaskTransitionError,
 } from './transitions.ts';

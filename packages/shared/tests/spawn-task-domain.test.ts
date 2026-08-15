@@ -98,6 +98,20 @@ describe('spawn-task validation and terminal metadata', () => {
     }
   });
 
+  it('rejects malformed state timestamps and oversized persisted result metadata', () => {
+    const completed = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed) as unknown as Record<string, any>;
+    delete completed.stateTimestamps.completedAt;
+    expect(() => assertSpawnTask(completed)).toThrow('completedAt');
+
+    const oversized = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed) as unknown as Record<string, any>;
+    oversized.result.byteLength = 8 * 1024 * 1024 + 1;
+    expect(() => assertSpawnTask(oversized)).toThrow('byte limit');
+
+    const impossibleDispatch = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved) as unknown as Record<string, any>;
+    impossibleDispatch.dispatch.sentAt = at;
+    expect(() => assertSpawnTask(impossibleDispatch)).toThrow('dispatch');
+  });
+
   it('bounds and sanitizes failure content while preserving interrupted input kind', () => {
     const failure = createSpawnTaskFailure({
       code: 'input_interrupted',
@@ -116,6 +130,15 @@ describe('spawn-task validation and terminal metadata', () => {
     expect(failure.details?.kind).toBe('authentication');
     expect(JSON.stringify(failure.details)).not.toContain('secret-value');
     expect(Buffer.byteLength(JSON.stringify(failure.details), 'utf8')).toBeLessThanOrEqual(4 * 1024);
+
+    const manyDetails = createSpawnTaskFailure({
+      code: 'unknown',
+      message: 'many details',
+      retryable: false,
+      details: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`field${index}`, index])),
+      committedAt: at,
+    });
+    expect(manyDetails.details?.truncated).toBe(true);
   });
 
   it('allows only read, deletion, and integrity changes after terminal state', () => {
@@ -146,6 +169,29 @@ describe('spawn-task validation and terminal metadata', () => {
 });
 
 describe('spawn-task reservation store', () => {
+  it('rejects traversal in caller IDs and generated path segments', () => {
+    const root = tempWorkspace();
+    const generated = [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+      '00000000-0000-4000-8000-000000000003',
+      '00000000-0000-4000-8000-000000000004',
+      '../escape',
+    ];
+    const store = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_paths',
+      randomId: () => generated.shift()!,
+    });
+
+    expect(() => store.reserve({ parentSessionId: '../parent', delegatedPrompt: 'bad', childConfig: {} })).toThrow(
+      'path-safe',
+    );
+    expect(() => store.reserve({ parentSessionId: 'parent_safe', delegatedPrompt: 'bad nonce', childConfig: {} })).toThrow(
+      'generation nonce',
+    );
+  });
+
   it('persists all server-owned IDs before returning a reserved queued task', () => {
     let sequence = 0;
     const root = tempWorkspace();
@@ -192,6 +238,7 @@ describe('spawn-task reservation store', () => {
     const root = tempWorkspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch', clock: () => at });
     const reserved = store.reserve({ parentSessionId: 'parent_dispatch', delegatedPrompt: 'dispatch', childConfig: {} });
+    expect(() => store.updateDispatch(reserved.taskId, 'claimed', at)).toThrow('reserved -> claimed');
     const ready = store.updateDispatch(reserved.taskId, 'ready', at);
     const claimed = store.updateDispatch(ready.taskId, 'claimed', at);
     const sent = store.updateDispatch(claimed.taskId, 'sent', at);
@@ -205,6 +252,17 @@ describe('spawn-task reservation store', () => {
     expect(sent.dispatch).toMatchObject({ state: 'sent', readyAt: at, claimedAt: at, sentAt: at });
     expect(() => store.updateDispatch(cancelled.taskId, 'sent', at)).toThrow('after terminal');
     expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch' }).get(cancelled.taskId)).toEqual(cancelled);
+  });
+
+  it('rejects stale writers instead of replacing a newer committed version', () => {
+    const root = tempWorkspace();
+    const first = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cas', clock: () => at });
+    const reserved = first.reserve({ parentSessionId: 'parent_cas', delegatedPrompt: 'cas', childConfig: {} });
+    const stale = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cas', clock: () => at });
+
+    first.markParentDeleted(reserved.taskId, at);
+    expect(() => stale.markChildDeleted(reserved.taskId, at)).toThrow('stale');
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cas' }).get(reserved.taskId)?.parentDeletedAt).toBe(at);
   });
 
   it('keeps the previous committed record readable when replacement publication faults', () => {

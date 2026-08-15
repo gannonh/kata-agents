@@ -2,10 +2,12 @@ import {
   SPAWN_TASK_DISPATCH_STATES,
   SPAWN_TASK_FAILURE_CODES,
   SPAWN_TASK_LIMITS,
+  SPAWN_TASK_RESULT_ARTIFACT_PATH,
   SPAWN_TASK_RUNTIME_STATES,
   SPAWN_TASK_SCHEMA_VERSION,
   type SpawnTask,
   type SpawnTaskJsonValue,
+  type SpawnTaskResult,
 } from '@kata-sh/core';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$/;
@@ -27,7 +29,9 @@ function string(value: unknown, field: string): string {
 
 function timestamp(value: unknown, field: string): string {
   const text = string(value, field);
-  if (!Number.isFinite(Date.parse(text))) fail(`${field} must be an ISO timestamp`);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(text) || !Number.isFinite(Date.parse(text))) {
+    fail(`${field} must be an ISO timestamp`);
+  }
   return text;
 }
 
@@ -58,6 +62,24 @@ function assertJsonValue(value: unknown, field: string): asserts value is SpawnT
     return;
   }
   fail(`${field} must contain JSON values only`);
+}
+
+export function assertSpawnTaskResult(value: unknown, field = 'result'): SpawnTaskResult {
+  const result = object(value, field);
+  if (result.artifactPath !== SPAWN_TASK_RESULT_ARTIFACT_PATH) {
+    fail(`${field}.artifactPath must be ${SPAWN_TASK_RESULT_ARTIFACT_PATH}`);
+  }
+  const byteLength = positiveInteger(result.byteLength, `${field}.byteLength`, true);
+  if (byteLength > SPAWN_TASK_LIMITS.resultBytes) fail(`${field}.byteLength exceeds byte limit`);
+  if (!SHA256.test(string(result.sha256, `${field}.sha256`))) fail(`${field}.sha256 must be lowercase SHA-256`);
+  if (result.sourceMessageId !== undefined) assertSpawnTaskId(result.sourceMessageId, `${field}.sourceMessageId`);
+  timestamp(result.committedAt, `${field}.committedAt`);
+  const preview = string(result.preview, `${field}.preview`);
+  const previewBytes = Buffer.byteLength(preview, 'utf8');
+  if (previewBytes > SPAWN_TASK_LIMITS.resultPreviewBytes || previewBytes > byteLength) {
+    fail(`${field}.preview exceeds byte limit`);
+  }
+  return value as SpawnTaskResult;
 }
 
 export function assertSpawnTask(value: unknown): SpawnTask {
@@ -92,6 +114,18 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   for (const key of ['readyAt', 'claimedAt', 'sentAt']) {
     if (dispatch[key] !== undefined) timestamp(dispatch[key], `dispatch.${key}`);
   }
+  const requiredDispatchTimestamps: Record<string, readonly string[]> = {
+    reserved: [],
+    ready: ['readyAt'],
+    claimed: ['readyAt', 'claimedAt'],
+    sent: ['readyAt', 'claimedAt', 'sentAt'],
+  };
+  const allowedDispatchTimestamps = new Set(requiredDispatchTimestamps[dispatchState]);
+  for (const key of ['readyAt', 'claimedAt', 'sentAt']) {
+    if (allowedDispatchTimestamps.has(key) !== (dispatch[key] !== undefined)) {
+      fail(`dispatch.${key} is inconsistent with dispatch state ${dispatchState}`);
+    }
+  }
 
   if (task.awaitingInput !== undefined) {
     const awaiting = object(task.awaitingInput, 'awaitingInput');
@@ -108,16 +142,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     string(cancellation.reason, 'cancellation.reason');
   }
 
-  if (task.result !== undefined) {
-    const result = object(task.result, 'result');
-    if (result.artifactPath !== 'result.md') fail('result.artifactPath must be result.md');
-    positiveInteger(result.byteLength, 'result.byteLength', true);
-    if (!SHA256.test(string(result.sha256, 'result.sha256'))) fail('result.sha256 must be lowercase SHA-256');
-    if (result.sourceMessageId !== undefined) assertSpawnTaskId(result.sourceMessageId, 'result.sourceMessageId');
-    timestamp(result.committedAt, 'result.committedAt');
-    const preview = string(result.preview, 'result.preview');
-    if (Buffer.byteLength(preview, 'utf8') > SPAWN_TASK_LIMITS.resultPreviewBytes) fail('result.preview exceeds byte limit');
-  }
+  if (task.result !== undefined) assertSpawnTaskResult(task.result);
 
   if (task.failure !== undefined) {
     const failure = object(task.failure, 'failure');
@@ -142,9 +167,19 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     if (runtimeState !== 'completed') fail('integrityError requires completed runtimeState');
   }
 
-  if (task.resultReadAt !== undefined) timestamp(task.resultReadAt, 'resultReadAt');
+  if (task.resultReadAt !== undefined) {
+    timestamp(task.resultReadAt, 'resultReadAt');
+    if (runtimeState !== 'completed') fail('resultReadAt requires completed runtimeState');
+  }
   if (task.parentDeletedAt !== undefined) timestamp(task.parentDeletedAt, 'parentDeletedAt');
   if (task.childDeletedAt !== undefined) timestamp(task.childDeletedAt, 'childDeletedAt');
+
+  const stateTimestamp = runtimeState === 'awaiting-input'
+    ? 'awaitingInputAt'
+    : `${runtimeState}At`;
+  if (stateTimestamps[stateTimestamp] === undefined) {
+    fail(`stateTimestamps.${stateTimestamp} is required for ${runtimeState} state`);
+  }
 
   if (runtimeState === 'awaiting-input' && task.awaitingInput === undefined) fail('awaiting-input state requires awaitingInput');
   if (runtimeState !== 'awaiting-input' && task.awaitingInput !== undefined) fail('awaitingInput requires awaiting-input state');

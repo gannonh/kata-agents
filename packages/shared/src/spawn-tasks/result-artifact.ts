@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import {
   SPAWN_TASK_LIMITS,
+  SPAWN_TASK_RESULT_ARTIFACT_PATH,
   type SpawnTaskResult,
   type SpawnTaskResultChunkView,
 } from '@kata-sh/core';
 import { truncateUtf8 } from './utf8.ts';
+import { assertSpawnTaskResult } from './validation.ts';
 
-export const SPAWN_TASK_RESULT_FILE = 'result.md';
+export const SPAWN_TASK_RESULT_FILE = SPAWN_TASK_RESULT_ARTIFACT_PATH;
 export const SPAWN_TASK_VERIFIED_RESULT_FILE = 'verified-result.json';
 
 export interface SpawnTaskResultArtifact {
@@ -45,7 +47,7 @@ export function buildSpawnTaskResultArtifact(
   return {
     bytes,
     result: {
-      artifactPath: 'result.md',
+      artifactPath: SPAWN_TASK_RESULT_ARTIFACT_PATH,
       byteLength: bytes.byteLength,
       sha256: sha256(bytes),
       ...(options.sourceMessageId ? { sourceMessageId: options.sourceMessageId } : {}),
@@ -64,21 +66,7 @@ export function parseVerifiedResult(value: string): SpawnTaskResult {
   if (parsed.schemaVersion !== 1 || typeof parsed.result !== 'object' || parsed.result === null) {
     throw new Error('Invalid verified spawned-task result manifest');
   }
-  const result = parsed.result as Partial<SpawnTaskResult>;
-  if (
-    result.artifactPath !== 'result.md'
-    || !Number.isSafeInteger(result.byteLength)
-    || Number(result.byteLength) < 0
-    || typeof result.sha256 !== 'string'
-    || !/^[a-f0-9]{64}$/.test(result.sha256)
-    || typeof result.committedAt !== 'string'
-    || typeof result.preview !== 'string'
-    || Buffer.byteLength(result.preview, 'utf8') > SPAWN_TASK_LIMITS.resultPreviewBytes
-    || (result.sourceMessageId !== undefined && typeof result.sourceMessageId !== 'string')
-  ) {
-    throw new Error('Invalid verified spawned-task result descriptor');
-  }
-  return result as SpawnTaskResult;
+  return assertSpawnTaskResult(parsed.result, 'verifiedResult.result');
 }
 
 export function verifySpawnTaskResult(bytes: Uint8Array, result: SpawnTaskResult): boolean {
