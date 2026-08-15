@@ -51,12 +51,3 @@ Each package has its own agent context file — read it before modifying that pa
 - The agent-requiring E2E specs (`@agent`, `@browser` annotation send, `@worktree-v2 fork`, `@worktree-v2 handoff`) walk the whole chain via `runWithAgentProviderFallback` (`e2e/src/flows/agentChat.ts`) and only fail after every option is exhausted, with each attempt logged and the aggregated failure naming every option. Browser panel tests live under `@browser`, not `@settings` or `@agent`. Cookie import stays under `@settings`.
 - Before deferring any UAT tier or claiming credentials are unavailable: check the chain above and **ask the user**. Deterministic adapters (`@kata-sh/shared/agent/testing`) are test doubles only — never import them from production code, and never add `KATA_*_DETERMINISTIC_ADAPTER`-style env seams to production paths.
 
-## Sub-agents
-
-- Use the appropriate model and reasoning level for the task. Limit sub-agents to the following, listed by preference, from most to least capable:  
-  
-- openai-codex/gpt-5.6-sol
-- claude/opus-5  
-- openai-code/gpt-5.6-luna
-- opencode-go/deepseek-v4-flash
-
