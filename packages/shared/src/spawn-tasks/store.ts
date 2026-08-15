@@ -1,9 +1,7 @@
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -39,9 +37,7 @@ import {
   assertNotSymlink,
   assertRegularFile,
   ensureDurableDirectory,
-  isRegularFile,
   syncDirectory,
-  writeDurableFile,
 } from './durable-fs.ts';
 import {
   CURRENT_FILE,
@@ -49,6 +45,12 @@ import {
   RECORD_FILE,
   reconcileTaskGenerations,
 } from './generation-layout.ts';
+import {
+  publishTaskGeneration,
+  readTaskGenerationFile,
+  type SpawnTaskStoreFaultPoint,
+} from './generation-storage.ts';
+export type { SpawnTaskStoreFaultPoint } from './generation-storage.ts';
 import {
   buildSpawnTaskResultArtifact,
   createSpawnTaskResultChunk,
@@ -62,14 +64,6 @@ import {
 } from './result-artifact.ts';
 
 const MAX_RESERVATION_ATTEMPTS = 16;
-
-export type SpawnTaskStoreFaultPoint =
-  | 'before-record-write'
-  | 'after-record-write'
-  | 'before-artifact-write'
-  | 'after-artifact-write'
-  | 'after-generation-publish'
-  | 'before-current-publish';
 
 export interface SpawnTaskStoreOptions {
   readonly workspaceRoot: string;
@@ -529,82 +523,26 @@ export class SpawnTaskStore {
       throw new Error('A new spawned task must start at version 1');
     }
 
-    const taskPath = join(this.tasksPath(), task.taskId);
-    const currentPath = join(taskPath, CURRENT_FILE);
-    assertNotSymlink(taskPath, 'spawned-task directory');
-    assertNotSymlink(currentPath, 'spawned-task CURRENT');
-    if (existsSync(currentPath)) assertRegularFile(currentPath, 'spawned-task CURRENT');
-    const diskGeneration = existsSync(currentPath) ? readFileSync(currentPath, 'utf8').trim() : undefined;
-    const indexedGeneration = this.generations.get(task.taskId);
-    if (diskGeneration !== indexedGeneration) {
-      throw new Error(`Cannot replace spawned task ${task.taskId} from a stale store view`);
-    }
-
-    const generationsPath = join(taskPath, 'generations');
-    assertNotSymlink(generationsPath, 'spawned-task generations directory');
-    mkdirSync(generationsPath, { recursive: true });
-    assertDirectory(taskPath, 'spawned-task directory');
-    assertDirectory(generationsPath, 'spawned-task generations directory');
-    const nonce = assertSpawnTaskId(this.randomId(), 'generation nonce');
-    const stageName = `.stage-${nonce}`;
-    const stagePath = join(generationsPath, stageName);
-    const generation = `g-${String(task.version).padStart(10, '0')}-${nonce}`;
-    const generationPath = join(generationsPath, generation);
-    const currentTemp = join(taskPath, `.CURRENT-${nonce}.tmp`);
-    assertNotSymlink(stagePath, 'spawned-task staging path');
-    assertNotSymlink(generationPath, 'spawned-task generation path');
-    assertNotSymlink(currentTemp, 'spawned-task CURRENT staging path');
-
-    try {
-      this.faults?.('before-record-write', task);
-      mkdirSync(stagePath);
-      writeDurableFile(join(stagePath, RECORD_FILE), `${JSON.stringify(task, null, 2)}\n`);
-      this.copyGenerationFiles(current, stagePath);
-      this.faults?.('after-record-write', task);
-      if (options.artifactFiles) {
-        this.faults?.('before-artifact-write', task);
-        for (const [name, content] of options.artifactFiles) {
-          if (name !== SPAWN_TASK_RESULT_FILE && name !== SPAWN_TASK_VERIFIED_RESULT_FILE) {
-            throw new Error(`Unsupported spawned-task artifact file: ${name}`);
-          }
-          writeDurableFile(join(stagePath, name), content);
-        }
-        this.faults?.('after-artifact-write', task);
-      }
-      syncDirectory(stagePath);
-      renameSync(stagePath, generationPath);
-      syncDirectory(generationsPath);
-      this.faults?.('after-generation-publish', task);
-      writeDurableFile(currentTemp, `${generation}\n`);
-      this.faults?.('before-current-publish', task);
-      renameSync(currentTemp, currentPath);
-      syncDirectory(taskPath);
-      if (!current) syncDirectory(this.tasksPath());
-    } catch (error) {
-      rmSync(stagePath, { recursive: true, force: true });
-      rmSync(currentTemp, { force: true });
-      throw error;
-    }
-
-    this.index(task, generation);
-    try {
-      reconcileTaskGenerations(taskPath, generation, diskGeneration);
-    } catch (error) {
-      this.loadErrors.set(task.taskId, error instanceof Error ? error.message : String(error));
+    const published = publishTaskGeneration({
+      tasksPath: this.tasksPath(),
+      task,
+      currentTask: current,
+      indexedGeneration: this.generations.get(task.taskId),
+      randomId: this.randomId,
+      faults: this.faults,
+      artifactFiles: options.artifactFiles,
+    });
+    this.index(task, published.generation);
+    if (published.reconciliationError) {
+      this.loadErrors.set(task.taskId, published.reconciliationError);
     }
   }
 
   private readCurrentFile(taskId: string, name: string): Buffer | null {
     const generation = this.generations.get(taskId);
-    if (!generation) return null;
-    const generationPath = join(this.tasksPath(), taskId, 'generations', generation);
-    const filePath = join(generationPath, name);
-    try {
-      assertDirectory(generationPath, 'current spawned-task generation');
-      return isRegularFile(filePath) ? readFileSync(filePath) : null;
-    } catch {
-      return null;
-    }
+    return generation
+      ? readTaskGenerationFile(this.tasksPath(), taskId, generation, name)
+      : null;
   }
 
   private readVerifiedManifest(task: SpawnTask) {
@@ -636,22 +574,6 @@ export class SpawnTaskStore {
     });
     this.commit(next);
     return next;
-  }
-
-  private copyGenerationFiles(current: SpawnTask | undefined, stagePath: string): void {
-    if (!current) return;
-    // Result artifact files are added by the result layer. Record-only updates
-    // preserve them by copying every non-record file from the committed generation.
-    const generation = this.generations.get(current.taskId);
-    if (!generation) return;
-    const source = join(this.tasksPath(), current.taskId, 'generations', generation);
-    assertDirectory(source, 'current spawned-task generation');
-    for (const entry of readdirSync(source, { withFileTypes: true })) {
-      if (entry.isSymbolicLink() || !entry.isFile() || entry.name === RECORD_FILE) continue;
-      const sourceFile = join(source, entry.name);
-      assertRegularFile(sourceFile, `spawned-task artifact ${entry.name}`);
-      writeDurableFile(join(stagePath, entry.name), readFileSync(sourceFile));
-    }
   }
 
   private index(task: SpawnTask, generation: string): void {
