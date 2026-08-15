@@ -1,6 +1,7 @@
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { E2E_TIMEOUTS } from "../../src/config/timeouts.ts";
 import {
+  annotateFixtureUrl,
   attachBrowserToPanel,
   detachBrowser,
   expectBrowserPanelHidden,
@@ -12,7 +13,7 @@ import {
 } from "../../src/flows/browser.ts";
 import { test, expect } from "../../src/fixtures/testFixtures.ts";
 
-test.describe(`Embedded browser panel ${E2E_TAGS.settings}`, () => {
+test.describe(`Embedded browser panel ${E2E_TAGS.browser}`, () => {
   test("opens an integrated panel by default and round-trips detach without replacing the instance", async ({
     authenticatedAppWindow,
   }) => {
@@ -33,7 +34,7 @@ test.describe(`Embedded browser panel ${E2E_TAGS.settings}`, () => {
     expect(hidden.some((item) => item.id === instanceId)).toBe(true);
   });
 
-  test("exposes Annotate chrome in the panel and preserves it across detach", async ({
+  test("exposes the Annotate control in the panel and preserves it across detach", async ({
     authenticatedAppWindow,
   }) => {
     const instanceId = await openNewBrowser(authenticatedAppWindow);
@@ -44,8 +45,7 @@ test.describe(`Embedded browser panel ${E2E_TAGS.settings}`, () => {
     await expect(annotate).toBeDisabled();
     await expect(authenticatedAppWindow.locator("#browser-annotation-tray")).toHaveCount(0);
 
-    const fixtureUrl = `data:text/html;charset=utf-8,${encodeURIComponent("<!doctype html><title>Annotate fixture</title><button>Save</button>")}`;
-    await navigateBrowser(authenticatedAppWindow, instanceId, fixtureUrl);
+    await navigateBrowser(authenticatedAppWindow, instanceId, annotateFixtureUrl());
     await expect(annotate).toBeEnabled({ timeout: E2E_TIMEOUTS.authMs });
 
     await annotate.click();

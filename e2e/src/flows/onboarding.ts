@@ -45,7 +45,8 @@ async function handleWorkspacePickerIfPresent(page: Page): Promise<void> {
 /**
  * Deferred-setup path: drive the onboarding "Setup later" control, which sets
  * the `setupDeferred` flag and lets getSetupNeeds() report fully configured.
- * Reaches the ready shell credential-free for @settings.
+ * Reaches the ready shell credential-free for Settings and other
+ * provider-free product UI.
  */
 export async function completeDeferredSetup(page: Page): Promise<void> {
   await waitForOnboardingWizard(page);

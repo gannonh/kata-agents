@@ -1,6 +1,6 @@
 ---
 name: e2e-test-author
-description: Author or modify local Playwright + real-Electron E2E tests for Kata Agents. Use when adding @smoke/@settings/@agent specs, harness modules, or product flows under e2e/, or when wiring stable id selectors into renderer code for E2E.
+description: Author or modify local Playwright + real-Electron E2E tests for Kata Agents. Use when adding @smoke/@settings/@browser/@agent specs, harness modules, or product flows under e2e/, or when wiring stable id selectors into renderer code for E2E.
 ---
 
 # E2E test author (Kata Agents)
@@ -30,11 +30,12 @@ Read [`e2e/README.md`](../../../e2e/README.md) first.
 
 | Need | File |
 |---|---|
-| New test | `e2e/tests/<tier>/<name>.spec.ts`, tagged `@smoke` / `@settings` / `@agent` |
+| New test | `e2e/tests/<tier>/<name>.spec.ts`, tagged `@smoke` / `@settings` / `@browser` / `@agent` |
 | Shell wait | `e2e/src/flows/shell.ts` |
 | Onboarding step | `e2e/src/flows/onboarding.ts` |
 | Settings step | `e2e/src/flows/settings.ts` |
 | Agent chat step | `e2e/src/flows/agentChat.ts` |
+| Browser panel step | `e2e/src/flows/browser.ts` |
 | Launch/process/isolation | `e2e/src/harness/*` |
 | Playwright fixtures (composition root) | `e2e/src/fixtures/testFixtures.ts` |
 | Launch-health assertion | `e2e/src/assertions/appAssertions.ts` |
@@ -42,10 +43,9 @@ Read [`e2e/README.md`](../../../e2e/README.md) first.
 ## Fixtures
 
 - `appWindow` — launched app, `#root` mounted. Use for `@smoke`.
-- `authenticatedAppWindow` — deferred-setup → ready shell. Use for `@settings`.
-- `@agent` drives the configured real provider in-test. It defaults to the
-  existing `chatgpt-plus` OAuth credential; set `KATA_E2E_AGENT_PROVIDER=anthropic`
-  explicitly for API-key onboarding.
+- `authenticatedAppWindow` — deferred-setup → ready shell. Use for `@settings` and `@browser` panel specs that do not need a provider.
+- `@browser` covers the integrated browser panel. Cookie import stays under `@settings` because that UI lives in Settings.
+- `@agent` drives the configured real provider in-test. Browser annotation *send* uses the same provider fallback, but those specs stay under `@browser`.
 
 ## Reaching app states
 
@@ -80,5 +80,6 @@ them. Wizard copy and model lists change.
 bun run e2e --list
 bun run e2e --grep @smoke      # offline
 bun run e2e --grep @settings
+bun run e2e --grep @browser
 bun run e2e --grep @agent      # uses ChatGPT OAuth by default; Anthropic needs a key
 ```

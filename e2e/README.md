@@ -13,11 +13,11 @@ bun run electron:build   # produces apps/electron/dist/main.cjs + bootstrap-prel
 
 The harness fails loud if the desktop build artifacts are missing.
 
-For the `@agent` tier, the default is the existing `chatgpt-plus` ChatGPT
-OAuth credential. The Codex path never opens a browser or reads an API key.
-Set `KATA_E2E_AGENT_PROVIDER=anthropic` only when you explicitly want to run
-the API-key path, using a real key in the repo root `.env` (`KATA_ANTHROPIC_API_KEY`
-or `ANTHROPIC_API_KEY`).
+For `@agent` and the `@browser` annotation-send path, the default is the
+existing `chatgpt-plus` ChatGPT OAuth credential. The Codex path never opens a
+browser or reads an API key. Set `KATA_E2E_AGENT_PROVIDER=anthropic` only when
+you explicitly want to run the API-key path, using a real key in the repo root
+`.env` (`KATA_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY`).
 
 ## Commands
 
@@ -25,6 +25,7 @@ or `ANTHROPIC_API_KEY`).
 bun run e2e --list                              # list desktop-dev tests
 bun run e2e                                     # all tests, desktop-dev project
 bun run e2e --grep @smoke                       # one tier
+bun run e2e --grep @browser                     # integrated browser panel
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
@@ -72,8 +73,9 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | Tag         | Fixture                                | What it does                                                                                                                                                                                           |
 | ----------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@smoke`    | `appWindow`                            | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline.                                                                                                            |
-| `@settings` | `authenticatedAppWindow`               | Deferred-setup → ready shell → change appearance Mode → reload → assert persisted.                                                                                                                     |
-| `@agent`    | (in-test)                              | Real Anthropic onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
+| `@settings` | `authenticatedAppWindow`               | Settings UI: deferred-setup → ready shell → change appearance Mode → reload → assert persisted. Cookie import lives here.                                                                              |
+| `@browser`  | `authenticatedAppWindow` or in-test    | Integrated browser panel: open/detach/attach, Annotate a guest page, send notes to a session. The annotation send path uses a real provider the same way `@agent` does.                                |
+| `@agent`    | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
 | `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
 
@@ -139,7 +141,7 @@ relying on the flow as durable coverage.
 | `KATA_CONFIG_DIR`                              | Set per-run by the harness (temp dir).                                            | —                                                          |
 | `KATA_VITE_PORT`                               | Set per-run by the harness (allocated free port).                                 | —                                                          |
 | `KATA_E2E_RELEASE_APP`                         | Packaged `.app` path for `desktop-release`.                                       | unset → loud error                                         |
-| `KATA_E2E_AGENT_PROVIDER`                      | `@agent` provider: `openai-codex` or `anthropic`.                                 | `openai-codex`                                             |
+| `KATA_E2E_AGENT_PROVIDER`                      | `@agent` / `@browser` annotation-send provider: `openai-codex` or `anthropic`. | `openai-codex`                                             |
 | `KATA_E2E_AGENT_MODEL`                         | Composer model id picked in `@agent`.                                             | per-provider default                                       |
 | `KATA_ANTHROPIC_API_KEY` / `ANTHROPIC_API_KEY` | Anthropic key for `@agent`.                                                       | from `.env`                                                |
 | `KATA_OPENAI_API_KEY` / `OPENAI_API_KEY`       | Reserved for future API-key provider coverage; Codex uses stored OAuth instead.   | unset                                                      |
@@ -164,9 +166,9 @@ e2e/
     config/                   # loadEnv, timeouts, tags
     harness/                  # generic launch/process/isolation — no product selectors
     fixtures/                 # Playwright fixture composition root (wires flows → harness)
-    flows/                    # product UI steps (shell, onboarding, settings, agentChat)
+    flows/                    # product UI steps (shell, onboarding, settings, browser, agentChat)
     assertions/               # launch-health only
-  tests/{smoke,settings,agent}/*.spec.ts
+  tests/{smoke,settings,browser,agent}/*.spec.ts
   tests/web/*.spec.ts         # browser/WebUI tests and recording templates
 ```
 
@@ -183,7 +185,11 @@ pipeline; generic harness modules must not import flows.
 - **Run isolation.** Each run gets a temp `KATA_CONFIG_DIR`, an allocated Vite
   port, and a `test-results/<runId>/manifest.json`.
 - **id-based selectors.** Stable markers added to product code:
-  `#root`, `#onboarding-wizard`, `#app-ready`, `#workspace-picker`.
+  `#root`, `#onboarding-wizard`, `#app-ready`, `#workspace-picker`,
+  `#browser-panel`, `#browser-annotate-toggle`, `#browser-annotation-tray`,
+  `[data-testid="user-turn"]`, `[data-testid="assistant-turn"]`.
+  Guest page clicks go through the guest `webContents` (`sendInputEvent`)
+  because Electron BrowserViews are not Playwright pages.
 - **Fail loud.** Missing build artifacts, release app path, or provider key
   throw with the variable name and a pointer here.
 
