@@ -112,6 +112,53 @@ describe('spawn-task validation and terminal metadata', () => {
     expect(() => assertSpawnTask(impossibleDispatch)).toThrow('dispatch');
   });
 
+  it('redacts likely secrets from persisted failure messages', () => {
+    const failure = createSpawnTaskFailure({
+      code: 'provider_error',
+      message: 'Provider rejected Authorization: Bearer sk-live-secret-123 and api_key=super-secret; password: "hunter2".',
+      retryable: false,
+      committedAt: at,
+    });
+
+    expect(failure.message).toContain('Provider rejected');
+    expect(failure.message).toContain('[redacted]');
+    expect(failure.message).not.toContain('sk-live-secret-123');
+    expect(failure.message).not.toContain('super-secret');
+    expect(failure.message).not.toContain('hunter2');
+  });
+
+  it('requires canonical input interruption details in builders and persisted records', () => {
+    const interruption = createSpawnTaskFailure({
+      code: 'input_interrupted',
+      message: 'Permission request interrupted.',
+      retryable: true,
+      details: { kind: 'permission', token: 'secret' },
+      committedAt: at,
+    });
+    expect(interruption.details).toEqual({ kind: 'permission', token: '[redacted]' });
+
+    expect(() => createSpawnTaskFailure({
+      code: 'input_interrupted',
+      message: 'Missing kind.',
+      retryable: true,
+      committedAt: at,
+    })).toThrow('details.kind');
+    expect(() => createSpawnTaskFailure({
+      code: 'input_interrupted',
+      message: 'Invalid kind.',
+      retryable: true,
+      details: { kind: 'other' },
+      committedAt: at,
+    })).toThrow('details.kind');
+
+    const missingKind = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.failed) as unknown as Record<string, any>;
+    delete missingKind.failure.details.kind;
+    expect(() => assertSpawnTask(missingKind)).toThrow('input_interrupted');
+    const invalidKind = structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.failed) as unknown as Record<string, any>;
+    invalidKind.failure.details.kind = 'other';
+    expect(() => assertSpawnTask(invalidKind)).toThrow('input_interrupted');
+  });
+
   it('bounds and sanitizes failure content while preserving interrupted input kind', () => {
     const failure = createSpawnTaskFailure({
       code: 'input_interrupted',

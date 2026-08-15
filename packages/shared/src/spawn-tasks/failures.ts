@@ -10,6 +10,18 @@ import {
 import { truncateUtf8 } from './utf8.ts';
 
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|secret|token|api[-_]?key)/i;
+const AUTHORIZATION_SECRET = /(\bauthorization\s*[:=]\s*(?:bearer|basic)\s+)([^\s,;]+)/gi;
+const NAMED_SECRET = /(\b(?:api[-_]?key|cookie|credential|password|secret|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const OTHER_AUTHORIZATION = /(\bauthorization\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const LIKELY_BARE_SECRET = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+
+function sanitizeMessage(value: string): string {
+  return value
+    .replace(AUTHORIZATION_SECRET, '$1[redacted]')
+    .replace(NAMED_SECRET, '$1[redacted]')
+    .replace(OTHER_AUTHORIZATION, '$1[redacted]')
+    .replace(LIKELY_BARE_SECRET, '[redacted]');
+}
 
 export interface CreateSpawnTaskFailureInput {
   readonly code: SpawnTaskFailureCode;
@@ -89,14 +101,16 @@ function sanitizeDetails(details: unknown): SpawnTaskFailureDetails | undefined 
 
 export function createSpawnTaskFailure(input: CreateSpawnTaskFailureInput): SpawnTaskFailure {
   const code = SPAWN_TASK_FAILURE_CODES.includes(input.code) ? input.code : 'unknown';
-  const message = truncateUtf8(
-    typeof input.message === 'string'
-      ? input.message
-      : input.message instanceof Error
-        ? input.message.message
-        : String(input.message ?? 'Unknown spawned-task failure'),
-    SPAWN_TASK_LIMITS.failureMessageBytes,
-  );
+  const rawMessage = typeof input.message === 'string'
+    ? input.message
+    : input.message instanceof Error
+      ? input.message.message
+      : String(input.message ?? 'Unknown spawned-task failure');
+  const message = truncateUtf8(sanitizeMessage(rawMessage), SPAWN_TASK_LIMITS.failureMessageBytes);
+  const kind = inputKind((input.details as { kind?: unknown } | null)?.kind);
+  if (code === 'input_interrupted' && !kind) {
+    throw new TypeError('input_interrupted failure requires details.kind permission|authentication');
+  }
   const details = sanitizeDetails(input.details);
 
   return {

@@ -151,10 +151,14 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     const message = string(failure.message, 'failure.message');
     if (Buffer.byteLength(message, 'utf8') > SPAWN_TASK_LIMITS.failureMessageBytes) fail('failure.message exceeds byte limit');
     if (typeof failure.retryable !== 'boolean') fail('failure.retryable must be boolean');
+    let details: Record<string, unknown> | undefined;
     if (failure.details !== undefined) {
-      const details = object(failure.details, 'failure.details');
+      details = object(failure.details, 'failure.details');
       assertJsonValue(details, 'failure.details');
       if (Buffer.byteLength(JSON.stringify(details), 'utf8') > SPAWN_TASK_LIMITS.failureDetailsBytes) fail('failure.details exceeds byte limit');
+    }
+    if (code === 'input_interrupted' && details?.kind !== 'permission' && details?.kind !== 'authentication') {
+      fail('input_interrupted failure requires details.kind permission|authentication');
     }
     timestamp(failure.committedAt, 'failure.committedAt');
   }
