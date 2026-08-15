@@ -1,14 +1,10 @@
 import {
-  closeSync,
   existsSync,
-  fsyncSync,
   mkdirSync,
-  openSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -39,6 +35,21 @@ import { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
 import { createSpawnTaskFailure } from './failures.ts';
 import { finalizeRecoveredSpawnTask } from './recovery.ts';
 import {
+  assertDirectory,
+  assertNotSymlink,
+  assertRegularFile,
+  ensureDurableDirectory,
+  isRegularFile,
+  syncDirectory,
+  writeDurableFile,
+} from './durable-fs.ts';
+import {
+  CURRENT_FILE,
+  GENERATION_SEGMENT,
+  RECORD_FILE,
+  reconcileTaskGenerations,
+} from './generation-layout.ts';
+import {
   buildSpawnTaskResultArtifact,
   createSpawnTaskResultChunk,
   parseVerifiedResult,
@@ -50,9 +61,6 @@ import {
   type BuildSpawnTaskResultOptions,
 } from './result-artifact.ts';
 
-const CURRENT_FILE = 'CURRENT';
-const RECORD_FILE = 'record.json';
-const GENERATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
 const MAX_RESERVATION_ATTEMPTS = 16;
 
 export type SpawnTaskStoreFaultPoint =
@@ -103,29 +111,6 @@ function emptyStartupReport(): SpawnTaskStartupReport {
   return { finalized: [], integrityMarked: [] };
 }
 
-function writeDurableFile(path: string, content: Buffer | string): void {
-  const descriptor = openSync(path, 'w');
-  try {
-    writeFileSync(descriptor, content);
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function syncDirectory(path: string): void {
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(path, 'r');
-    fsyncSync(descriptor);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EISDIR') throw error;
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
 function sameIdentity(left: SpawnTask, right: SpawnTask): boolean {
   return left.taskId === right.taskId
     && left.workspaceId === right.workspaceId
@@ -139,6 +124,7 @@ export class SpawnTaskStore {
   readonly rootPath: string;
   readonly workspaceId: string;
 
+  private readonly workspaceRoot: string;
   private readonly clock: () => string;
   private readonly randomId: () => string;
   private readonly faults?: SpawnTaskStoreOptions['faults'];
@@ -153,12 +139,14 @@ export class SpawnTaskStore {
 
   constructor(options: SpawnTaskStoreOptions) {
     assertSpawnTaskId(options.workspaceId, 'workspaceId');
+    this.workspaceRoot = options.workspaceRoot;
     this.rootPath = getWorkspaceSpawnTasksPath(options.workspaceRoot);
     this.workspaceId = options.workspaceId;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.randomId = options.randomId ?? randomUUID;
     this.faults = options.faults;
-    mkdirSync(this.tasksPath(), { recursive: true });
+    ensureDurableDirectory(this.rootPath);
+    ensureDurableDirectory(this.tasksPath());
     this.reload();
   }
 
@@ -380,22 +368,11 @@ export class SpawnTaskStore {
     return clone(repaired);
   }
 
-  purgeTask(taskId: string): boolean {
-    const current = this.tasks.get(assertSpawnTaskId(taskId, 'taskId'));
-    if (!current) return false;
-    rmSync(join(this.tasksPath(), taskId), { recursive: true, force: true });
-    this.tasks.delete(taskId);
-    this.generations.delete(taskId);
-    this.byParent.get(current.parentSessionId)?.delete(taskId);
-    this.byChild.delete(current.childSessionId);
-    this.byMessage.delete(current.dispatch.messageId);
-    this.byDispatchAttempt.delete(current.dispatch.dispatchAttemptId);
-    return true;
-  }
-
   purgeWorkspace(): void {
     rmSync(this.rootPath, { recursive: true, force: true });
-    mkdirSync(this.tasksPath(), { recursive: true });
+    syncDirectory(this.workspaceRoot);
+    ensureDurableDirectory(this.rootPath);
+    ensureDurableDirectory(this.tasksPath());
     this.tasks.clear();
     this.generations.clear();
     this.byParent.clear();
@@ -473,17 +450,31 @@ export class SpawnTaskStore {
     this.loadErrors.clear();
 
     for (const entry of readdirSync(this.tasksPath(), { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isSymbolicLink()) {
+        this.loadErrors.set(entry.name, 'Spawned-task directory must not be a symbolic link');
+        continue;
+      }
+      if (!entry.isDirectory()) continue;
       try {
         assertSpawnTaskId(entry.name, 'task directory');
         const taskPath = join(this.tasksPath(), entry.name);
+        assertDirectory(taskPath, 'spawned-task directory');
         const currentPath = join(taskPath, CURRENT_FILE);
+        assertNotSymlink(currentPath, 'spawned-task CURRENT');
         if (!existsSync(currentPath)) continue;
+        assertRegularFile(currentPath, 'spawned-task CURRENT');
         const generation = readFileSync(currentPath, 'utf8').trim();
         if (!GENERATION_SEGMENT.test(generation) || generation === '.' || generation === '..') {
           throw new Error(`Invalid spawned-task generation pointer for ${entry.name}`);
         }
-        const recordPath = join(taskPath, 'generations', generation, RECORD_FILE);
+        const generationsPath = join(taskPath, 'generations');
+        assertDirectory(generationsPath, 'spawned-task generations directory');
+        const generationPath = join(generationsPath, generation);
+        assertDirectory(generationPath, 'current spawned-task generation');
+        reconcileTaskGenerations(taskPath, generation);
+        const recordPath = join(generationPath, RECORD_FILE);
+        assertRegularFile(recordPath, 'spawned-task record');
         const task = assertSpawnTask(JSON.parse(readFileSync(recordPath, 'utf8')));
         if (task.taskId !== entry.name || task.workspaceId !== this.workspaceId) {
           throw new Error(`Spawned-task ownership mismatch for ${entry.name}`);
@@ -502,8 +493,10 @@ export class SpawnTaskStore {
     assertSpawnTaskId(ids.childSessionId, 'childSessionId');
     assertSpawnTaskId(ids.messageId, 'dispatch.messageId');
     assertSpawnTaskId(ids.dispatchAttemptId, 'dispatch.dispatchAttemptId');
+    const taskPath = join(this.tasksPath(), ids.taskId);
+    assertNotSymlink(taskPath, 'spawned-task reservation path');
     return !this.tasks.has(ids.taskId)
-      && !existsSync(join(this.tasksPath(), ids.taskId))
+      && !existsSync(taskPath)
       && !this.byChild.has(ids.childSessionId)
       && !this.byMessage.has(ids.messageId)
       && !this.byDispatchAttempt.has(ids.dispatchAttemptId);
@@ -538,6 +531,9 @@ export class SpawnTaskStore {
 
     const taskPath = join(this.tasksPath(), task.taskId);
     const currentPath = join(taskPath, CURRENT_FILE);
+    assertNotSymlink(taskPath, 'spawned-task directory');
+    assertNotSymlink(currentPath, 'spawned-task CURRENT');
+    if (existsSync(currentPath)) assertRegularFile(currentPath, 'spawned-task CURRENT');
     const diskGeneration = existsSync(currentPath) ? readFileSync(currentPath, 'utf8').trim() : undefined;
     const indexedGeneration = this.generations.get(task.taskId);
     if (diskGeneration !== indexedGeneration) {
@@ -545,13 +541,19 @@ export class SpawnTaskStore {
     }
 
     const generationsPath = join(taskPath, 'generations');
+    assertNotSymlink(generationsPath, 'spawned-task generations directory');
     mkdirSync(generationsPath, { recursive: true });
+    assertDirectory(taskPath, 'spawned-task directory');
+    assertDirectory(generationsPath, 'spawned-task generations directory');
     const nonce = assertSpawnTaskId(this.randomId(), 'generation nonce');
     const stageName = `.stage-${nonce}`;
     const stagePath = join(generationsPath, stageName);
     const generation = `g-${String(task.version).padStart(10, '0')}-${nonce}`;
     const generationPath = join(generationsPath, generation);
     const currentTemp = join(taskPath, `.CURRENT-${nonce}.tmp`);
+    assertNotSymlink(stagePath, 'spawned-task staging path');
+    assertNotSymlink(generationPath, 'spawned-task generation path');
+    assertNotSymlink(currentTemp, 'spawned-task CURRENT staging path');
 
     try {
       this.faults?.('before-record-write', task);
@@ -577,6 +579,7 @@ export class SpawnTaskStore {
       this.faults?.('before-current-publish', task);
       renameSync(currentTemp, currentPath);
       syncDirectory(taskPath);
+      if (!current) syncDirectory(this.tasksPath());
     } catch (error) {
       rmSync(stagePath, { recursive: true, force: true });
       rmSync(currentTemp, { force: true });
@@ -584,15 +587,21 @@ export class SpawnTaskStore {
     }
 
     this.index(task, generation);
+    try {
+      reconcileTaskGenerations(taskPath, generation, diskGeneration);
+    } catch (error) {
+      this.loadErrors.set(task.taskId, error instanceof Error ? error.message : String(error));
+    }
   }
 
   private readCurrentFile(taskId: string, name: string): Buffer | null {
     const generation = this.generations.get(taskId);
     if (!generation) return null;
-    const filePath = join(this.tasksPath(), taskId, 'generations', generation, name);
-    if (!existsSync(filePath)) return null;
+    const generationPath = join(this.tasksPath(), taskId, 'generations', generation);
+    const filePath = join(generationPath, name);
     try {
-      return readFileSync(filePath);
+      assertDirectory(generationPath, 'current spawned-task generation');
+      return isRegularFile(filePath) ? readFileSync(filePath) : null;
     } catch {
       return null;
     }
@@ -636,9 +645,12 @@ export class SpawnTaskStore {
     const generation = this.generations.get(current.taskId);
     if (!generation) return;
     const source = join(this.tasksPath(), current.taskId, 'generations', generation);
+    assertDirectory(source, 'current spawned-task generation');
     for (const entry of readdirSync(source, { withFileTypes: true })) {
-      if (!entry.isFile() || entry.name === RECORD_FILE) continue;
-      writeDurableFile(join(stagePath, entry.name), readFileSync(join(source, entry.name)));
+      if (entry.isSymbolicLink() || !entry.isFile() || entry.name === RECORD_FILE) continue;
+      const sourceFile = join(source, entry.name);
+      assertRegularFile(sourceFile, `spawned-task artifact ${entry.name}`);
+      writeDurableFile(join(stagePath, entry.name), readFileSync(sourceFile));
     }
   }
 

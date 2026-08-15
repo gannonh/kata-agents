@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPAWN_TASK_LIMITS } from '@kata-sh/core';
@@ -23,6 +34,12 @@ function currentGenerationPath(root: string, taskId: string): string {
   const taskRoot = join(root, 'spawn-tasks', 'tasks', taskId);
   const generation = readFileSync(join(taskRoot, 'CURRENT'), 'utf8').trim();
   return join(taskRoot, 'generations', generation);
+}
+
+function generationNames(root: string, taskId: string): string[] {
+  return readdirSync(join(root, 'spawn-tasks', 'tasks', taskId, 'generations'))
+    .filter((name) => name.startsWith('g-'))
+    .sort();
 }
 
 function rewriteCurrentRecord(root: string, taskId: string, mutate: (record: Record<string, any>) => void): void {
@@ -344,8 +361,93 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(reloaded.getLoadErrors()).toHaveProperty(corrupt.taskId);
   });
 
-  it('persists read/deletion markers and purges tasks only on explicit request', () => {
+  it('bounds committed generations to current plus prior', () => {
     const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_bounded_generations' });
+    const processing = processingTask(store);
+    const completed = store.commitResult(processing.taskId, 'bounded', { committedAt: later });
+    store.markResultRead(completed.taskId, '2026-02-03T04:07:06.000Z');
+    store.markParentDeleted(completed.taskId, '2026-02-03T04:08:06.000Z');
+    const current = readFileSync(join(root, 'spawn-tasks', 'tasks', completed.taskId, 'CURRENT'), 'utf8').trim();
+
+    const generations = generationNames(root, completed.taskId);
+    expect(generations).toHaveLength(2);
+    expect(generations).toContain(current);
+  });
+
+  it('cleans orphan publication files and generations during reload', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cleanup' });
+    const processing = processingTask(store);
+    store.markParentDeleted(processing.taskId, later);
+    const taskRoot = join(root, 'spawn-tasks', 'tasks', processing.taskId);
+    const generationsRoot = join(taskRoot, 'generations');
+    mkdirSync(join(generationsRoot, '.stage-orphan'));
+    writeFileSync(join(taskRoot, '.CURRENT-orphan.tmp'), 'orphan', 'utf8');
+    mkdirSync(join(generationsRoot, 'g-9999999999-orphan'));
+    writeFileSync(join(generationsRoot, 'g-9999999999-orphan', 'record.json'), '{}', 'utf8');
+
+    const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cleanup' });
+    expect(reloaded.get(processing.taskId)?.parentDeletedAt).toBe(later);
+    expect(existsSync(join(generationsRoot, '.stage-orphan'))).toBe(false);
+    expect(existsSync(join(taskRoot, '.CURRENT-orphan.tmp'))).toBe(false);
+    expect(generationNames(root, processing.taskId)).toHaveLength(2);
+  });
+
+  it('rejects symlinked task, CURRENT, generation, and result paths', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_symlink' });
+    const healthy = processingTask(store);
+    const tasksRoot = join(root, 'spawn-tasks', 'tasks');
+    const externalTask = mkdtempSync(join(tmpdir(), 'spawn-task-external-'));
+    roots.push(externalTask);
+    symlinkSync(externalTask, join(tasksRoot, 'task_symlink'));
+
+    const currentTask = join(tasksRoot, healthy.taskId);
+    const currentTarget = join(currentTask, 'CURRENT.target');
+    const currentValue = readFileSync(join(currentTask, 'CURRENT'), 'utf8');
+    writeFileSync(currentTarget, currentValue, 'utf8');
+    unlinkSync(join(currentTask, 'CURRENT'));
+    symlinkSync(currentTarget, join(currentTask, 'CURRENT'));
+
+    const currentSymlinkReload = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_symlink' });
+    expect(currentSymlinkReload.get(healthy.taskId)).toBeNull();
+    expect(currentSymlinkReload.getLoadErrors()).toHaveProperty(healthy.taskId);
+    expect(currentSymlinkReload.getLoadErrors()).toHaveProperty('task_symlink');
+
+    unlinkSync(join(currentTask, 'CURRENT'));
+    writeFileSync(join(currentTask, 'CURRENT'), currentValue, 'utf8');
+    const generation = currentValue.trim();
+    const generationPath = join(currentTask, 'generations', generation);
+    const movedGeneration = `${generationPath}.target`;
+    renameSync(generationPath, movedGeneration);
+    symlinkSync(movedGeneration, generationPath);
+    const generationSymlinkReload = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_symlink' });
+    expect(generationSymlinkReload.get(healthy.taskId)).toBeNull();
+    expect(generationSymlinkReload.getLoadErrors()).toHaveProperty(healthy.taskId);
+  });
+
+  it('treats a symlinked completed artifact as an integrity failure without following it', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_artifact_symlink', clock: () => later });
+    const processing = processingTask(store);
+    const completed = store.commitResult(processing.taskId, 'same bytes', { committedAt: later });
+    const resultPath = join(currentGenerationPath(root, completed.taskId), 'result.md');
+    const external = join(root, 'external-result.md');
+    writeFileSync(external, 'same bytes', 'utf8');
+    unlinkSync(resultPath);
+    symlinkSync(external, resultPath);
+
+    const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_artifact_symlink', clock: () => later });
+    expect(reloaded.get(completed.taskId)).toMatchObject({
+      runtimeState: 'completed',
+      integrityError: { code: 'result_persist_failed' },
+    });
+  });
+
+  it('retains tasks until explicit workspace purge and exposes no per-task purge', () => {
+    const root = workspace();
+    writeFileSync(join(root, 'config.json'), '{"workspace":true}\n', 'utf8');
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_retention' });
     const first = processingTask(store);
     const completed = store.commitResult(first.taskId, 'retained', { committedAt: later });
@@ -356,12 +458,12 @@ describe('spawn-task artifact recovery and retention', () => {
     const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_retention' });
     expect(reloaded.get(childDeleted.taskId)).toEqual(childDeleted);
     expect(reloaded.readResultChunk(childDeleted.taskId, 0, 64)).toMatchObject({ dataBase64: 'cmV0YWluZWQ=' });
-    expect(reloaded.purgeTask(childDeleted.taskId)).toBe(true);
-    expect(reloaded.get(childDeleted.taskId)).toBeNull();
+    expect((reloaded as unknown as { purgeTask?: unknown }).purgeTask).toBeUndefined();
 
     processingTask(reloaded);
     reloaded.purgeWorkspace();
     expect(reloaded.listAll()).toEqual([]);
     expect(existsSync(join(root, 'spawn-tasks', 'tasks'))).toBe(true);
+    expect(readFileSync(join(root, 'config.json'), 'utf8')).toContain('workspace');
   });
 });
