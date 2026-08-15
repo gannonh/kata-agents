@@ -81,6 +81,7 @@ function createMockBrowserView() {
     webContents,
     setBounds: mock(() => {}),
     setAutoResize: mock(() => {}),
+    getBounds: mock(() => ({ x: 0, y: 0, width: 800, height: 600 })),
   }
 }
 
@@ -560,6 +561,14 @@ describe('BrowserPaneManager', () => {
     )
   })
 
+  it('navigate keeps data URLs instead of sending them to search', async () => {
+    manager.createInstance('nav-data')
+    const dataUrl = 'data:text/html;charset=utf-8,<h1>Annotate fixture</h1>'
+    await manager.navigate('nav-data', dataUrl)
+    const instance = (manager as any).instances.get('nav-data')
+    expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith(dataUrl)
+  })
+
   it('clears navigation timeout timer on success', async () => {
     manager.createInstance('nav-timeout')
 
@@ -789,6 +798,7 @@ describe('BrowserPaneManager', () => {
         canGoForward: false,
         themeColor: '#123456',
         surface: 'detached',
+        agentControlActive: false,
       },
     ])
   })
@@ -821,6 +831,7 @@ describe('BrowserPaneManager', () => {
         canGoForward: true,
         themeColor: '#654321',
         surface: 'panel',
+        agentControlActive: false,
       },
     ])
   })
@@ -1084,6 +1095,17 @@ describe('BrowserPaneManager', () => {
       expect(instance.nativeOverlayView.setBounds).toHaveBeenCalledWith({ x: 0, y: 48, width: 1200, height: 852 })
       expect(instance.nativeOverlayView.webContents.focus).not.toHaveBeenCalled()
       expect(manager.listInstances().find(i => i.id === 'ac-idle')?.agentControlActive).toBe(true)
+    })
+
+    it('rejects annotate mode while agent control owns the page', async () => {
+      manager.createInstance('ac-annotate')
+      manager.bindSession('ac-annotate', 'sess-annotate')
+      manager.setAgentControl('sess-annotate', { displayName: 'Navigate Page' })
+
+      expect(await manager.setAnnotateMode('ac-annotate', true)).toEqual({
+        ok: false,
+        reason: 'not-authorized',
+      })
     })
 
     it('emits state change when agent control is set and cleared', () => {

@@ -14,6 +14,7 @@ import type {
   BrowserInstanceInfo,
   DeepLinkNavigation,
 } from './dto'
+import type { BrowserAnnotationState } from './browser-annotations'
 import type { GitStatusChangedEvent } from './git'
 
 export interface BroadcastEventMap {
@@ -56,6 +57,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.browserPane.STATE_CHANGED]: [info: BrowserInstanceInfo]
   [RPC_CHANNELS.browserPane.REMOVED]: [id: string]
   [RPC_CHANNELS.browserPane.INTERACTED]: [id: string]
+  [RPC_CHANNELS.browserPane.ANNOTATION_STATE_CHANGED]: [state: BrowserAnnotationState]
 
   // Navigation events (per-window)
   [RPC_CHANNELS.notification.NAVIGATE]: [data: { workspaceId: string; sessionId: string }]

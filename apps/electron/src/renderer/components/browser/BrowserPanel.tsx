@@ -26,6 +26,12 @@ import {
 import { getOpenOverlayRects } from '@/lib/overlay-detection'
 import { EMPTY_STATE_PROMPT_SAMPLES } from './empty-state-prompts'
 import type { BrowserInstanceInfo } from '../../../shared/types'
+import {
+  BrowserAnnotateToggle,
+  BrowserAnnotationTray,
+  useBrowserAnnotationState,
+} from './BrowserAnnotationChrome'
+import { isAnnotateChromeDisabled } from './annotation-ui'
 
 const PARKED_BOUNDS: BrowserViewRect = { x: 0, y: 0, width: 0, height: 0 }
 
@@ -41,6 +47,7 @@ export function BrowserPanel({ instanceId }: BrowserPanelProps) {
   const url = requestedUrl ?? instance?.url ?? 'about:blank'
   const isBlank = isBlankBrowserUrl(url)
   const hostRef = useRef<HTMLDivElement>(null)
+  const annotationState = useBrowserAnnotationState(instanceId)
 
   useEffect(() => {
     if (!isBlankBrowserUrl(instance?.url)) setRequestedUrl(null)
@@ -91,10 +98,13 @@ export function BrowserPanel({ instanceId }: BrowserPanelProps) {
           instance={instance}
           leadingAction={leadingAction}
           closeButton={rightSidebarButton}
+          annotationState={annotationState}
+          annotateDisabled={isAnnotateChromeDisabled(isBlank, instance?.agentControlActive)}
           onNavigate={(nextUrl) => {
             setRequestedUrl(nextUrl)
           }}
         />
+        <BrowserAnnotationTray instanceId={instanceId} state={annotationState} />
         <div
           ref={hostRef}
           id="browser-panel"
@@ -116,12 +126,16 @@ function BrowserPanelToolbar({
   instance,
   leadingAction,
   closeButton,
+  annotationState,
+  annotateDisabled,
   onNavigate,
 }: {
   instanceId: string
   instance: BrowserInstanceInfo | undefined
   leadingAction?: ReactNode
   closeButton?: ReactNode
+  annotationState: ReturnType<typeof useBrowserAnnotationState>
+  annotateDisabled: boolean
   onNavigate?: (url: string) => void
 }) {
   const api = window.electronAPI?.browserPane
@@ -162,11 +176,16 @@ function BrowserPanelToolbar({
       themeColor={instance?.themeColor}
       compact
       leadingContent={leadingAction}
-      trailingContent={closeButton ? (
-        <div className="ml-2 flex items-center">
+      trailingContent={(
+        <div className="ml-2 flex items-center gap-1">
+          <BrowserAnnotateToggle
+            instanceId={instanceId}
+            state={annotationState}
+            disabled={annotateDisabled}
+          />
           {closeButton}
         </div>
-      ) : undefined}
+      )}
       urlBarClassName="max-w-[600px]"
       className={cn(
         'shrink-0 border-b border-foreground/6',

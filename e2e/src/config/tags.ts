@@ -2,6 +2,7 @@
 export const E2E_TAGS = {
   smoke: "@smoke",
   settings: "@settings",
+  browser: "@browser",
   agent: "@agent",
   oauth: "@oauth",
   /** Serial Git/GitHub V1 flows, including the authenticated UAT repository path. */

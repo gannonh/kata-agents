@@ -1,6 +1,7 @@
 export * from './types'
 export * from './channels'
 export * from './dto'
+export * from './browser-annotations'
 export * from './git'
 export * from './worktree-handoff'
 export * from './conversation-fork'

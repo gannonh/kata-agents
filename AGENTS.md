@@ -48,7 +48,7 @@ Each package has its own agent context file — read it before modifying that pa
 
 - **Primary credential: codex OAuth.** The app is already authenticated against the codex harness (credentials in `dotfiles/pi/.pi/agent/auth.json`); the `chatgpt-plus` connection is reused without entering a key.
 - **Fallback chain: root `.env`.** `KATA_E2E_AGENT_PROVIDER[_NN]` + `KATA_E2E_AGENT_MODEL[_NN]` select the provider; the matching `KATA_*_API_KEY` supplies the key (`openai-codex` → `KATA_OPENAI_API_KEY`, `opencode-go` → `KATA_OPENCODE_GO_API_KEY`, `openrouter` → `KATA_OPENROUTER_API_KEY`, `deepseek` → `KATA_DEEPSEEK_API_KEY`, `anthropic` → `KATA_ANTHROPIC_API_KEY` — avoid, expensive).
-- The agent E2E specs (`@agent`, `@worktree-v2 fork`, `@worktree-v2 handoff`) walk the whole chain via `runWithAgentProviderFallback` (`e2e/src/flows/agentChat.ts`) and only fail after every option is exhausted, with each attempt logged and the aggregated failure naming every option.
+- The agent-requiring E2E specs (`@agent`, `@browser` annotation send, `@worktree-v2 fork`, `@worktree-v2 handoff`) walk the whole chain via `runWithAgentProviderFallback` (`e2e/src/flows/agentChat.ts`) and only fail after every option is exhausted, with each attempt logged and the aggregated failure naming every option. Browser panel tests live under `@browser`, not `@settings` or `@agent`. Cookie import stays under `@settings`.
 - Before deferring any UAT tier or claiming credentials are unavailable: check the chain above and **ask the user**. Deterministic adapters (`@kata-sh/shared/agent/testing`) are test doubles only — never import them from production code, and never add `KATA_*_DETERMINISTIC_ADAPTER`-style env seams to production paths.
 
 ## Sub-agents

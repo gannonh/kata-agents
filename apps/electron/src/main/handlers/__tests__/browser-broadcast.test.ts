@@ -75,6 +75,13 @@ function makeDeps(opts: {
   captureStateCb?: (cb: (info: BrowserInstanceInfo) => void) => void
   captureRemovedCb?: (cb: (id: string) => void) => void
   captureInteractedCb?: (cb: (id: string) => void) => void
+  captureAnnotationCb?: (cb: (state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void) => void
+  setAnnotateMode?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; reason: 'not-ready' }>
+  cancelAnnotate?: (id: string) => void
+  cancelPendingAnnotation?: (id: string) => void
+  deleteAnnotation?: (id: string, annotationId: string) => boolean
+  clearAnnotations?: (id: string) => void
+  getAnnotationState?: (id: string) => import('@kata-sh/shared/protocol').BrowserAnnotationState
 }): HandlerDeps {
   return {
     sessionManager: {} as HandlerDeps['sessionManager'],
@@ -96,6 +103,20 @@ function makeDeps(opts: {
       onStateChange: (cb: (info: BrowserInstanceInfo) => void) => opts.captureStateCb?.(cb),
       onRemoved: (cb: (id: string) => void) => opts.captureRemovedCb?.(cb),
       onInteracted: (cb: (id: string) => void) => opts.captureInteractedCb?.(cb),
+      onAnnotationStateChange: (
+        cb: (state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void,
+      ) => opts.captureAnnotationCb?.(cb),
+      setAnnotateMode: opts.setAnnotateMode ?? (async () => ({ ok: true })),
+      cancelAnnotate: opts.cancelAnnotate ?? (() => {}),
+      cancelPendingAnnotation: opts.cancelPendingAnnotation ?? (() => {}),
+      deleteAnnotation: opts.deleteAnnotation ?? (() => false),
+      clearAnnotations: opts.clearAnnotations ?? (() => {}),
+      getAnnotationState: opts.getAnnotationState ?? ((id: string) => ({
+        instanceId: id,
+        mode: 'idle' as const,
+        annotations: [],
+        pendingLabel: null,
+      })),
     } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
     oauthFlowStore: {} as HandlerDeps['oauthFlowStore'],
   }
@@ -204,6 +225,57 @@ describe('browser handler — workspace filtering', () => {
         'remote-tab',
         'unbound',
       ])
+    })
+  })
+
+  describe('annotation RPCs', () => {
+    it('broadcasts annotation state to all renderers', async () => {
+      let captured: ((state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void) | null = null
+      const { registerBrowserHandlers } = await import('../browser')
+      registerBrowserHandlers(
+        recorder.server,
+        makeDeps({
+          instances: [],
+          captureAnnotationCb: (cb) => { captured = cb },
+        }),
+      )
+
+      captured!({
+        instanceId: 'b-1',
+        mode: 'selecting',
+        annotations: [],
+        pendingLabel: null,
+      })
+
+      expect(recorder.pushes).toHaveLength(1)
+      expect(recorder.pushes[0].channel).toBe('browser-pane:annotation-state-changed')
+      expect(recorder.pushes[0].target).toEqual({ to: 'all' })
+      expect(recorder.pushes[0].args[0]).toEqual({
+        instanceId: 'b-1',
+        mode: 'selecting',
+        annotations: [],
+        pendingLabel: null,
+      })
+    })
+
+    it('hydrates list-annotations with the full instance state', async () => {
+      const state = {
+        instanceId: 'b-1',
+        mode: 'composing' as const,
+        annotations: [],
+        pendingLabel: 'Submit',
+      }
+      const { registerBrowserHandlers } = await import('../browser')
+      registerBrowserHandlers(
+        recorder.server,
+        makeDeps({
+          instances: [],
+          getAnnotationState: (id) => ({ ...state, instanceId: id }),
+        }),
+      )
+      const handler = recorder.handlers.get('browser-pane:list-annotations')
+      expect(handler).toBeDefined()
+      expect(handler!({ clientId: 'c1', workspaceId: 'ws-1', webContentsId: null }, 'b-1')).toEqual(state)
     })
   })
 })

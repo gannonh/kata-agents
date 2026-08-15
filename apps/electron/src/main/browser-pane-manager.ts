@@ -25,9 +25,18 @@ import {
   type BrowserViewRect,
 } from '../shared/browser-surface'
 import { DEFAULT_THEME, loadAppTheme, getAllowRemoteEvaluate } from '@kata-sh/shared/config'
+import { i18n } from '@kata-sh/shared/i18n'
 import { CodedError } from '@kata-sh/shared/protocol'
 import { getBrowserLiveFxCornerRadii } from '../shared/browser-live-fx'
 import { prepareBrowserCookiePartition } from './browser-cookie-import/electron-runtime'
+import { BrowserAnnotationRuntime, type AnnotationRuntimeGuest } from './browser-annotations/annotation-runtime'
+import {
+  ANNOTATION_COMPOSER_MARKUP,
+  ANNOTATION_COMPOSER_STYLES,
+  buildBindAnnotationComposerShieldScript,
+  buildUnbindAnnotationComposerShieldScript,
+} from './browser-annotations/composer-overlay'
+import { formatBrowserAnnotationsAsMarkdown } from '../shared/browser-annotations/output'
 import type {
   IBrowserPaneManager,
   BrowserInstanceSnapshot,
@@ -130,6 +139,9 @@ const TOOLBAR_CHANNELS = {
   ATTACH: 'browser-toolbar:attach',
   STATE_UPDATE: 'browser-toolbar:state-update',
   THEME_COLOR: 'browser-toolbar:theme-color',
+  SET_ANNOTATE_MODE: 'browser-toolbar:set-annotate-mode',
+  ANNOTATION_STATE: 'browser-toolbar:annotation-state',
+  CLEAR_ANNOTATIONS: 'browser-toolbar:clear-annotations',
 } as const
 export const BROWSER_PANE_SESSION_PARTITION = 'persist:browser-pane'
 const SESSION_PARTITION = BROWSER_PANE_SESSION_PARTITION
@@ -354,6 +366,22 @@ export class BrowserPaneManager implements IBrowserPaneManager {
   private windowManager: WindowManager | null = null
   private sessionPathResolver: ((sessionId: string) => string | null) | null = null
   private hostWillDestroyCleanup: (() => void) | null = null
+  private annotationStateCallback: ((state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void) | null = null
+  private readonly annotations = new BrowserAnnotationRuntime(
+    (instanceId) => this.resolveAnnotationPage(instanceId),
+    () => ({
+      dialog: i18n.t('browser.annotationComposer'),
+      comment: i18n.t('browser.annotationComment'),
+      placeholder: i18n.t('browser.annotationCommentPlaceholder'),
+      intent: i18n.t('browser.annotationIntent'),
+      change: i18n.t('browser.annotationIntent.change'),
+      fix: i18n.t('browser.annotationIntent.fix'),
+      question: i18n.t('browser.annotationIntent.question'),
+      approve: i18n.t('browser.annotationIntent.approve'),
+      cancel: i18n.t('common.cancel'),
+      save: i18n.t('browser.annotationAdd'),
+    }),
+  )
 
   setWindowManager(windowManager: WindowManager): void {
     this.hostWillDestroyCleanup?.()
@@ -380,6 +408,76 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
   onInteracted(callback: (id: string) => void): void {
     this.interactedCallback = callback
+  }
+
+  onAnnotationStateChange(callback: (state: import('@kata-sh/shared/protocol').BrowserAnnotationState) => void): void {
+    this.annotationStateCallback = callback
+    this.bindAnnotationRuntime()
+  }
+
+  private annotationRuntimeBound = false
+
+  private bindAnnotationRuntime(): void {
+    if (this.annotationRuntimeBound) return
+    this.annotationRuntimeBound = true
+    this.annotations.onStateChange((state) => {
+      this.annotationStateCallback?.(state)
+      const instance = this.instances.get(state.instanceId)
+      if (instance) {
+        this.updateNativeOverlayState(instance)
+        this.pushToolbarAnnotationState(instance)
+      }
+    })
+  }
+
+  async setAnnotateMode(id: string, enabled: boolean) {
+    if (enabled) {
+      const instance = this.instances.get(id)
+      if (instance?.agentControl?.active) {
+        return { ok: false as const, reason: 'not-authorized' as const }
+      }
+    }
+    return this.annotations.setEnabled(id, enabled)
+  }
+
+  cancelAnnotate(id: string): void {
+    void this.annotations.setEnabled(id, false)
+  }
+
+  cancelPendingAnnotation(id: string): void {
+    this.annotations.cancelPending(id)
+  }
+
+  deleteAnnotation(id: string, annotationId: string): boolean {
+    return this.annotations.delete(id, annotationId)
+  }
+
+  clearAnnotations(id: string): void {
+    this.annotations.clear(id)
+  }
+
+  listAnnotations(id: string) {
+    return this.annotations.list(id)
+  }
+
+  getAnnotationState(id: string) {
+    return this.annotations.getState(id)
+  }
+
+  private resolveAnnotationPage(instanceId: string) {
+    const instance = this.instances.get(instanceId)
+    if (!instance || instance.window.isDestroyed()) return null
+    return {
+      guest: instance.pageView.webContents as unknown as AnnotationRuntimeGuest,
+      overlay: instance.nativeOverlayView.webContents as unknown as AnnotationRuntimeGuest,
+      viewportSize: () => {
+        const bounds = typeof instance.pageView.getBounds === 'function'
+          ? instance.pageView.getBounds()
+          : { width: 0, height: 0 }
+        return { width: Math.max(0, bounds.width), height: Math.max(0, bounds.height) }
+      },
+      currentUrl: () => instance.currentUrl,
+    }
   }
 
   createInstance(id?: string, options?: CreateBrowserInstanceOptions): string {
@@ -531,6 +629,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
     this.setupWindowListeners(instance)
     this.instances.set(instanceId, instance)
+    this.bindAnnotationRuntime()
     this.emitStateChange(instance)
     mainLog.info(`[browser-pane] toolbar version: v4-react-chromeless`)
     mainLog.info(`[browser-pane] Created instance: ${instanceId} (show=${shouldShow}, surface=${surface}, ownerType=${ownerType}, ownerSessionId=${ownerSessionId ?? 'none'})`)
@@ -568,6 +667,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     instance.themeObserverToken = null
     instance.pendingShowOnReady = false
     instance.pendingShowToken += 1
+    this.annotations.destroy(id)
 
     // Clean up in-flight network tracking for this instance's webContents
     const wcId = instance.pageView.webContents.id
@@ -764,7 +864,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     let normalizedUrl = url.trim()
     const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedUrl)
     const isAbout = normalizedUrl.startsWith('about:')
-    if (!hasScheme && !isAbout) {
+    const isData = /^data:/i.test(normalizedUrl)
+    const isFile = /^file:/i.test(normalizedUrl)
+    if (!hasScheme && !isAbout && !isData && !isFile) {
       const looksLikeHost = /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[\w-]+(?:\.[\w-]+)+)(?::\d+)?(?:\/|$)/i.test(normalizedUrl)
       if (looksLikeHost) {
         normalizedUrl = `https://${normalizedUrl}`
@@ -2052,12 +2154,14 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         pointer-events: none;
         cursor: default;
       }
+      ${ANNOTATION_COMPOSER_STYLES}
     </style>
   </head>
   <body>
     <div id="overlay">
       <div id="shield"></div>
       <div id="chip">Agent is working…</div>
+      ${ANNOTATION_COMPOSER_MARKUP}
     </div>
   </body>
 </html>`
@@ -2241,7 +2345,8 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     const control = instance.agentControl
     const agentActive = !!control?.active
     const menuActive = !!instance.toolbarMenuOverlayActive
-    const shouldShow = agentActive || menuActive
+    const composing = this.annotations.getState(instance.id).mode === 'composing'
+    const shouldShow = agentActive || menuActive || composing
     const host = this.getViewHost(instance)
 
     if (!shouldShow || !instance.nativeOverlayReady || !host || host.isDestroyed()) {
@@ -2261,6 +2366,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       const accent = this.getResolvedAccentColor()
 
       void instance.nativeOverlayView.webContents.executeJavaScript(`(() => {
+        ${buildUnbindAnnotationComposerShieldScript()}
         const overlay = document.getElementById('overlay');
         const chip = document.getElementById('chip');
         const shield = document.getElementById('shield');
@@ -2277,8 +2383,16 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       return
     }
 
+    if (composing) {
+      void instance.nativeOverlayView.webContents
+        .executeJavaScript(buildBindAnnotationComposerShieldScript())
+        .catch(() => {})
+      return
+    }
+
     // Menu mode: transparent full-page tap-catcher, no visuals
     void instance.nativeOverlayView.webContents.executeJavaScript(`(() => {
+      ${buildUnbindAnnotationComposerShieldScript()}
       const overlay = document.getElementById('overlay');
       const chip = document.getElementById('chip');
       const shield = document.getElementById('shield');
@@ -2543,8 +2657,21 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       canGoForward: instance.canGoForward,
       themeColor: instance.themeColor,
       surface: instance.surface,
+      agentControlActive: !!instance.agentControl?.active,
     }
     instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.STATE_UPDATE, state)
+    this.pushToolbarAnnotationState(instance)
+  }
+
+  private pushToolbarAnnotationState(instance: BrowserInstance): void {
+    if (instance.window.isDestroyed() || instance.toolbarView.webContents.isDestroyed()) return
+    const state = this.annotations.getState(instance.id)
+    instance.toolbarView.webContents.send(TOOLBAR_CHANNELS.ANNOTATION_STATE, {
+      mode: state.mode,
+      count: state.annotations.length,
+      pendingLabel: state.pendingLabel,
+      markdown: formatBrowserAnnotationsAsMarkdown(state.annotations),
+    })
   }
 
   /** Register IPC handlers for toolbar actions. Call once at app startup. */
@@ -2622,6 +2749,17 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     ipcMain.handle(TOOLBAR_CHANNELS.ATTACH, async (_event, instanceId: string) => {
       const inst = findInstance(instanceId)
       if (inst) this.attachToPanel(inst.id)
+    })
+
+    ipcMain.handle(TOOLBAR_CHANNELS.SET_ANNOTATE_MODE, async (_event, instanceId: string, enabled: boolean) => {
+      const inst = findInstance(instanceId)
+      if (!inst) return { ok: false as const, reason: 'not-ready' as const }
+      return this.setAnnotateMode(inst.id, enabled)
+    })
+
+    ipcMain.handle(TOOLBAR_CHANNELS.CLEAR_ANNOTATIONS, async (_event, instanceId: string) => {
+      const inst = findInstance(instanceId)
+      if (inst) this.clearAnnotations(inst.id)
     })
 
     mainLog.info('[browser-pane] Toolbar IPC handlers registered')
@@ -3023,6 +3161,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           displayName: meta.displayName,
           intent: meta.intent,
         }
+        void this.annotations.setEnabled(instance.id, false)
 
         // Backfill workspaceId for instances that were created before the
         // workspace was known (legacy callers / pre-workspaceId code paths).
@@ -3034,6 +3173,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
 
         this.reapplyAgentControlVisual(instance)
         this.emitStateChange(instance)
+        this.pushToolbarState(instance)
 
         mainLog.info(`[browser-pane] agent control activated session=${sessionId} label=${label}`)
         return
@@ -3052,6 +3192,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         this.applyAgentControlLock(instance, false)
         this.updateNativeOverlayState(instance)
         this.emitStateChange(instance)
+        this.pushToolbarState(instance)
         mainLog.info(`[browser-pane] agent control released session=${sessionId}`)
       }
     }
@@ -3081,6 +3222,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     this.applyAgentControlLock(instance, false)
     this.updateNativeOverlayState(instance)
     this.emitStateChange(instance)
+    this.pushToolbarState(instance)
     mainLog.info(`[browser-pane] agent control released instance=${instanceId}${sessionId ? ` session=${sessionId}` : ''}`)
 
     return { released: true }
@@ -3649,6 +3791,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       void this.pushToolbarState(instance)
       this.scheduleEarlyThemeExtraction(instance, url)
       this.reapplyAgentControlVisual(instance)
+      this.annotations.handleNavigated(instance.id, true)
     })
 
     pageWc.on('did-redirect-navigation', (_event, url, isInPlace, isMainFrame) => {
@@ -3680,6 +3823,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
         this.installThemeObserver(instance)
         instance.inPageThemeTimer = setTimeout(() => { void this.extractThemeColor(instance) }, 300)
         this.reapplyAgentControlVisual(instance)
+        this.annotations.handleNavigated(instance.id, false)
       }).catch((error) => {
         mainLog.warn(`[browser-pane] empty-state launch handling failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
       })
@@ -3706,6 +3850,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.on('console-message', (_event, level, message) => {
+      if (this.annotations.handleConsoleMessage(instance.id, message)) {
+        return
+      }
       if (message.startsWith(THEME_COLOR_SIGNAL_PREFIX)) {
         const payload = message.slice(THEME_COLOR_SIGNAL_PREFIX.length)
         const delimiterIdx = payload.indexOf(':')
