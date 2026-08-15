@@ -1,4 +1,5 @@
 import type { SpawnTask, SpawnTaskIntegrityError } from '@kata-sh/core';
+import { isSpawnTaskTerminal } from './transitions.ts';
 
 export interface SpawnTaskMetadataUpdate {
   readonly at: string;
@@ -7,6 +8,29 @@ export interface SpawnTaskMetadataUpdate {
   readonly childDeletedAt?: string;
   /** null clears the marker after a verified atomic artifact repair. */
   readonly integrityError?: SpawnTaskIntegrityError | null;
+}
+
+export function requestSpawnTaskCancellation(
+  task: SpawnTask,
+  requestedAt: string,
+  reason: string,
+): SpawnTask {
+  if (isSpawnTaskTerminal(task.runtimeState)) return task;
+  if (!reason.trim()) throw new Error('Spawned-task cancellation reason must not be empty');
+  if (task.cancellation) {
+    if (task.cancellation.requestedAt === requestedAt && task.cancellation.reason === reason) return task;
+    throw new Error('Spawned-task cancellation request is immutable once persisted');
+  }
+
+  return {
+    ...task,
+    version: task.version + 1,
+    stateTimestamps: {
+      ...task.stateTimestamps,
+      updatedAt: requestedAt,
+    },
+    cancellation: { requestedAt, reason },
+  };
 }
 
 export function updateSpawnTaskMetadata(

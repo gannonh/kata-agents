@@ -77,8 +77,17 @@ export function transitionSpawnTask(task: SpawnTask, transition: SpawnTaskTransi
       return { ...next, result: transition.result };
     case 'failed':
       return { ...next, failure: transition.failure };
-    case 'cancelled':
-      return { ...next, cancellation: transition.cancellation };
+    case 'cancelled': {
+      const request = task.cancellation;
+      if (
+        !request
+        || request.requestedAt !== transition.cancellation.requestedAt
+        || request.reason !== transition.cancellation.reason
+      ) {
+        throw new Error('Final cancellation must use the same durable request');
+      }
+      return { ...next, cancellation: request };
+    }
     default: {
       const exhaustive: never = nextState;
       throw new Error(`Unhandled spawned-task runtime state: ${exhaustive}`);

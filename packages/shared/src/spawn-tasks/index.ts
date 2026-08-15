@@ -17,6 +17,9 @@ export type {
   SpawnTaskStoreOptions,
   SpawnTaskStoreFaultPoint,
   ReserveSpawnTaskInput,
+  SpawnTaskStartupChange,
+  SpawnTaskFinalizedStartupChange,
+  SpawnTaskStartupReport,
 } from './store.ts';
 export {
   buildSpawnTaskResultArtifact,

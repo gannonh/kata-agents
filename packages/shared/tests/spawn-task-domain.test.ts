@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPAWN_TASK_CANONICAL_FIXTURE, type SpawnTask } from '@kata-sh/core';
@@ -52,8 +52,14 @@ describe('spawn-task runtime transitions', () => {
 
     const processingForFailure = transitionSpawnTask(reservedTask(), { runtimeState: 'processing', at });
     expect(transitionSpawnTask(processingForFailure, { runtimeState: 'failed', at, failure }).runtimeState).toBe('failed');
-    expect(transitionSpawnTask(processingForFailure, { runtimeState: 'cancelled', at, cancellation }).runtimeState).toBe('cancelled');
-    expect(transitionSpawnTask(reservedTask(), { runtimeState: 'cancelled', at, cancellation }).runtimeState).toBe('cancelled');
+    expect(transitionSpawnTask(
+      { ...processingForFailure, cancellation },
+      { runtimeState: 'cancelled', at, cancellation },
+    ).runtimeState).toBe('cancelled');
+    expect(transitionSpawnTask(
+      { ...reservedTask(), cancellation },
+      { runtimeState: 'cancelled', at, cancellation },
+    ).runtimeState).toBe('cancelled');
 
     const awaitingForFailure = transitionSpawnTask(processingForFailure, { runtimeState: 'awaiting-input', at, awaitingInput });
     const interrupted = transitionSpawnTask(awaitingForFailure, { runtimeState: 'failed', at, failure });
@@ -71,7 +77,10 @@ describe('spawn-task runtime transitions', () => {
       at,
       failure: permissionFlowFailure,
     }).failure?.details?.kind).toBe('permission');
-    expect(transitionSpawnTask(awaitingForFailure, { runtimeState: 'cancelled', at, cancellation }).runtimeState).toBe('cancelled');
+    expect(transitionSpawnTask(
+      { ...awaitingForFailure, cancellation },
+      { runtimeState: 'cancelled', at, cancellation },
+    ).runtimeState).toBe('cancelled');
 
     for (const key of immutableKeys) {
       expect(resumed[key]).toBe(reservedTask()[key]);
@@ -239,6 +248,91 @@ describe('spawn-task reservation store', () => {
     );
   });
 
+  it('retries reservation when any reserved identity collides', () => {
+    const root = tempWorkspace();
+    const initialIds = [
+      'task-first',
+      'child-first',
+      'message-first',
+      'attempt-first',
+      'nonce-first',
+    ];
+    const firstStore = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_collision',
+      randomId: () => initialIds.shift()!,
+      clock: () => at,
+    });
+    const first = firstStore.reserve({ parentSessionId: 'parent_collision', delegatedPrompt: 'first', childConfig: {} });
+
+    const retryIds = [
+      'task-first',
+      'child-first',
+      'message-first',
+      'attempt-first',
+      'task-second',
+      'child-second',
+      'message-second',
+      'attempt-second',
+      'nonce-second',
+    ];
+    const retrying = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_collision',
+      randomId: () => retryIds.shift()!,
+      clock: () => at,
+    });
+    const second = retrying.reserve({ parentSessionId: 'parent_collision', delegatedPrompt: 'second', childConfig: {} });
+
+    expect(second.taskId).not.toBe(first.taskId);
+    expect(second.childSessionId).not.toBe(first.childSessionId);
+    expect(second.dispatch.messageId).not.toBe(first.dispatch.messageId);
+    expect(second.dispatch.dispatchAttemptId).not.toBe(first.dispatch.dispatchAttemptId);
+    expect(retrying.listAll()).toHaveLength(2);
+
+    const collidingValues = ['task-first', 'child-first', 'message-first', 'attempt-first'];
+    let calls = 0;
+    const exhausted = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_collision',
+      randomId: () => collidingValues[calls++ % collidingValues.length]!,
+      clock: () => at,
+    });
+    expect(() => exhausted.reserve({ parentSessionId: 'parent_collision', delegatedPrompt: 'never', childConfig: {} })).toThrow(
+      'after 16 attempts',
+    );
+    expect(calls).toBe(64);
+  });
+
+  it('rejects duplicate child, message, and attempt indexes during reload', () => {
+    for (const field of ['childSessionId', 'messageId', 'dispatchAttemptId'] as const) {
+      const root = tempWorkspace();
+      const values = [
+        'task-a', 'child-a', 'message-a', 'attempt-a', 'nonce-a',
+        'task-b', 'child-b', 'message-b', 'attempt-b', 'nonce-b',
+      ];
+      const store = new SpawnTaskStore({
+        workspaceRoot: root,
+        workspaceId: `ws_duplicate_${field}`,
+        randomId: () => values.shift()!,
+        clock: () => at,
+      });
+      const first = store.reserve({ parentSessionId: 'parent_duplicate', delegatedPrompt: 'first', childConfig: {} });
+      const second = store.reserve({ parentSessionId: 'parent_duplicate', delegatedPrompt: 'second', childConfig: {} });
+      const taskRoot = join(root, 'spawn-tasks', 'tasks', second.taskId);
+      const generation = readFileSync(join(taskRoot, 'CURRENT'), 'utf8').trim();
+      const recordPath = join(taskRoot, 'generations', generation, 'record.json');
+      const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+      if (field === 'childSessionId') record.childSessionId = first.childSessionId;
+      else record.dispatch[field] = first.dispatch[field];
+      writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+
+      const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: `ws_duplicate_${field}` });
+      expect(reloaded.listAll()).toHaveLength(1);
+      expect(Object.keys(reloaded.getLoadErrors())).toHaveLength(1);
+    }
+  });
+
   it('persists all server-owned IDs before returning a reserved queued task', () => {
     let sequence = 0;
     const root = tempWorkspace();
@@ -290,10 +384,11 @@ describe('spawn-task reservation store', () => {
     const claimed = store.updateDispatch(ready.taskId, 'claimed', at);
     const sent = store.updateDispatch(claimed.taskId, 'sent', at);
     const processing = store.transition(sent.taskId, { runtimeState: 'processing', at });
-    const cancelled = store.transition(processing.taskId, {
+    const cancellationRequested = store.requestCancellation(processing.taskId, at, 'requested');
+    const cancelled = store.transition(cancellationRequested.taskId, {
       runtimeState: 'cancelled',
       at,
-      cancellation: { requestedAt: at, reason: 'requested' },
+      cancellation: cancellationRequested.cancellation!,
     });
 
     expect(sent.dispatch).toMatchObject({ state: 'sent', readyAt: at, claimedAt: at, sentAt: at });
@@ -310,6 +405,75 @@ describe('spawn-task reservation store', () => {
     first.markParentDeleted(reserved.taskId, at);
     expect(() => stale.markChildDeleted(reserved.taskId, at)).toThrow('stale');
     expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cas' }).get(reserved.taskId)?.parentDeletedAt).toBe(at);
+  });
+
+  it('durably requests cancellation and preserves the request through terminal races', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_request', clock: () => at });
+
+    const completionCandidate = store.transition(
+      store.reserve({ parentSessionId: 'parent_cancel', delegatedPrompt: 'complete', childConfig: {} }).taskId,
+      { runtimeState: 'processing', at },
+    );
+    const requested = store.requestCancellation(completionCandidate.taskId, at, 'user_requested');
+    const completed = store.commitResult(requested.taskId, 'completion won', { committedAt: at });
+    expect(completed.runtimeState).toBe('completed');
+    expect(completed.cancellation).toEqual({ requestedAt: at, reason: 'user_requested' });
+    expect(store.requestCancellation(completed.taskId, at, 'late_request')).toEqual(completed);
+
+    const failureCandidate = store.transition(
+      store.reserve({ parentSessionId: 'parent_cancel', delegatedPrompt: 'fail', childConfig: {} }).taskId,
+      { runtimeState: 'processing', at },
+    );
+    const failureRequested = store.requestCancellation(failureCandidate.taskId, at, 'user_requested');
+    const failed = store.transition(failureRequested.taskId, {
+      runtimeState: 'failed',
+      at,
+      failure: SPAWN_TASK_CANONICAL_FIXTURE.tasks.failed.failure,
+    });
+    expect(failed.cancellation).toEqual(failureRequested.cancellation);
+
+    const cancelCandidate = store.requestCancellation(
+      store.reserve({ parentSessionId: 'parent_cancel', delegatedPrompt: 'cancel', childConfig: {} }).taskId,
+      at,
+      'user_requested',
+    );
+    expect(() => store.transition(cancelCandidate.taskId, {
+      runtimeState: 'cancelled',
+      at,
+      cancellation: { requestedAt: at, reason: 'different' },
+    })).toThrow('same durable request');
+    const cancelled = store.transition(cancelCandidate.taskId, {
+      runtimeState: 'cancelled',
+      at,
+      cancellation: cancelCandidate.cancellation!,
+    });
+    expect(cancelled.cancellation).toEqual(cancelCandidate.cancellation);
+  });
+
+  it('prevents a stale store from overwriting terminal and cancellation outcomes', () => {
+    const root = tempWorkspace();
+    const writer = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_stale', clock: () => at });
+    const processing = writer.transition(
+      writer.reserve({ parentSessionId: 'parent_stale', delegatedPrompt: 'terminal', childConfig: {} }).taskId,
+      { runtimeState: 'processing', at },
+    );
+    const stale = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_stale', clock: () => at });
+    const completed = writer.commitResult(processing.taskId, 'done', { committedAt: at });
+
+    expect(() => stale.requestCancellation(processing.taskId, at, 'stale')).toThrow('stale');
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_stale' }).get(processing.taskId)).toEqual(completed);
+
+    const cancelCandidate = writer.reserve({ parentSessionId: 'parent_stale', delegatedPrompt: 'cancelled', childConfig: {} });
+    const staleBeforeCancel = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_stale', clock: () => at });
+    const requested = writer.requestCancellation(cancelCandidate.taskId, at, 'winner');
+    const cancelled = writer.transition(requested.taskId, {
+      runtimeState: 'cancelled',
+      at,
+      cancellation: requested.cancellation!,
+    });
+    expect(() => staleBeforeCancel.requestCancellation(cancelCandidate.taskId, at, 'stale')).toThrow('stale');
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_stale' }).get(cancelCandidate.taskId)).toEqual(cancelled);
   });
 
   it('keeps the previous committed record readable when replacement publication faults', () => {

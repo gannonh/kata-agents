@@ -139,7 +139,10 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   if (task.cancellation !== undefined) {
     const cancellation = object(task.cancellation, 'cancellation');
     timestamp(cancellation.requestedAt, 'cancellation.requestedAt');
-    string(cancellation.reason, 'cancellation.reason');
+    const reason = string(cancellation.reason, 'cancellation.reason');
+    if (!reason.trim() || Buffer.byteLength(reason, 'utf8') > SPAWN_TASK_LIMITS.failureMessageBytes) {
+      fail('cancellation.reason must be non-empty and bounded');
+    }
   }
 
   if (task.result !== undefined) assertSpawnTaskResult(task.result);

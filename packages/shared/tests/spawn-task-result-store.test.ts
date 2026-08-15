@@ -25,6 +25,13 @@ function currentGenerationPath(root: string, taskId: string): string {
   return join(taskRoot, 'generations', generation);
 }
 
+function rewriteCurrentRecord(root: string, taskId: string, mutate: (record: Record<string, any>) => void): void {
+  const recordPath = join(currentGenerationPath(root, taskId), 'record.json');
+  const record = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, any>;
+  mutate(record);
+  writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+}
+
 function processingTask(store: SpawnTaskStore) {
   const reserved = store.reserve({
     parentSessionId: 'session_parent',
@@ -145,10 +152,62 @@ describe('spawn-task artifact recovery and retention', () => {
     const recovered = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_finalize' });
     const completed = recovered.get(processing.taskId)!;
     expect(completed.runtimeState).toBe('completed');
+    expect(recovered.getLastStartupReport().finalized).toEqual([{
+      taskId: processing.taskId,
+      previousRuntimeState: 'processing',
+      version: completed.version,
+    }]);
     expect(recovered.readResultChunk(processing.taskId, 0, 64)).toMatchObject({ dataBase64: 'ZHVyYWJsZSByZXN1bHQ=' });
 
     const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_finalize' });
     expect(reloaded.get(processing.taskId)?.version).toBe(completed.version);
+    expect(reloaded.getLastStartupReport().finalized).toEqual([]);
+    expect(reloaded.reload().finalized).toEqual([]);
+  });
+
+  it('finalizes verified artifacts from queued and awaiting-input recovery states', () => {
+    for (const state of ['queued', 'awaiting-input'] as const) {
+      const root = workspace();
+      const workspaceId = `ws_finalize_${state.replace('-', '_')}`;
+      const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId });
+      const processing = processingTask(initial);
+      const faulting = new SpawnTaskStore({
+        workspaceRoot: root,
+        workspaceId,
+        faults: (point, task) => {
+          if (point === 'before-current-publish' && task.runtimeState === 'completed') {
+            throw new Error('terminal publication interrupted');
+          }
+        },
+      });
+      expect(() => faulting.commitResult(processing.taskId, `recovered ${state}`, { committedAt: later })).toThrow();
+      rewriteCurrentRecord(root, processing.taskId, (record) => {
+        record.runtimeState = state;
+        if (state === 'queued') {
+          delete record.stateTimestamps.processingAt;
+        } else {
+          record.stateTimestamps.awaitingInputAt = later;
+          record.awaitingInput = {
+            kind: 'authentication',
+            requestId: 'request_recovery',
+            promptSummary: 'Authenticate to continue.',
+            createdAt: later,
+          };
+        }
+      });
+
+      const recovered = new SpawnTaskStore({ workspaceRoot: root, workspaceId });
+      const completed = recovered.get(processing.taskId)!;
+      expect(completed.runtimeState).toBe('completed');
+      expect(completed.awaitingInput).toBeUndefined();
+      expect(recovered.getLastStartupReport().finalized).toEqual([{
+        taskId: processing.taskId,
+        previousRuntimeState: state,
+        version: completed.version,
+      }]);
+      expect(recovered.reload().finalized).toEqual([]);
+      expect(recovered.get(processing.taskId)?.version).toBe(completed.version);
+    }
   });
 
   it('leaves unverified nonterminal artifact junk nonterminal and replaceable', () => {
@@ -195,11 +254,14 @@ describe('spawn-task artifact recovery and retention', () => {
     const completed = store.commitResult(processing.taskId, 'reload me', { committedAt: later });
     writeFileSync(join(currentGenerationPath(root, completed.taskId), 'result.md'), 'corrupt', 'utf8');
 
-    store.reload();
-    expect(store.get(completed.taskId)).toMatchObject({
+    const report = store.reload();
+    const marked = store.get(completed.taskId)!;
+    expect(marked).toMatchObject({
       runtimeState: 'completed',
       integrityError: { code: 'result_persist_failed' },
     });
+    expect(report.integrityMarked).toEqual([{ taskId: completed.taskId, version: marked.version }]);
+    expect(store.reload().integrityMarked).toEqual([]);
   });
 
   it('marks a missing completed artifact while preserving completed state', () => {

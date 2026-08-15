@@ -21,17 +21,23 @@ import {
   type SpawnTaskIntegrityView,
   type SpawnTaskJsonValue,
   type SpawnTaskResultChunkView,
+  type SpawnTaskRuntimeState,
 } from '@kata-sh/core';
 import { getWorkspaceSpawnTasksPath } from '../workspaces/storage.ts';
-import { reserveSpawnTaskIds } from './ids.ts';
+import { reserveSpawnTaskIds, type SpawnTaskReservedIds } from './ids.ts';
 import {
   isSpawnTaskTerminal,
   transitionSpawnTask,
   type SpawnTaskTransition,
 } from './transitions.ts';
-import { updateSpawnTaskMetadata, type SpawnTaskMetadataUpdate } from './metadata.ts';
+import {
+  requestSpawnTaskCancellation,
+  updateSpawnTaskMetadata,
+  type SpawnTaskMetadataUpdate,
+} from './metadata.ts';
 import { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
 import { createSpawnTaskFailure } from './failures.ts';
+import { finalizeRecoveredSpawnTask } from './recovery.ts';
 import {
   buildSpawnTaskResultArtifact,
   createSpawnTaskResultChunk,
@@ -47,6 +53,7 @@ import {
 const CURRENT_FILE = 'CURRENT';
 const RECORD_FILE = 'record.json';
 const GENERATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+const MAX_RESERVATION_ATTEMPTS = 16;
 
 export type SpawnTaskStoreFaultPoint =
   | 'before-record-write'
@@ -70,12 +77,30 @@ export interface ReserveSpawnTaskInput {
   readonly childConfig: Readonly<Record<string, SpawnTaskJsonValue>>;
 }
 
+export interface SpawnTaskStartupChange {
+  readonly taskId: string;
+  readonly version: number;
+}
+
+export interface SpawnTaskFinalizedStartupChange extends SpawnTaskStartupChange {
+  readonly previousRuntimeState: SpawnTaskRuntimeState;
+}
+
+export interface SpawnTaskStartupReport {
+  readonly finalized: readonly SpawnTaskFinalizedStartupChange[];
+  readonly integrityMarked: readonly SpawnTaskStartupChange[];
+}
+
 interface CommitOptions {
   readonly artifactFiles?: ReadonlyMap<string, Buffer | string>;
 }
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function emptyStartupReport(): SpawnTaskStartupReport {
+  return { finalized: [], integrityMarked: [] };
 }
 
 function writeDurableFile(path: string, content: Buffer | string): void {
@@ -121,7 +146,10 @@ export class SpawnTaskStore {
   private readonly generations = new Map<string, string>();
   private readonly byParent = new Map<string, Set<string>>();
   private readonly byChild = new Map<string, string>();
+  private readonly byMessage = new Map<string, string>();
+  private readonly byDispatchAttempt = new Map<string, string>();
   private readonly loadErrors = new Map<string, string>();
+  private lastStartupReport: SpawnTaskStartupReport = emptyStartupReport();
 
   constructor(options: SpawnTaskStoreOptions) {
     assertSpawnTaskId(options.workspaceId, 'workspaceId');
@@ -136,33 +164,40 @@ export class SpawnTaskStore {
 
   reserve(input: ReserveSpawnTaskInput): SpawnTask {
     assertSpawnTaskId(input.parentSessionId, 'parentSessionId');
-    const ids = reserveSpawnTaskIds(this.randomId);
-    const now = this.clock();
-    const task: SpawnTask = {
-      schemaVersion: SPAWN_TASK_SCHEMA_VERSION,
-      version: 1,
-      taskId: ids.taskId,
-      workspaceId: this.workspaceId,
-      parentSessionId: input.parentSessionId,
-      childSessionId: ids.childSessionId,
-      delegatedPrompt: input.delegatedPrompt,
-      childConfig: clone(input.childConfig),
-      runtimeState: 'queued',
-      stateTimestamps: {
-        createdAt: now,
-        updatedAt: now,
-        queuedAt: now,
-      },
-      dispatch: {
-        state: 'reserved',
-        dispatchAttemptId: ids.dispatchAttemptId,
-        messageId: ids.messageId,
-        reservedAt: now,
-      },
-    };
-    assertSpawnTask(task);
-    this.commit(task);
-    return clone(task);
+
+    for (let attempt = 0; attempt < MAX_RESERVATION_ATTEMPTS; attempt += 1) {
+      const ids = reserveSpawnTaskIds(this.randomId);
+      if (!this.reservedIdsAvailable(ids)) continue;
+
+      const now = this.clock();
+      const task: SpawnTask = {
+        schemaVersion: SPAWN_TASK_SCHEMA_VERSION,
+        version: 1,
+        taskId: ids.taskId,
+        workspaceId: this.workspaceId,
+        parentSessionId: input.parentSessionId,
+        childSessionId: ids.childSessionId,
+        delegatedPrompt: input.delegatedPrompt,
+        childConfig: clone(input.childConfig),
+        runtimeState: 'queued',
+        stateTimestamps: {
+          createdAt: now,
+          updatedAt: now,
+          queuedAt: now,
+        },
+        dispatch: {
+          state: 'reserved',
+          dispatchAttemptId: ids.dispatchAttemptId,
+          messageId: ids.messageId,
+          reservedAt: now,
+        },
+      };
+      assertSpawnTask(task);
+      this.commit(task);
+      return clone(task);
+    }
+
+    throw new Error(`Unable to reserve unique spawned-task IDs after ${MAX_RESERVATION_ATTEMPTS} attempts`);
   }
 
   get(taskId: string): SpawnTask | null {
@@ -173,6 +208,10 @@ export class SpawnTaskStore {
 
   getLoadErrors(): Readonly<Record<string, string>> {
     return Object.freeze(Object.fromEntries(this.loadErrors));
+  }
+
+  getLastStartupReport(): SpawnTaskStartupReport {
+    return clone(this.lastStartupReport);
   }
 
   listAll(): SpawnTask[] {
@@ -213,6 +252,14 @@ export class SpawnTaskStore {
     }
     const current = this.require(taskId);
     const next = updateSpawnTaskMetadata(current, update);
+    this.commit(next);
+    return clone(next);
+  }
+
+  requestCancellation(taskId: string, requestedAt: string, reason: string): SpawnTask {
+    const current = this.require(taskId);
+    const next = requestSpawnTaskCancellation(current, requestedAt, reason);
+    if (next === current) return clone(current);
     this.commit(next);
     return clone(next);
   }
@@ -341,6 +388,8 @@ export class SpawnTaskStore {
     this.generations.delete(taskId);
     this.byParent.get(current.parentSessionId)?.delete(taskId);
     this.byChild.delete(current.childSessionId);
+    this.byMessage.delete(current.dispatch.messageId);
+    this.byDispatchAttempt.delete(current.dispatch.dispatchAttemptId);
     return true;
   }
 
@@ -351,40 +400,47 @@ export class SpawnTaskStore {
     this.generations.clear();
     this.byParent.clear();
     this.byChild.clear();
+    this.byMessage.clear();
+    this.byDispatchAttempt.clear();
     this.loadErrors.clear();
+    this.lastStartupReport = emptyStartupReport();
   }
 
-  validateArtifactsOnStartup(): SpawnTask[] {
-    const changed: SpawnTask[] = [];
+  validateArtifactsOnStartup(): SpawnTaskStartupReport {
+    const finalized: SpawnTaskFinalizedStartupChange[] = [];
+    const integrityMarked: SpawnTaskStartupChange[] = [];
     for (const snapshot of [...this.tasks.values()]) {
       try {
         if (snapshot.runtimeState === 'completed' && snapshot.result) {
           if (!this.readVerifiedArtifact(snapshot) && !snapshot.integrityError) {
-            changed.push(this.markIntegrityError(
+            const marked = this.markIntegrityError(
               snapshot,
               'Spawned-task result artifact is missing or does not match its digest.',
-            ));
+            );
+            integrityMarked.push({ taskId: marked.taskId, version: marked.version });
           }
           continue;
         }
 
-        if (snapshot.runtimeState !== 'processing') continue;
+        if (isSpawnTaskTerminal(snapshot.runtimeState)) continue;
         const pending = this.readVerifiedManifest(snapshot);
         if (!pending) continue;
         const bytes = this.readCurrentFile(snapshot.taskId, SPAWN_TASK_RESULT_FILE);
         if (!bytes || !verifySpawnTaskResult(bytes, pending)) continue;
-        const completed = transitionSpawnTask(snapshot, {
-          runtimeState: 'completed',
-          at: pending.committedAt,
-          result: pending,
-        });
+        const completed = finalizeRecoveredSpawnTask(snapshot, pending);
         this.commit(completed);
-        changed.push(clone(completed));
+        finalized.push({
+          taskId: completed.taskId,
+          previousRuntimeState: snapshot.runtimeState,
+          version: completed.version,
+        });
       } catch (error) {
         this.loadErrors.set(snapshot.taskId, error instanceof Error ? error.message : String(error));
       }
     }
-    return changed;
+    const report: SpawnTaskStartupReport = { finalized, integrityMarked };
+    this.lastStartupReport = clone(report);
+    return clone(report);
   }
 
   updateDispatch(taskId: string, state: SpawnTaskDispatchState, at: string): SpawnTask {
@@ -407,11 +463,13 @@ export class SpawnTaskStore {
     return clone(next);
   }
 
-  reload(): void {
+  reload(): SpawnTaskStartupReport {
     this.tasks.clear();
     this.generations.clear();
     this.byParent.clear();
     this.byChild.clear();
+    this.byMessage.clear();
+    this.byDispatchAttempt.clear();
     this.loadErrors.clear();
 
     for (const entry of readdirSync(this.tasksPath(), { withFileTypes: true })) {
@@ -436,7 +494,19 @@ export class SpawnTaskStore {
       }
     }
 
-    this.validateArtifactsOnStartup();
+    return this.validateArtifactsOnStartup();
+  }
+
+  private reservedIdsAvailable(ids: SpawnTaskReservedIds): boolean {
+    assertSpawnTaskId(ids.taskId, 'taskId');
+    assertSpawnTaskId(ids.childSessionId, 'childSessionId');
+    assertSpawnTaskId(ids.messageId, 'dispatch.messageId');
+    assertSpawnTaskId(ids.dispatchAttemptId, 'dispatch.dispatchAttemptId');
+    return !this.tasks.has(ids.taskId)
+      && !existsSync(join(this.tasksPath(), ids.taskId))
+      && !this.byChild.has(ids.childSessionId)
+      && !this.byMessage.has(ids.messageId)
+      && !this.byDispatchAttempt.has(ids.dispatchAttemptId);
   }
 
   private tasksPath(): string {
@@ -450,6 +520,11 @@ export class SpawnTaskStore {
     return task;
   }
 
+  /**
+   * SessionManager is the sole task writer and mutations are synchronous, so
+   * calls cannot interleave in-process. CURRENT comparison rejects stale store
+   * instances; cross-process multi-writer locking is intentionally out of scope.
+   */
   private commit(task: SpawnTask, options: CommitOptions = {}): void {
     assertSpawnTask(task);
     if (task.workspaceId !== this.workspaceId) throw new Error('Spawned-task workspace ownership cannot change');
@@ -568,6 +643,18 @@ export class SpawnTaskStore {
   }
 
   private index(task: SpawnTask, generation: string): void {
+    const uniqueIndexes: ReadonlyArray<readonly [string, Map<string, string>, string]> = [
+      ['childSessionId', this.byChild, task.childSessionId],
+      ['messageId', this.byMessage, task.dispatch.messageId],
+      ['dispatchAttemptId', this.byDispatchAttempt, task.dispatch.dispatchAttemptId],
+    ];
+    for (const [field, index, value] of uniqueIndexes) {
+      const owner = index.get(value);
+      if (owner && owner !== task.taskId) {
+        throw new Error(`Duplicate spawned-task ${field}: ${value}`);
+      }
+    }
+
     const previous = this.tasks.get(task.taskId);
     if (previous && previous.parentSessionId !== task.parentSessionId) {
       this.byParent.get(previous.parentSessionId)?.delete(task.taskId);
@@ -578,5 +665,7 @@ export class SpawnTaskStore {
     parentTasks.add(task.taskId);
     this.byParent.set(task.parentSessionId, parentTasks);
     this.byChild.set(task.childSessionId, task.taskId);
+    this.byMessage.set(task.dispatch.messageId, task.taskId);
+    this.byDispatchAttempt.set(task.dispatch.dispatchAttemptId, task.taskId);
   }
 }
