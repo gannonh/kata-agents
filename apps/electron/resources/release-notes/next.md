@@ -15,6 +15,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Durable delegated task results** — Spawned child sessions now persist normalized Claude/Pi output and failures as task-owned results before update notifications, reconcile published artifacts after crashes, and preserve stable delegated message IDs across auth retries ([#64](https://github.com/gannonh/kata-agents/issues/64); commit `eec8e8c`).
 - Failed Chrome cookie imports no longer wipe the live Kata browser session. New cookies are written first, leftover cookies are removed only after at least one replacement lands, and a total write failure reports an error instead of success with zero imported cookies ([#30](https://github.com/gannonh/kata-agents/issues/30)).
 - Restored a focused Bash config-write guard in pre-tool-use: syntactically identifiable Bash mutations targeting validator-recognized config files (derivable `cat <<'DELIM' > target` heredocs and opaque forms like redirects, `tee`, `sed -i`, wrapper shells, or script arguments) are now validated or blocked instead of bypassing config validation. Read-only commands and non-config targets are unaffected.
 
