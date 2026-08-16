@@ -54,21 +54,46 @@ export function assertSpawnTaskId(value: unknown, field = 'id'): string {
   return id;
 }
 
+function assertJsonArray(value: readonly unknown[], field: string): void {
+  for (const key of Reflect.ownKeys(value)) {
+    if (key === 'length') continue;
+    if (typeof key === 'symbol') fail(`${field} must contain JSON values only`);
+    const index = Number(key);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+      fail(`${field} must contain JSON values only`);
+    }
+  }
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) fail(`${field} must contain JSON values only`);
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index))!;
+    if (!('value' in descriptor)) fail(`${field} must contain JSON values only`);
+    assertJsonValue(descriptor.value, `${field}[${index}]`);
+  }
+}
+
+function assertJsonObject(value: object, field: string): void {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    fail(`${field} must contain JSON values only`);
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === 'symbol') fail(`${field} must contain JSON values only`);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!descriptor.enumerable || !('value' in descriptor)) fail(`${field} must contain JSON values only`);
+    assertJsonValue(descriptor.value, `${field}.${key}`);
+  }
+}
+
 function assertJsonValue(value: unknown, field: string): asserts value is SpawnTaskJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
   if (typeof value === 'number' && Number.isFinite(value)) return;
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJsonValue(item, `${field}[${index}]`));
+    assertJsonArray(value, field);
     return;
   }
   if (typeof value === 'object') {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      fail(`${field} must contain JSON values only`);
-    }
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      assertJsonValue(item, `${field}.${key}`);
-    }
+    assertJsonObject(value, field);
     return;
   }
   fail(`${field} must contain JSON values only`);

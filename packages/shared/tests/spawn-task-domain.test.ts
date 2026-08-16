@@ -461,16 +461,59 @@ describe('spawn-task reservation store', () => {
     expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_json_fidelity' }).listAll()).toEqual([]);
   });
 
-  it('round-trips a null-prototype JSON childConfig without value drift', () => {
+  it('rejects JSON structures whose own properties would drift during serialization', () => {
+    const sparse = new Array(2);
+    sparse[1] = 'present';
+    const arrayExtra = ['value'] as string[] & { extra?: string };
+    arrayExtra.extra = 'omitted';
+    const arraySymbol = ['value'];
+    Object.defineProperty(arraySymbol, Symbol('array-drift'), { value: 'omitted', enumerable: true });
+    const objectSymbol = { visible: true } as Record<PropertyKey, unknown>;
+    objectSymbol[Symbol('object-drift')] = 'omitted';
+    const nonEnumerable = { visible: true };
+    Object.defineProperty(nonEnumerable, 'hidden', { value: 'omitted' });
+    let getterCalls = 0;
+    const accessor = { visible: true };
+    Object.defineProperty(accessor, 'computed', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return 'invoked';
+      },
+    });
+
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_json_properties', clock: () => at });
+    const invalidValues: Array<[string, unknown]> = [
+      ['sparse array', sparse],
+      ['array extra property', arrayExtra],
+      ['array symbol', arraySymbol],
+      ['object symbol', objectSymbol],
+      ['non-enumerable object property', nonEnumerable],
+      ['object accessor', accessor],
+    ];
+    for (const [label, value] of invalidValues) {
+      expect(() => store.reserve({
+        parentSessionId: 'parent_json_properties',
+        delegatedPrompt: label,
+        childConfig: { value } as never,
+      })).toThrow('JSON values only');
+    }
+    expect(getterCalls).toBe(0);
+    expect(store.listAll()).toEqual([]);
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_json_properties' }).listAll()).toEqual([]);
+  });
+
+  it('round-trips dense arrays and null-prototype JSON maps without value drift', () => {
     const root = tempWorkspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_null_proto_config', clock: () => at });
     const nested = Object.assign(Object.create(null), { enabled: true });
     const childConfig = Object.assign(Object.create(null), {
       model: 'fixture-model',
       nested,
-      sources: ['docs'],
+      sources: ['docs', { priority: 1 }],
     });
-    const expected = { model: 'fixture-model', nested: { enabled: true }, sources: ['docs'] };
+    const expected = { model: 'fixture-model', nested: { enabled: true }, sources: ['docs', { priority: 1 }] };
 
     const reserved = store.reserve({
       parentSessionId: 'parent_null_proto',
