@@ -28,7 +28,6 @@ export interface SpawnTaskCoordinatorOptions {
   readonly appendDelegatedPrompt: (input: SpawnTaskAppendPromptInput) => Promise<void>
   readonly dispatchProvider: (input: SpawnTaskDispatchInput) => void | Promise<void>
   readonly clock?: () => string
-  readonly onAsyncDispatchFailure?: (error: unknown, task: SpawnTask) => void
 }
 
 export interface SpawnTaskSpawnInput {
@@ -71,7 +70,6 @@ export class SpawnTaskCoordinator {
   private readonly appendDelegatedPrompt: SpawnTaskCoordinatorOptions['appendDelegatedPrompt']
   private readonly dispatchProvider: SpawnTaskCoordinatorOptions['dispatchProvider']
   private readonly clock: () => string
-  private readonly onAsyncDispatchFailure?: SpawnTaskCoordinatorOptions['onAsyncDispatchFailure']
 
   constructor(options: SpawnTaskCoordinatorOptions) {
     this.store = options.store
@@ -79,7 +77,6 @@ export class SpawnTaskCoordinator {
     this.appendDelegatedPrompt = options.appendDelegatedPrompt
     this.dispatchProvider = options.dispatchProvider
     this.clock = options.clock ?? (() => new Date().toISOString())
-    this.onAsyncDispatchFailure = options.onAsyncDispatchFailure
   }
 
   async spawn(input: SpawnTaskSpawnInput): Promise<SpawnSessionResult> {
@@ -144,20 +141,19 @@ export class SpawnTaskCoordinator {
     }
 
     try {
-      const dispatch = this.dispatchProvider({
+      // C1 owns the durable sent/processing boundary and the single provider
+      // invocation only. The provider turn is finalized by the later
+      // lifecycle layer; never await or observe its returned promise here.
+      void this.dispatchProvider({
         task,
         prompt: input.delegatedPrompt,
         attachments: input.attachments,
       })
-      if (dispatch && typeof (dispatch as Promise<void>).then === 'function') {
-        void dispatch.catch((error: unknown) => {
-          const current = this.store.get(task.taskId) ?? task
-          const failed = this.commitFailure(current, error, 'provider')
-          this.onAsyncDispatchFailure?.(error, failed)
-        })
-      }
     } catch (error) {
-      throw this.creationFailure(task, error, 'provider')
+      // A truly synchronous callback throw is an invocation/provider failure,
+      // not a spawn-persistence failure. Async turn rejection is deliberately
+      // left to the later lifecycle layer.
+      throw this.creationFailure(task, error, 'provider', 'provider_error')
     }
 
     return {
@@ -168,9 +164,13 @@ export class SpawnTaskCoordinator {
     }
   }
 
-  private failure(error: unknown, boundary: string): SpawnTaskFailure {
+  private failure(
+    error: unknown,
+    boundary: string,
+    code: 'spawn_persist_failed' | 'provider_error' = 'spawn_persist_failed',
+  ): SpawnTaskFailure {
     return createSpawnTaskFailure({
-      code: 'spawn_persist_failed',
+      code,
       message: errorMessage(error),
       retryable: true,
       details: { boundary },
@@ -178,20 +178,19 @@ export class SpawnTaskCoordinator {
     })
   }
 
-  private creationFailure(task: SpawnTask, error: unknown, boundary: string): SpawnTaskCreationError {
-    const current = this.store.get(task.taskId) ?? task
-    const failure = this.failure(error, boundary)
-    const failed = this.commitFailure(current, error, boundary, failure)
-    return new SpawnTaskCreationError(failure, failed)
-  }
-
-  private commitFailure(
+  private creationFailure(
     task: SpawnTask,
     error: unknown,
     boundary: string,
-    providedFailure?: SpawnTaskFailure,
-  ): SpawnTask {
-    const failure = providedFailure ?? this.failure(error, boundary)
+    code: 'spawn_persist_failed' | 'provider_error' = 'spawn_persist_failed',
+  ): SpawnTaskCreationError {
+    const current = this.store.get(task.taskId) ?? task
+    const failure = this.failure(error, boundary, code)
+    const failed = this.commitFailure(current, failure)
+    return new SpawnTaskCreationError(failure, failed)
+  }
+
+  private commitFailure(task: SpawnTask, failure: SpawnTaskFailure): SpawnTask {
     let current = this.store.get(task.taskId) ?? task
     if (current.runtimeState === 'queued') {
       try {

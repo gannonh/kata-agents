@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { SpawnTask } from '@kata-sh/core'
 import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 import { SpawnTaskCoordinator } from './spawn-task-coordinator.ts'
 
@@ -341,7 +340,7 @@ describe('SpawnTaskCoordinator', () => {
     expect(store.listAll()).toHaveLength(1)
   })
 
-  it('commits a synchronous provider-call failure without dispatching twice', async () => {
+  it('commits provider_error for a truly synchronous provider callback throw', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
     const store = createStore(workspaceRoot)
@@ -353,72 +352,88 @@ describe('SpawnTaskCoordinator', () => {
       appendDelegatedPrompt: async () => {},
       dispatchProvider: () => {
         providerCalls += 1
-        throw new Error('provider call failed before turn')
+        throw new Error('provider callback failed before turn')
       },
     })
 
     await expect(coordinator.spawn({
       parentSessionId: 'session_parent',
-      delegatedPrompt: 'provider boundary',
+      delegatedPrompt: 'provider callback boundary',
       childConfig: {},
     })).rejects.toMatchObject({
       failure: {
-        code: 'spawn_persist_failed',
+        code: 'provider_error',
         details: { boundary: 'provider' },
       },
       task: {
         dispatch: { state: 'sent' },
         runtimeState: 'failed',
+        failure: {
+          code: 'provider_error',
+          details: { boundary: 'provider' },
+        },
       },
     })
     expect(providerCalls).toBe(1)
   })
 
-  it('commits a provider-call failure after the initial dispatch has been claimed once', async () => {
+  it('returns while the provider turn is pending and never terminalizes its rejection', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
     const store = createStore(workspaceRoot)
+    const order: string[] = []
     let rejectProvider!: (error: Error) => void
+    let providerTurn!: Promise<void>
     let providerCalls = 0
-    let observedFailure: SpawnTask | undefined
 
     const coordinator = new SpawnTaskCoordinator({
       store,
-      createChild: async () => {},
-      appendDelegatedPrompt: async ({ task }) => {
-        expect(task.dispatch.messageId).toBe('message_id-3')
+      createChild: async () => {
+        order.push('child')
       },
-      dispatchProvider: () => {
+      appendDelegatedPrompt: async ({ task }) => {
+        order.push('append')
+        expect(task.dispatch.state).toBe('claimed')
+      },
+      dispatchProvider: ({ task }) => {
+        order.push('provider')
         providerCalls += 1
-        return new Promise<void>((_resolve, reject) => {
+        expect(task.dispatch.state).toBe('sent')
+        expect(store.get(task.taskId)).toMatchObject({
+          dispatch: { state: 'sent' },
+          runtimeState: 'processing',
+        })
+        providerTurn = new Promise<void>((_resolve, reject) => {
           rejectProvider = reject
         })
-      },
-      onAsyncDispatchFailure: (_error, task) => {
-        observedFailure = task
+        // The test owns this rejection handler so the intentionally pending
+        // provider turn does not become an unhandled test-process rejection.
+        providerTurn.catch(() => {})
+        return providerTurn
       },
     })
 
     const result = await coordinator.spawn({
       parentSessionId: 'session_parent',
-      delegatedPrompt: 'provider may fail',
+      delegatedPrompt: 'provider may fail later',
       childConfig: {},
     })
-    expect(result.runtimeState).toBe('processing')
-    expect(providerCalls).toBe(1)
 
-    rejectProvider(new Error('provider unavailable'))
+    expect(result.runtimeState).toBe('processing')
+    expect(order).toEqual(['child', 'append', 'provider'])
+    expect(providerCalls).toBe(1)
+    expect(store.get(result.taskId)).toMatchObject({
+      dispatch: { state: 'sent' },
+      runtimeState: 'processing',
+    })
+
+    rejectProvider(new Error('provider turn failed'))
     await new Promise<void>((resolve) => setImmediate(resolve))
 
-    expect(observedFailure).toMatchObject({
+    expect(store.get(result.taskId)).toMatchObject({
       dispatch: { state: 'sent' },
-      runtimeState: 'failed',
-      failure: {
-        code: 'spawn_persist_failed',
-        details: { boundary: 'provider' },
-      },
+      runtimeState: 'processing',
     })
-    expect(store.listAll()).toHaveLength(1)
-    expect(providerCalls).toBe(1)
+    expect(store.get(result.taskId)?.failure).toBeUndefined()
   })
 })

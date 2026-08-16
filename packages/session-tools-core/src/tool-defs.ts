@@ -473,7 +473,7 @@ Use get_session_info for full details on a specific session (list-then-detail pa
   send_agent_message: `Send a message to another session. The message is delivered with your session ID so the target can reply back.
 
 Use this to coordinate with spawned sessions, send follow-up instructions, or relay information between sessions.
-Use list_sessions to find session IDs, or use the sessionId returned by spawn_session.
+Use list_sessions to find child sessions, or use the childSessionId returned by spawn_session; retain taskId for task-scoped operations.
 
 The target session receives your message with a sender envelope containing your session ID, so it can use send_agent_message to reply.`,
 

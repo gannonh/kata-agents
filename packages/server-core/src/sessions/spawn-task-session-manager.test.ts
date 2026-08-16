@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { CONFIG_DIR } from '@kata-sh/shared/config'
 import { loadSession } from '@kata-sh/shared/sessions'
 import type { SpawnTask } from '@kata-sh/core'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
+import type { SpawnTaskCoordinator } from './spawn-task-coordinator.ts'
 
 const roots: string[] = []
 
@@ -41,6 +43,65 @@ describe('SessionManager spawned-task transcript append', () => {
 
     expect(publicSession).not.toBeNull()
     expect('spawnTaskRef' in (publicSession as object)).toBe(false)
+  })
+
+  it('persists the reserved child ID and private task reference through real SessionManager storage', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_integration',
+      name: 'Spawn integration workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      let dispatchedTask: SpawnTask | undefined
+      const manager = new SessionManager({
+        spawnTaskDispatchProvider: ({ task }) => {
+          dispatchedTask = task
+        },
+      })
+      manager.setEventSink(() => {})
+      const parent = createManagedSession(
+        { id: 'session_spawn_integration_parent', name: 'parent' },
+        workspace as never,
+        { messagesLoaded: true },
+      )
+      const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions
+      sessions.set(parent.id, parent)
+
+      const coordinator = (manager as unknown as {
+        getSpawnTaskCoordinator: (session: unknown) => SpawnTaskCoordinator
+      }).getSpawnTaskCoordinator(parent)
+      const result = await coordinator.spawn({
+        parentSessionId: parent.id,
+        delegatedPrompt: 'persist the real child relationship',
+        childConfig: { name: 'child' },
+      })
+
+      const persistedChild = loadSession(workspaceRoot, result.childSessionId)
+      expect(dispatchedTask?.childSessionId).toBe(result.childSessionId)
+      expect(persistedChild).toMatchObject({
+        id: result.childSessionId,
+        spawnTaskRef: {
+          taskId: result.taskId,
+          parentSessionId: parent.id,
+        },
+      })
+      expect(persistedChild?.id).toBe(dispatchedTask?.childSessionId)
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
   })
 
   it('orchestrates the real child append and send boundary without changing session status', async () => {

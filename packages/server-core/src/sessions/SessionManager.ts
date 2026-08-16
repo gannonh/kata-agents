@@ -112,7 +112,7 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
-import { SpawnTaskCoordinator } from './spawn-task-coordinator'
+import { SpawnTaskCoordinator, type SpawnTaskDispatchInput } from './spawn-task-coordinator'
 import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
@@ -1203,6 +1203,8 @@ interface PendingDelta {
 export interface SessionManagerOptions {
   /** Deterministic seam for C1 task-store fault tests; production uses the default store. */
   spawnTaskStoreFactory?: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+  /** Deterministic provider boundary for SessionManager/storage integration tests. */
+  spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
 }
 
 interface ForkChildCreateOptions {
@@ -1224,6 +1226,7 @@ interface ForkChildCreateOptions {
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+  private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
@@ -1310,6 +1313,7 @@ export class SessionManager implements ISessionManager {
 
   constructor(options: SessionManagerOptions = {}) {
     this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
+    this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
   }
 
   private registerPreChatBarrier(sessionId: string): () => void {
@@ -2805,11 +2809,12 @@ export class SessionManager implements ISessionManager {
       appendDelegatedPrompt: async ({ task, prompt }) => {
         await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, parent.workspace.id)
       },
-      dispatchProvider: ({ task, prompt, attachments }) => {
+      dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
         // sendMessage reuses the already flushed stable message instead of
-        // appending a second user turn. Its returned promise is observed by
-        // the coordinator for canonical provider failure persistence.
-        return this.sendMessage(
+        // appending a second user turn. C1 intentionally does not await or
+        // observe this full turn; normalized lifecycle handling owns its
+        // eventual completion or failure.
+        void this.sendMessage(
           task.childSessionId,
           prompt,
           attachments ? [...attachments] as FileAttachment[] : undefined,
@@ -2817,10 +2822,7 @@ export class SessionManager implements ISessionManager {
           undefined,
           task.dispatch.messageId,
         )
-      },
-      onAsyncDispatchFailure: (error, task) => {
-        sessionLog.error(`Spawned task provider dispatch failed for ${task.taskId}:`, error)
-      },
+      }),
     })
     this.spawnTaskCoordinators.set(workspaceKey, coordinator)
     return coordinator
