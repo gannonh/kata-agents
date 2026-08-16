@@ -27,6 +27,568 @@ afterEach(() => {
 })
 
 describe('SpawnTaskCoordinator', () => {
+  it('transitions a child through permission awaiting-input and resume', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'await permission',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const updates: string[] = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: ({ taskId }) => {
+        updates.push(taskId)
+      },
+    })
+
+    const awaiting = await coordinator.awaitInputForChildSession(processing.childSessionId, {
+      kind: 'permission',
+      requestId: 'permission_request_1',
+      promptSummary: 'Allow the Bash tool to run?',
+      createdAt: '2026-08-16T16:01:00.000Z',
+    })
+    expect(awaiting).toMatchObject({
+      runtimeState: 'awaiting-input',
+      awaitingInput: {
+        kind: 'permission',
+        requestId: 'permission_request_1',
+        promptSummary: 'Allow the Bash tool to run?',
+      },
+    })
+
+    const resumed = await coordinator.resumeAwaitingInputForChildSession(
+      processing.childSessionId,
+      'permission_request_1',
+    )
+    expect(resumed).toMatchObject({ runtimeState: 'processing' })
+    expect(resumed?.awaitingInput).toBeUndefined()
+    expect(updates).toEqual([processing.taskId, processing.taskId])
+  })
+
+  it('interrupts authentication awaiting-input with the original kind', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'await authentication',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    await coordinator.awaitInputForChildSession(processing.childSessionId, {
+      kind: 'authentication',
+      requestId: 'auth_request_1',
+      promptSummary: 'Authenticate with the configured source.',
+      createdAt: '2026-08-16T16:01:00.000Z',
+    })
+    const failed = await coordinator.interruptAwaitingInputForChildSession(
+      processing.childSessionId,
+      'Authentication flow ended before resume.',
+    )
+
+    expect(failed).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'input_interrupted',
+        retryable: true,
+        details: { kind: 'authentication' },
+      },
+    })
+    expect(updates).toHaveLength(2)
+    expect(updates[1]?.version).toBe(failed!.version)
+  })
+
+  it('notifies startup interruption for persisted permission and authentication waits', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const taskIds: string[] = []
+    for (const [index, kind] of (['permission', 'authentication'] as const).entries()) {
+      const reserved = initial.reserve({
+        parentSessionId: 'session_parent',
+        delegatedPrompt: `await ${kind}`,
+        childConfig: {},
+      })
+      const processing = initial.transition(reserved.taskId, {
+        runtimeState: 'processing',
+        at: '2026-08-16T16:00:00.000Z',
+      })
+      await new SpawnTaskCoordinator({
+        store: initial,
+        createChild: async () => {},
+        appendDelegatedPrompt: async () => {},
+        dispatchProvider: () => {},
+      }).awaitInputForChildSession(processing.childSessionId, {
+        kind,
+        requestId: `${kind}_request_${index}`,
+        promptSummary: `${kind} input`,
+        createdAt: '2026-08-16T16:01:00.000Z',
+      })
+      taskIds.push(processing.taskId)
+    }
+
+    const restarted = createStore(workspaceRoot)
+    const updates: string[] = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: restarted,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: ({ taskId }) => {
+        expect(restarted.get(taskId)).toMatchObject({
+          runtimeState: 'failed',
+          failure: { code: 'input_interrupted' },
+        })
+        updates.push(taskId)
+      },
+    })
+    await coordinator.waitForStartupNotification()
+
+    expect(updates.sort()).toEqual(taskIds.sort())
+    for (const taskId of taskIds) {
+      expect(restarted.get(taskId)?.failure?.code).toBe('input_interrupted')
+    }
+  })
+
+  it('cancels an active child after durable request and abort', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'cancel this work',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    let abortCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+
+    const result = await coordinator.cancelChildSession(processing.childSessionId, 'user_requested', {
+      abort: () => {
+        abortCalls += 1
+      },
+    })
+
+    expect(result.status).toBe('cancelled')
+    expect(result.task).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'user_requested' },
+    })
+    expect(abortCalls).toBe(1)
+  })
+
+  it('cancels active child deletion and preserves terminal results', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const activeReserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'active child', childConfig: {} })
+    const active = store.transition(activeReserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const terminalReserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'terminal child', childConfig: {} })
+    const terminalProcessing = store.transition(terminalReserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const terminal = store.commitResult(terminalProcessing.taskId, 'survives deletion', { committedAt: '2026-08-16T16:00:01.000Z' })
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    let cleanupCalls = 0
+
+    const activeDeleted = await coordinator.markChildDeleted(active.childSessionId, {
+      abort: () => {
+        throw new Error('child abort failed')
+      },
+      cleanup: () => {
+        cleanupCalls += 1
+      },
+    })
+    const terminalDeleted = await coordinator.markChildDeleted(terminal.childSessionId)
+
+    expect(activeDeleted).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'cancel_failed' },
+      childDeletedAt: expect.any(String),
+    })
+    expect(cleanupCalls).toBe(1)
+    expect(terminalDeleted).toMatchObject({
+      runtimeState: 'completed',
+      childDeletedAt: expect.any(String),
+      result: { byteLength: Buffer.byteLength('survives deletion', 'utf8') },
+    })
+    expect(store.get(terminal.taskId)?.result).toBeDefined()
+  })
+
+  it('returns already_terminal without mutating or notifying terminal cancellation', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'already done',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const completed = store.commitResult(processing.taskId, 'done', { committedAt: '2026-08-16T16:01:00.000Z' })
+    let updates = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: () => {
+        updates += 1
+      },
+    })
+
+    const result = await coordinator.cancelChildSession(completed.childSessionId, 'too late')
+
+    expect(result).toEqual({ status: 'already_terminal', task: completed })
+    expect(store.get(completed.taskId)).toEqual(completed)
+    expect(updates).toBe(0)
+  })
+
+  it('stops pre-dispatch spawn after parent deletion and preserves published child', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    let coordinator!: SpawnTaskCoordinator
+    let childCalls = 0
+    let appendCalls = 0
+    let providerCalls = 0
+    coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {
+        childCalls += 1
+        await coordinator.markParentDeleted('session_parent')
+      },
+      appendDelegatedPrompt: async () => {
+        appendCalls += 1
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    const result = await coordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'parent can be deleted during publication',
+      childConfig: {},
+    })
+
+    expect(result.runtimeState).toBe('cancelled')
+    expect(childCalls).toBe(1)
+    expect(appendCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+    expect(store.get(result.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
+      parentDeletedAt: expect.any(String),
+    })
+  })
+
+  it('rejects new spawn work after a parent deletion tombstone', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    let childCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {
+        childCalls += 1
+      },
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+
+    await coordinator.markParentDeleted('session_parent')
+    const result = await coordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'must not spawn after deletion',
+      childConfig: {},
+    })
+
+    expect(result.runtimeState).toBe('cancelled')
+    expect(childCalls).toBe(0)
+    expect(store.get(result.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
+      parentDeletedAt: expect.any(String),
+    })
+  })
+
+  it('restores the parent deletion boundary after coordinator restart', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const existing = initial.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'existing', childConfig: {} })
+    const initialCoordinator = new SpawnTaskCoordinator({
+      store: initial,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    await initialCoordinator.markParentDeleted('session_parent')
+    expect(initial.get(existing.taskId)?.parentDeletedAt).toBeDefined()
+
+    const restarted = createStore(workspaceRoot)
+    let childCalls = 0
+    const restartedCoordinator = new SpawnTaskCoordinator({
+      store: restarted,
+      createChild: async () => {
+        childCalls += 1
+      },
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    const result = await restartedCoordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'must remain blocked after restart',
+      childConfig: {},
+    })
+
+    expect(result.runtimeState).toBe('cancelled')
+    expect(childCalls).toBe(0)
+    expect(restarted.get(result.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
+    })
+  })
+
+  it('marks parent deletion and cancels only pre-dispatch work', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const parentSessionId = 'session_deleted_parent'
+    const reserve = (prompt: string) => store.reserve({ parentSessionId, delegatedPrompt: prompt, childConfig: {} })
+    const reserved = reserve('reserved')
+    const readyBase = reserve('ready')
+    const ready = store.updateDispatch(readyBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimedBase = reserve('claimed')
+    const claimedReady = store.updateDispatch(claimedBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimed = store.updateDispatch(claimedReady.taskId, 'claimed', '2026-08-16T16:00:02.000Z')
+    const sentBase = reserve('sent')
+    const sentReady = store.updateDispatch(sentBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const sentClaimed = store.updateDispatch(sentReady.taskId, 'claimed', '2026-08-16T16:00:02.000Z')
+    const sent = store.updateDispatch(sentClaimed.taskId, 'sent', '2026-08-16T16:00:03.000Z')
+    const processing = store.transition(sent.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:04.000Z' })
+    const terminalBase = reserve('terminal')
+    const terminalProcessing = store.transition(terminalBase.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:03.000Z',
+    })
+    const terminal = store.commitResult(terminalProcessing.taskId, 'retained', { committedAt: '2026-08-16T16:00:04.000Z' })
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+
+    const changed = await coordinator.markParentDeleted(parentSessionId)
+
+    expect(changed).toHaveLength(5)
+    expect(store.get(reserved.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
+      parentDeletedAt: expect.any(String),
+    })
+    expect(store.get(ready.taskId)).toMatchObject({ runtimeState: 'cancelled', cancellation: { reason: 'parent_deleted' } })
+    expect(store.get(claimed.taskId)).toMatchObject({ runtimeState: 'cancelled', cancellation: { reason: 'parent_deleted' } })
+    expect(store.get(processing.taskId)).toMatchObject({ runtimeState: 'processing', parentDeletedAt: expect.any(String) })
+    expect(store.get(terminal.taskId)).toMatchObject({ runtimeState: 'completed', parentDeletedAt: expect.any(String) })
+  })
+
+  it('serializes concurrent cancellation attempts behind one durable CAS operation', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'concurrent cancellation',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    let releaseAbort!: () => void
+    const abortReleased = new Promise<void>((resolve) => {
+      releaseAbort = resolve
+    })
+    let abortCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    const runtime = {
+      abort: async () => {
+        abortCalls += 1
+        await abortReleased
+      },
+    }
+
+    const first = coordinator.cancelChildSession(processing.childSessionId, 'first_reason', runtime)
+    const second = coordinator.cancelChildSession(processing.childSessionId, 'second_reason', {
+      abort: () => {
+        throw new Error('the second abort must not run')
+      },
+    })
+    await Promise.resolve()
+    releaseAbort()
+
+    const results = await Promise.all([first, second])
+
+    expect(results[0]).toEqual(results[1])
+    expect(results[0]).toMatchObject({
+      status: 'cancelled',
+      task: {
+        runtimeState: 'cancelled',
+        cancellation: { reason: 'first_reason' },
+      },
+    })
+    expect(abortCalls).toBe(1)
+  })
+
+  it('commits cancel_failed and runs cleanup when abort throws', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'abort failure',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    let cleanupCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+
+    const result = await coordinator.cancelChildSession(processing.childSessionId, 'user_requested', {
+      abort: () => {
+        throw new Error('abort failed')
+      },
+      cleanup: () => {
+        cleanupCalls += 1
+      },
+    })
+
+    expect(result.status).toBe('cancel_failed')
+    expect(result.task).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'cancel_failed', retryable: false },
+    })
+    expect(cleanupCalls).toBe(1)
+  })
+
+  it('keeps deterministic completion/failure versus cancellation race winners', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(root)
+    const store = createStore(root)
+    const makeProcessing = (prompt: string) => {
+      const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: prompt, childConfig: {} })
+      return store.transition(reserved.taskId, {
+        runtimeState: 'processing',
+        at: '2026-08-16T16:00:00.000Z',
+      })
+    }
+    const updates: string[] = []
+    const audits: string[] = []
+    let coordinator!: SpawnTaskCoordinator
+    coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: ({ taskId }) => {
+        updates.push(taskId)
+      },
+      onLateEvent: ({ taskId, eventKind }) => {
+        audits.push(`${taskId}:${eventKind}`)
+      },
+    })
+
+    const completionFirst = makeProcessing('completion first')
+    const completionRace = await coordinator.cancelChildSession(completionFirst.childSessionId, 'race', {
+      abort: async () => {
+        await coordinator.finalizeResultForChildSession(completionFirst.childSessionId, 'winner')
+      },
+    })
+    expect(completionRace.status).toBe('already_terminal')
+    expect(completionRace.task?.runtimeState).toBe('completed')
+
+    const failureFirst = makeProcessing('failure first')
+    const failureRace = await coordinator.cancelChildSession(failureFirst.childSessionId, 'race', {
+      abort: async () => {
+        await coordinator.finalizeProviderFailureForChildSession(failureFirst.childSessionId, 'winner')
+      },
+    })
+    expect(failureRace.status).toBe('already_terminal')
+    expect(failureRace.task?.runtimeState).toBe('failed')
+
+    const cancelBeforeCompletion = makeProcessing('cancel before completion')
+    const cancelledCompletion = await coordinator.cancelChildSession(cancelBeforeCompletion.childSessionId, 'race')
+    expect(cancelledCompletion.status).toBe('cancelled')
+    const updatesAfterCompletionCancel = updates.length
+    await coordinator.finalizeResultForChildSession(cancelBeforeCompletion.childSessionId, 'late result')
+    expect(updates.length).toBe(updatesAfterCompletionCancel)
+
+    const cancelBeforeFailure = makeProcessing('cancel before failure')
+    const cancelledFailure = await coordinator.cancelChildSession(cancelBeforeFailure.childSessionId, 'race')
+    expect(cancelledFailure.status).toBe('cancelled')
+    const updatesAfterFailureCancel = updates.length
+    await coordinator.finalizeProviderFailureForChildSession(cancelBeforeFailure.childSessionId, 'late failure')
+    expect(updates.length).toBe(updatesAfterFailureCancel)
+
+    expect(audits).toEqual([
+      `${cancelBeforeCompletion.taskId}:result`,
+      `${cancelBeforeFailure.taskId}:provider_error`,
+    ])
+  })
+
   it('persists the reserved intent before child publication and dispatches only after sent', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
@@ -173,7 +735,7 @@ describe('SpawnTaskCoordinator', () => {
       spawnRejected = true
       throw error
     })
-    for (let attempt = 0; attempt < 3 && !notificationStarted; attempt++) {
+    for (let attempt = 0; attempt < 20 && !notificationStarted; attempt++) {
       await Promise.resolve()
     }
     expect(notificationStarted).toBe(true)

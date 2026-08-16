@@ -22,6 +22,9 @@ export interface CreateSpawnTaskAwaitingInputInput {
 export function createSpawnTaskAwaitingInput(
   input: CreateSpawnTaskAwaitingInputInput,
 ): SpawnTaskAwaitingInput {
+  if (input.kind !== 'permission' && input.kind !== 'authentication') {
+    throw new TypeError('awaitingInput.kind must be permission|authentication');
+  }
   const requestId = assertSpawnTaskId(input.requestId, 'awaitingInput.requestId');
   const promptSummary = createSpawnTaskFailure({
     code: 'unknown',

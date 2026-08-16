@@ -6,8 +6,10 @@ import type {
 } from '@kata-sh/core'
 import type { SpawnSessionResult } from '@kata-sh/shared/agent'
 import {
+  createSpawnTaskAwaitingInput,
   createSpawnTaskFailure,
   isSpawnTaskTerminal,
+  type CreateSpawnTaskAwaitingInputInput,
   type SpawnTaskStartupReport,
   type SpawnTaskStore,
 } from '@kata-sh/shared/spawn-tasks'
@@ -34,7 +36,25 @@ export interface SpawnTaskUpdated {
   readonly version: number
 }
 
+export interface SpawnTaskLateEvent {
+  readonly taskId: string
+  readonly childSessionId: string
+  readonly currentState: SpawnTask['runtimeState']
+  readonly eventKind: string
+}
+
 export type SpawnTaskUpdatedHandler = (change: SpawnTaskUpdated) => void | Promise<void>
+export type SpawnTaskLateEventHandler = (event: SpawnTaskLateEvent) => void | Promise<void>
+
+export interface SpawnTaskCancellationRuntime {
+  readonly abort?: () => void | Promise<void>
+  readonly cleanup?: () => void | Promise<void>
+}
+
+export interface SpawnTaskCancellationResult {
+  readonly status: 'cancelled' | 'already_terminal' | 'cancel_failed'
+  readonly task: SpawnTask | null
+}
 
 export interface SpawnTaskCoordinatorOptions {
   readonly store: SpawnTaskStore
@@ -42,6 +62,7 @@ export interface SpawnTaskCoordinatorOptions {
   readonly appendDelegatedPrompt: (input: SpawnTaskAppendPromptInput) => Promise<void>
   readonly dispatchProvider: (input: SpawnTaskDispatchInput) => void | Promise<void>
   readonly onTaskUpdated?: SpawnTaskUpdatedHandler
+  readonly onLateEvent?: SpawnTaskLateEventHandler
   readonly clock?: () => string
 }
 
@@ -85,8 +106,11 @@ export class SpawnTaskCoordinator {
   private readonly appendDelegatedPrompt: SpawnTaskCoordinatorOptions['appendDelegatedPrompt']
   private readonly dispatchProvider: SpawnTaskCoordinatorOptions['dispatchProvider']
   private readonly onTaskUpdated?: SpawnTaskUpdatedHandler
+  private readonly onLateEvent?: SpawnTaskLateEventHandler
   private readonly clock: () => string
   private readonly notifiedUpdates = new Set<string>()
+  private readonly cancellationOperations = new Map<string, Promise<SpawnTaskCancellationResult>>()
+  private readonly deletedParents = new Set<string>()
   private readonly startupNotification: Promise<void>
 
   constructor(options: SpawnTaskCoordinatorOptions) {
@@ -95,7 +119,16 @@ export class SpawnTaskCoordinator {
     this.appendDelegatedPrompt = options.appendDelegatedPrompt
     this.dispatchProvider = options.dispatchProvider
     this.onTaskUpdated = options.onTaskUpdated
+    this.onLateEvent = options.onLateEvent
     this.clock = options.clock ?? (() => new Date().toISOString())
+    try {
+      for (const task of this.store.listAll()) {
+        if (task.parentDeletedAt) this.deletedParents.add(task.parentSessionId)
+      }
+    } catch {
+      // Startup reconciliation remains authoritative for stores that do not
+      // expose an initialized in-memory index during factory failure tests.
+    }
     this.startupNotification = this.notifyStartupReport(this.store.getLastStartupReport())
   }
 
@@ -106,7 +139,11 @@ export class SpawnTaskCoordinator {
   ): Promise<SpawnTask | null> {
     await this.startupNotification
     const current = this.store.getByChildSessionId(childSessionId)
-    if (!current || isSpawnTaskTerminal(current.runtimeState)) return current
+    if (!current) return current
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.auditLateEvent(current, 'result')
+      return current
+    }
 
     try {
       const finalized = this.store.commitResult(current.taskId, content, {
@@ -166,9 +203,308 @@ export class SpawnTaskCoordinator {
     await this.startupNotification
   }
 
+  async awaitInputForChildSession(
+    childSessionId: string,
+    input: CreateSpawnTaskAwaitingInputInput,
+  ): Promise<SpawnTask | null> {
+    await this.startupNotification
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return current
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.auditLateEvent(current, `${input.kind}_request`)
+      return current
+    }
+    if (current.cancellation || current.runtimeState !== 'processing') return current
+
+    const awaitingInput = createSpawnTaskAwaitingInput(input)
+    try {
+      const awaiting = this.store.transition(current.taskId, {
+        runtimeState: 'awaiting-input',
+        at: awaitingInput.createdAt,
+        awaitingInput,
+      })
+      await this.notifyTaskUpdated(awaiting)
+      return awaiting
+    } catch {
+      await this.reconcileStore()
+      return this.store.get(current.taskId)
+    }
+  }
+
+  async resumeAwaitingInputForChildSession(
+    childSessionId: string,
+    requestId: string,
+  ): Promise<SpawnTask | null> {
+    await this.startupNotification
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return current
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.auditLateEvent(current, 'input_response')
+      return current
+    }
+    if (
+      current.runtimeState !== 'awaiting-input'
+      || current.cancellation
+      || current.awaitingInput?.requestId !== requestId
+    ) return current
+
+    try {
+      const resumed = this.store.transition(current.taskId, {
+        runtimeState: 'processing',
+        at: this.clock(),
+      })
+      await this.notifyTaskUpdated(resumed)
+      return resumed
+    } catch {
+      await this.reconcileStore()
+      return this.store.get(current.taskId)
+    }
+  }
+
+  async interruptAwaitingInputForChildSession(
+    childSessionId: string,
+    error?: unknown,
+  ): Promise<SpawnTask | null> {
+    await this.startupNotification
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return current
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.auditLateEvent(current, 'input_interrupted')
+      return current
+    }
+    if (current.cancellation || current.runtimeState !== 'awaiting-input' || !current.awaitingInput) return current
+
+    const failure = createSpawnTaskFailure({
+      code: 'input_interrupted',
+      message: error ?? `Pending ${current.awaitingInput.kind} input was interrupted.`,
+      retryable: true,
+      details: { kind: current.awaitingInput.kind },
+      committedAt: this.clock(),
+    })
+    try {
+      const failed = this.store.transition(current.taskId, {
+        runtimeState: 'failed',
+        at: failure.committedAt,
+        failure,
+      })
+      await this.notifyTaskUpdated(failed)
+      return failed
+    } catch {
+      await this.reconcileStore()
+      return this.store.get(current.taskId)
+    }
+  }
+
+  async cancelChildSession(
+    childSessionId: string,
+    reason: string,
+    runtime?: SpawnTaskCancellationRuntime,
+  ): Promise<SpawnTaskCancellationResult> {
+    await this.startupNotification
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return { status: 'already_terminal', task: null }
+    return this.cancelTask(current.taskId, reason, runtime)
+  }
+
+  getTask(taskId: string): SpawnTask | null {
+    return this.store.get(taskId)
+  }
+
+  recordLateEventForChildSession(childSessionId: string, eventKind: string): boolean {
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current || !isSpawnTaskTerminal(current.runtimeState)) return false
+    this.auditLateEvent(current, eventKind)
+    return true
+  }
+
+  async cancelTask(
+    taskId: string,
+    reason: string,
+    runtime?: SpawnTaskCancellationRuntime,
+  ): Promise<SpawnTaskCancellationResult> {
+    const existing = this.cancellationOperations.get(taskId)
+    if (existing) return existing
+
+    const operation = this.cancelTaskOnce(taskId, reason, runtime)
+    this.cancellationOperations.set(taskId, operation)
+    try {
+      return await operation
+    } finally {
+      if (this.cancellationOperations.get(taskId) === operation) {
+        this.cancellationOperations.delete(taskId)
+      }
+    }
+  }
+
+  private async cancelTaskOnce(
+    taskId: string,
+    reason: string,
+    runtime?: SpawnTaskCancellationRuntime,
+  ): Promise<SpawnTaskCancellationResult> {
+    await this.startupNotification
+    let current = this.store.get(taskId)
+    if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+      return { status: 'already_terminal', task: current }
+    }
+
+    let requested: SpawnTask
+    try {
+      requested = this.store.requestCancellation(taskId, this.clock(), reason)
+      if (requested.version !== current.version) await this.notifyTaskUpdated(requested)
+    } catch {
+      await this.reconcileStore()
+      current = this.store.get(taskId)
+      return isSpawnTaskTerminal(current?.runtimeState ?? 'cancelled')
+        ? { status: 'already_terminal', task: current }
+        : { status: 'cancel_failed', task: current }
+    }
+
+    if (requested.runtimeState === 'queued' || !runtime?.abort) {
+      return this.commitCancellation(requested)
+    }
+
+    try {
+      await runtime.abort()
+    } catch (error) {
+      try {
+        await runtime.cleanup?.()
+      } catch {
+        // Cleanup is best effort, but it is attempted before durable failure.
+      }
+
+      current = this.store.get(taskId)
+      if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+        return { status: 'already_terminal', task: current }
+      }
+
+      const failure = createSpawnTaskFailure({
+        code: 'cancel_failed',
+        message: error,
+        retryable: false,
+        details: { reason },
+        committedAt: this.clock(),
+      })
+      try {
+        const failed = this.store.transition(taskId, {
+          runtimeState: 'failed',
+          at: failure.committedAt,
+          failure,
+        })
+        await this.notifyTaskUpdated(failed)
+        return { status: 'cancel_failed', task: failed }
+      } catch {
+        await this.reconcileStore()
+        current = this.store.get(taskId)
+        return { status: 'cancel_failed', task: current }
+      }
+    }
+
+    current = this.store.get(taskId)
+    if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+      return { status: 'already_terminal', task: current }
+    }
+    return this.commitCancellation(current)
+  }
+
+  async markParentDeleted(parentSessionId: string): Promise<readonly SpawnTask[]> {
+    this.deletedParents.add(parentSessionId)
+    await this.startupNotification
+    const changed: SpawnTask[] = []
+    for (const snapshot of this.store.listByParentSessionId(parentSessionId)) {
+      let current = this.store.get(snapshot.taskId)
+      if (!current) continue
+
+      if (!current.parentDeletedAt) {
+        try {
+          current = this.store.markParentDeleted(current.taskId, this.clock())
+          await this.notifyTaskUpdated(current)
+        } catch {
+          await this.reconcileStore()
+          current = this.store.get(snapshot.taskId)
+          if (!current) continue
+        }
+      }
+
+      if (current.dispatch.state !== 'sent' && !isSpawnTaskTerminal(current.runtimeState)) {
+        const cancellation = await this.cancelTask(current.taskId, 'parent_deleted')
+        current = cancellation.task ?? current
+      }
+      changed.push(current)
+    }
+    return changed
+  }
+
+  async markChildDeleted(
+    childSessionId: string,
+    runtime?: SpawnTaskCancellationRuntime,
+  ): Promise<SpawnTask | null> {
+    await this.startupNotification
+    let current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return current
+    if (!isSpawnTaskTerminal(current.runtimeState)) {
+      const cancellation = await this.cancelChildSession(childSessionId, 'child_deleted', runtime)
+      current = cancellation.task ?? current
+    }
+    if (current && !current.childDeletedAt) {
+      try {
+        current = this.store.markChildDeleted(current.taskId, this.clock())
+        await this.notifyTaskUpdated(current)
+      } catch {
+        await this.reconcileStore()
+        current = this.store.get(current.taskId)
+      }
+    }
+    return current
+  }
+
+  private async commitCancellation(task: SpawnTask): Promise<SpawnTaskCancellationResult> {
+    if (isSpawnTaskTerminal(task.runtimeState)) {
+      return { status: 'already_terminal', task }
+    }
+    try {
+      const cancelled = this.store.transition(task.taskId, {
+        runtimeState: 'cancelled',
+        at: this.clock(),
+        cancellation: task.cancellation!,
+      })
+      await this.notifyTaskUpdated(cancelled)
+      return { status: 'cancelled', task: cancelled }
+    } catch {
+      await this.reconcileStore()
+      const current = this.store.get(task.taskId)
+      return isSpawnTaskTerminal(current?.runtimeState ?? 'cancelled')
+        ? { status: 'already_terminal', task: current }
+        : { status: 'cancel_failed', task: current }
+    }
+  }
+
   async reconcileStartup(): Promise<void> {
     await this.startupNotification
     await this.reconcileStore()
+  }
+
+  private async preDispatchCancellation(task: SpawnTask): Promise<SpawnSessionResult | null> {
+    let current = this.store.get(task.taskId)
+    if (!current || current.dispatch.state === 'sent') return null
+
+    if (this.deletedParents.has(current.parentSessionId) && !isSpawnTaskTerminal(current.runtimeState)) {
+      if (!current.parentDeletedAt) {
+        current = this.store.markParentDeleted(current.taskId, this.clock())
+        await this.notifyTaskUpdated(current)
+      }
+      const cancellation = await this.cancelTask(current.taskId, 'parent_deleted')
+      current = cancellation.task ?? this.store.get(current.taskId) ?? current
+    }
+
+    if (current.cancellation?.reason === 'parent_deleted' || current.cancellation?.reason === 'child_deleted') {
+      return {
+        taskId: current.taskId,
+        childSessionId: current.childSessionId,
+        runtimeState: current.runtimeState,
+        version: current.version,
+      }
+    }
+    return null
   }
 
   async spawn(input: SpawnTaskSpawnInput): Promise<SpawnSessionResult> {
@@ -187,11 +523,17 @@ export class SpawnTaskCoordinator {
       )
     }
 
+    const reservedCancellation = await this.preDispatchCancellation(task)
+    if (reservedCancellation) return reservedCancellation
+
     try {
       await this.createChild({ task })
     } catch (error) {
       throw await this.creationFailure(task, error, 'child')
     }
+
+    const childCancellation = await this.preDispatchCancellation(task)
+    if (childCancellation) return childCancellation
 
     try {
       task = this.store.updateDispatch(task.taskId, 'ready', this.clock())
@@ -199,11 +541,17 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(task, error, 'ready')
     }
 
+    const readyCancellation = await this.preDispatchCancellation(task)
+    if (readyCancellation) return readyCancellation
+
     try {
       task = this.store.updateDispatch(task.taskId, 'claimed', this.clock())
     } catch (error) {
       throw await this.creationFailure(task, error, 'claim')
     }
+
+    const claimedCancellation = await this.preDispatchCancellation(task)
+    if (claimedCancellation) return claimedCancellation
 
     try {
       await this.appendDelegatedPrompt({
@@ -214,6 +562,9 @@ export class SpawnTaskCoordinator {
     } catch (error) {
       throw await this.creationFailure(task, error, 'message_append')
     }
+
+    const appendedCancellation = await this.preDispatchCancellation(task)
+    if (appendedCancellation) return appendedCancellation
 
     try {
       task = this.store.updateDispatch(task.taskId, 'sent', this.clock())
@@ -272,7 +623,11 @@ export class SpawnTaskCoordinator {
   ): Promise<SpawnTask | null> {
     await this.startupNotification
     const current = this.store.getByChildSessionId(childSessionId)
-    if (!current || isSpawnTaskTerminal(current.runtimeState)) return current
+    if (!current) return current
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.auditLateEvent(current, input.code)
+      return current
+    }
     if (current.runtimeState !== 'processing') return current
 
     const failure = createSpawnTaskFailure({
@@ -353,7 +708,7 @@ export class SpawnTaskCoordinator {
       await this.notifyStartupReport(report)
       return report
     } catch {
-      return { finalized: [], integrityMarked: [] }
+      return { finalized: [], integrityMarked: [], inputInterrupted: [] }
     }
   }
 
@@ -365,6 +720,24 @@ export class SpawnTaskCoordinator {
     for (const change of report.integrityMarked) {
       const task = this.store.get(change.taskId)
       if (task) await this.notifyTaskUpdated(task)
+    }
+    for (const change of report.inputInterrupted) {
+      const task = this.store.get(change.taskId)
+      if (task) await this.notifyTaskUpdated(task)
+    }
+  }
+
+  private auditLateEvent(task: SpawnTask, eventKind: string): void {
+    const event: SpawnTaskLateEvent = {
+      taskId: task.taskId,
+      childSessionId: task.childSessionId,
+      currentState: task.runtimeState,
+      eventKind,
+    }
+    try {
+      Promise.resolve(this.onLateEvent?.(event)).catch(() => {})
+    } catch {
+      // Auditing is best effort and must never change terminal task state.
     }
   }
 

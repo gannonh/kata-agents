@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPAWN_TASK_LIMITS } from '@kata-sh/core';
-import { SpawnTaskStore } from '../src/spawn-tasks/index.ts';
+import { createSpawnTaskAwaitingInput, SpawnTaskStore } from '../src/spawn-tasks/index.ts';
 
 const at = '2026-02-03T04:05:06.000Z';
 const later = '2026-02-03T04:06:06.000Z';
@@ -172,6 +172,48 @@ describe('spawn-task result artifacts', () => {
 });
 
 describe('spawn-task artifact recovery and retention', () => {
+  it('interrupts awaiting permission and authentication input during startup', () => {
+    const root = workspace();
+    const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_awaiting_restart' });
+    const taskIds: string[] = [];
+
+    for (const [index, kind] of (['permission', 'authentication'] as const).entries()) {
+      const processing = processingTask(initial);
+      const awaitingInput = createSpawnTaskAwaitingInput({
+        kind,
+        requestId: `${kind}_request_${index}`,
+        promptSummary: `${kind} input`,
+        createdAt: later,
+      });
+      initial.transition(processing.taskId, {
+        runtimeState: 'awaiting-input',
+        at: later,
+        awaitingInput,
+      });
+      taskIds.push(processing.taskId);
+    }
+
+    const restarted = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_awaiting_restart' });
+    const report = restarted.getLastStartupReport();
+
+    expect([...report.inputInterrupted].sort((left, right) => left.taskId.localeCompare(right.taskId))).toEqual([...taskIds]
+      .sort()
+      .map((taskId) => ({
+        taskId,
+        version: restarted.get(taskId)!.version,
+      })));
+    for (const [index, kind] of (['permission', 'authentication'] as const).entries()) {
+      expect(restarted.get(taskIds[index])).toMatchObject({
+        runtimeState: 'failed',
+        failure: {
+          code: 'input_interrupted',
+          retryable: true,
+          details: { kind },
+        },
+      });
+    }
+  })
+
   it('finalizes a verified artifact left with a nonterminal record exactly once', () => {
     const root = workspace();
     const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_finalize' });
@@ -251,7 +293,7 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(recovered.reload().finalized).toEqual([]);
   });
 
-  it('finalizes verified artifacts from queued and awaiting-input recovery states', () => {
+  it('finalizes verified queued artifacts and interrupts awaiting-input recovery', () => {
     for (const state of ['queued', 'awaiting-input'] as const) {
       const root = workspace();
       const workspaceId = `ws_finalize_${state.replace('-', '_')}`;
@@ -283,16 +325,32 @@ describe('spawn-task artifact recovery and retention', () => {
       });
 
       const recovered = new SpawnTaskStore({ workspaceRoot: root, workspaceId });
-      const completed = recovered.get(processing.taskId)!;
-      expect(completed.runtimeState).toBe('completed');
-      expect(completed.awaitingInput).toBeUndefined();
-      expect(recovered.getLastStartupReport().finalized).toEqual([{
-        taskId: processing.taskId,
-        previousRuntimeState: state,
-        version: completed.version,
-      }]);
-      expect(recovered.reload().finalized).toEqual([]);
-      expect(recovered.get(processing.taskId)?.version).toBe(completed.version);
+      const task = recovered.get(processing.taskId)!;
+      if (state === 'queued') {
+        expect(task.runtimeState).toBe('completed');
+        expect(task.awaitingInput).toBeUndefined();
+        expect(recovered.getLastStartupReport().finalized).toEqual([{
+          taskId: processing.taskId,
+          previousRuntimeState: state,
+          version: task.version,
+        }]);
+        expect(recovered.reload().finalized).toEqual([]);
+      } else {
+        expect(task).toMatchObject({
+          runtimeState: 'failed',
+          failure: {
+            code: 'input_interrupted',
+            retryable: true,
+            details: { kind: 'authentication' },
+          },
+        });
+        expect(recovered.getLastStartupReport().inputInterrupted).toEqual([{
+          taskId: processing.taskId,
+          version: task.version,
+        }]);
+        expect(recovered.reload().inputInterrupted).toEqual([]);
+      }
+      expect(recovered.get(processing.taskId)?.version).toBe(task.version);
     }
   });
 

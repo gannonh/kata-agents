@@ -92,6 +92,7 @@ export interface SpawnTaskFinalizedStartupChange extends SpawnTaskStartupChange 
 export interface SpawnTaskStartupReport {
   readonly finalized: readonly SpawnTaskFinalizedStartupChange[];
   readonly integrityMarked: readonly SpawnTaskStartupChange[];
+  readonly inputInterrupted: readonly SpawnTaskStartupChange[];
 }
 
 interface CommitOptions {
@@ -103,7 +104,7 @@ function clone<T>(value: T): T {
 }
 
 function emptyStartupReport(): SpawnTaskStartupReport {
-  return { finalized: [], integrityMarked: [] };
+  return { finalized: [], integrityMarked: [], inputInterrupted: [] };
 }
 
 function sameIdentity(left: SpawnTask, right: SpawnTask): boolean {
@@ -382,6 +383,7 @@ export class SpawnTaskStore {
   validateArtifactsOnStartup(): SpawnTaskStartupReport {
     const finalized: SpawnTaskFinalizedStartupChange[] = [];
     const integrityMarked: SpawnTaskStartupChange[] = [];
+    const inputInterrupted: SpawnTaskStartupChange[] = [];
     for (const snapshot of [...this.tasks.values()]) {
       try {
         if (snapshot.runtimeState === 'completed' && snapshot.result) {
@@ -396,6 +398,26 @@ export class SpawnTaskStore {
         }
 
         if (isSpawnTaskTerminal(snapshot.runtimeState)) continue;
+
+        if (snapshot.runtimeState === 'awaiting-input' && snapshot.awaitingInput) {
+          const interruptedAt = this.clock();
+          const failure = createSpawnTaskFailure({
+            code: 'input_interrupted',
+            message: `Pending ${snapshot.awaitingInput.kind} input was interrupted during restart.`,
+            retryable: true,
+            details: { kind: snapshot.awaitingInput.kind },
+            committedAt: interruptedAt,
+          });
+          const failed = transitionSpawnTask(snapshot, {
+            runtimeState: 'failed',
+            at: interruptedAt,
+            failure,
+          });
+          this.commit(failed);
+          inputInterrupted.push({ taskId: failed.taskId, version: failed.version });
+          continue;
+        }
+
         const pending = this.readVerifiedManifest(snapshot);
         if (!pending) continue;
         const bytes = this.readCurrentFile(snapshot.taskId, SPAWN_TASK_RESULT_FILE);
@@ -411,7 +433,7 @@ export class SpawnTaskStore {
         this.loadErrors.set(snapshot.taskId, error instanceof Error ? error.message : String(error));
       }
     }
-    const report: SpawnTaskStartupReport = { finalized, integrityMarked };
+    const report: SpawnTaskStartupReport = { finalized, integrityMarked, inputInterrupted };
     this.lastStartupReport = clone(report);
     return clone(report);
   }
