@@ -781,6 +781,22 @@ async function resolveToolDisplayMeta(
 /** Agent type - unified backend interface for all providers */
 type AgentInstance = AgentBackend
 
+interface TurnToolFailureEvidence {
+  toolName: string
+  toolUseId?: string
+}
+
+const MAX_TURN_TOOL_EVIDENCE_FIELD_LENGTH = 128
+
+function boundTurnToolEvidenceField(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const bounded = value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .slice(0, MAX_TURN_TOOL_EVIDENCE_FIELD_LENGTH)
+    .trim()
+  return bounded || undefined
+}
+
 interface ManagedSession {
   id: string
   /** Private durable task relationship; never returned in Session DTOs. */
@@ -895,6 +911,9 @@ interface ManagedSession {
   lastFinalMessageId?: string
   // Turn baseline: last final assistant message ID at turn start (runtime-only, not persisted)
   turnStartFinalMessageId?: string
+  // Runtime-only evidence for a tool failure observed during the current turn.
+  // The result payload is intentionally excluded because it may contain secrets.
+  turnToolFailureEvidence?: TurnToolFailureEvidence
   // External session metadata updates seen while processing (applied after turn stop)
   pendingExternalMetadata?: SessionHeader
   // Guard: suppress external metadata revert after programmatic writes (setSessionStatus/setSessionLabels).
@@ -5395,6 +5414,31 @@ export class SessionManager implements ISessionManager {
     await coordinator.finalizeToolFailureForChildSession(managed.id, error, details)
   }
 
+  private recordSpawnTaskToolFailureEvidence(
+    managed: ManagedSession,
+    toolName: unknown,
+    toolUseId: unknown,
+  ): void {
+    if (!managed.spawnTaskRef) return
+    const boundedToolName = boundTurnToolEvidenceField(toolName) ?? 'unknown'
+    const boundedToolUseId = boundTurnToolEvidenceField(toolUseId)
+    managed.turnToolFailureEvidence = {
+      toolName: boundedToolName,
+      ...(boundedToolUseId ? { toolUseId: boundedToolUseId } : {}),
+    }
+  }
+
+  private async finalizeSpawnTaskToolFailureEvidence(managed: ManagedSession): Promise<void> {
+    const evidence = managed.turnToolFailureEvidence
+    if (!evidence) return
+    managed.turnToolFailureEvidence = undefined
+    await this.finalizeSpawnTaskToolFailure(
+      managed,
+      `Tool ${evidence.toolName} reported an error`,
+      evidence,
+    )
+  }
+
   /**
    * Set which session the user is actively viewing.
    * Called when user navigates to a session. Used to determine whether to mark
@@ -7909,6 +7953,7 @@ export class SessionManager implements ISessionManager {
     managed.streamingText = ''
     managed.processingGeneration++
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    managed.turnToolFailureEvidence = undefined
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
@@ -8166,16 +8211,15 @@ export class SessionManager implements ISessionManager {
 
           sessionLog.info('Chat completed via complete event')
 
-          // Check if we got an assistant response in this turn
-          // If not, the SDK may have hit context limits or other issues
-          const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate
-          )
+          // Check if we got a final assistant response in this turn. An intermediate
+          // response after a recoverable tool error does not count as task completion.
+          const finalAssistantForTurn = this.getFinalAssistantMessageForTurn(managed)
           const lastUserMsg = [...managed.messages].reverse().find(m => m.role === 'user')
+          let terminalSpawnTaskFailure = false
 
-          // If the last user message is newer than any assistant response, we got no reply
-          // This can happen due to context overflow or API issues
-          if (lastUserMsg && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)) {
+          // If the last user message is newer than any final assistant response, we got no reply.
+          // This can happen due to context overflow, API issues, or a terminal tool failure.
+          if (lastUserMsg && !finalAssistantForTurn) {
             sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
 
             // Check if there's a captured API error that explains the silent failure.
@@ -8187,6 +8231,8 @@ export class SessionManager implements ISessionManager {
             if (apiError && apiError.status === 400) {
               const isImageError = apiError.message?.includes('image exceeds')
               await this.finalizeSpawnTaskProviderFailure(managed, apiError.message)
+              managed.turnToolFailureEvidence = undefined
+              terminalSpawnTaskFailure = true
 
               const errorMessage: Message = {
                 id: generateMessageId(),
@@ -8220,7 +8266,14 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          await this.finalizeSpawnTaskResult(managed)
+          if (!terminalSpawnTaskFailure && !finalAssistantForTurn && managed.turnToolFailureEvidence) {
+            await this.finalizeSpawnTaskToolFailureEvidence(managed)
+            terminalSpawnTaskFailure = true
+          }
+
+          if (!terminalSpawnTaskFailure) {
+            await this.finalizeSpawnTaskResult(managed)
+          }
 
           sendSpan.mark('chat.complete')
           sendSpan.end()
@@ -8280,6 +8333,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.setMetadata('error', error instanceof Error ? error.message : String(error))
         sendSpan.end()
         await this.finalizeSpawnTaskProviderFailure(managed, error)
+        managed.turnToolFailureEvidence = undefined
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -8446,6 +8500,7 @@ export class SessionManager implements ISessionManager {
           }
 
           managed.authRetryInProgress = false
+          managed.turnToolFailureEvidence = undefined
 
           await this.sendMessage(
             sessionId,
@@ -8518,6 +8573,7 @@ export class SessionManager implements ISessionManager {
 
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
+    managed.turnToolFailureEvidence = undefined
 
     // Clear agent control overlay between turns. The session keeps browser
     // ownership (boundSessionId) — only the visual overlay is removed.
@@ -9400,10 +9456,13 @@ export class SessionManager implements ISessionManager {
         }
 
         if (inferredError) {
-          await this.finalizeSpawnTaskToolFailure(managed, formattedResult, {
-            toolName,
-            toolUseId: event.toolUseId,
-          })
+          // Tool failures can be recoverable while the provider turn is still active.
+          // Keep only bounded, non-secret evidence and defer task finalization until
+          // the terminal complete/error boundary decides whether recovery occurred.
+          this.recordSpawnTaskToolFailureEvidence(managed, toolName, event.toolUseId)
+        } else if (managed.spawnTaskRef) {
+          // A later successful tool outcome supersedes earlier recoverable failure evidence.
+          managed.turnToolFailureEvidence = undefined
         }
 
         // Send event to renderer if: (a) first completion, or (b) result content changed
@@ -9539,6 +9598,7 @@ export class SessionManager implements ISessionManager {
         }
 
         await this.finalizeSpawnTaskProviderFailure(managed, event.message)
+        managed.turnToolFailureEvidence = undefined
 
         // AgentEvent uses `message` not `error`
         const errorMessage: Message = {
@@ -9583,6 +9643,7 @@ export class SessionManager implements ISessionManager {
         }
 
         await this.finalizeSpawnTaskProviderFailure(managed, event.error.message || event.error.title)
+        managed.turnToolFailureEvidence = undefined
 
         // Build rich error message with all diagnostic fields for persistence and UI display
         const typedErrorMessage: Message = {

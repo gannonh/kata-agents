@@ -291,6 +291,8 @@ describe('SessionManager spawned-task transcript append', () => {
       })(),
     })
     const updates: Array<{ taskId: string; version: number }> = []
+    const terminalLifecycleOrder: string[] = []
+    let terminalChildSessionId: string | undefined
     let manager!: SessionManager
     let sessions!: Map<string, any>
     manager = new SessionManager({
@@ -302,12 +304,21 @@ describe('SessionManager spawned-task transcript append', () => {
         })
         const task = reloaded.get(change.taskId)
         const hasApiError = task?.delegatedPrompt.includes('api-error')
+        const hasTerminalToolError = task?.delegatedPrompt.includes('terminal-tool')
         expect(task).toMatchObject({
-          runtimeState: hasApiError ? 'failed' : 'completed',
+          runtimeState: hasApiError || hasTerminalToolError ? 'failed' : 'completed',
           version: change.version,
         })
         if (hasApiError) {
           expect(task?.failure?.code).toBe('provider_error')
+        } else if (hasTerminalToolError) {
+          expect(task?.failure?.code).toBe('tool_error')
+          expect(task?.failure?.message).toBe('Tool Bash reported an error')
+          expect(task?.failure?.details).toEqual({
+            toolName: 'Bash',
+            toolUseId: 'terminal-tool-use',
+          })
+          terminalLifecycleOrder.push('task-updated')
         } else {
           expect(task?.result?.byteLength).toBe(
             task?.delegatedPrompt.includes('empty')
@@ -319,8 +330,12 @@ describe('SessionManager spawned-task transcript append', () => {
       },
       spawnTaskDispatchProvider: ({ task, prompt, attachments }) => {
         const child = sessions.get(task.childSessionId)
-        const output = prompt.includes('empty') || prompt.includes('api-error') ? '' : 'normalized child result'
+        const output = prompt.includes('empty') || prompt.includes('api-error') || prompt.includes('terminal-tool')
+          ? ''
+          : 'normalized child result'
         const hasApiError = prompt.includes('api-error')
+        const hasRecoverableToolError = prompt.includes('recoverable-tool')
+        const hasTerminalToolError = prompt.includes('terminal-tool')
         child.agent = {
           generateTitle: async () => 'Child result title',
           setAllSources: () => {},
@@ -334,6 +349,17 @@ describe('SessionManager spawned-task transcript append', () => {
                 message: 'provider rejected the child turn',
                 timestamp: Date.now(),
               }))
+            }
+            if (hasRecoverableToolError || hasTerminalToolError) {
+              yield {
+                type: 'tool_result' as const,
+                toolName: 'Bash',
+                toolUseId: hasRecoverableToolError ? 'recoverable-tool-use' : 'terminal-tool-use',
+                result: hasRecoverableToolError
+                  ? 'Error: transient command failed; the agent can recover'
+                  : 'Error: terminal command failure; no recovery followed',
+                isError: true,
+              }
             }
             if (output) {
               yield { type: 'text_complete' as const, text: output, isIntermediate: false }
@@ -351,7 +377,11 @@ describe('SessionManager spawned-task transcript append', () => {
         )
       },
     })
-    manager.setEventSink(() => {})
+    manager.setEventSink((_channel, _target, event) => {
+      if (event.type === 'complete' && event.sessionId === terminalChildSessionId) {
+        terminalLifecycleOrder.push('session-complete')
+      }
+    })
     const services = createGitServices({
       worktreeRoot: join(workspaceRoot, 'worktrees'),
       registryPath: join(workspaceRoot, 'worktrees', 'registry.json'),
@@ -387,11 +417,22 @@ describe('SessionManager spawned-task transcript append', () => {
       delegatedPrompt: 'normalize this child result',
       childConfig: {},
     })
+    const recoverableToolResult = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize recoverable-tool child result',
+      childConfig: {},
+    })
     const emptyResult = await coordinator.spawn({
       parentSessionId: parent.id,
       delegatedPrompt: 'normalize empty child result',
       childConfig: {},
     })
+    const terminalToolResult = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize terminal-tool child result',
+      childConfig: {},
+    })
+    terminalChildSessionId = terminalToolResult.childSessionId
     const apiErrorResult = await coordinator.spawn({
       parentSessionId: parent.id,
       delegatedPrompt: 'normalize api-error child result',
@@ -399,16 +440,22 @@ describe('SessionManager spawned-task transcript append', () => {
     })
 
     let task = store.get(result.taskId)
+    let recoverableToolTask = store.get(recoverableToolResult.taskId)
     let emptyTask = store.get(emptyResult.taskId)
+    let terminalToolTask = store.get(terminalToolResult.taskId)
     let apiErrorTask = store.get(apiErrorResult.taskId)
     for (let attempt = 0; attempt < 40 && (
       task?.runtimeState !== 'completed'
+      || recoverableToolTask?.runtimeState !== 'completed'
       || emptyTask?.runtimeState !== 'completed'
+      || terminalToolTask?.runtimeState !== 'failed'
       || apiErrorTask?.runtimeState !== 'failed'
     ); attempt++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 5))
       task = store.get(result.taskId)
+      recoverableToolTask = store.get(recoverableToolResult.taskId)
       emptyTask = store.get(emptyResult.taskId)
+      terminalToolTask = store.get(terminalToolResult.taskId)
       apiErrorTask = store.get(apiErrorResult.taskId)
     }
 
@@ -422,11 +469,24 @@ describe('SessionManager spawned-task transcript append', () => {
     const childHistory = sessions.get(result.childSessionId).messages as Array<{ role: string; id: string }>
     const finalAssistant = childHistory.findLast((message) => message.role === 'assistant')
     expect(task?.result?.sourceMessageId).toBe(finalAssistant?.id)
+    expect(recoverableToolTask).toMatchObject({
+      childSessionId: recoverableToolResult.childSessionId,
+      runtimeState: 'completed',
+      result: {
+        byteLength: Buffer.byteLength('normalized child result', 'utf8'),
+      },
+    })
     expect(emptyTask).toMatchObject({
       childSessionId: emptyResult.childSessionId,
       runtimeState: 'completed',
       result: { byteLength: 0, preview: '' },
     })
+    expect(terminalToolTask).toMatchObject({
+      childSessionId: terminalToolResult.childSessionId,
+      runtimeState: 'failed',
+      failure: { code: 'tool_error' },
+    })
+    expect(terminalLifecycleOrder).toEqual(['task-updated', 'session-complete'])
     expect(apiErrorTask).toMatchObject({
       childSessionId: apiErrorResult.childSessionId,
       runtimeState: 'failed',
@@ -434,15 +494,103 @@ describe('SessionManager spawned-task transcript append', () => {
     })
     expect(updates.map((change) => change.taskId).sort()).toEqual([
       result.taskId,
+      recoverableToolResult.taskId,
       emptyResult.taskId,
+      terminalToolResult.taskId,
       apiErrorResult.taskId,
     ].sort())
     expect(sessions.get(result.childSessionId).sessionStatus).toBeUndefined()
+    expect(sessions.get(recoverableToolResult.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(emptyResult.childSessionId).sessionStatus).toBeUndefined()
+    expect(sessions.get(terminalToolResult.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(apiErrorResult.childSessionId).sessionStatus).toBeUndefined()
   })
 
-  it('finalizes provider and terminal tool failures before task invalidation notifications', async () => {
+  it('does not carry recoverable tool-failure evidence into a later turn', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_tool_evidence_reset',
+      name: 'Spawn tool evidence reset workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({
+      parentSessionId: 'session_tool_evidence_parent',
+      delegatedPrompt: 'tool evidence reset',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const manager = new SessionManager({ spawnTaskStoreFactory: () => store })
+    manager.setEventSink(() => {})
+    const services = createGitServices({
+      worktreeRoot: join(workspaceRoot, 'worktrees'),
+      registryPath: join(workspaceRoot, 'worktrees', 'registry.json'),
+    })
+    manager.setGitServices(services)
+    services.lifecycle.markReady()
+
+    let chatCalls = 0
+    const child = createManagedSession(
+      {
+        id: processing.childSessionId,
+        name: 'child',
+        spawnTaskRef: {
+          taskId: processing.taskId,
+          parentSessionId: processing.parentSessionId,
+        },
+      },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    child.agent = {
+      generateTitle: async () => 'Child title',
+      setAllSources: () => {},
+      getModel: () => 'test-model',
+      getSessionId: () => undefined,
+      async *chat() {
+        chatCalls += 1
+        if (chatCalls === 1) {
+          yield {
+            type: 'tool_result' as const,
+            toolName: 'Bash',
+            toolUseId: 'reset-tool-use',
+            result: 'Error: recoverable first-turn failure',
+            isError: true,
+          }
+          return
+        }
+        yield { type: 'complete' as const }
+      },
+    } as any
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+    ;(manager as any).getOrCreateAgent = async (managed: any) => managed.agent
+
+    await manager.sendMessage(child.id, 'first turn')
+    expect(store.get(processing.taskId)?.runtimeState).toBe('processing')
+    expect(child.isProcessing).toBe(false)
+
+    await manager.sendMessage(child.id, 'later turn')
+    let completed = store.get(processing.taskId)
+    for (let attempt = 0; attempt < 20 && completed?.runtimeState !== 'completed'; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+      completed = store.get(processing.taskId)
+    }
+
+    expect(chatCalls).toBe(2)
+    expect(completed).toMatchObject({
+      runtimeState: 'completed',
+      result: { byteLength: 0, preview: '' },
+    })
+    expect(completed?.failure).toBeUndefined()
+  })
+
+  it('finalizes provider failures and defers recoverable tool failures', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
     roots.push(workspaceRoot)
     const workspace = {
@@ -514,13 +662,11 @@ describe('SessionManager spawned-task transcript append', () => {
       failure: { code: 'provider_error' },
     })
     expect(store.get(toolTask.taskId)).toMatchObject({
-      runtimeState: 'failed',
-      failure: { code: 'tool_error' },
+      runtimeState: 'processing',
     })
     expect(order).toEqual([
       `task:${providerTask.taskId}`,
       'event:error',
-      `task:${toolTask.taskId}`,
       'event:tool_result',
     ])
     expect(providerChild.sessionStatus).toBe('review')
