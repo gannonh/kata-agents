@@ -54,6 +54,42 @@ export type {
 } from './message.ts';
 export { generateMessageId } from './message.ts';
 
+// Spawned task types and canonical parity fixture
+export type {
+  SpawnTaskRuntimeState,
+  SpawnTaskDispatchState,
+  SpawnTaskFailureCode,
+  SpawnTaskAwaitingInputKind,
+  SpawnTaskJsonPrimitive,
+  SpawnTaskJsonValue,
+  SpawnTaskStateTimestamps,
+  SpawnTaskDispatchMetadata,
+  SpawnTaskAwaitingInput,
+  SpawnTaskCancellation,
+  SpawnTaskResult,
+  SpawnTaskFailureDetails,
+  SpawnTaskFailure,
+  SpawnTaskIntegrityError,
+  SpawnTask,
+  SpawnTaskView,
+  SpawnTaskTerminalSuccessView,
+  SpawnTaskTerminalFailureView,
+  SpawnTaskTerminalCancellationView,
+  SpawnTaskTerminalView,
+  SpawnTaskResultView,
+  SpawnTaskResultChunkView,
+  SpawnTaskIntegrityView,
+} from './spawn-task.ts';
+export {
+  SPAWN_TASK_SCHEMA_VERSION,
+  SPAWN_TASK_RESULT_ARTIFACT_PATH,
+  SPAWN_TASK_RUNTIME_STATES,
+  SPAWN_TASK_DISPATCH_STATES,
+  SPAWN_TASK_FAILURE_CODES,
+  SPAWN_TASK_LIMITS,
+} from './spawn-task.ts';
+export { SPAWN_TASK_CANONICAL_FIXTURE } from './spawn-task-fixture.ts';
+
 // Message persistence mappers
 export { messageToStored, storedToMessage } from './message-mapper.ts';
 

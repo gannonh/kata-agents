@@ -80,6 +80,14 @@ export function getWorkspaceSessionsPath(rootPath: string): string {
 }
 
 /**
+ * Get path to the independent spawned-task persistence namespace.
+ * @param rootPath - Absolute path to workspace root folder
+ */
+export function getWorkspaceSpawnTasksPath(rootPath: string): string {
+  return join(rootPath, 'spawn-tasks');
+}
+
+/**
  * Get path to workspace skills directory
  * @param rootPath - Absolute path to workspace root folder
  */
