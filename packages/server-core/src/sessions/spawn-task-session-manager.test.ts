@@ -775,6 +775,55 @@ describe('SessionManager spawned-task transcript append', () => {
     expect(child.sessionStatus).toBe('todo')
   })
 
+  it('delivers the current authentication response exactly once', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_auth_success',
+      name: 'Spawn auth success workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'auth success', childConfig: {} })
+    const processing = store.transition(reserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const manager = new SessionManager({ spawnTaskStoreFactory: () => store })
+    const child = createManagedSession({
+      id: processing.childSessionId,
+      spawnTaskRef: { taskId: processing.taskId, parentSessionId: processing.parentSessionId },
+    }, workspace as never, { messagesLoaded: true })
+    child.agent = {} as any
+    child.messages.push({
+      id: 'auth_message',
+      role: 'auth-request',
+      content: 'Sign in',
+      timestamp: '2026-08-16T16:00:00.000Z',
+      authRequestId: 'auth_current',
+      authStatus: 'pending',
+    } as any)
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+    const sentMessages: string[] = []
+    ;(manager as any).sendMessage = async (_sessionId: string, content: string) => {
+      sentMessages.push(content)
+    }
+
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'authentication',
+      requestId: 'auth_current',
+      promptSummary: 'Sign in to the source.',
+    })).toBe(true)
+    await manager.completeAuthRequest(child.id, {
+      requestId: 'auth_current',
+      sourceSlug: '',
+      success: true,
+    } as any)
+
+    expect(sentMessages).toHaveLength(1)
+    expect(store.get(processing.taskId)?.runtimeState).toBe('processing')
+    expect(child.messages.find((message: any) => message.authRequestId === 'auth_current')?.authStatus).toBe('completed')
+  })
+
   it('fails awaiting permission when the provider rejects the response', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
     roots.push(workspaceRoot)
@@ -796,6 +845,8 @@ describe('SessionManager spawned-task transcript append', () => {
       respondToPermission: () => {
         throw new Error('permission response channel closed')
       },
+      forceAbort: () => {},
+      dispose: () => {},
     } as any
     const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
     sessions.set(child.id, child)
@@ -816,6 +867,222 @@ describe('SessionManager spawned-task transcript append', () => {
       runtimeState: 'failed',
       failure: { code: 'input_interrupted', retryable: true, details: { kind: 'permission' } },
     })
+  })
+
+  it('interrupts and unwinds a paused child for a stale permission response', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_permission_stale',
+      name: 'Spawn stale permission workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'stale permission', childConfig: {} })
+    const processing = store.transition(reserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const audits: string[] = []
+    const manager = new SessionManager({
+      spawnTaskStoreFactory: () => store,
+      spawnTaskLateEvent: ({ currentState, eventKind }) => {
+        audits.push(`${currentState}:${eventKind}`)
+      },
+    })
+    const child = createManagedSession({
+      id: processing.childSessionId,
+      spawnTaskRef: { taskId: processing.taskId, parentSessionId: processing.parentSessionId },
+    }, workspace as never, { messagesLoaded: true })
+    let responseCalls: string[] = []
+    let abortCalls = 0
+    let disposeCalls = 0
+    child.agent = {
+      respondToPermission: (requestId: string) => {
+        responseCalls.push(requestId)
+      },
+      forceAbort: () => {
+        abortCalls += 1
+      },
+      dispose: () => {
+        disposeCalls += 1
+      },
+    } as any
+    child.isProcessing = true
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+    const pending = (manager as any).pendingPermissionRequests as Map<string, unknown>
+    pending.set('permission_old', { sessionId: child.id, type: 'bash' })
+    pending.set('permission_new', { sessionId: child.id, type: 'bash' })
+
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'permission',
+      requestId: 'permission_old',
+      promptSummary: 'Allow the first tool?',
+    })).toBe(true)
+    expect(await (manager as any).resumeSpawnTaskInput(child, 'permission_old')).toBe(true)
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'permission',
+      requestId: 'permission_new',
+      promptSummary: 'Allow the newer tool?',
+    })).toBe(true)
+
+    expect(manager.respondToPermission(child.id, 'permission_old', true, false)).toBe(false)
+    for (let attempt = 0; attempt < 20 && store.get(processing.taskId)?.runtimeState !== 'failed'; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1))
+    }
+
+    expect(responseCalls).toEqual([])
+    expect(abortCalls).toBe(1)
+    expect(disposeCalls).toBe(1)
+    expect(child.agent).toBeNull()
+    expect(child.isProcessing).toBe(false)
+    expect(store.get(processing.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'input_interrupted', details: { kind: 'permission' } },
+    })
+    expect(audits).toContain('awaiting-input:permission_response')
+
+    await (manager as any).processEvent(child, { type: 'error', message: 'late provider event' })
+    expect(audits).toContain('failed:error')
+    expect(manager.respondToPermission(child.id, 'permission_new', true, false)).toBe(false)
+    expect(responseCalls).toEqual([])
+  })
+
+  it('interrupts and unwinds a paused child for a stale authentication response', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_auth_stale',
+      name: 'Spawn stale auth workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'stale authentication', childConfig: {} })
+    const processing = store.transition(reserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const audits: string[] = []
+    const events: string[] = []
+    const manager = new SessionManager({
+      spawnTaskStoreFactory: () => store,
+      spawnTaskLateEvent: ({ currentState, eventKind }) => {
+        audits.push(`${currentState}:${eventKind}`)
+      },
+    })
+    manager.setEventSink((channel) => {
+      events.push(channel)
+    })
+    const child = createManagedSession({
+      id: processing.childSessionId,
+      spawnTaskRef: { taskId: processing.taskId, parentSessionId: processing.parentSessionId },
+    }, workspace as never, { messagesLoaded: true })
+    let abortCalls = 0
+    let disposeCalls = 0
+    child.agent = {
+      forceAbort: () => {
+        abortCalls += 1
+      },
+      dispose: () => {
+        disposeCalls += 1
+      },
+    } as any
+    child.isProcessing = true
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'authentication',
+      requestId: 'auth_old',
+      promptSummary: 'Sign in to the first source.',
+    })).toBe(true)
+    expect(await (manager as any).resumeSpawnTaskInput(child, 'auth_old')).toBe(true)
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'authentication',
+      requestId: 'auth_new',
+      promptSummary: 'Sign in to the newer source.',
+    })).toBe(true)
+    const messagesBefore = structuredClone(child.messages)
+
+    await manager.completeAuthRequest(child.id, {
+      requestId: 'auth_old',
+      sourceSlug: 'source-old',
+      success: true,
+    } as any)
+
+    expect(abortCalls).toBe(1)
+    expect(disposeCalls).toBe(1)
+    expect(child.agent).toBeNull()
+    expect(child.isProcessing).toBe(false)
+    expect(child.messages).toEqual(messagesBefore)
+    expect(events).toEqual([])
+    expect(store.get(processing.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'input_interrupted', details: { kind: 'authentication' } },
+    })
+    expect(audits).toContain('awaiting-input:authentication_response')
+
+    await manager.completeAuthRequest(child.id, {
+      requestId: 'auth_new',
+      sourceSlug: 'source-new',
+      success: true,
+    } as any)
+    expect(events).toEqual([])
+  })
+
+  it('keeps input_interrupted durable when stale-response abort and cleanup fail', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_input_cleanup_failure',
+      name: 'Spawn input cleanup failure workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'cleanup failure', childConfig: {} })
+    const processing = store.transition(reserved.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:00.000Z' })
+    const manager = new SessionManager({ spawnTaskStoreFactory: () => store })
+    const child = createManagedSession({
+      id: processing.childSessionId,
+      spawnTaskRef: { taskId: processing.taskId, parentSessionId: processing.parentSessionId },
+    }, workspace as never, { messagesLoaded: true })
+    child.agent = {
+      respondToPermission: () => {},
+      forceAbort: () => {
+        throw new Error('input abort failed')
+      },
+      dispose: () => {
+        throw new Error('input cleanup failed')
+      },
+    } as any
+    child.isProcessing = true
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+    const pending = (manager as any).pendingPermissionRequests as Map<string, unknown>
+    pending.set('permission_old', { sessionId: child.id, type: 'bash' })
+    pending.set('permission_new', { sessionId: child.id, type: 'bash' })
+
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'permission',
+      requestId: 'permission_old',
+      promptSummary: 'Allow the first tool?',
+    })).toBe(true)
+    expect(await (manager as any).resumeSpawnTaskInput(child, 'permission_old')).toBe(true)
+    expect(await (manager as any).enterSpawnTaskAwaitingInput(child, {
+      kind: 'permission',
+      requestId: 'permission_new',
+      promptSummary: 'Allow the newer tool?',
+    })).toBe(true)
+
+    expect(() => manager.respondToPermission(child.id, 'permission_old', true, false)).not.toThrow()
+    for (let attempt = 0; attempt < 20 && store.get(processing.taskId)?.runtimeState !== 'failed'; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1))
+    }
+
+    expect(store.get(processing.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'input_interrupted', details: { kind: 'permission' } },
+    })
+    expect(child.agent).toBeNull()
+    expect(child.isProcessing).toBe(false)
   })
 
   it('makes terminal permission responses a no-op and audits them', async () => {

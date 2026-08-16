@@ -2408,6 +2408,15 @@ export class SessionManager implements ISessionManager {
     // A spawned task must resume durably before any auth UI, credential, or
     // bridge side effect can revive a terminal child. Ordinary sessions keep
     // the existing auth flow unchanged.
+    if (managed.spawnTaskRef && !this.spawnedTaskInputResponseIsCurrent(
+      managed,
+      result.requestId,
+      'authentication_response',
+    )) {
+      await this.interruptSpawnTaskInput(managed, `Authentication response could not resume request ${result.requestId}.`)
+      sessionLog.warn(`Ignoring authentication response for non-awaiting spawned task ${managed.id}`)
+      return
+    }
     const canResumeSpawnTask = await this.resumeSpawnTaskInput(managed, result.requestId)
     if (!canResumeSpawnTask && managed.spawnTaskRef) {
       await this.interruptSpawnTaskInput(managed, `Authentication response could not resume request ${result.requestId}.`)
@@ -5491,7 +5500,7 @@ export class SessionManager implements ISessionManager {
         try {
           agent?.dispose()
         } catch (error) {
-          sessionLog.warn(`Failed to clean up cancelled spawned child ${managed.id}:`, error)
+          sessionLog.warn(`Failed to clean up spawned child ${managed.id}:`, error)
         }
       },
     }
@@ -5550,7 +5559,23 @@ export class SessionManager implements ISessionManager {
     const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
     const task = coordinator.getTask(managed.spawnTaskRef.taskId)
     if (!task || isSpawnTaskTerminal(task.runtimeState) || task.runtimeState !== 'awaiting-input') return
-    await coordinator.interruptAwaitingInputForChildSession(managed.id, error)
+    const interrupted = await coordinator.interruptAwaitingInputForChildSession(managed.id, error)
+    if (interrupted?.runtimeState !== 'failed' || interrupted.failure?.code !== 'input_interrupted') return
+    await this.unwindSpawnTaskRuntime(managed)
+  }
+
+  private async unwindSpawnTaskRuntime(managed: ManagedSession): Promise<void> {
+    const runtime = this.spawnTaskRuntimeForSession(managed)
+    try {
+      await runtime.abort?.()
+    } catch (error) {
+      sessionLog.warn(`Failed to abort paused spawned child ${managed.id}:`, error)
+    }
+    try {
+      await runtime.cleanup?.()
+    } catch (error) {
+      sessionLog.warn(`Failed to clean up paused spawned child ${managed.id}:`, error)
+    }
   }
 
   private spawnedTaskInputResponseIsCurrent(
@@ -5566,9 +5591,11 @@ export class SessionManager implements ISessionManager {
       coordinator.recordLateEventForChildSession(managed.id, eventKind)
       return false
     }
-    return task.runtimeState === 'awaiting-input'
+    const current = task.runtimeState === 'awaiting-input'
       && !task.cancellation
       && task.awaitingInput?.requestId === requestId
+    if (!current) coordinator.recordRejectedInputForChildSession(managed.id, eventKind)
+    return current
   }
 
   private async finalizeSpawnTaskResult(managed: ManagedSession): Promise<void> {

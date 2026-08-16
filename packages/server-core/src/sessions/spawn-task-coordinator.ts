@@ -317,6 +317,13 @@ export class SpawnTaskCoordinator {
     return true
   }
 
+  recordRejectedInputForChildSession(childSessionId: string, eventKind: string): boolean {
+    const current = this.store.getByChildSessionId(childSessionId)
+    if (!current) return false
+    this.auditLateEvent(current, eventKind)
+    return true
+  }
+
   async cancelTask(
     taskId: string,
     reason: string,
