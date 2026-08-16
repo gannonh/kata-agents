@@ -161,7 +161,7 @@ export class SpawnTaskStore {
         parentSessionId: input.parentSessionId,
         childSessionId: ids.childSessionId,
         delegatedPrompt: input.delegatedPrompt,
-        childConfig: clone(input.childConfig),
+        childConfig: input.childConfig,
         runtimeState: 'queued',
         stateTimestamps: {
           createdAt: now,
@@ -176,8 +176,9 @@ export class SpawnTaskStore {
         },
       };
       assertSpawnTask(task);
-      this.commit(task);
-      return clone(task);
+      const snapshot = clone(task);
+      this.commit(snapshot);
+      return clone(snapshot);
     }
 
     throw new Error(`Unable to reserve unique spawned-task IDs after ${MAX_RESERVATION_ATTEMPTS} attempts`);
@@ -535,8 +536,7 @@ export class SpawnTaskStore {
       artifactFiles: options.artifactFiles,
     });
     this.index(task, published.generation);
-    const warnings = [published.postCommitWarning, published.reconciliationError].filter(Boolean);
-    if (warnings.length > 0) this.loadErrors.set(task.taskId, warnings.join('; '));
+    if (published.reconciliationError) this.loadErrors.set(task.taskId, published.reconciliationError);
   }
 
   private readCurrentFile(taskId: string, name: string): Buffer | null {

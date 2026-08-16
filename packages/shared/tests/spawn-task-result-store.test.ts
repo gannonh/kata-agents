@@ -207,7 +207,7 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(reloaded.reload().finalized).toEqual([]);
   });
 
-  it('reports recovery even when durability sync fails after CURRENT publication', () => {
+  it('rolls back failed post-CURRENT startup recovery and retries exactly once', () => {
     const root = workspace();
     const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_post_current_report' });
     const processing = processingTask(initial);
@@ -225,20 +225,30 @@ describe('spawn-task artifact recovery and retention', () => {
       workspaceRoot: root,
       workspaceId: 'ws_post_current_report',
       faults: (point) => {
-        if (point === 'after-current-publish') {
-          injected += 1;
-          throw new Error('post-current sync failure');
-        }
+        if (point === 'after-current-publish' && injected++ === 0) throw new Error('post-current sync failure');
       },
     });
+    expect(recovered.get(processing.taskId)?.runtimeState).toBe('processing');
+    expect(recovered.getLastStartupReport().finalized).toEqual([]);
+    expect(recovered.getLoadErrors()[processing.taskId]).toContain('post-current sync failure');
+    const stillPending = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_post_current_report',
+      faults: (point) => {
+        if (point === 'after-current-publish') throw new Error('verify rollback');
+      },
+    });
+    expect(stillPending.get(processing.taskId)?.runtimeState).toBe('processing');
+
+    const report = recovered.reload();
     const completed = recovered.get(processing.taskId)!;
-    expect(injected).toBe(1);
     expect(completed.runtimeState).toBe('completed');
-    expect(recovered.getLastStartupReport().finalized).toEqual([{
+    expect(report.finalized).toEqual([{
       taskId: processing.taskId,
       previousRuntimeState: 'processing',
       version: completed.version,
     }]);
+    expect(recovered.reload().finalized).toEqual([]);
   });
 
   it('finalizes verified artifacts from queued and awaiting-input recovery states', () => {
@@ -385,6 +395,51 @@ describe('spawn-task artifact recovery and retention', () => {
     }
   });
 
+  it('rolls back an existing record when post-CURRENT durability fails', () => {
+    const root = workspace();
+    const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_post_current_existing' });
+    const processing = processingTask(initial);
+    let injected = 0;
+    const faulting = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: initial.workspaceId,
+      faults: (point) => {
+        if (point === 'after-current-publish' && injected++ === 0) throw new Error('post-current existing failure');
+      },
+    });
+
+    expect(() => faulting.markParentDeleted(processing.taskId, later)).toThrow('post-current existing failure');
+    expect(faulting.get(processing.taskId)).toEqual(processing);
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: initial.workspaceId }).get(processing.taskId)).toEqual(processing);
+
+    const retried = faulting.markParentDeleted(processing.taskId, later);
+    expect(retried.parentDeletedAt).toBe(later);
+  });
+
+  it('throws an explicit uncertain error when post-CURRENT rollback also fails', () => {
+    const root = workspace();
+    const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_post_current_uncertain' });
+    const processing = processingTask(initial);
+    const faulting = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: initial.workspaceId,
+      faults: (point) => {
+        if (point === 'after-current-publish') throw new Error('post-current failure');
+        if (point === 'before-current-rollback') throw new Error('rollback failure');
+      },
+    });
+
+    try {
+      faulting.markParentDeleted(processing.taskId, later);
+      throw new Error('expected durability failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as Error).message).toContain('durability is uncertain');
+      expect((error as Error).message).toContain('post-current failure');
+      expect((error as Error).message).toContain('rollback failure');
+    }
+  });
+
   it('keeps an integrity-marked generation readable when repair publication faults', () => {
     const root = workspace();
     const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_repair_fault' });
@@ -453,6 +508,34 @@ describe('spawn-task artifact recovery and retention', () => {
 
     new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_missing_current' });
     expect(existsSync(taskPath)).toBe(false);
+  });
+
+  it('removes a first reservation when post-CURRENT durability fails', () => {
+    const root = workspace();
+    const values = [
+      'task-first', 'child-first', 'message-first', 'attempt-first', 'nonce-first',
+      'task-retry', 'child-retry', 'message-retry', 'attempt-retry', 'nonce-retry',
+    ];
+    let injected = 0;
+    const faulting = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_first_post_current',
+      randomId: () => values.shift()!,
+      faults: (point) => {
+        if (point === 'after-current-publish' && injected++ === 0) throw new Error('post-current first failure');
+      },
+    });
+
+    expect(() => faulting.reserve({ parentSessionId: 'parent_first', delegatedPrompt: 'first', childConfig: {} })).toThrow(
+      'post-current first failure',
+    );
+    const failedTaskPath = join(root, 'spawn-tasks', 'tasks', 'task_task-first');
+    expect(existsSync(failedTaskPath)).toBe(false);
+    expect(faulting.get('task_task-first')).toBeNull();
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_first_post_current' }).get('task_task-first')).toBeNull();
+
+    const retried = faulting.reserve({ parentSessionId: 'parent_first', delegatedPrompt: 'retry', childConfig: {} });
+    expect(retried.taskId).toBe('task_task-retry');
   });
 
   it('cleans orphan publication files and generations during reload', () => {

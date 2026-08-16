@@ -62,6 +62,10 @@ function assertJsonValue(value: unknown, field: string): asserts value is SpawnT
     return;
   }
   if (typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      fail(`${field} must contain JSON values only`);
+    }
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       assertJsonValue(item, `${field}.${key}`);
     }

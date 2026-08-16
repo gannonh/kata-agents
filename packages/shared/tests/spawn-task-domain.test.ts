@@ -434,6 +434,55 @@ describe('spawn-task reservation store', () => {
     }
   });
 
+  it('rejects non-plain childConfig objects before reservation persistence', () => {
+    class InvalidChildConfig {
+      readonly model = 'class-instance';
+    }
+
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_json_fidelity', clock: () => at });
+    const invalidConfigs: Array<[string, unknown]> = [
+      ['Date', new Date(at)],
+      ['Buffer', Buffer.from('bytes')],
+      ['typed array', new Uint8Array([1, 2, 3])],
+      ['Map', new Map([['model', 'map']])],
+      ['Set', new Set(['set'])],
+      ['class instance', new InvalidChildConfig()],
+    ];
+
+    for (const [label, childConfig] of invalidConfigs) {
+      expect(() => store.reserve({
+        parentSessionId: 'parent_json_fidelity',
+        delegatedPrompt: label,
+        childConfig: childConfig as never,
+      })).toThrow('JSON values only');
+    }
+    expect(store.listAll()).toEqual([]);
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_json_fidelity' }).listAll()).toEqual([]);
+  });
+
+  it('round-trips a null-prototype JSON childConfig without value drift', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_null_proto_config', clock: () => at });
+    const nested = Object.assign(Object.create(null), { enabled: true });
+    const childConfig = Object.assign(Object.create(null), {
+      model: 'fixture-model',
+      nested,
+      sources: ['docs'],
+    });
+    const expected = { model: 'fixture-model', nested: { enabled: true }, sources: ['docs'] };
+
+    const reserved = store.reserve({
+      parentSessionId: 'parent_null_proto',
+      delegatedPrompt: 'null prototype',
+      childConfig,
+    });
+    expect(Object.getPrototypeOf(childConfig)).toBeNull();
+    expect(reserved.childConfig).toEqual(expected);
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_null_proto_config' }).get(reserved.taskId)?.childConfig)
+      .toEqual(expected);
+  });
+
   it('persists all server-owned IDs before returning a reserved queued task', () => {
     let sequence = 0;
     const root = tempWorkspace();

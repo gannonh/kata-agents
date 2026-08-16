@@ -21,6 +21,7 @@ import {
   CURRENT_FILE,
   RECORD_FILE,
   reconcileTaskGenerations,
+  removeUnpublishedTask,
 } from './generation-layout.ts';
 import {
   SPAWN_TASK_RESULT_FILE,
@@ -35,7 +36,8 @@ export type SpawnTaskStoreFaultPoint =
   | 'after-artifact-write'
   | 'after-generation-publish'
   | 'before-current-publish'
-  | 'after-current-publish';
+  | 'after-current-publish'
+  | 'before-current-rollback';
 
 export interface PublishTaskGenerationInput {
   readonly tasksPath: string;
@@ -49,8 +51,36 @@ export interface PublishTaskGenerationInput {
 
 export interface PublishTaskGenerationResult {
   readonly generation: string;
-  readonly postCommitWarning?: string;
   readonly reconciliationError?: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function rollbackPublishedCurrent(
+  input: PublishTaskGenerationInput,
+  taskPath: string,
+  currentPath: string,
+  currentTemp: string,
+  priorGeneration: string | undefined,
+): void {
+  input.faults?.('before-current-rollback', input.task);
+  if (!priorGeneration) {
+    removeUnpublishedTask(taskPath);
+    return;
+  }
+
+  writeDurableFile(currentTemp, `${priorGeneration}\n`);
+  renameSync(currentTemp, currentPath);
+  syncDirectory(taskPath);
+}
+
+function uncertainDurabilityError(publicationError: unknown, rollbackError: unknown): AggregateError {
+  return new AggregateError(
+    [publicationError, rollbackError],
+    `Spawned-task durability is uncertain: ${errorMessage(publicationError)}; rollback failed: ${errorMessage(rollbackError)}`,
+  );
 }
 
 function copyGenerationFiles(
@@ -132,23 +162,26 @@ export function publishTaskGeneration(input: PublishTaskGenerationInput): Publis
     throw error;
   }
 
-  let postCommitWarning: string | undefined;
   try {
     input.faults?.('after-current-publish', task);
     syncDirectory(taskPath);
     if (!currentTask) syncDirectory(tasksPath);
-  } catch (error) {
-    postCommitWarning = error instanceof Error ? error.message : String(error);
+  } catch (publicationError) {
+    try {
+      rollbackPublishedCurrent(input, taskPath, currentPath, currentTemp, diskGeneration);
+    } catch (rollbackError) {
+      throw uncertainDurabilityError(publicationError, rollbackError);
+    }
+    throw publicationError;
   }
 
   try {
     reconcileTaskGenerations(taskPath, generation, diskGeneration);
-    return { generation, ...(postCommitWarning ? { postCommitWarning } : {}) };
+    return { generation };
   } catch (error) {
     return {
       generation,
-      ...(postCommitWarning ? { postCommitWarning } : {}),
-      reconciliationError: error instanceof Error ? error.message : String(error),
+      reconciliationError: errorMessage(error),
     };
   }
 }
