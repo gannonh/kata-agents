@@ -51,6 +51,28 @@ export interface SpawnTaskCancellationRuntime {
   readonly cleanup?: () => void | Promise<void>
 }
 
+export interface SpawnTaskRecoveryReference {
+  readonly taskId: string
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly delegatedPrompt?: string
+  readonly childConfig?: Readonly<Record<string, SpawnTaskJsonValue>>
+  readonly messageId?: string
+  readonly dispatchAttemptId?: string
+}
+
+export interface SpawnTaskRecoveryChild {
+  readonly exists: boolean
+  readonly matches: boolean
+  readonly reference?: SpawnTaskRecoveryReference
+}
+
+export interface SpawnTaskRecoveryAdapter {
+  readonly parentExists?: (parentSessionId: string) => boolean | Promise<boolean>
+  readonly findChild: (task: SpawnTask) => SpawnTaskRecoveryChild | Promise<SpawnTaskRecoveryChild>
+  readonly listChildren?: () => readonly SpawnTaskRecoveryReference[] | Promise<readonly SpawnTaskRecoveryReference[]>
+}
+
 export interface SpawnTaskCancellationResult {
   readonly status: 'cancelled' | 'already_terminal' | 'cancel_failed'
   readonly task: SpawnTask | null
@@ -96,6 +118,14 @@ function errorMessage(error: unknown): string {
 }
 
 /**
+ * A process-local claim registry lets two SessionManager instances sharing a
+ * workspace recognize the manager that won a durable claim. A fresh process
+ * starts empty, so persisted claimed/sent work still becomes
+ * dispatch_interrupted rather than replaying after restart.
+ */
+const activeDispatchRegistry = new Set<string>()
+
+/**
  * Owns reserved-child creation/dispatch and task-owned lifecycle finalization.
  * The SessionManager supplies child publication, transcript/event facts, and
  * the provider boundary; it does not own task persistence or terminal policy.
@@ -111,7 +141,9 @@ export class SpawnTaskCoordinator {
   private readonly notifiedUpdates = new Set<string>()
   private readonly cancellationOperations = new Map<string, Promise<SpawnTaskCancellationResult>>()
   private readonly deletedParents = new Set<string>()
+  private readonly activeDispatches = new Set<string>()
   private readonly startupNotification: Promise<void>
+  private recoveryOperation?: Promise<void>
 
   constructor(options: SpawnTaskCoordinatorOptions) {
     this.store = options.store
@@ -122,6 +154,9 @@ export class SpawnTaskCoordinator {
     this.onLateEvent = options.onLateEvent
     this.clock = options.clock ?? (() => new Date().toISOString())
     try {
+      for (const parentSessionId of this.store.listDeletedParents()) {
+        this.deletedParents.add(parentSessionId)
+      }
       for (const task of this.store.listAll()) {
         if (task.parentDeletedAt) this.deletedParents.add(task.parentSessionId)
       }
@@ -141,6 +176,7 @@ export class SpawnTaskCoordinator {
     const current = this.store.getByChildSessionId(childSessionId)
     if (!current) return current
     if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.clearDispatchActive(current.taskId)
       this.auditLateEvent(current, 'result')
       return current
     }
@@ -151,6 +187,7 @@ export class SpawnTaskCoordinator {
         ...(sourceMessageId ? { sourceMessageId } : {}),
       })
       await this.notifyTaskUpdated(finalized)
+      this.clearDispatchActive(finalized.taskId)
       return finalized
     } catch (error) {
       return this.reconcileFinalizationFailure(current.taskId, current.version, error, 'result')
@@ -310,6 +347,10 @@ export class SpawnTaskCoordinator {
     return this.store.get(taskId)
   }
 
+  dispose(): void {
+    for (const taskId of this.activeDispatches) this.clearDispatchActive(taskId)
+  }
+
   recordLateEventForChildSession(childSessionId: string, eventKind: string): boolean {
     const current = this.store.getByChildSessionId(childSessionId)
     if (!current || !isSpawnTaskTerminal(current.runtimeState)) return false
@@ -351,6 +392,7 @@ export class SpawnTaskCoordinator {
     await this.startupNotification
     let current = this.store.get(taskId)
     if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+      if (current) this.clearDispatchActive(current.taskId)
       return { status: 'already_terminal', task: current }
     }
 
@@ -381,6 +423,7 @@ export class SpawnTaskCoordinator {
 
       current = this.store.get(taskId)
       if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+        if (current) this.clearDispatchActive(current.taskId)
         return { status: 'already_terminal', task: current }
       }
 
@@ -398,6 +441,7 @@ export class SpawnTaskCoordinator {
           failure,
         })
         await this.notifyTaskUpdated(failed)
+        this.clearDispatchActive(failed.taskId)
         return { status: 'cancel_failed', task: failed }
       } catch {
         await this.reconcileStore()
@@ -408,6 +452,7 @@ export class SpawnTaskCoordinator {
 
     current = this.store.get(taskId)
     if (!current || isSpawnTaskTerminal(current.runtimeState)) {
+      if (current) this.clearDispatchActive(current.taskId)
       return { status: 'already_terminal', task: current }
     }
     return this.commitCancellation(current)
@@ -416,6 +461,7 @@ export class SpawnTaskCoordinator {
   async markParentDeleted(parentSessionId: string): Promise<readonly SpawnTask[]> {
     this.deletedParents.add(parentSessionId)
     await this.startupNotification
+    this.store.markParentDeletedBoundary(parentSessionId, this.clock())
     const changed: SpawnTask[] = []
     for (const snapshot of this.store.listByParentSessionId(parentSessionId)) {
       let current = this.store.get(snapshot.taskId)
@@ -466,6 +512,7 @@ export class SpawnTaskCoordinator {
 
   private async commitCancellation(task: SpawnTask): Promise<SpawnTaskCancellationResult> {
     if (isSpawnTaskTerminal(task.runtimeState)) {
+      this.clearDispatchActive(task.taskId)
       return { status: 'already_terminal', task }
     }
     try {
@@ -475,6 +522,7 @@ export class SpawnTaskCoordinator {
         cancellation: task.cancellation!,
       })
       await this.notifyTaskUpdated(cancelled)
+      this.clearDispatchActive(cancelled.taskId)
       return { status: 'cancelled', task: cancelled }
     } catch {
       await this.reconcileStore()
@@ -485,16 +533,273 @@ export class SpawnTaskCoordinator {
     }
   }
 
-  async reconcileStartup(): Promise<void> {
+  private dispatchRegistryKey(taskId: string): string {
+    return `${this.store.rootPath}\u0000${taskId}`
+  }
+
+  private markDispatchActive(taskId: string): void {
+    this.activeDispatches.add(taskId)
+    activeDispatchRegistry.add(this.dispatchRegistryKey(taskId))
+  }
+
+  private isDispatchActive(taskId: string): boolean {
+    return this.activeDispatches.has(taskId) || activeDispatchRegistry.has(this.dispatchRegistryKey(taskId))
+  }
+
+  private clearDispatchActive(taskId: string): void {
+    this.activeDispatches.delete(taskId)
+    activeDispatchRegistry.delete(this.dispatchRegistryKey(taskId))
+  }
+
+  async reconcileStartup(recovery?: SpawnTaskRecoveryAdapter): Promise<void> {
+    const existing = this.recoveryOperation
+    if (existing) {
+      await existing
+      return
+    }
+    const operation = this.reconcileStartupOnce(recovery)
+    this.recoveryOperation = operation
+    try {
+      await operation
+    } finally {
+      if (this.recoveryOperation === operation) this.recoveryOperation = undefined
+    }
+  }
+
+  private async reconcileStartupOnce(recovery?: SpawnTaskRecoveryAdapter): Promise<void> {
     await this.startupNotification
     await this.reconcileStore()
+    if (!recovery) return
+
+    const children = recovery.listChildren ? await recovery.listChildren() : []
+    for (const reference of children) {
+      if (this.store.get(reference.taskId)) continue
+      try {
+        const reconstructed = this.store.reconstructMissingTask({
+          taskId: reference.taskId,
+          parentSessionId: reference.parentSessionId,
+          childSessionId: reference.childSessionId,
+          delegatedPrompt: reference.delegatedPrompt,
+          childConfig: reference.childConfig,
+          messageId: reference.messageId,
+          dispatchAttemptId: reference.dispatchAttemptId,
+          at: this.clock(),
+        })
+        await this.notifyTaskUpdated(reconstructed)
+      } catch {
+        await this.reconcileStore()
+      }
+    }
+
+    for (const snapshot of this.store.listAll()) {
+      try {
+        let current = this.store.get(snapshot.taskId)
+        if (!current || isSpawnTaskTerminal(current.runtimeState)) continue
+
+        const parentExists = recovery.parentExists ? await recovery.parentExists(current.parentSessionId) : true
+        const parentDeleted = !!current.parentDeletedAt || !parentExists
+        if (parentDeleted) {
+          try {
+            this.store.markParentDeletedBoundary(current.parentSessionId, this.clock())
+          } catch {
+            await this.reconcileStore()
+            continue
+          }
+        }
+        if (parentDeleted && !current.parentDeletedAt) {
+          try {
+            current = this.store.markParentDeleted(current.taskId, this.clock())
+            await this.notifyTaskUpdated(current)
+          } catch {
+            await this.reconcileStore()
+            current = this.store.get(snapshot.taskId)
+            if (!current) continue
+          }
+        }
+
+        if (parentDeleted && current.dispatch.state !== 'sent') {
+          const cancellation = await this.cancelTask(current.taskId, 'parent_deleted')
+          current = cancellation.task ?? this.store.get(current.taskId) ?? current
+          if (isSpawnTaskTerminal(current.runtimeState)) continue
+        }
+
+        if (current.dispatch.state === 'sent') {
+          if (!this.isDispatchActive(current.taskId)) await this.interruptRecoveredDispatch(current)
+          continue
+        }
+        if (current.dispatch.state === 'claimed') {
+          if (parentDeleted || this.isDispatchActive(current.taskId)) continue
+          await this.interruptRecoveredDispatch(current)
+          continue
+        }
+        if (current.dispatch.state === 'reserved') {
+          if (parentDeleted) continue
+          let child = await recovery.findChild(current)
+          if (child.exists && !child.matches) {
+            await this.commitRecoveryFailure(current, 'child')
+            continue
+          }
+          if (!child.exists) {
+            try {
+              await this.createChild({ task: current })
+            } catch {
+              await this.reconcileStore()
+              current = this.store.get(snapshot.taskId)
+              if (!current || isSpawnTaskTerminal(current.runtimeState)) continue
+              if (recovery.parentExists && !(await recovery.parentExists(current.parentSessionId))) {
+                const cancellation = await this.cancelTask(current.taskId, 'parent_deleted')
+                if (cancellation.task?.runtimeState === 'cancelled') continue
+              }
+              child = await recovery.findChild(current)
+              if (!child.exists || !child.matches) {
+                await this.commitRecoveryFailure(current, 'child')
+                continue
+              }
+              if (current.dispatch.state !== 'reserved') {
+                if (current.dispatch.state === 'ready') await this.recoverReadyTask(current, recovery)
+                continue
+              }
+            }
+          }
+          try {
+            current = this.store.updateDispatch(current.taskId, 'ready', this.clock())
+            await this.notifyTaskUpdated(current)
+          } catch {
+            await this.reconcileStore()
+            continue
+          }
+        }
+
+        if (current.dispatch.state === 'ready') {
+          await this.recoverReadyTask(current, recovery)
+        }
+      } catch {
+        await this.reconcileStore()
+      }
+    }
+  }
+
+  private async cancelRecoveryBeforeDispatch(
+    taskId: string,
+    recovery: SpawnTaskRecoveryAdapter,
+  ): Promise<boolean> {
+    let current = this.store.get(taskId)
+    if (!current || isSpawnTaskTerminal(current.runtimeState)) return true
+    const parentExists = recovery.parentExists ? await recovery.parentExists(current.parentSessionId) : true
+    if (!current.parentDeletedAt && parentExists) return false
+
+    try {
+      this.store.markParentDeletedBoundary(current.parentSessionId, this.clock())
+    } catch {
+      await this.reconcileStore()
+      return true
+    }
+    if (!current.parentDeletedAt) {
+      try {
+        current = this.store.markParentDeleted(current.taskId, this.clock())
+        await this.notifyTaskUpdated(current)
+      } catch {
+        await this.reconcileStore()
+        current = this.store.get(taskId)
+        if (!current) return true
+      }
+    }
+    if (current.dispatch.state !== 'sent' && !isSpawnTaskTerminal(current.runtimeState)) {
+      const cancellation = await this.cancelTask(current.taskId, 'parent_deleted')
+      current = cancellation.task ?? this.store.get(taskId) ?? current
+    }
+    if (current.dispatch.state !== 'sent') this.clearDispatchActive(current.taskId)
+    return true
+  }
+
+  private async recoverReadyTask(task: SpawnTask, recovery: SpawnTaskRecoveryAdapter): Promise<void> {
+    let current = this.store.get(task.taskId)
+    if (!current || isSpawnTaskTerminal(current.runtimeState)) return
+    if (await this.cancelRecoveryBeforeDispatch(current.taskId, recovery)) return
+
+    try {
+      current = this.store.updateDispatch(current.taskId, 'claimed', this.clock())
+      this.markDispatchActive(current.taskId)
+      await this.notifyTaskUpdated(current)
+    } catch {
+      await this.reconcileStore()
+      return
+    }
+
+    try {
+      await this.appendDelegatedPrompt({
+        task: current,
+        prompt: current.delegatedPrompt,
+      })
+    } catch {
+      await this.commitRecoveryFailure(current, 'message_append')
+      return
+    }
+
+    try {
+      current = this.store.updateDispatch(current.taskId, 'sent', this.clock())
+      await this.notifyTaskUpdated(current)
+      current = this.store.transition(current.taskId, {
+        runtimeState: 'processing',
+        at: this.clock(),
+      })
+      await this.notifyTaskUpdated(current)
+    } catch {
+      await this.commitRecoveryFailure(current, 'sent')
+      return
+    }
+
+    try {
+      const providerTurn = this.dispatchProvider({
+        task: current,
+        prompt: current.delegatedPrompt,
+      })
+      this.markDispatchActive(current.taskId)
+      if (providerTurn) {
+        void providerTurn.catch((error: unknown) => {
+          void this.finalizeProviderFailureForChildSession(current!.childSessionId, error).catch(() => {})
+        })
+      }
+    } catch (error) {
+      await this.commitRecoveryFailure(current, 'provider', 'provider_error', error)
+    }
+  }
+
+  private async interruptRecoveredDispatch(task: SpawnTask): Promise<void> {
+    try {
+      const failed = this.store.interruptDispatch(task.taskId, this.clock())
+      await this.notifyTaskUpdated(failed)
+      this.clearDispatchActive(failed.taskId)
+    } catch {
+      await this.reconcileStore()
+    }
+  }
+
+  private async commitRecoveryFailure(
+    task: SpawnTask,
+    boundary: string,
+    code: 'spawn_persist_failed' | 'provider_error' = 'spawn_persist_failed',
+    error?: unknown,
+  ): Promise<void> {
+    const failure = this.failure(error ?? `Spawned-task recovery failed at ${boundary}.`, boundary, code)
+    let current = this.store.get(task.taskId) ?? task
+    if (isSpawnTaskTerminal(current.runtimeState)) return
+    try {
+      const failed = await this.commitFailure(current, failure)
+      if (isSpawnTaskTerminal(failed.runtimeState)) this.clearDispatchActive(failed.taskId)
+    } catch {
+      await this.reconcileStore()
+    }
   }
 
   private async preDispatchCancellation(task: SpawnTask): Promise<SpawnSessionResult | null> {
     let current = this.store.get(task.taskId)
     if (!current || current.dispatch.state === 'sent') return null
 
-    if (this.deletedParents.has(current.parentSessionId) && !isSpawnTaskTerminal(current.runtimeState)) {
+    const parentDeleted = this.deletedParents.has(current.parentSessionId)
+      || this.store.isParentDeleted(current.parentSessionId)
+    if (parentDeleted && !isSpawnTaskTerminal(current.runtimeState)) {
+      this.deletedParents.add(current.parentSessionId)
       if (!current.parentDeletedAt) {
         current = this.store.markParentDeleted(current.taskId, this.clock())
         await this.notifyTaskUpdated(current)
@@ -553,6 +858,7 @@ export class SpawnTaskCoordinator {
 
     try {
       task = this.store.updateDispatch(task.taskId, 'claimed', this.clock())
+      this.markDispatchActive(task.taskId)
     } catch (error) {
       throw await this.creationFailure(task, error, 'claim')
     }
@@ -599,6 +905,7 @@ export class SpawnTaskCoordinator {
         prompt: input.delegatedPrompt,
         attachments: input.attachments,
       })
+      this.markDispatchActive(task.taskId)
       if (providerTurn) {
         void providerTurn.catch((error: unknown) => {
           void this.finalizeProviderFailureForChildSession(task.childSessionId, error).catch(() => {})
@@ -632,6 +939,7 @@ export class SpawnTaskCoordinator {
     const current = this.store.getByChildSessionId(childSessionId)
     if (!current) return current
     if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.clearDispatchActive(current.taskId)
       this.auditLateEvent(current, input.code)
       return current
     }
@@ -652,6 +960,7 @@ export class SpawnTaskCoordinator {
         failure,
       })
       await this.notifyTaskUpdated(failed)
+      this.clearDispatchActive(failed.taskId)
       return failed
     } catch (error) {
       return this.reconcileFinalizationFailure(current.taskId, current.version, error, 'failure', failure.code)
@@ -674,6 +983,7 @@ export class SpawnTaskCoordinator {
     // failure so task-owned output is never overwritten.
     if (isSpawnTaskTerminal(current.runtimeState)) {
       if (current.version > previousVersion) await this.notifyTaskUpdated(current)
+      this.clearDispatchActive(current.taskId)
       return current
     }
     if (current.runtimeState !== 'processing') return current
@@ -702,8 +1012,9 @@ export class SpawnTaskCoordinator {
       // defensible answer. Reconcile once more before returning it.
       await this.reconcileStore()
       current = this.store.get(taskId)
-      if (current && isSpawnTaskTerminal(current.runtimeState) && current.version > previousVersion) {
-        await this.notifyTaskUpdated(current)
+      if (current && isSpawnTaskTerminal(current.runtimeState)) {
+        if (current.version > previousVersion) await this.notifyTaskUpdated(current)
+        this.clearDispatchActive(current.taskId)
       }
       return current
     }

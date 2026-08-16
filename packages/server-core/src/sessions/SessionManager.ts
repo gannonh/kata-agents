@@ -112,7 +112,7 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
-import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskUpdated } from './spawn-task-coordinator'
+import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskRecoveryAdapter, type SpawnTaskRecoveryReference, type SpawnTaskUpdated } from './spawn-task-coordinator'
 import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
@@ -1255,6 +1255,7 @@ export class SessionManager implements ISessionManager {
   private readonly spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
+  private readonly spawnTaskRecoveryPending = new Set<string>()
   /** Sends that have started but have not yet entered agent.chat(). */
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
@@ -2176,6 +2177,7 @@ export class SessionManager implements ISessionManager {
           startupCoordinator = this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspace.id)
           await startupCoordinator.waitForStartupNotification()
         } catch (error) {
+          this.spawnTaskRecoveryPending.add(workspaceRootPath)
           this.discardSpawnTaskCoordinator(workspaceRootPath, startupCoordinator)
           sessionLog.error(
             `Failed to reconcile spawned tasks during startup for workspace ${workspace.id} (${workspaceRootPath}):`,
@@ -2228,6 +2230,19 @@ export class SessionManager implements ISessionManager {
           }
 
           totalSessions++
+        }
+
+        if (startupCoordinator) {
+          try {
+            await startupCoordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspace.id, workspaceRootPath))
+          } catch (error) {
+            this.spawnTaskRecoveryPending.add(workspaceRootPath)
+            this.discardSpawnTaskCoordinator(workspaceRootPath, startupCoordinator)
+            sessionLog.error(
+              `Failed to recover spawned tasks during startup for workspace ${workspace.id} (${workspaceRootPath}):`,
+              error,
+            )
+          }
         }
       }
 
@@ -2836,12 +2851,75 @@ export class SessionManager implements ISessionManager {
     return this.getOrCreateSpawnTaskCoordinator(parent.workspace.rootPath, parent.workspace.id)
   }
 
+  private getSpawnTaskRecoveryAdapter(
+    workspaceId: string,
+    workspaceRootPath: string,
+  ): SpawnTaskRecoveryAdapter {
+    const sessions = () => [...this.sessions.values()].filter((managed) => managed.workspace.id === workspaceId)
+    const storedSessions = () => listStoredSessions(workspaceRootPath)
+    const referenceFor = (
+      sessionId: string,
+      reference: SpawnTaskSessionReference | undefined,
+    ): SpawnTaskRecoveryReference | undefined => {
+      if (!reference) return undefined
+      return {
+        taskId: reference.taskId,
+        parentSessionId: reference.parentSessionId,
+        childSessionId: sessionId,
+        delegatedPrompt: reference.delegatedPrompt,
+        childConfig: reference.childConfig,
+        messageId: reference.messageId,
+        dispatchAttemptId: reference.dispatchAttemptId,
+      }
+    }
+    const allReferences = (): readonly SpawnTaskRecoveryReference[] => {
+      const references = new Map<string, SpawnTaskRecoveryReference>()
+      for (const meta of storedSessions()) {
+        const reference = referenceFor(meta.id, meta.spawnTaskRef)
+        if (reference) references.set(meta.id, reference)
+      }
+      for (const managed of sessions()) {
+        const reference = referenceFor(managed.id, managed.spawnTaskRef)
+        if (reference) references.set(managed.id, reference)
+      }
+      return [...references.values()]
+    }
+
+    return {
+      parentExists: (parentSessionId) => sessions().some((managed) => managed.id === parentSessionId)
+        || storedSessions().some((meta) => meta.id === parentSessionId),
+      findChild: (task) => {
+        const managed = sessions().find((candidate) => candidate.id === task.childSessionId)
+        const stored = storedSessions().find((candidate) => candidate.id === task.childSessionId)
+        const reference = referenceFor(
+          task.childSessionId,
+          managed?.spawnTaskRef ?? stored?.spawnTaskRef,
+        )
+        const exists = managed !== undefined || stored !== undefined
+        const matches = exists
+          && reference?.taskId === task.taskId
+          && reference.parentSessionId === task.parentSessionId
+          && reference.delegatedPrompt === task.delegatedPrompt
+          && JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig)
+          && reference.messageId === task.dispatch.messageId
+          && reference.dispatchAttemptId === task.dispatch.dispatchAttemptId
+        return {
+          exists,
+          matches,
+          ...(reference ? { reference } : {}),
+        }
+      },
+      listChildren: allReferences,
+    }
+  }
+
   private discardSpawnTaskCoordinator(
     workspaceRootPath: string,
     expectedCoordinator?: SpawnTaskCoordinator,
   ): void {
     const currentCoordinator = this.spawnTaskCoordinators.get(workspaceRootPath)
     if (expectedCoordinator ? currentCoordinator !== expectedCoordinator : currentCoordinator) return
+    currentCoordinator?.dispose()
     this.spawnTaskCoordinators.delete(workspaceRootPath)
     this.spawnTaskStores.delete(workspaceRootPath)
   }
@@ -2871,6 +2949,10 @@ export class SessionManager implements ISessionManager {
             spawnTaskRef: {
               taskId: task.taskId,
               parentSessionId: task.parentSessionId,
+              delegatedPrompt: task.delegatedPrompt,
+              childConfig: task.childConfig,
+              messageId: task.dispatch.messageId,
+              dispatchAttemptId: task.dispatch.dispatchAttemptId,
             },
             name: typeof config.name === 'string' ? config.name : undefined,
             llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
@@ -2908,13 +2990,21 @@ export class SessionManager implements ISessionManager {
       })
       this.spawnTaskStores.set(workspaceKey, store)
       this.spawnTaskCoordinators.set(workspaceKey, coordinator)
-      void coordinator.waitForStartupNotification().catch((error) => {
-        this.discardSpawnTaskCoordinator(workspaceKey, coordinator)
-        sessionLog.error(
-          `Spawned-task startup reconciliation failed for workspace ${workspaceId} (${workspaceRootPath}):`,
-          error,
-        )
-      })
+      const retryRecovery = this.spawnTaskRecoveryPending.has(workspaceKey)
+        && [...this.sessions.values()].some((managed) => managed.workspace.id === workspaceId)
+      if (retryRecovery) this.spawnTaskRecoveryPending.delete(workspaceKey)
+      void coordinator.waitForStartupNotification()
+        .then(async () => {
+          if (retryRecovery) await coordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspaceId, workspaceRootPath))
+        })
+        .catch((error) => {
+          if (retryRecovery) this.spawnTaskRecoveryPending.add(workspaceKey)
+          this.discardSpawnTaskCoordinator(workspaceKey, coordinator)
+          sessionLog.error(
+            `Spawned-task startup reconciliation failed for workspace ${workspaceId} (${workspaceRootPath}):`,
+            error,
+          )
+        })
       return coordinator
     } catch (error) {
       this.discardSpawnTaskCoordinator(workspaceKey)

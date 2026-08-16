@@ -628,6 +628,180 @@ describe('SessionManager spawned-task transcript append', () => {
     }
   })
 
+  it('recovers a reserved child during startup without changing workflow status', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_recovery_integration',
+      name: 'Spawn recovery integration workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      await saveSession({
+        id: 'session_recovery_parent',
+        workspaceRootPath: workspaceRoot,
+        name: 'Recovery parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+      const reserved = initial.reserve({
+        parentSessionId: 'session_recovery_parent',
+        delegatedPrompt: 'recover this child from startup',
+        childConfig: { name: 'recovered child' },
+      })
+      const updates: Array<{ taskId: string; version: number }> = []
+      const dispatched: string[] = []
+      const manager = new SessionManager({
+        spawnTaskUpdated: (change) => {
+          updates.push(change)
+        },
+        spawnTaskDispatchProvider: ({ task }) => {
+          dispatched.push(task.taskId)
+        },
+      })
+      manager.setEventSink(() => {})
+
+      await (manager as any).loadSessionsFromDisk()
+
+      const recovered = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)!
+      const child = loadSession(workspaceRoot, reserved.childSessionId)
+      expect(recovered).toMatchObject({
+        runtimeState: 'processing',
+        dispatch: { state: 'sent', messageId: reserved.dispatch.messageId },
+      })
+      expect(child).toMatchObject({
+        id: reserved.childSessionId,
+        spawnTaskRef: {
+          taskId: reserved.taskId,
+          parentSessionId: reserved.parentSessionId,
+          delegatedPrompt: reserved.delegatedPrompt,
+          childConfig: { name: 'recovered child' },
+          messageId: reserved.dispatch.messageId,
+          dispatchAttemptId: reserved.dispatch.dispatchAttemptId,
+        },
+      })
+      expect(dispatched).toEqual([reserved.taskId])
+      expect(updates.every((change) => Object.keys(change).sort().join(',') === 'taskId,version')).toBe(true)
+      expect((await manager.getSession('session_recovery_parent'))?.sessionStatus).toBe('todo')
+      const updatesAfterFirstRecovery = updates.length
+
+      await (manager as any).loadSessionsFromDisk()
+      expect(new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)?.failure).toBeUndefined()
+      expect(dispatched).toEqual([reserved.taskId])
+      expect(updates).toHaveLength(updatesAfterFirstRecovery)
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
+  })
+
+  it('reconstructs a failed task for a child back-reference whose task record is missing', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_missing_task_recovery',
+      name: 'Spawn missing task recovery workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      const reference = {
+        taskId: 'task_missing_startup_record',
+        parentSessionId: 'session_missing_task_parent',
+        delegatedPrompt: 'do not lose this child history',
+        childConfig: { model: 'fixture' },
+        messageId: 'message_missing_startup_record',
+        dispatchAttemptId: 'attempt_missing_startup_record',
+      }
+      const history: any[] = [{
+        id: reference.messageId,
+        role: 'user',
+        content: reference.delegatedPrompt,
+        timestamp: 1,
+      }]
+      await saveSession({
+        id: 'session_missing_task_child',
+        workspaceRootPath: workspaceRoot,
+        name: 'Orphan child history',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        spawnTaskRef: {
+          ...reference,
+          childSessionId: 'session_missing_task_child',
+        },
+        messages: history,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      const updates: Array<{ taskId: string; version: number }> = []
+      const dispatched: string[] = []
+      const manager = new SessionManager({
+        spawnTaskUpdated: (change) => {
+          updates.push(change)
+        },
+        spawnTaskDispatchProvider: ({ task }) => {
+          dispatched.push(task.taskId)
+        },
+      })
+      manager.setEventSink(() => {})
+
+      await (manager as any).loadSessionsFromDisk()
+
+      const recovered = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reference.taskId)
+      expect(recovered).toMatchObject({
+        runtimeState: 'failed',
+        childSessionId: 'session_missing_task_child',
+        delegatedPrompt: reference.delegatedPrompt,
+        failure: {
+          code: 'spawn_persist_failed',
+          details: { boundary: 'recovery' },
+        },
+      })
+      expect(dispatched).toEqual([])
+      expect(updates).toEqual([{ taskId: reference.taskId, version: 1 }])
+      expect(loadSession(workspaceRoot, 'session_missing_task_child')?.messages).toEqual(history)
+      expect((await manager.getSession('session_missing_task_child'))?.sessionStatus).toBe('todo')
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
+  })
+
   it('exposes internal child cancellation without changing session status', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
     roots.push(workspaceRoot)
@@ -1782,9 +1956,13 @@ describe('SessionManager spawned-task transcript append', () => {
     ]])
     const child = sessions.get(result.childSessionId)
     expect(child.sessionStatus).toBe('todo')
-    expect(child.spawnTaskRef).toEqual({
+    expect(child.spawnTaskRef).toMatchObject({
       taskId: result.taskId,
       parentSessionId: parent.id,
+      delegatedPrompt: 'orchestrated prompt',
+      childConfig: { name: 'child' },
+      messageId: providerCalls[0]![2],
+      dispatchAttemptId: expect.any(String),
     })
     expect(child.messages).toHaveLength(1)
     expect(child.messages[0]).toMatchObject({

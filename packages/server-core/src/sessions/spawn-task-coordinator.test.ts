@@ -27,6 +27,529 @@ afterEach(() => {
 })
 
 describe('SpawnTaskCoordinator', () => {
+  it('recovers a reserved task by creating the reserved child before dispatch', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'recover this reserved task',
+      childConfig: { model: 'fixture' },
+    })
+    const order: string[] = []
+    let createdChildId: string | undefined
+    let childExists = false
+    let providerCalls = 0
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async ({ task }) => {
+        order.push('child')
+        createdChildId = task.childSessionId
+        expect(store.get(task.taskId)?.dispatch.state).toBe('reserved')
+        childExists = true
+      },
+      appendDelegatedPrompt: async ({ task }) => {
+        order.push('append')
+        expect(childExists).toBe(true)
+        expect(store.get(task.taskId)?.dispatch.state).toBe('claimed')
+      },
+      dispatchProvider: ({ task }) => {
+        order.push('provider')
+        providerCalls += 1
+        expect(task.dispatch.state).toBe('sent')
+        expect(store.get(task.taskId)?.runtimeState).toBe('processing')
+      },
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: childExists, matches: childExists }),
+      listChildren: () => [],
+    })
+
+    expect(createdChildId).toBe(reserved.childSessionId)
+    expect(order).toEqual(['child', 'append', 'provider'])
+    expect(providerCalls).toBe(1)
+    expect(store.get(reserved.taskId)).toMatchObject({
+      runtimeState: 'processing',
+      dispatch: { state: 'sent', messageId: reserved.dispatch.messageId },
+    })
+    expect(updates.length).toBeGreaterThanOrEqual(3)
+    expect(updates.every((change) => Object.keys(change).sort().join(',') === 'taskId,version')).toBe(true)
+  })
+
+  it('marks a reserved task with its existing child ready without recreating it', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'existing reserved child',
+      childConfig: {},
+    })
+    let createCalls = 0
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {
+        createCalls += 1
+      },
+      appendDelegatedPrompt: async ({ task }) => {
+        expect(store.get(task.taskId)?.dispatch.state).toBe('claimed')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(createCalls).toBe(0)
+    expect(providerCalls).toBe(1)
+    expect(store.get(reserved.taskId)).toMatchObject({
+      runtimeState: 'processing',
+      dispatch: { state: 'sent' },
+    })
+  })
+
+  it('interrupts claimed work after restart without replaying the provider call', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'never replay this task',
+      childConfig: {},
+    })
+    const ready = store.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimed = store.updateDispatch(ready.taskId, 'claimed', '2026-08-16T16:00:02.000Z')
+    const updates: Array<{ taskId: string; version: number }> = []
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        throw new Error('claimed work must not append again')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onTaskUpdated: (change) => {
+        updates.push(change)
+        expect(store.get(change.taskId)?.runtimeState).toBe('failed')
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(store.get(claimed.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'dispatch_interrupted',
+        retryable: true,
+      },
+    })
+    expect(updates).toEqual([{ taskId: claimed.taskId, version: claimed.version + 1 }])
+  })
+
+  it('lets two managers share one durable claim without replaying or interrupting it', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'one manager owns this task',
+      childConfig: {},
+    })
+    const ready = initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const managerOneStore = createStore(workspaceRoot)
+    const managerTwoStore = createStore(workspaceRoot)
+    let releaseAppend!: () => void
+    const appendReleased = new Promise<void>((resolve) => {
+      releaseAppend = resolve
+    })
+    let providerCalls = 0
+    const managerOne = new SpawnTaskCoordinator({
+      store: managerOneStore,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        await appendReleased
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+    const managerTwo = new SpawnTaskCoordinator({
+      store: managerTwoStore,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        throw new Error('second manager must not append')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    const firstRecovery = managerOne.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    for (let attempt = 0; attempt < 20 && managerOneStore.get(ready.taskId)?.dispatch.state !== 'claimed'; attempt++) {
+      await Promise.resolve()
+    }
+    expect(managerOneStore.get(ready.taskId)?.dispatch.state).toBe('claimed')
+
+    await managerTwo.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    releaseAppend()
+    await firstRecovery
+
+    expect(providerCalls).toBe(1)
+    expect(new SpawnTaskStore({ workspaceRoot, workspaceId: 'workspace_spawn_test' }).get(ready.taskId)).toMatchObject({
+      runtimeState: 'processing',
+      dispatch: { state: 'sent' },
+    })
+  })
+
+  it('retries recovery after a claim publication fault without replaying a provider call', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'retry claim recovery', childConfig: {} })
+    const ready = initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    let injected = true
+    const faulting = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.dispatch.state === 'claimed' && injected) {
+          injected = false
+          throw new Error('claim publication interrupted')
+        }
+      },
+    })
+    let appendCalls = 0
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store: faulting,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        appendCalls += 1
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    expect(faulting.get(ready.taskId)).toMatchObject({ dispatch: { state: 'ready' } })
+    expect(appendCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    expect(faulting.get(ready.taskId)).toMatchObject({ runtimeState: 'processing', dispatch: { state: 'sent' } })
+    expect(appendCalls).toBe(1)
+    expect(providerCalls).toBe(1)
+  })
+
+  it('keeps recovery durable when task-update notification fails', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'notification fault', childConfig: {} })
+    initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const store = createStore(workspaceRoot)
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onTaskUpdated: async () => {
+        throw new Error('notification unavailable')
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(providerCalls).toBe(1)
+    expect(store.get(reserved.taskId)).toMatchObject({ runtimeState: 'processing', dispatch: { state: 'sent' } })
+  })
+
+  it('normalizes a synchronous recovery provider fault without replay', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'provider fault', childConfig: {} })
+    const ready = initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const faulting = createStore(workspaceRoot)
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store: faulting,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {
+        providerCalls += 1
+        throw new Error('recovery provider unavailable')
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(providerCalls).toBe(1)
+    expect(faulting.get(ready.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      dispatch: { state: 'sent' },
+      failure: { code: 'provider_error', details: { boundary: 'provider' } },
+    })
+  })
+
+  it('records a bounded recovery failure when the sent commit is interrupted', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'sent commit fault', childConfig: {} })
+    const ready = initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    let injected = true
+    const faulting = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.dispatch.state === 'sent' && injected) {
+          injected = false
+          throw new Error('sent publication interrupted')
+        }
+      },
+    })
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store: faulting,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(faulting.get(ready.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      dispatch: { state: 'claimed' },
+      failure: { code: 'spawn_persist_failed', details: { boundary: 'sent' } },
+    })
+  })
+
+  it('keeps concurrent children independent through recovery and terminal outcomes', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const first = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'first child', childConfig: { model: 'one' } })
+    const second = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'second child', childConfig: { model: 'two' } })
+    const dispatched: string[] = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: ({ task }) => {
+        dispatched.push(task.taskId)
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    const firstProcessing = store.get(first.taskId)!
+    const secondProcessing = store.get(second.taskId)!
+    expect(dispatched.sort()).toEqual([first.taskId, second.taskId].sort())
+    expect(first.dispatch.messageId).not.toBe(second.dispatch.messageId)
+    expect(first.dispatch.dispatchAttemptId).not.toBe(second.dispatch.dispatchAttemptId)
+
+    const completed = await coordinator.finalizeResultForChildSession(first.childSessionId, 'first result')
+    const cancelled = await coordinator.cancelChildSession(second.childSessionId, 'second cancelled')
+
+    expect(completed).toMatchObject({ runtimeState: 'completed', result: { preview: 'first result' } })
+    expect(cancelled).toMatchObject({ status: 'cancelled', task: { runtimeState: 'cancelled' } })
+    expect(store.get(firstProcessing.taskId)?.runtimeState).toBe('completed')
+    expect(store.get(secondProcessing.taskId)?.runtimeState).toBe('cancelled')
+    expect(store.get(firstProcessing.taskId)?.version).toBeGreaterThan(firstProcessing.version)
+    expect(store.get(secondProcessing.taskId)?.version).toBeGreaterThan(secondProcessing.version)
+  })
+
+  it('interrupts sent and processing work after restart and audits later events', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'sent before stop', childConfig: {} })
+    const ready = store.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimed = store.updateDispatch(ready.taskId, 'claimed', '2026-08-16T16:00:02.000Z')
+    const sent = store.updateDispatch(claimed.taskId, 'sent', '2026-08-16T16:00:03.000Z')
+    const processing = store.transition(sent.taskId, { runtimeState: 'processing', at: '2026-08-16T16:00:04.000Z' })
+    const audits: string[] = []
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        throw new Error('sent work must not append again')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onLateEvent: ({ eventKind, currentState }) => {
+        audits.push(`${currentState}:${eventKind}`)
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(store.get(processing.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'dispatch_interrupted', retryable: true },
+    })
+    expect(coordinator.recordLateEventForChildSession(processing.childSessionId, 'complete')).toBe(true)
+    expect(audits).toEqual(['failed:complete'])
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+    expect(audits).toEqual(['failed:complete'])
+  })
+
+  it('reconstructs a failed task from a surviving child back-reference without dispatch', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const updates: Array<{ taskId: string; version: number }> = []
+    let providerCalls = 0
+    const reference = {
+      taskId: 'task_missing_record',
+      parentSessionId: 'session_parent',
+      childSessionId: 'session_orphan_child',
+      delegatedPrompt: 'preserve this child history',
+      childConfig: { model: 'fixture' },
+      messageId: 'message_missing_record',
+      dispatchAttemptId: 'attempt_missing_record',
+    }
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {
+        throw new Error('reconstruction must not create a child')
+      },
+      appendDelegatedPrompt: async () => {
+        throw new Error('reconstruction must not append')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true, reference }),
+      listChildren: () => [reference],
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(store.get(reference.taskId)).toMatchObject({
+      taskId: reference.taskId,
+      childSessionId: reference.childSessionId,
+      runtimeState: 'failed',
+      delegatedPrompt: reference.delegatedPrompt,
+      failure: {
+        code: 'spawn_persist_failed',
+        details: { boundary: 'recovery' },
+      },
+    })
+    expect(updates).toEqual([{ taskId: reference.taskId, version: 1 }])
+  })
+
+  it('cancels pre-dispatch recovery after parent deletion without creating or dispatching', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({ parentSessionId: 'session_deleted_parent', delegatedPrompt: 'reserved', childConfig: {} })
+    const readyBase = store.reserve({ parentSessionId: 'session_deleted_parent', delegatedPrompt: 'ready', childConfig: {} })
+    const ready = store.updateDispatch(readyBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimedBase = store.reserve({ parentSessionId: 'session_deleted_parent', delegatedPrompt: 'claimed', childConfig: {} })
+    const claimedReady = store.updateDispatch(claimedBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const claimed = store.updateDispatch(claimedReady.taskId, 'claimed', '2026-08-16T16:00:02.000Z')
+    const existingChildBase = store.reserve({ parentSessionId: 'session_deleted_parent', delegatedPrompt: 'existing child', childConfig: {} })
+    const existingChild = store.updateDispatch(existingChildBase.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const parentTaskIds = [reserved.taskId, ready.taskId, claimed.taskId, existingChild.taskId]
+    let createCalls = 0
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {
+        createCalls += 1
+      },
+      appendDelegatedPrompt: async () => {
+        throw new Error('deleted parent must not append')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => false,
+      findChild: (task) => ({
+        exists: task.taskId === existingChild.taskId,
+        matches: task.taskId === existingChild.taskId,
+      }),
+    })
+
+    expect(createCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+    for (const taskId of parentTaskIds) {
+      expect(store.get(taskId)).toMatchObject({
+        runtimeState: 'cancelled',
+        cancellation: { reason: 'parent_deleted' },
+        parentDeletedAt: expect.any(String),
+      })
+    }
+  })
+
   it('transitions a child through permission awaiting-input and resume', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
@@ -348,6 +871,83 @@ describe('SpawnTaskCoordinator', () => {
       runtimeState: 'cancelled',
       cancellation: { reason: 'parent_deleted' },
       parentDeletedAt: expect.any(String),
+    })
+  })
+
+  it('rechecks durable parent deletion before a stale coordinator dispatches', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const managerOneStore = createStore(workspaceRoot)
+    const managerTwoStore = createStore(workspaceRoot)
+    const managerOne = new SpawnTaskCoordinator({
+      store: managerOneStore,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    let childCalls = 0
+    let providerCalls = 0
+    const managerTwo = new SpawnTaskCoordinator({
+      store: managerTwoStore,
+      createChild: async () => {
+        childCalls += 1
+      },
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await managerOne.markParentDeleted('session_deleted_before_manager_two_spawn')
+    const result = await managerTwo.spawn({
+      parentSessionId: 'session_deleted_before_manager_two_spawn',
+      delegatedPrompt: 'must not dispatch after another manager deletes parent',
+      childConfig: {},
+    })
+
+    expect(childCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+    expect(result.runtimeState).toBe('cancelled')
+    expect(managerTwoStore.get(result.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
+    })
+  })
+
+  it('persists an empty parent deletion boundary across coordinator restart', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const first = new SpawnTaskCoordinator({
+      store: initial,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    await first.markParentDeleted('session_never_spawned')
+
+    const restartedStore = createStore(workspaceRoot)
+    expect(restartedStore.isParentDeleted('session_never_spawned')).toBe(true)
+    let childCalls = 0
+    const restarted = new SpawnTaskCoordinator({
+      store: restartedStore,
+      createChild: async () => {
+        childCalls += 1
+      },
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+    const result = await restarted.spawn({
+      parentSessionId: 'session_never_spawned',
+      delegatedPrompt: 'must stay cancelled',
+      childConfig: {},
+    })
+
+    expect(childCalls).toBe(0)
+    expect(result.runtimeState).toBe('cancelled')
+    expect(restartedStore.get(result.taskId)).toMatchObject({
+      runtimeState: 'cancelled',
+      cancellation: { reason: 'parent_deleted' },
     })
   })
 
