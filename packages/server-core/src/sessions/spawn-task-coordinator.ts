@@ -719,7 +719,8 @@ export class SpawnTaskCoordinator {
   }
 
   private recoveryReferenceMatchesTask(reference: SpawnTaskRecoveryReference, task: SpawnTask): boolean {
-    return reference.parentSessionId === task.parentSessionId
+    return reference.taskId === task.taskId
+      && reference.parentSessionId === task.parentSessionId
       && reference.childSessionId === task.childSessionId
       && (reference.delegatedPrompt === undefined || reference.delegatedPrompt === task.delegatedPrompt)
       && (reference.childConfig === undefined || JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig))

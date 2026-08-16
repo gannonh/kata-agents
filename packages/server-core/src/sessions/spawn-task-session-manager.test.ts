@@ -715,6 +715,195 @@ describe('SessionManager spawned-task transcript append', () => {
     }
   })
 
+  it('recovers a reserved task with a partial on-disk child reference', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_partial_reference_recovery',
+      name: 'Spawn partial reference recovery workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      const parentSessionId = 'session_partial_reference_parent'
+      await saveSession({
+        id: parentSessionId,
+        workspaceRootPath: workspaceRoot,
+        name: 'Partial reference parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+      const reserved = initial.reserve({
+        parentSessionId,
+        delegatedPrompt: 'recover the partially persisted child',
+        childConfig: { name: 'partial child' },
+      })
+      const childStatus = 'todo'
+      await saveSession({
+        id: reserved.childSessionId,
+        workspaceRootPath: workspaceRoot,
+        name: 'Partial child',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: childStatus,
+        spawnTaskRef: {
+          taskId: reserved.taskId,
+          parentSessionId,
+        },
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+
+      const dispatched: Array<{ taskId: string; dispatchState: string; runtimeState: string }> = []
+      const manager = new SessionManager({
+        spawnTaskDispatchProvider: ({ task }) => {
+          dispatched.push({
+            taskId: task.taskId,
+            dispatchState: task.dispatch.state,
+            runtimeState: task.runtimeState,
+          })
+        },
+      })
+      manager.setEventSink(() => {})
+
+      await (manager as any).loadSessionsFromDisk()
+
+      const recovered = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)!
+      expect(recovered).toMatchObject({
+        runtimeState: 'processing',
+        dispatch: { state: 'sent' },
+      })
+      expect(recovered.failure).toBeUndefined()
+      expect(dispatched).toEqual([{
+        taskId: reserved.taskId,
+        dispatchState: 'sent',
+        runtimeState: 'processing',
+      }])
+      expect((await manager.getSessions(workspace.id)).filter((session) => session.id === reserved.childSessionId)).toHaveLength(1)
+      expect((await manager.getSession(reserved.childSessionId))?.sessionStatus).toBe(childStatus)
+      expect((await manager.getSession(parentSessionId))?.sessionStatus).toBe('todo')
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
+  })
+
+  it('rejects contradictory optional child reference metadata during startup recovery', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_contradictory_reference_recovery',
+      name: 'Spawn contradictory reference recovery workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      const parentSessionId = 'session_contradictory_reference_parent'
+      await saveSession({
+        id: parentSessionId,
+        workspaceRootPath: workspaceRoot,
+        name: 'Contradictory reference parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+      const reserved = initial.reserve({
+        parentSessionId,
+        delegatedPrompt: 'reject contradictory recovery metadata',
+        childConfig: { name: 'contradictory child' },
+      })
+      await saveSession({
+        id: reserved.childSessionId,
+        workspaceRootPath: workspaceRoot,
+        name: 'Contradictory child',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        spawnTaskRef: {
+          taskId: reserved.taskId,
+          parentSessionId,
+          messageId: 'message_contradictory_reference',
+        },
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+
+      const dispatched: string[] = []
+      const manager = new SessionManager({
+        spawnTaskDispatchProvider: ({ task }) => {
+          dispatched.push(task.taskId)
+        },
+      })
+      manager.setEventSink(() => {})
+
+      await (manager as any).loadSessionsFromDisk()
+
+      const recovered = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)!
+      expect(recovered).toMatchObject({
+        runtimeState: 'failed',
+        failure: {
+          code: 'spawn_persist_failed',
+          details: { boundary: 'child' },
+        },
+      })
+      expect(dispatched).toEqual([])
+      expect((await manager.getSessions(workspace.id)).filter((session) => session.id === reserved.childSessionId)).toHaveLength(1)
+      expect((await manager.getSession(reserved.childSessionId))?.sessionStatus).toBe('todo')
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
+  })
+
   it('reconstructs a failed task for a child back-reference whose task record is missing', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
     roots.push(workspaceRoot)

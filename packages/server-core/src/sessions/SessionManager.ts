@@ -2897,12 +2897,13 @@ export class SessionManager implements ISessionManager {
         )
         const exists = managed !== undefined || stored !== undefined
         const matches = exists
-          && reference?.taskId === task.taskId
+          && reference?.childSessionId === task.childSessionId
+          && reference.taskId === task.taskId
           && reference.parentSessionId === task.parentSessionId
-          && reference.delegatedPrompt === task.delegatedPrompt
-          && JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig)
-          && reference.messageId === task.dispatch.messageId
-          && reference.dispatchAttemptId === task.dispatch.dispatchAttemptId
+          && (reference.delegatedPrompt === undefined || reference.delegatedPrompt === task.delegatedPrompt)
+          && (reference.childConfig === undefined || JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig))
+          && (reference.messageId === undefined || reference.messageId === task.dispatch.messageId)
+          && (reference.dispatchAttemptId === undefined || reference.dispatchAttemptId === task.dispatch.dispatchAttemptId)
         return {
           exists,
           matches,
