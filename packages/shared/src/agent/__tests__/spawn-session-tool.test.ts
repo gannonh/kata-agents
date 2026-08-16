@@ -23,7 +23,7 @@ describe('spawn_session tool contract', () => {
     const result = await tool.handler({ prompt: 'delegate' } as any, {} as any)
 
     expect(result).toEqual({
-      content: [{ type: 'text', text: JSON.stringify(failure) }],
+      content: [{ type: 'text', text: JSON.stringify(failure, null, 2) }],
       isError: true,
     })
   })

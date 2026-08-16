@@ -1200,11 +1200,19 @@ interface PendingDelta {
  * preflight entirely — provider establishment happens on first Send (Task 4),
  * not at creation.
  */
+export interface SpawnTaskProviderRejectionContext {
+  readonly taskId: string
+  readonly childSessionId: string
+  readonly error: unknown
+}
+
 export interface SessionManagerOptions {
   /** Deterministic seam for C1 task-store fault tests; production uses the default store. */
   spawnTaskStoreFactory?: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   /** Deterministic provider boundary for SessionManager/storage integration tests. */
   spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
+  /** C2 lifecycle seam for provider-turn rejections; C1 only logs and consumes them. */
+  spawnTaskProviderRejectionHandler?: (context: SpawnTaskProviderRejectionContext) => void
 }
 
 interface ForkChildCreateOptions {
@@ -1227,6 +1235,7 @@ export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
+  private readonly spawnTaskProviderRejectionHandler?: (context: SpawnTaskProviderRejectionContext) => void
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
@@ -1314,6 +1323,7 @@ export class SessionManager implements ISessionManager {
   constructor(options: SessionManagerOptions = {}) {
     this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
     this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
+    this.spawnTaskProviderRejectionHandler = options.spawnTaskProviderRejectionHandler
   }
 
   private registerPreChatBarrier(sessionId: string): () => void {
@@ -2769,16 +2779,44 @@ export class SessionManager implements ISessionManager {
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
+  private handleSpawnTaskProviderRejection(
+    taskId: string,
+    childSessionId: string,
+    error: unknown,
+  ): void {
+    const context: SpawnTaskProviderRejectionContext = { taskId, childSessionId, error }
+    sessionLog.error('Spawned task provider turn rejected', {
+      taskId,
+      childSessionId,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+
+    // C1 consumes the rejection without changing durable task state. C2 can
+    // replace this seam with normalized provider-error finalization.
+    try {
+      this.spawnTaskProviderRejectionHandler?.(context)
+    } catch (handlerError) {
+      sessionLog.error('Spawned task provider rejection handler failed', {
+        taskId,
+        childSessionId,
+        error: handlerError instanceof Error ? handlerError.message : String(handlerError),
+      })
+    }
+  }
+
   private getSpawnTaskCoordinator(parent: ManagedSession): SpawnTaskCoordinator {
-    const workspaceKey = parent.workspace.rootPath
+    const workspaceRootPath = parent.workspace.rootPath
+    const workspaceId = parent.workspace.id
+    const workspaceKey = workspaceRootPath
     const existing = this.spawnTaskCoordinators.get(workspaceKey)
     if (existing) return existing
 
     let store = this.spawnTaskStores.get(workspaceKey)
     if (!store) {
       store = this.spawnTaskStoreFactory({
-        workspaceRoot: parent.workspace.rootPath,
-        workspaceId: parent.workspace.id,
+        workspaceRoot: workspaceRootPath,
+        workspaceId,
       })
       this.spawnTaskStores.set(workspaceKey, store)
     }
@@ -2787,7 +2825,7 @@ export class SessionManager implements ISessionManager {
       store,
       createChild: async ({ task }) => {
         const config = task.childConfig as Record<string, unknown>
-        const child = await this.createSession(parent.workspace.id, {
+        const child = await this.createSession(workspaceId, {
           reservedSessionId: task.childSessionId,
           spawnTaskRef: {
             taskId: task.taskId,
@@ -2804,16 +2842,17 @@ export class SessionManager implements ISessionManager {
         })
 
         // Publish the child only after its reserved ID/back-reference is durable.
-        this.sendEvent({ type: 'session_created', sessionId: child.id }, parent.workspace.id)
+        this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
       },
       appendDelegatedPrompt: async ({ task, prompt }) => {
-        await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, parent.workspace.id)
+        await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
       },
       dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
         // sendMessage reuses the already flushed stable message instead of
         // appending a second user turn. C1 intentionally does not await or
         // observe this full turn; normalized lifecycle handling owns its
-        // eventual completion or failure.
+        // eventual completion or failure. The rejection is consumed here so
+        // it reaches the C2 lifecycle seam with task/session identity.
         void this.sendMessage(
           task.childSessionId,
           prompt,
@@ -2821,7 +2860,9 @@ export class SessionManager implements ISessionManager {
           undefined,
           undefined,
           task.dispatch.messageId,
-        )
+        ).catch((error: unknown) => {
+          this.handleSpawnTaskProviderRejection(task.taskId, task.childSessionId, error)
+        })
       }),
     })
     this.spawnTaskCoordinators.set(workspaceKey, coordinator)
@@ -2864,6 +2905,42 @@ export class SessionManager implements ISessionManager {
       message,
       status: 'accepted',
     }, workspaceId)
+  }
+
+  private async applyInitialSessionTitle(
+    managed: ManagedSession,
+    message: string,
+    options?: SendMessageOptions,
+  ): Promise<void> {
+    const isFirstUserMessage = managed.messages.filter((entry) => entry.role === 'user').length === 1
+    if (!isFirstUserMessage || managed.name || managed.triggeredBy) return
+
+    // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
+    // so titles show human-readable names instead of raw IDs.
+    let titleSource = message
+    if (options?.badges) {
+      for (const badge of options.badges) {
+        if (badge.rawText && badge.label) {
+          titleSource = titleSource.replace(badge.rawText, badge.label)
+        }
+      }
+    }
+
+    const sanitized = sanitizeForTitle(titleSource)
+    const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
+    managed.name = initialTitle
+    this.persistSession(managed)
+    // Flush immediately so disk is authoritative before notifying the renderer.
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'title_generated',
+      sessionId: managed.id,
+      title: initialTitle,
+    }, managed.workspace.id)
+
+    // Preserve the existing enhanced title behavior without duplicating the
+    // already-persisted user message (including the stable spawn message path).
+    this.generateTitle(managed, message)
   }
 
   async createSession(
@@ -7762,38 +7839,13 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      // If this is the first user message and no title exists, set one immediately
-      // AI generation will enhance it later, but we always have a title from the start
-      // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
-        // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
-        // so titles show human-readable names instead of raw IDs
-        let titleSource = message
-        if (options?.badges) {
-          for (const badge of options.badges) {
-            if (badge.rawText && badge.label) {
-              titleSource = titleSource.replace(badge.rawText, badge.label)
-            }
-          }
-        }
-        // Sanitize: strip any remaining bracket mentions, XML blocks, tags
-        const sanitized = sanitizeForTitle(titleSource)
-        const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
-        managed.name = initialTitle
-        this.persistSession(managed)
-        // Flush immediately so disk is authoritative before notifying renderer
-        await this.flushSession(managed.id)
-        this.sendEvent({
-          type: 'title_generated',
-          sessionId,
-          title: initialTitle,
-        }, managed.workspace.id)
+    }
 
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
-      }
+    // Preserve the immediate prompt-derived title and schedule enhanced title
+    // generation for new messages and stable pre-appended spawn messages. Do
+    // not change ordinary queued-message replay behavior.
+    if (!existingMessageId || managed.spawnTaskRef) {
+      await this.applyInitialSessionTitle(managed, message, options)
     }
 
     // Phase 4 Task 4: first-Send provider establishment for a pending
@@ -10103,8 +10155,9 @@ export class SessionManager implements ISessionManager {
     // Create session directory with all subdirectories
     const sessionDir = ensureSessionDir(workspaceRootPath, sessionId)
 
-    // Build the stored session from bundle data
-    const header = bundle.session.header
+    // Build the stored session from bundle data. Spawn ownership is bound to
+    // the source server/workspace and must never cross the import boundary.
+    const { spawnTaskRef: _spawnTaskRef, ...header } = bundle.session.header
     const storedSession: StoredSession = {
       id: sessionId,
       workspaceRootPath,

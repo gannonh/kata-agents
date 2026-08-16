@@ -121,9 +121,12 @@ export function serializeSession(
   const firstLine = rawContent.split('\n')[0]
   if (!firstLine) return null
 
-  // Strip server-internal fields that shouldn't travel with the bundle
+  // Strip server-internal fields that shouldn't travel with the bundle.
+  // Spawn ownership is server-local and must never be imported into another
+  // workspace, even though it remains durable in the source session.
+  const { spawnTaskRef: _spawnTaskRef, ...portableHeader } = JSON.parse(firstLine) as SessionHeader
   const header: SessionHeader = {
-    ...JSON.parse(firstLine) as SessionHeader,
+    ...portableHeader,
     // workspaceRootPath will be set by the importing server
   }
 

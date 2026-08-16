@@ -98,7 +98,7 @@ Only use 'attachments' for existing file paths on disk — the tool reads them a
           : undefined
         if (failure && typeof failure === 'object') {
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify(failure) }],
+            content: [{ type: 'text' as const, text: JSON.stringify(failure, null, 2) }],
             isError: true,
           }
         }
