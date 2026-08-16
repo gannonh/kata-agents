@@ -2,6 +2,7 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -38,6 +39,7 @@ import {
   assertRegularFile,
   ensureDurableDirectory,
   syncDirectory,
+  writeDurableFile,
 } from './durable-fs.ts';
 import {
   assertGenerationName,
@@ -65,6 +67,7 @@ import {
 } from './result-artifact.ts';
 
 const MAX_RESERVATION_ATTEMPTS = 16;
+const PARENT_DELETIONS_DIRECTORY = 'parents';
 
 export interface SpawnTaskStoreOptions {
   readonly workspaceRoot: string;
@@ -78,6 +81,17 @@ export interface ReserveSpawnTaskInput {
   readonly parentSessionId: string;
   readonly delegatedPrompt: string;
   readonly childConfig: Readonly<Record<string, SpawnTaskJsonValue>>;
+}
+
+export interface ReconstructSpawnTaskInput {
+  readonly taskId: string;
+  readonly parentSessionId: string;
+  readonly childSessionId: string;
+  readonly delegatedPrompt?: string;
+  readonly childConfig?: Readonly<Record<string, SpawnTaskJsonValue>>;
+  readonly messageId?: string;
+  readonly dispatchAttemptId?: string;
+  readonly at: string;
 }
 
 export interface SpawnTaskStartupChange {
@@ -130,6 +144,7 @@ export class SpawnTaskStore {
   private readonly byChild = new Map<string, string>();
   private readonly byMessage = new Map<string, string>();
   private readonly byDispatchAttempt = new Map<string, string>();
+  private readonly deletedParents = new Set<string>();
   private readonly loadErrors = new Map<string, string>();
   private lastStartupReport: SpawnTaskStartupReport = emptyStartupReport();
 
@@ -143,6 +158,7 @@ export class SpawnTaskStore {
     this.faults = options.faults;
     ensureDurableDirectory(this.rootPath);
     ensureDurableDirectory(this.tasksPath());
+    ensureDurableDirectory(this.parentDeletionsPath());
     this.reload();
   }
 
@@ -193,6 +209,39 @@ export class SpawnTaskStore {
 
   getLoadErrors(): Readonly<Record<string, string>> {
     return Object.freeze(Object.fromEntries(this.loadErrors));
+  }
+
+  isParentDeleted(parentSessionId: string): boolean {
+    assertSpawnTaskId(parentSessionId, 'parentSessionId');
+    if (this.deletedParents.has(parentSessionId)) return true;
+    const markerPath = join(this.parentDeletionsPath(), parentSessionId);
+    if (!existsSync(markerPath)) return false;
+    assertNotSymlink(markerPath, 'spawned-task parent deletion marker');
+    this.deletedParents.add(parentSessionId);
+    return true;
+  }
+
+  listDeletedParents(): readonly string[] {
+    return [...this.deletedParents].sort();
+  }
+
+  markParentDeletedBoundary(parentSessionId: string, at: string): boolean {
+    assertSpawnTaskId(parentSessionId, 'parentSessionId');
+    if (this.deletedParents.has(parentSessionId)) return false;
+    const parentPath = this.parentDeletionsPath();
+    const markerPath = join(parentPath, parentSessionId);
+    const temporaryPath = join(parentPath, `.${parentSessionId}.${this.randomId()}.tmp`);
+    assertNotSymlink(markerPath, 'spawned-task parent deletion marker');
+    try {
+      writeDurableFile(temporaryPath, `${at}\n`);
+      renameSync(temporaryPath, markerPath);
+      syncDirectory(parentPath);
+      this.deletedParents.add(parentSessionId);
+      return true;
+    } catch (error) {
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
   }
 
   getLastStartupReport(): SpawnTaskStartupReport {
@@ -247,6 +296,83 @@ export class SpawnTaskStore {
     if (next === current) return clone(current);
     this.commit(next);
     return clone(next);
+  }
+
+  interruptDispatch(taskId: string, at: string): SpawnTask {
+    const current = this.require(taskId);
+    if (isSpawnTaskTerminal(current.runtimeState)) return clone(current);
+    if (current.dispatch.state !== 'claimed' && current.dispatch.state !== 'sent') {
+      throw new Error(`Cannot interrupt spawned-task dispatch in state ${current.dispatch.state}`);
+    }
+    const failure = createSpawnTaskFailure({
+      code: 'dispatch_interrupted',
+      message: 'Spawned-task dispatch was interrupted before completion and will not be replayed automatically.',
+      retryable: true,
+      details: { dispatchState: current.dispatch.state },
+      committedAt: at,
+    });
+    const failed = transitionSpawnTask(current, {
+      runtimeState: 'failed',
+      at,
+      failure,
+    });
+    this.commit(failed);
+    return clone(failed);
+  }
+
+  reconstructMissingTask(input: ReconstructSpawnTaskInput): SpawnTask {
+    assertSpawnTaskId(input.taskId, 'taskId');
+    assertSpawnTaskId(input.parentSessionId, 'parentSessionId');
+    assertSpawnTaskId(input.childSessionId, 'childSessionId');
+    const existing = this.tasks.get(input.taskId);
+    if (existing) return clone(existing);
+    if (this.byChild.has(input.childSessionId)) {
+      throw new Error(`Spawned-task child session is already owned: ${input.childSessionId}`);
+    }
+
+    const recoveredSuffix = input.taskId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 200);
+    const messageId = input.messageId ?? `message_recovered_${recoveredSuffix}`;
+    const dispatchAttemptId = input.dispatchAttemptId ?? `attempt_recovered_${recoveredSuffix}`;
+    assertSpawnTaskId(messageId, 'dispatch.messageId');
+    assertSpawnTaskId(dispatchAttemptId, 'dispatch.dispatchAttemptId');
+    if (this.byMessage.has(messageId) || this.byDispatchAttempt.has(dispatchAttemptId)) {
+      throw new Error(`Recovered spawned-task dispatch identity is already owned: ${input.taskId}`);
+    }
+
+    const failure = createSpawnTaskFailure({
+      code: 'spawn_persist_failed',
+      message: 'Spawned-task record was missing while its child back-reference remained.',
+      retryable: true,
+      details: { boundary: 'recovery' },
+      committedAt: input.at,
+    });
+    const task: SpawnTask = {
+      schemaVersion: SPAWN_TASK_SCHEMA_VERSION,
+      version: 1,
+      taskId: input.taskId,
+      workspaceId: this.workspaceId,
+      parentSessionId: input.parentSessionId,
+      childSessionId: input.childSessionId,
+      delegatedPrompt: input.delegatedPrompt ?? '',
+      childConfig: input.childConfig ?? {},
+      runtimeState: 'failed',
+      stateTimestamps: {
+        createdAt: input.at,
+        updatedAt: input.at,
+        queuedAt: input.at,
+        failedAt: input.at,
+      },
+      dispatch: {
+        state: 'reserved',
+        dispatchAttemptId,
+        messageId,
+        reservedAt: input.at,
+      },
+      failure,
+    };
+    assertSpawnTask(task);
+    this.commit(task);
+    return clone(task);
   }
 
   commitResult(taskId: string, content: string, options: BuildSpawnTaskResultOptions): SpawnTask {
@@ -339,6 +465,8 @@ export class SpawnTaskStore {
   }
 
   markParentDeleted(taskId: string, at: string): SpawnTask {
+    const current = this.require(taskId);
+    this.markParentDeletedBoundary(current.parentSessionId, at);
     return this.updateMetadata(taskId, { at, parentDeletedAt: at });
   }
 
@@ -370,12 +498,14 @@ export class SpawnTaskStore {
     syncDirectory(this.workspaceRoot);
     ensureDurableDirectory(this.rootPath);
     ensureDurableDirectory(this.tasksPath());
+    ensureDurableDirectory(this.parentDeletionsPath());
     this.tasks.clear();
     this.generations.clear();
     this.byParent.clear();
     this.byChild.clear();
     this.byMessage.clear();
     this.byDispatchAttempt.clear();
+    this.deletedParents.clear();
     this.loadErrors.clear();
     this.lastStartupReport = emptyStartupReport();
   }
@@ -465,7 +595,9 @@ export class SpawnTaskStore {
     this.byChild.clear();
     this.byMessage.clear();
     this.byDispatchAttempt.clear();
+    this.deletedParents.clear();
     this.loadErrors.clear();
+    this.loadParentDeletionMarkers();
 
     for (const entry of readdirSync(this.tasksPath(), { withFileTypes: true })) {
       if (entry.name.startsWith('.')) continue;
@@ -523,6 +655,25 @@ export class SpawnTaskStore {
 
   private tasksPath(): string {
     return join(this.rootPath, 'tasks');
+  }
+
+  private parentDeletionsPath(): string {
+    return join(this.rootPath, PARENT_DELETIONS_DIRECTORY);
+  }
+
+  private loadParentDeletionMarkers(): void {
+    for (const entry of readdirSync(this.parentDeletionsPath(), { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      try {
+        if (entry.isSymbolicLink() || !entry.isFile()) throw new Error('Parent deletion marker must be a regular file');
+        assertSpawnTaskId(entry.name, 'parent deletion marker');
+        const marker = readFileSync(join(this.parentDeletionsPath(), entry.name), 'utf8').trim();
+        if (!marker) throw new Error('Parent deletion marker is empty');
+        this.deletedParents.add(entry.name);
+      } catch (error) {
+        this.loadErrors.set(`${PARENT_DELETIONS_DIRECTORY}/${entry.name}`, error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   private require(taskId: string): SpawnTask {

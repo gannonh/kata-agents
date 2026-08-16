@@ -18,6 +18,7 @@ export type {
   SpawnTaskStoreOptions,
   SpawnTaskStoreFaultPoint,
   ReserveSpawnTaskInput,
+  ReconstructSpawnTaskInput,
   SpawnTaskStartupChange,
   SpawnTaskFinalizedStartupChange,
   SpawnTaskStartupReport,

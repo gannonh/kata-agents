@@ -59,6 +59,70 @@ function processingTask(store: SpawnTaskStore) {
 }
 
 describe('spawn-task result artifacts', () => {
+  it('re-reads a durable parent-deletion boundary from an older store instance', () => {
+    const root = workspace();
+    const first = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_parent_boundary' });
+    const second = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_parent_boundary' });
+
+    expect(second.isParentDeleted('session_deleted')).toBe(false);
+    expect(first.markParentDeletedBoundary('session_deleted', later)).toBe(true);
+    expect(second.isParentDeleted('session_deleted')).toBe(true);
+    expect(first.markParentDeletedBoundary('session_deleted', later)).toBe(false);
+  });
+
+  it('commits claimed dispatch interruption as a retryable terminal failure', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch_interrupt' });
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'never replay', childConfig: {} });
+    const ready = store.updateDispatch(reserved.taskId, 'ready', at);
+    const claimed = store.updateDispatch(ready.taskId, 'claimed', later);
+
+    const failed = store.interruptDispatch(claimed.taskId, '2026-02-03T04:07:06.000Z');
+
+    expect(failed).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'dispatch_interrupted',
+        retryable: true,
+        details: { dispatchState: 'claimed' },
+      },
+    });
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch_interrupt' }).get(claimed.taskId)).toEqual(failed);
+  });
+
+  it('reconstructs a bounded failed task from child recovery metadata', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_reconstruct' });
+
+    const recovered = store.reconstructMissingTask({
+      taskId: 'task_recovered',
+      parentSessionId: 'session_parent',
+      childSessionId: 'session_child',
+      delegatedPrompt: 'recover without dispatch',
+      childConfig: { model: 'fixture' },
+      messageId: 'message_recovered',
+      dispatchAttemptId: 'attempt_recovered',
+      at: later,
+    });
+
+    expect(recovered).toMatchObject({
+      taskId: 'task_recovered',
+      runtimeState: 'failed',
+      delegatedPrompt: 'recover without dispatch',
+      failure: {
+        code: 'spawn_persist_failed',
+        retryable: true,
+        details: { boundary: 'recovery' },
+      },
+    });
+    expect(store.reconstructMissingTask({
+      taskId: 'task_recovered',
+      parentSessionId: 'session_parent',
+      childSessionId: 'session_child',
+      at: later,
+    })).toEqual(recovered);
+  });
+
   it('commits zero-byte output as a valid task-owned result', () => {
     const root = workspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_result' });

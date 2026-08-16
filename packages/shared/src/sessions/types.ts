@@ -10,6 +10,7 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { SpawnTaskJsonValue } from '@kata-sh/core';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { SessionCheckout } from '../protocol/git.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@kata-sh/core/types';
@@ -81,6 +82,11 @@ export type SessionStatus = string;
 export interface SpawnTaskSessionReference {
   readonly taskId: string;
   readonly parentSessionId: string;
+  /** Recovery metadata is private and omitted from public session projections. */
+  readonly delegatedPrompt?: string;
+  readonly childConfig?: Readonly<Record<string, SpawnTaskJsonValue>>;
+  readonly messageId?: string;
+  readonly dispatchAttemptId?: string;
 }
 
 /**
@@ -379,6 +385,8 @@ export interface SessionHeader {
 export interface SessionMetadata {
   id: string;
   workspaceRootPath: string;
+  /** Private spawned-task relationship used only during server recovery. */
+  spawnTaskRef?: SpawnTaskSessionReference;
   name?: string;
   createdAt: number;
   lastUsedAt: number;
