@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CONFIG_DIR } from '@kata-sh/shared/config'
-import { getSessionPath, loadSession, type SessionBundle } from '@kata-sh/shared/sessions'
+import { getSessionPath, loadSession, saveSession, type SessionBundle } from '@kata-sh/shared/sessions'
 import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
 import type { SpawnTask } from '@kata-sh/core'
 import type { SessionEvent } from '@kata-sh/shared/protocol'
@@ -334,6 +334,7 @@ describe('SessionManager spawned-task transcript append', () => {
           ? ''
           : 'normalized child result'
         const hasApiError = prompt.includes('api-error')
+        const hasNon400ApiError = prompt.includes('api-error-429')
         const hasRecoverableToolError = prompt.includes('recoverable-tool')
         const hasTerminalToolError = prompt.includes('terminal-tool')
         child.agent = {
@@ -344,9 +345,11 @@ describe('SessionManager spawned-task transcript append', () => {
           async *chat() {
             if (hasApiError) {
               writeFileSync(join(getSessionPath(workspaceRoot, task.childSessionId), 'api-error.json'), JSON.stringify({
-                status: 400,
-                statusText: 'Bad Request',
-                message: 'provider rejected the child turn',
+                status: hasNon400ApiError ? 429 : 400,
+                statusText: hasNon400ApiError ? 'Too Many Requests' : 'Bad Request',
+                message: hasNon400ApiError
+                  ? 'provider rate-limited the child turn'
+                  : 'provider rejected the child turn',
                 timestamp: Date.now(),
               }))
             }
@@ -438,18 +441,25 @@ describe('SessionManager spawned-task transcript append', () => {
       delegatedPrompt: 'normalize api-error child result',
       childConfig: {},
     })
+    const non400ApiErrorResult = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize api-error-429 child result',
+      childConfig: {},
+    })
 
     let task = store.get(result.taskId)
     let recoverableToolTask = store.get(recoverableToolResult.taskId)
     let emptyTask = store.get(emptyResult.taskId)
     let terminalToolTask = store.get(terminalToolResult.taskId)
     let apiErrorTask = store.get(apiErrorResult.taskId)
+    let non400ApiErrorTask = store.get(non400ApiErrorResult.taskId)
     for (let attempt = 0; attempt < 40 && (
       task?.runtimeState !== 'completed'
       || recoverableToolTask?.runtimeState !== 'completed'
       || emptyTask?.runtimeState !== 'completed'
       || terminalToolTask?.runtimeState !== 'failed'
       || apiErrorTask?.runtimeState !== 'failed'
+      || non400ApiErrorTask?.runtimeState !== 'failed'
     ); attempt++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 5))
       task = store.get(result.taskId)
@@ -457,6 +467,7 @@ describe('SessionManager spawned-task transcript append', () => {
       emptyTask = store.get(emptyResult.taskId)
       terminalToolTask = store.get(terminalToolResult.taskId)
       apiErrorTask = store.get(apiErrorResult.taskId)
+      non400ApiErrorTask = store.get(non400ApiErrorResult.taskId)
     }
 
     expect(task).toMatchObject({
@@ -492,18 +503,129 @@ describe('SessionManager spawned-task transcript append', () => {
       runtimeState: 'failed',
       failure: { code: 'provider_error' },
     })
+    expect(sessions.get(apiErrorResult.childSessionId).messages).toContainEqual(expect.objectContaining({
+      role: 'error',
+      errorCode: 'invalid_request',
+      content: expect.stringContaining('Request Error'),
+    }))
+    expect(non400ApiErrorTask).toMatchObject({
+      childSessionId: non400ApiErrorResult.childSessionId,
+      runtimeState: 'failed',
+      failure: { code: 'provider_error' },
+    })
     expect(updates.map((change) => change.taskId).sort()).toEqual([
       result.taskId,
       recoverableToolResult.taskId,
       emptyResult.taskId,
       terminalToolResult.taskId,
       apiErrorResult.taskId,
+      non400ApiErrorResult.taskId,
     ].sort())
     expect(sessions.get(result.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(recoverableToolResult.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(emptyResult.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(terminalToolResult.childSessionId).sessionStatus).toBeUndefined()
     expect(sessions.get(apiErrorResult.childSessionId).sessionStatus).toBeUndefined()
+    expect(sessions.get(non400ApiErrorResult.childSessionId).sessionStatus).toBeUndefined()
+  })
+
+  it('continues ordinary session loading and retries startup reconciliation after a coordinator failure', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_startup_retry',
+      name: 'Spawn startup retry workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      await saveSession({
+        id: 'session_survives_spawn_startup_failure',
+        workspaceRootPath: workspaceRoot,
+        name: 'Ordinary session survives startup failure',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+
+      const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+      const reserved = initial.reserve({
+        parentSessionId: 'session_startup_retry_parent',
+        delegatedPrompt: 'Recover after a retryable startup failure.',
+        childConfig: {},
+      })
+      const processing = initial.transition(reserved.taskId, {
+        runtimeState: 'processing',
+        at: '2026-08-16T16:00:00.000Z',
+      })
+      const interrupted = new SpawnTaskStore({
+        workspaceRoot,
+        workspaceId: workspace.id,
+        faults: (point, task) => {
+          if (point === 'before-current-publish' && task.runtimeState === 'completed') {
+            throw new Error('startup retry publication interrupted')
+          }
+        },
+      })
+      expect(() => interrupted.commitResult(processing.taskId, 'reconcile on retry', {
+        committedAt: '2026-08-16T16:00:01.000Z',
+      })).toThrow('startup retry publication interrupted')
+
+      let targetFactoryCalls = 0
+      const updates: Array<{ taskId: string; version: number }> = []
+      const failedStore = Object.create(SpawnTaskStore.prototype) as SpawnTaskStore
+      ;(failedStore as any).getLastStartupReport = () => {
+        throw new Error('injected startup reconciliation reload failure')
+      }
+      const manager = new SessionManager({
+        spawnTaskStoreFactory: (options) => {
+          if (options.workspaceRoot !== workspaceRoot) return new SpawnTaskStore(options)
+          targetFactoryCalls += 1
+          if (targetFactoryCalls === 1) return failedStore
+          return new SpawnTaskStore(options)
+        },
+        spawnTaskUpdated: (change) => {
+          updates.push(change)
+        },
+      })
+
+      await expect((manager as any).loadSessionsFromDisk()).resolves.toBeUndefined()
+      const loadedSessions = await manager.getSessions(workspace.id)
+      expect(loadedSessions.map((session) => session.id)).toContain('session_survives_spawn_startup_failure')
+      expect(targetFactoryCalls).toBe(1)
+
+      const coordinator = (manager as any).getOrCreateSpawnTaskCoordinator(workspaceRoot, workspace.id)
+      await coordinator.waitForStartupNotification()
+
+      expect(targetFactoryCalls).toBe(2)
+      const recovered = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(processing.taskId)
+      expect(recovered).toMatchObject({
+        runtimeState: 'completed',
+        result: {
+          byteLength: Buffer.byteLength('reconcile on retry', 'utf8'),
+        },
+      })
+      expect(updates).toEqual([{ taskId: processing.taskId, version: recovered!.version }])
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
   })
 
   it('does not carry recoverable tool-failure evidence into a later turn', async () => {

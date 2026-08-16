@@ -190,19 +190,19 @@ export class SpawnTaskCoordinator {
     try {
       await this.createChild({ task })
     } catch (error) {
-      throw this.creationFailure(task, error, 'child')
+      throw await this.creationFailure(task, error, 'child')
     }
 
     try {
       task = this.store.updateDispatch(task.taskId, 'ready', this.clock())
     } catch (error) {
-      throw this.creationFailure(task, error, 'ready')
+      throw await this.creationFailure(task, error, 'ready')
     }
 
     try {
       task = this.store.updateDispatch(task.taskId, 'claimed', this.clock())
     } catch (error) {
-      throw this.creationFailure(task, error, 'claim')
+      throw await this.creationFailure(task, error, 'claim')
     }
 
     try {
@@ -212,13 +212,13 @@ export class SpawnTaskCoordinator {
         attachments: input.attachments,
       })
     } catch (error) {
-      throw this.creationFailure(task, error, 'message_append')
+      throw await this.creationFailure(task, error, 'message_append')
     }
 
     try {
       task = this.store.updateDispatch(task.taskId, 'sent', this.clock())
     } catch (error) {
-      throw this.creationFailure(task, error, 'sent')
+      throw await this.creationFailure(task, error, 'sent')
     }
 
     try {
@@ -230,7 +230,7 @@ export class SpawnTaskCoordinator {
         at: this.clock(),
       })
     } catch (error) {
-      throw this.creationFailure(task, error, 'processing')
+      throw await this.creationFailure(task, error, 'processing')
     }
 
     try {
@@ -250,7 +250,7 @@ export class SpawnTaskCoordinator {
       // A truly synchronous callback throw is an invocation/provider failure,
       // not a spawn-persistence failure. Async turn rejection is handled by
       // the same durable lifecycle finalizer above.
-      throw this.creationFailure(task, error, 'provider', 'provider_error')
+      throw await this.creationFailure(task, error, 'provider', 'provider_error')
     }
 
     return {
@@ -394,19 +394,19 @@ export class SpawnTaskCoordinator {
     })
   }
 
-  private creationFailure(
+  private async creationFailure(
     task: SpawnTask,
     error: unknown,
     boundary: string,
     code: 'spawn_persist_failed' | 'provider_error' = 'spawn_persist_failed',
-  ): SpawnTaskCreationError {
+  ): Promise<SpawnTaskCreationError> {
     const current = this.store.get(task.taskId) ?? task
     const failure = this.failure(error, boundary, code)
-    const failed = this.commitFailure(current, failure)
+    const failed = await this.commitFailure(current, failure)
     return new SpawnTaskCreationError(failure, failed)
   }
 
-  private commitFailure(task: SpawnTask, failure: SpawnTaskFailure): SpawnTask {
+  private async commitFailure(task: SpawnTask, failure: SpawnTaskFailure): Promise<SpawnTask> {
     let current = this.store.get(task.taskId) ?? task
     if (current.runtimeState === 'queued') {
       try {
@@ -425,7 +425,7 @@ export class SpawnTaskCoordinator {
         at: failure.committedAt,
         failure,
       })
-      void this.notifyTaskUpdated(failed)
+      await this.notifyTaskUpdated(failed)
       return failed
     } catch {
       // Keep the last committed reservation/claim as recovery evidence. Never

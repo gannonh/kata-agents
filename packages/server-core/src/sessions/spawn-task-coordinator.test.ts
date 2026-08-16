@@ -139,6 +139,12 @@ describe('SpawnTaskCoordinator', () => {
     })
     let appendCalls = 0
     let providerCalls = 0
+    const updates: string[] = []
+    let notificationStarted = false
+    let releaseNotification!: () => void
+    const notificationReleased = new Promise<void>((resolve) => {
+      releaseNotification = resolve
+    })
 
     const coordinator = new SpawnTaskCoordinator({
       store,
@@ -149,13 +155,32 @@ describe('SpawnTaskCoordinator', () => {
       dispatchProvider: () => {
         providerCalls += 1
       },
+      onTaskUpdated: async (change) => {
+        notificationStarted = true
+        await notificationReleased
+        updates.push('task-updated')
+        expect(store.get(change.taskId)).toMatchObject({ runtimeState: 'failed' })
+      },
     })
 
-    await expect(coordinator.spawn({
+    await coordinator.waitForStartupNotification()
+    let spawnRejected = false
+    const spawn = coordinator.spawn({
       parentSessionId: 'session_parent',
       delegatedPrompt: 'claim before dispatch',
       childConfig: {},
-    })).rejects.toMatchObject({
+    }).catch((error) => {
+      spawnRejected = true
+      throw error
+    })
+    for (let attempt = 0; attempt < 3 && !notificationStarted; attempt++) {
+      await Promise.resolve()
+    }
+    expect(notificationStarted).toBe(true)
+    await Promise.resolve()
+    expect(spawnRejected).toBe(false)
+    releaseNotification()
+    await expect(spawn).rejects.toMatchObject({
       failure: {
         code: 'spawn_persist_failed',
         details: { boundary: 'claim' },
@@ -169,6 +194,7 @@ describe('SpawnTaskCoordinator', () => {
       runtimeState: 'failed',
       failure: { code: 'spawn_persist_failed' },
     })
+    expect(updates).toEqual(['task-updated'])
   })
 
   it('does not claim, append, or dispatch when the ready commit fails', async () => {

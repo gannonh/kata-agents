@@ -2164,8 +2164,20 @@ export class SessionManager implements ISessionManager {
         await this.recoverStagedSessionDeletions(workspaceRootPath)
         // Construct the workspace task coordinator during startup so verified
         // artifact recovery and integrity markers use the same commit-before-
-        // invalidation seam as live child lifecycle finalization.
-        await this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspace.id).waitForStartupNotification()
+        // invalidation seam as live child lifecycle finalization. A task-store
+        // startup failure must not prevent ordinary sessions in this workspace
+        // from loading; the coordinator cache is discarded so first use retries.
+        let startupCoordinator: SpawnTaskCoordinator | undefined
+        try {
+          startupCoordinator = this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspace.id)
+          await startupCoordinator.waitForStartupNotification()
+        } catch (error) {
+          this.discardSpawnTaskCoordinator(workspaceRootPath, startupCoordinator)
+          sessionLog.error(
+            `Failed to reconcile spawned tasks during startup for workspace ${workspace.id} (${workspaceRootPath}):`,
+            error,
+          )
+        }
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
@@ -2801,6 +2813,16 @@ export class SessionManager implements ISessionManager {
     return this.getOrCreateSpawnTaskCoordinator(parent.workspace.rootPath, parent.workspace.id)
   }
 
+  private discardSpawnTaskCoordinator(
+    workspaceRootPath: string,
+    expectedCoordinator?: SpawnTaskCoordinator,
+  ): void {
+    const currentCoordinator = this.spawnTaskCoordinators.get(workspaceRootPath)
+    if (expectedCoordinator ? currentCoordinator !== expectedCoordinator : currentCoordinator) return
+    this.spawnTaskCoordinators.delete(workspaceRootPath)
+    this.spawnTaskStores.delete(workspaceRootPath)
+  }
+
   private getOrCreateSpawnTaskCoordinator(
     workspaceRootPath: string,
     workspaceId: string,
@@ -2809,58 +2831,69 @@ export class SessionManager implements ISessionManager {
     const existing = this.spawnTaskCoordinators.get(workspaceKey)
     if (existing) return existing
 
-    let store = this.spawnTaskStores.get(workspaceKey)
-    if (!store) {
-      store = this.spawnTaskStoreFactory({
+    const cachedStore = this.spawnTaskStores.get(workspaceKey)
+    let store: SpawnTaskStore
+    try {
+      store = cachedStore ?? this.spawnTaskStoreFactory({
         workspaceRoot: workspaceRootPath,
         workspaceId,
       })
+
+      const coordinator = new SpawnTaskCoordinator({
+        store,
+        createChild: async ({ task }) => {
+          const config = task.childConfig as Record<string, unknown>
+          const child = await this.createSession(workspaceId, {
+            reservedSessionId: task.childSessionId,
+            spawnTaskRef: {
+              taskId: task.taskId,
+              parentSessionId: task.parentSessionId,
+            },
+            name: typeof config.name === 'string' ? config.name : undefined,
+            llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
+            model: typeof config.model === 'string' ? config.model : undefined,
+            enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
+            permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
+            thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
+            labels: Array.isArray(config.labels) ? config.labels as string[] : undefined,
+            workingDirectory: typeof config.workingDirectory === 'string' ? config.workingDirectory : undefined,
+          })
+
+          // Publish the child only after its reserved ID/back-reference is durable.
+          this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+        },
+        appendDelegatedPrompt: async ({ task, prompt }) => {
+          await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
+        },
+        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
+          // sendMessage reuses the already flushed stable message instead of
+          // appending a second user turn. SpawnTaskCoordinator consumes the
+          // eventual rejection through the durable provider-error finalizer.
+          return this.sendMessage(
+            task.childSessionId,
+            prompt,
+            attachments ? [...attachments] as FileAttachment[] : undefined,
+            undefined,
+            undefined,
+            task.dispatch.messageId,
+          )
+        }),
+        onTaskUpdated: this.spawnTaskUpdated,
+      })
       this.spawnTaskStores.set(workspaceKey, store)
-    }
-
-    const coordinator = new SpawnTaskCoordinator({
-      store,
-      createChild: async ({ task }) => {
-        const config = task.childConfig as Record<string, unknown>
-        const child = await this.createSession(workspaceId, {
-          reservedSessionId: task.childSessionId,
-          spawnTaskRef: {
-            taskId: task.taskId,
-            parentSessionId: task.parentSessionId,
-          },
-          name: typeof config.name === 'string' ? config.name : undefined,
-          llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
-          model: typeof config.model === 'string' ? config.model : undefined,
-          enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
-          permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
-          thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
-          labels: Array.isArray(config.labels) ? config.labels as string[] : undefined,
-          workingDirectory: typeof config.workingDirectory === 'string' ? config.workingDirectory : undefined,
-        })
-
-        // Publish the child only after its reserved ID/back-reference is durable.
-        this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
-      },
-      appendDelegatedPrompt: async ({ task, prompt }) => {
-        await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
-      },
-      dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
-        // sendMessage reuses the already flushed stable message instead of
-        // appending a second user turn. SpawnTaskCoordinator consumes the
-        // eventual rejection through the durable provider-error finalizer.
-        return this.sendMessage(
-          task.childSessionId,
-          prompt,
-          attachments ? [...attachments] as FileAttachment[] : undefined,
-          undefined,
-          undefined,
-          task.dispatch.messageId,
+      this.spawnTaskCoordinators.set(workspaceKey, coordinator)
+      void coordinator.waitForStartupNotification().catch((error) => {
+        this.discardSpawnTaskCoordinator(workspaceKey, coordinator)
+        sessionLog.error(
+          `Spawned-task startup reconciliation failed for workspace ${workspaceId} (${workspaceRootPath}):`,
+          error,
         )
-      }),
-      onTaskUpdated: this.spawnTaskUpdated,
-    })
-    this.spawnTaskCoordinators.set(workspaceKey, coordinator)
-    return coordinator
+      })
+      return coordinator
+    } catch (error) {
+      this.discardSpawnTaskCoordinator(workspaceKey)
+      throw error
+    }
   }
 
   private async appendSpawnPrompt(
@@ -8228,41 +8261,48 @@ export class SessionManager implements ISessionManager {
             const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
             const apiError = getLastApiError(sessionErrorPath)
 
-            if (apiError && apiError.status === 400) {
-              const isImageError = apiError.message?.includes('image exceeds')
+            if (apiError) {
+              const isBadRequest = apiError.status === 400
+              const isImageError = isBadRequest && apiError.message?.includes('image exceeds')
               await this.finalizeSpawnTaskProviderFailure(managed, apiError.message)
               managed.turnToolFailureEvidence = undefined
               terminalSpawnTaskFailure = true
 
-              const errorMessage: Message = {
-                id: generateMessageId(),
-                role: 'error',
-                content: isImageError
-                  ? `Image Too Large: ${apiError.message}`
-                  : `Request Error: ${apiError.message}`,
-                timestamp: this.monotonic(),
-                errorCode: isImageError ? 'image_too_large' : 'invalid_request',
-                errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
-                errorDetails: isImageError
-                  ? ['An image in the conversation exceeds the 5 MB API limit.',
-                     'This session cannot recover — the image is embedded in the history.',
-                     'Please start a new session to continue.']
-                  : [apiError.message],
-                errorCanRetry: false,
+              // Preserve the existing specialized transcript/UI copy for 400
+              // request and image errors. Other captured API statuses still
+              // classify the task as provider_error without inventing a new
+              // no-output failure or changing the existing UI contract.
+              if (isBadRequest) {
+                const errorMessage: Message = {
+                  id: generateMessageId(),
+                  role: 'error',
+                  content: isImageError
+                    ? `Image Too Large: ${apiError.message}`
+                    : `Request Error: ${apiError.message}`,
+                  timestamp: this.monotonic(),
+                  errorCode: isImageError ? 'image_too_large' : 'invalid_request',
+                  errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
+                  errorDetails: isImageError
+                    ? ['An image in the conversation exceeds the 5 MB API limit.',
+                       'This session cannot recover — the image is embedded in the history.',
+                       'Please start a new session to continue.']
+                    : [apiError.message],
+                  errorCanRetry: false,
+                }
+                managed.messages.push(errorMessage)
+                this.sendEvent({
+                  type: 'typed_error',
+                  sessionId,
+                  error: {
+                    code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
+                    title: errorMessage.errorTitle!,
+                    message: apiError.message,
+                    actions: [],
+                    canRetry: false,
+                    details: errorMessage.errorDetails,
+                  },
+                }, managed.workspace.id)
               }
-              managed.messages.push(errorMessage)
-              this.sendEvent({
-                type: 'typed_error',
-                sessionId,
-                error: {
-                  code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
-                  title: errorMessage.errorTitle!,
-                  message: apiError.message,
-                  actions: [],
-                  canRetry: false,
-                  details: errorMessage.errorDetails,
-                },
-              }, managed.workspace.id)
             }
           }
 
