@@ -44,6 +44,7 @@ describe('spawn-task canonical contract', () => {
       'unknown',
     ]);
     expect(SPAWN_TASK_LIMITS).toEqual({
+      childConfigBytes: 64 * 1024,
       resultBytes: 8 * 1024 * 1024,
       resultReadBytes: 64 * 1024,
       resultPreviewBytes: 4 * 1024,

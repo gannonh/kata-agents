@@ -45,6 +45,7 @@ export type SpawnTaskAwaitingInputKind = 'permission' | 'authentication';
 
 /** Bounds are UTF-8 byte counts, not JavaScript string lengths. */
 export const SPAWN_TASK_LIMITS = Object.freeze({
+  childConfigBytes: 64 * 1024,
   resultBytes: 8 * 1024 * 1024,
   resultReadBytes: 64 * 1024,
   resultPreviewBytes: 4 * 1024,

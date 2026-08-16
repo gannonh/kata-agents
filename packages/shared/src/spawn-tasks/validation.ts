@@ -128,6 +128,9 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   string(task.delegatedPrompt, 'delegatedPrompt');
   const childConfig = object(task.childConfig, 'childConfig');
   assertJsonValue(childConfig, 'childConfig');
+  if (Buffer.byteLength(JSON.stringify(childConfig), 'utf8') > SPAWN_TASK_LIMITS.childConfigBytes) {
+    fail('childConfig exceeds byte limit');
+  }
 
   const runtimeState = string(task.runtimeState, 'runtimeState');
   if (!(SPAWN_TASK_RUNTIME_STATES as readonly string[]).includes(runtimeState)) fail('unknown runtimeState');

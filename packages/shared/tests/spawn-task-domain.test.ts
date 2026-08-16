@@ -143,6 +143,10 @@ describe('spawn-task validation and terminal metadata', () => {
     openMaps.childConfig.futureProviderOption = { enabled: true };
     openMaps.failure.details.futureDiagnostic = { status: 429 };
     expect(assertSpawnTask(openMaps)).toEqual(openMaps);
+
+    const oversizedConfig = JSON.parse(JSON.stringify(SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved)) as Record<string, any>;
+    oversizedConfig.childConfig = { payload: 'x'.repeat(SPAWN_TASK_LIMITS.childConfigBytes) };
+    expect(() => assertSpawnTask(oversizedConfig)).toThrow('childConfig exceeds byte limit');
   });
 
   it('rejects malformed state timestamps and oversized persisted result metadata', () => {
