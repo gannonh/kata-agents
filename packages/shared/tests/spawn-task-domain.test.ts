@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SPAWN_TASK_CANONICAL_FIXTURE, SPAWN_TASK_LIMITS, type SpawnTask } from '@kata-sh/core';
 import {
   assertSpawnTask,
+  createSpawnTaskAwaitingInput,
   createSpawnTaskFailure,
   transitionSpawnTask,
   SpawnTaskStore,
@@ -34,6 +35,23 @@ describe('spawn-task public API', () => {
     expect('updateSpawnTaskMetadata' in spawnTaskApi).toBe(false);
   });
 });
+
+describe('spawn-task awaiting-input descriptors', () => {
+  it('bounds and sanitizes permission/auth summaries without persisting secrets', () => {
+    const descriptor = createSpawnTaskAwaitingInput({
+      kind: 'authentication',
+      requestId: 'auth_request_1',
+      promptSummary: `Authenticate with token: super-secret-value ${'é'.repeat(5_000)}`,
+      createdAt: at,
+    })
+
+    expect(Object.keys(descriptor).sort()).toEqual(['createdAt', 'kind', 'promptSummary', 'requestId'])
+    expect(descriptor.kind).toBe('authentication')
+    expect(descriptor.requestId).toBe('auth_request_1')
+    expect(descriptor.promptSummary).not.toContain('super-secret-value')
+    expect(Buffer.byteLength(descriptor.promptSummary, 'utf8')).toBeLessThanOrEqual(SPAWN_TASK_LIMITS.promptSummaryBytes)
+  })
+})
 
 describe('spawn-task runtime transitions', () => {
   it('moves queued work to processing with a monotonic version', () => {
