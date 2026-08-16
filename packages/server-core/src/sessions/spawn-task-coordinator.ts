@@ -745,6 +745,7 @@ export class SpawnTaskCoordinator {
       })
       await this.notifyTaskUpdated(current)
     } catch {
+      if (await this.cancelRecoveryBeforeDispatch(current.taskId, recovery)) return
       await this.commitRecoveryFailure(current, 'sent')
       return
     }
@@ -850,6 +851,8 @@ export class SpawnTaskCoordinator {
     try {
       task = this.store.updateDispatch(task.taskId, 'ready', this.clock())
     } catch (error) {
+      const deletionCancellation = await this.preDispatchCancellation(task)
+      if (deletionCancellation) return deletionCancellation
       throw await this.creationFailure(task, error, 'ready')
     }
 
@@ -860,6 +863,8 @@ export class SpawnTaskCoordinator {
       task = this.store.updateDispatch(task.taskId, 'claimed', this.clock())
       this.markDispatchActive(task.taskId)
     } catch (error) {
+      const deletionCancellation = await this.preDispatchCancellation(task)
+      if (deletionCancellation) return deletionCancellation
       throw await this.creationFailure(task, error, 'claim')
     }
 
@@ -882,6 +887,8 @@ export class SpawnTaskCoordinator {
     try {
       task = this.store.updateDispatch(task.taskId, 'sent', this.clock())
     } catch (error) {
+      const deletionCancellation = await this.preDispatchCancellation(task)
+      if (deletionCancellation) return deletionCancellation
       throw await this.creationFailure(task, error, 'sent')
     }
 

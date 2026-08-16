@@ -2,7 +2,6 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +38,7 @@ import {
   assertRegularFile,
   ensureDurableDirectory,
   syncDirectory,
-  writeDurableFile,
+  writeDurableFileIfAbsent,
 } from './durable-fs.ts';
 import {
   assertGenerationName,
@@ -118,7 +117,11 @@ function clone<T>(value: T): T {
 }
 
 function emptyStartupReport(): SpawnTaskStartupReport {
-  return { finalized: [], integrityMarked: [], inputInterrupted: [] };
+  return {
+    finalized: [],
+    integrityMarked: [],
+    inputInterrupted: [],
+  };
 }
 
 function sameIdentity(left: SpawnTask, right: SpawnTask): boolean {
@@ -195,6 +198,16 @@ export class SpawnTaskStore {
       assertSpawnTask(task);
       const snapshot = clone(task);
       this.commit(snapshot);
+      if (this.isParentDeleted(snapshot.parentSessionId)) {
+        let cancelled = this.markParentDeleted(snapshot.taskId, now);
+        cancelled = this.requestCancellation(cancelled.taskId, now, 'parent_deleted');
+        cancelled = this.transition(cancelled.taskId, {
+          runtimeState: 'cancelled',
+          at: now,
+          cancellation: cancelled.cancellation!,
+        });
+        return clone(cancelled);
+      }
       return clone(snapshot);
     }
 
@@ -230,18 +243,16 @@ export class SpawnTaskStore {
     if (this.deletedParents.has(parentSessionId)) return false;
     const parentPath = this.parentDeletionsPath();
     const markerPath = join(parentPath, parentSessionId);
-    const temporaryPath = join(parentPath, `.${parentSessionId}.${this.randomId()}.tmp`);
     assertNotSymlink(markerPath, 'spawned-task parent deletion marker');
-    try {
-      writeDurableFile(temporaryPath, `${at}\n`);
-      renameSync(temporaryPath, markerPath);
-      syncDirectory(parentPath);
+    const created = writeDurableFileIfAbsent(markerPath, `${at}\n`);
+    if (!created) {
+      assertRegularFile(markerPath, 'spawned-task parent deletion marker');
       this.deletedParents.add(parentSessionId);
-      return true;
-    } catch (error) {
-      rmSync(temporaryPath, { force: true });
-      throw error;
+      return false;
     }
+    syncDirectory(parentPath);
+    this.deletedParents.add(parentSessionId);
+    return true;
   }
 
   getLastStartupReport(): SpawnTaskStartupReport {
@@ -465,8 +476,6 @@ export class SpawnTaskStore {
   }
 
   markParentDeleted(taskId: string, at: string): SpawnTask {
-    const current = this.require(taskId);
-    this.markParentDeletedBoundary(current.parentSessionId, at);
     return this.updateMetadata(taskId, { at, parentDeletedAt: at });
   }
 
@@ -514,6 +523,8 @@ export class SpawnTaskStore {
     const finalized: SpawnTaskFinalizedStartupChange[] = [];
     const integrityMarked: SpawnTaskStartupChange[] = [];
     const inputInterrupted: SpawnTaskStartupChange[] = [];
+    const dispatchInterrupted: SpawnTaskStartupChange[] = [];
+    const parentCancelled: SpawnTaskStartupChange[] = [];
     for (const snapshot of [...this.tasks.values()]) {
       try {
         if (snapshot.runtimeState === 'completed' && snapshot.result) {
@@ -572,6 +583,9 @@ export class SpawnTaskStore {
     const current = this.require(taskId);
     if (isSpawnTaskTerminal(current.runtimeState)) {
       throw new Error(`Cannot update dispatch metadata after terminal state ${current.runtimeState}`);
+    }
+    if (this.isParentDeleted(current.parentSessionId)) {
+      throw new Error(`Cannot advance spawned-task dispatch after parent deletion: ${current.parentSessionId}`);
     }
     const order: readonly SpawnTaskDispatchState[] = SPAWN_TASK_DISPATCH_STATES;
     if (order.indexOf(state) !== order.indexOf(current.dispatch.state) + 1) {

@@ -19,6 +19,21 @@ export function writeDurableFile(path: string, content: Buffer | string): void {
   }
 }
 
+export function writeDurableFileIfAbsent(path: string, content: Buffer | string): boolean {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(path, 'wx');
+    writeFileSync(descriptor, content);
+    fsyncSync(descriptor);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 export function syncDirectory(path: string): void {
   let descriptor: number | undefined;
   try {
