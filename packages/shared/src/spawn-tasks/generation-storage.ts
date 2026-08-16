@@ -63,7 +63,11 @@ function copyGenerationFiles(
   const source = join(tasksPath, current.taskId, 'generations', currentGeneration);
   assertDirectory(source, 'current spawned-task generation');
   for (const entry of readdirSync(source, { withFileTypes: true })) {
-    if (entry.isSymbolicLink() || !entry.isFile() || entry.name === RECORD_FILE) continue;
+    if (
+      entry.isSymbolicLink()
+      || !entry.isFile()
+      || (entry.name !== SPAWN_TASK_RESULT_FILE && entry.name !== SPAWN_TASK_VERIFIED_RESULT_FILE)
+    ) continue;
     const sourceFile = join(source, entry.name);
     assertRegularFile(sourceFile, `spawned-task artifact ${entry.name}`);
     writeDurableFile(join(stagePath, entry.name), readFileSync(sourceFile));

@@ -434,6 +434,27 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(generations).toContain(current);
   });
 
+  it('removes an unpublished first generation when CURRENT was never committed', () => {
+    const root = workspace();
+    const values = ['task-orphan', 'child-orphan', 'message-orphan', 'attempt-orphan', 'nonce-orphan'];
+    const faulting = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_missing_current',
+      randomId: () => values.shift()!,
+      faults: (point) => {
+        if (point === 'after-generation-publish') throw new Error('first publication interrupted');
+      },
+    });
+    expect(() => faulting.reserve({ parentSessionId: 'parent_orphan', delegatedPrompt: 'orphan', childConfig: {} })).toThrow(
+      'first publication interrupted',
+    );
+    const taskPath = join(root, 'spawn-tasks', 'tasks', 'task_task-orphan');
+    expect(existsSync(taskPath)).toBe(true);
+
+    new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_missing_current' });
+    expect(existsSync(taskPath)).toBe(false);
+  });
+
   it('cleans orphan publication files and generations during reload', () => {
     const root = workspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cleanup' });
@@ -455,6 +476,25 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(existsSync(join(generationsRoot, 'junk-directory'))).toBe(false);
     expect(existsSync(join(generationsRoot, 'junk-file'))).toBe(false);
     expect(generationNames(root, processing.taskId)).toHaveLength(2);
+  });
+
+  it('retains only a valid immediate prior generation and does not copy arbitrary files', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_safe_prior' });
+    const processing = processingTask(store);
+    const taskRoot = join(root, 'spawn-tasks', 'tasks', processing.taskId);
+    const generationsRoot = join(taskRoot, 'generations');
+    const current = readFileSync(join(taskRoot, 'CURRENT'), 'utf8').trim();
+    const prior = generationNames(root, processing.taskId).find((name) => name !== current)!;
+    rmSync(join(generationsRoot, prior), { recursive: true, force: true });
+    mkdirSync(join(generationsRoot, 'g-0000000001-fake'));
+    writeFileSync(join(generationsRoot, 'g-0000000001-fake', 'record.json'), '{}', 'utf8');
+    writeFileSync(join(currentGenerationPath(root, processing.taskId), 'extra.bin'), 'junk', 'utf8');
+
+    const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_safe_prior' });
+    expect(generationNames(root, processing.taskId)).toEqual([current]);
+    const updated = reloaded.markParentDeleted(processing.taskId, later);
+    expect(existsSync(join(currentGenerationPath(root, updated.taskId), 'extra.bin'))).toBe(false);
   });
 
   it('rejects symlinked task, CURRENT, generation, and result paths', () => {

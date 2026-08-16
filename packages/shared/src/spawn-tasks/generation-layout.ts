@@ -1,6 +1,7 @@
-import { lstatSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { assertDirectory } from './durable-fs.ts';
+import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { assertDirectory, isRegularFile, syncDirectory } from './durable-fs.ts';
+import { assertSpawnTask } from './validation.ts';
 
 export const CURRENT_FILE = 'CURRENT';
 export const RECORD_FILE = 'record.json';
@@ -17,6 +18,25 @@ function generationVersion(name: string): number | null {
 
 function removeEntry(path: string): void {
   rmSync(path, { recursive: true, force: true });
+}
+
+function isValidPriorGeneration(taskPath: string, name: string, expectedVersion: number): boolean {
+  const generationPath = join(taskPath, 'generations', name);
+  const recordPath = join(generationPath, RECORD_FILE);
+  try {
+    assertDirectory(generationPath, 'prior spawned-task generation');
+    if (!isRegularFile(recordPath)) return false;
+    const task = assertSpawnTask(JSON.parse(readFileSync(recordPath, 'utf8')));
+    return task.version === expectedVersion && task.taskId === basename(taskPath);
+  } catch {
+    return false;
+  }
+}
+
+export function removeUnpublishedTask(taskPath: string): void {
+  assertDirectory(taskPath, 'unpublished spawned-task directory');
+  removeEntry(taskPath);
+  syncDirectory(dirname(taskPath));
 }
 
 /** Keep CURRENT plus its immediate prior committed generation and remove crash debris. */
@@ -41,16 +61,15 @@ export function reconcileTaskGenerations(
     if (entry.name.startsWith('.stage-')) removeEntry(join(generationsPath, entry.name));
   }
 
+  const currentVersion = generationVersion(currentGeneration)!;
   let prior = priorGeneration;
+  if (prior && !isValidPriorGeneration(taskPath, prior, currentVersion - 1)) prior = undefined;
   if (!prior) {
-    const currentVersion = generationVersion(currentGeneration);
-    if (currentVersion !== null) {
-      prior = generationEntries
-        .filter((entry) => !entry.isSymbolicLink() && entry.isDirectory())
-        .map((entry) => ({ name: entry.name, version: generationVersion(entry.name) }))
-        .filter((entry): entry is { name: string; version: number } => entry.version !== null && entry.version < currentVersion)
-        .sort((left, right) => right.version - left.version)[0]?.name;
-    }
+    const candidates = generationEntries
+      .filter((entry) => !entry.isSymbolicLink() && entry.isDirectory())
+      .filter((entry) => generationVersion(entry.name) === currentVersion - 1)
+      .filter((entry) => isValidPriorGeneration(taskPath, entry.name, currentVersion - 1));
+    if (candidates.length === 1) prior = candidates[0]!.name;
   }
 
   for (const entry of readdirSync(generationsPath, { withFileTypes: true })) {

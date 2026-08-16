@@ -44,6 +44,7 @@ import {
   CURRENT_FILE,
   RECORD_FILE,
   reconcileTaskGenerations,
+  removeUnpublishedTask,
 } from './generation-layout.ts';
 import {
   publishTaskGeneration,
@@ -456,7 +457,10 @@ export class SpawnTaskStore {
         assertDirectory(taskPath, 'spawned-task directory');
         const currentPath = join(taskPath, CURRENT_FILE);
         assertNotSymlink(currentPath, 'spawned-task CURRENT');
-        if (!existsSync(currentPath)) continue;
+        if (!existsSync(currentPath)) {
+          removeUnpublishedTask(taskPath);
+          continue;
+        }
         assertRegularFile(currentPath, 'spawned-task CURRENT');
         const generation = readFileSync(currentPath, 'utf8').trim();
         assertGenerationName(generation);
