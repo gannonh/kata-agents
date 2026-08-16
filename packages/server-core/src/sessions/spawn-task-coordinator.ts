@@ -408,8 +408,11 @@ export class SpawnTaskCoordinator {
         : { status: 'cancel_failed', task: current }
     }
 
-    if (requested.runtimeState === 'queued' || !runtime?.abort) {
+    if (requested.runtimeState === 'queued') {
       return this.commitCancellation(requested)
+    }
+    if (!runtime?.abort) {
+      return this.commitCancellation(requested, false)
     }
 
     try {
@@ -446,6 +449,7 @@ export class SpawnTaskCoordinator {
       } catch {
         await this.reconcileStore()
         current = this.store.get(taskId)
+        if (current) this.clearDispatchActive(current.taskId)
         return { status: 'cancel_failed', task: current }
       }
     }
@@ -510,7 +514,10 @@ export class SpawnTaskCoordinator {
     return current
   }
 
-  private async commitCancellation(task: SpawnTask): Promise<SpawnTaskCancellationResult> {
+  private async commitCancellation(
+    task: SpawnTask,
+    clearActiveOnFailure = true,
+  ): Promise<SpawnTaskCancellationResult> {
     if (isSpawnTaskTerminal(task.runtimeState)) {
       this.clearDispatchActive(task.taskId)
       return { status: 'already_terminal', task }
@@ -527,6 +534,7 @@ export class SpawnTaskCoordinator {
     } catch {
       await this.reconcileStore()
       const current = this.store.get(task.taskId)
+      if (clearActiveOnFailure) this.clearDispatchActive(task.taskId)
       return isSpawnTaskTerminal(current?.runtimeState ?? 'cancelled')
         ? { status: 'already_terminal', task: current }
         : { status: 'cancel_failed', task: current }
@@ -761,7 +769,10 @@ export class SpawnTaskCoordinator {
       })
       await this.notifyTaskUpdated(current)
     } catch {
-      if (await this.cancelRecoveryBeforeDispatch(current.taskId, recovery)) return
+      if (await this.cancelRecoveryBeforeDispatch(current.taskId, recovery)) {
+        this.clearDispatchActive(current.taskId)
+        return
+      }
       await this.commitRecoveryFailure(current, 'sent')
       return
     }
@@ -800,12 +811,17 @@ export class SpawnTaskCoordinator {
   ): Promise<void> {
     const failure = this.failure(error ?? `Spawned-task recovery failed at ${boundary}.`, boundary, code)
     let current = this.store.get(task.taskId) ?? task
-    if (isSpawnTaskTerminal(current.runtimeState)) return
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      this.clearDispatchActive(current.taskId)
+      return
+    }
     try {
       const failed = await this.commitFailure(current, failure)
       if (isSpawnTaskTerminal(failed.runtimeState)) this.clearDispatchActive(failed.taskId)
     } catch {
       await this.reconcileStore()
+    } finally {
+      this.clearDispatchActive(task.taskId)
     }
   }
 
@@ -966,7 +982,10 @@ export class SpawnTaskCoordinator {
       this.auditLateEvent(current, input.code)
       return current
     }
-    if (current.runtimeState !== 'processing') return current
+    if (current.runtimeState !== 'processing') {
+      this.clearDispatchActive(current.taskId)
+      return current
+    }
 
     const failure = createSpawnTaskFailure({
       code: input.code,
@@ -999,7 +1018,10 @@ export class SpawnTaskCoordinator {
   ): Promise<SpawnTask | null> {
     await this.reconcileStore()
     let current = this.store.get(taskId)
-    if (!current) return null
+    if (!current) {
+      this.clearDispatchActive(taskId)
+      return null
+    }
 
     // A verified artifact may have been published even when the terminal record
     // commit threw. Reload/reconciliation wins over a synthetic persistence
@@ -1009,7 +1031,10 @@ export class SpawnTaskCoordinator {
       this.clearDispatchActive(current.taskId)
       return current
     }
-    if (current.runtimeState !== 'processing') return current
+    if (current.runtimeState !== 'processing') {
+      this.clearDispatchActive(current.taskId)
+      return current
+    }
 
     const persistFailure = createSpawnTaskFailure({
       code: 'result_persist_failed',
@@ -1029,6 +1054,7 @@ export class SpawnTaskCoordinator {
         failure: persistFailure,
       })
       await this.notifyTaskUpdated(current)
+      this.clearDispatchActive(current.taskId)
       return current
     } catch {
       // A second durability fault leaves the last durable state as the only
@@ -1037,8 +1063,8 @@ export class SpawnTaskCoordinator {
       current = this.store.get(taskId)
       if (current && isSpawnTaskTerminal(current.runtimeState)) {
         if (current.version > previousVersion) await this.notifyTaskUpdated(current)
-        this.clearDispatchActive(current.taskId)
       }
+      this.clearDispatchActive(taskId)
       return current
     }
   }
@@ -1121,30 +1147,41 @@ export class SpawnTaskCoordinator {
   }
 
   private async commitFailure(task: SpawnTask, failure: SpawnTaskFailure): Promise<SpawnTask> {
-    let current = this.store.get(task.taskId) ?? task
-    if (current.runtimeState === 'queued') {
+    try {
+      let current = this.store.get(task.taskId) ?? task
+      if (current.runtimeState === 'queued') {
+        try {
+          const failed = this.store.transition(current.taskId, {
+            runtimeState: 'failed',
+            at: failure.committedAt,
+            failure,
+          })
+          await this.notifyTaskUpdated(failed)
+          return failed
+        } catch {
+          // Keep the last committed reservation/claim as recovery evidence.
+          return this.store.get(task.taskId) ?? current
+        }
+      }
+      if (current.runtimeState !== 'processing') return current
       try {
-        current = this.store.transition(current.taskId, {
-          runtimeState: 'processing',
-          at: this.clock(),
+        const failed = this.store.transition(current.taskId, {
+          runtimeState: 'failed',
+          at: failure.committedAt,
+          failure,
         })
+        await this.notifyTaskUpdated(failed)
+        return failed
       } catch {
+        // Keep the last committed reservation/claim as recovery evidence. Never
+        // compensate by deleting a task whose intent reached durable storage.
         return this.store.get(task.taskId) ?? current
       }
-    }
-    if (current.runtimeState !== 'processing') return current
-    try {
-      const failed = this.store.transition(current.taskId, {
-        runtimeState: 'failed',
-        at: failure.committedAt,
-        failure,
-      })
-      await this.notifyTaskUpdated(failed)
-      return failed
-    } catch {
-      // Keep the last committed reservation/claim as recovery evidence. Never
-      // compensate by deleting a task whose intent reached durable storage.
-      return this.store.get(task.taskId) ?? current
+    } finally {
+      // This helper is only used after a provider has not been intentionally
+      // left live. A failed terminal publication must not hide claimed work
+      // from same-process startup recovery.
+      this.clearDispatchActive(task.taskId)
     }
   }
 }

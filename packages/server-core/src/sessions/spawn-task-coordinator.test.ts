@@ -371,6 +371,124 @@ describe('SpawnTaskCoordinator', () => {
     })
   })
 
+  it('clears active dispatch after a post-claim failure publication fault', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    let failurePublicationFault = true
+    const store = createStore(workspaceRoot, (point, task) => {
+      if (point === 'before-current-publish' && task.runtimeState === 'failed' && failurePublicationFault) {
+        failurePublicationFault = false
+        throw new Error('failure publication interrupted')
+      }
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        throw new Error('append failed after claim')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    await expect(coordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'do not hide this failed claim',
+      childConfig: {},
+    })).rejects.toThrow('append failed after claim')
+
+    const afterFailure = store.listAll()[0]
+    expect(afterFailure?.dispatch.state).toBe('claimed')
+    expect(afterFailure?.runtimeState).toBe('queued')
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    const interrupted = store.get(afterFailure!.taskId)!
+    expect(interrupted).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'dispatch_interrupted',
+        retryable: true,
+      },
+    })
+    expect(providerCalls).toBe(0)
+    expect(updates.at(-1)).toEqual({ taskId: interrupted.taskId, version: interrupted.version })
+  })
+
+  it('clears active recovery claims after failure publication faults', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'recover without hiding the failed claim',
+      childConfig: {},
+    })
+    const ready = initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    let failurePublicationFault = true
+    const store = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.runtimeState === 'failed' && failurePublicationFault) {
+          failurePublicationFault = false
+          throw new Error('recovery failure publication interrupted')
+        }
+      },
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {
+        throw new Error('recovery append failed after claim')
+      },
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    const afterFailure = store.get(ready.taskId)!
+    expect(afterFailure).toMatchObject({
+      runtimeState: 'queued',
+      dispatch: { state: 'claimed' },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+    })
+
+    const interrupted = store.get(ready.taskId)!
+    expect(interrupted).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'dispatch_interrupted',
+        retryable: true,
+      },
+    })
+    expect(providerCalls).toBe(0)
+    expect(updates.at(-1)).toEqual({ taskId: interrupted.taskId, version: interrupted.version })
+  })
+
   it('keeps concurrent children independent through recovery and terminal outcomes', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
