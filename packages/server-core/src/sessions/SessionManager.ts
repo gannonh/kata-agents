@@ -112,8 +112,8 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
-import { SpawnTaskCoordinator, type SpawnTaskDispatchInput, type SpawnTaskUpdated } from './spawn-task-coordinator'
-import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
+import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskUpdated } from './spawn-task-coordinator'
+import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
@@ -1227,6 +1227,8 @@ export interface SessionManagerOptions {
   spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
   /** Internal C2 invalidation seam; task commits precede this versioned callback. */
   spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
+  /** Internal C3 audit seam for ignored late child lifecycle events. */
+  spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
 }
 
 interface ForkChildCreateOptions {
@@ -1250,6 +1252,7 @@ export class SessionManager implements ISessionManager {
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
   private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
+  private readonly spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
@@ -1338,6 +1341,7 @@ export class SessionManager implements ISessionManager {
     this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
     this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
     this.spawnTaskUpdated = options.spawnTaskUpdated
+    this.spawnTaskLateEvent = options.spawnTaskLateEvent
   }
 
   private registerPreChatBarrier(sessionId: string): () => void {
@@ -2401,6 +2405,16 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    // A spawned task must resume durably before any auth UI, credential, or
+    // bridge side effect can revive a terminal child. Ordinary sessions keep
+    // the existing auth flow unchanged.
+    const canResumeSpawnTask = await this.resumeSpawnTaskInput(managed, result.requestId)
+    if (!canResumeSpawnTask && managed.spawnTaskRef) {
+      await this.interruptSpawnTaskInput(managed, `Authentication response could not resume request ${result.requestId}.`)
+      sessionLog.warn(`Ignoring authentication response for non-awaiting spawned task ${managed.id}`)
+      return
+    }
+
     // Find and update the pending auth-request message
     const authMessage = managed.messages.find(m =>
       m.role === 'auth-request' &&
@@ -2879,6 +2893,9 @@ export class SessionManager implements ISessionManager {
           )
         }),
         onTaskUpdated: this.spawnTaskUpdated,
+        onLateEvent: this.spawnTaskLateEvent ?? ((event) => {
+          sessionLog.warn('Ignored late spawned-task event:', event)
+        }),
       })
       this.spawnTaskStores.set(workspaceKey, store)
       this.spawnTaskCoordinators.set(workspaceKey, coordinator)
@@ -4399,68 +4416,90 @@ export class SessionManager implements ISessionManager {
         commandHash?: string;
         approvalTtlSeconds?: number;
       }) => {
-        sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
-        let brokerMetadata: {
-          commandHash?: string
-          approvalTtlSeconds?: number
-        } = {}
-
-        if (request.type === 'admin_approval' && request.command) {
-          const brokerRequest = this.privilegedExecutionBroker.createRequest({
+        void (async () => {
+          const canAwait = await this.enterSpawnTaskAwaitingInput(managed, {
+            kind: 'permission',
             requestId: request.requestId,
-            sessionId: managed.id,
-            command: request.command,
-            reason: request.reason,
-            impact: request.impact,
-            approvalTtlSeconds: request.approvalTtlSeconds,
+            promptSummary: `${request.toolName} permission requested`,
           })
+          if (!canAwait) return
 
-          brokerMetadata = {
-            commandHash: brokerRequest.commandHash,
-            approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
-          }
-        }
+          sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+          let brokerMetadata: {
+            commandHash?: string
+            approvalTtlSeconds?: number
+          } = {}
 
-        const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
-
-        this.pendingPermissionRequests.set(request.requestId, {
-          sessionId: managed.id,
-          type: request.type,
-          commandHash: effectiveCommandHash,
-        })
-
-        if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
-          const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
-            expectedCommandHash: effectiveCommandHash,
-          })
-
-          this.pendingPermissionRequests.delete(request.requestId)
-
-          if (brokerResult.ok) {
-            this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
-              sessionId: managed.id,
+          if (request.type === 'admin_approval' && request.command) {
+            const brokerRequest = this.privilegedExecutionBroker.createRequest({
               requestId: request.requestId,
-              commandHash: effectiveCommandHash,
+              sessionId: managed.id,
+              command: request.command,
+              reason: request.reason,
+              impact: request.impact,
+              approvalTtlSeconds: request.approvalTtlSeconds,
             })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
+
+            brokerMetadata = {
+              commandHash: brokerRequest.commandHash,
+              approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
             }
           }
 
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
-        }
+          const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
 
-        this.sendEvent({
-          type: 'permission_request',
-          sessionId: managed.id,
-          request: {
-            ...request,
-            ...brokerMetadata,
+          this.pendingPermissionRequests.set(request.requestId, {
             sessionId: managed.id,
+            type: request.type,
+            commandHash: effectiveCommandHash,
+          })
+
+          if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
+            const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
+              expectedCommandHash: effectiveCommandHash,
+            })
+
+            this.pendingPermissionRequests.delete(request.requestId)
+
+            if (brokerResult.ok) {
+              this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
+                sessionId: managed.id,
+                requestId: request.requestId,
+                commandHash: effectiveCommandHash,
+              })
+              const liveAgent = managed.agent
+              if (liveAgent) {
+                try {
+                  liveAgent.respondToPermission(request.requestId, true, false)
+                  const resumed = await this.resumeSpawnTaskInput(managed, request.requestId)
+                  if (!resumed) {
+                    await this.interruptSpawnTaskInput(managed, `Permission auto-approval could not resume request ${request.requestId}.`)
+                  }
+                } catch (error) {
+                  await this.interruptSpawnTaskInput(managed, error)
+                }
+                return
+              }
+            }
+
+            sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
           }
-        }, managed.workspace.id)
+
+          this.sendEvent({
+            type: 'permission_request',
+            sessionId: managed.id,
+            request: {
+              ...request,
+              ...brokerMetadata,
+              sessionId: managed.id,
+            }
+          }, managed.workspace.id)
+        })().catch((error) => {
+          void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+            sessionLog.warn(`Failed to interrupt permission task for session ${managed.id}:`, interruptError)
+          })
+          sessionLog.error(`Failed to persist permission input state for session ${managed.id}:`, error)
+        })
       }
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)
@@ -4562,6 +4601,14 @@ export class SessionManager implements ISessionManager {
 
       // Wire up onAuthRequest to add auth message to conversation and pause execution
       managed.agent.onAuthRequest = (request) => {
+        void (async () => {
+          const canAwait = await this.enterSpawnTaskAwaitingInput(managed, {
+            kind: 'authentication',
+            requestId: request.requestId,
+            promptSummary: this.getAuthRequestDescription(request),
+          })
+          if (!canAwait) return
+
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
 
         // Create auth-request message
@@ -4624,6 +4671,12 @@ export class SessionManager implements ISessionManager {
 
         // OAuth flow is client-driven via performOAuth() (preload).
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
+        })().catch((error) => {
+          void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+            sessionLog.warn(`Failed to interrupt authentication task for session ${managed.id}:`, interruptError)
+          })
+          sessionLog.error(`Failed to persist authentication input state for session ${managed.id}:`, error)
+        })
       }
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
@@ -5421,6 +5474,101 @@ export class SessionManager implements ISessionManager {
     // Ownership is resolved by the coordinator's durable child-session index;
     // the private back-reference merely makes the expected path explicit.
     return this.getSpawnTaskCoordinator(managed)
+  }
+
+  private spawnTaskRuntimeForSession(managed: ManagedSession): SpawnTaskCancellationRuntime {
+    return {
+      abort: () => {
+        if (!managed.agent) return
+        managed.stopRequested = true
+        managed.agent.forceAbort(AbortReason.UserStop)
+      },
+      cleanup: () => {
+        const agent = managed.agent
+        managed.agent = null
+        this.setProcessing(managed, false)
+        managed.stopRequested = false
+        try {
+          agent?.dispose()
+        } catch (error) {
+          sessionLog.warn(`Failed to clean up cancelled spawned child ${managed.id}:`, error)
+        }
+      },
+    }
+  }
+
+  async cancelSpawnTask(taskId: string, reason = 'cancelled'): Promise<SpawnTaskCancellationResult> {
+    const managed = Array.from(this.sessions.values()).find((session) => session.spawnTaskRef?.taskId === taskId)
+    if (managed) {
+      return this.getSpawnTaskCoordinatorForChild(managed).cancelTask(
+        taskId,
+        reason,
+        this.spawnTaskRuntimeForSession(managed),
+      )
+    }
+
+    for (const coordinator of this.spawnTaskCoordinators.values()) {
+      if (coordinator.getTask(taskId)) return coordinator.cancelTask(taskId, reason)
+    }
+    return { status: 'already_terminal', task: null }
+  }
+
+  private async enterSpawnTaskAwaitingInput(
+    managed: ManagedSession,
+    input: Omit<CreateSpawnTaskAwaitingInputInput, 'createdAt'> & { createdAt?: string },
+  ): Promise<boolean> {
+    if (!managed.spawnTaskRef) return true
+    const task = await this.getSpawnTaskCoordinatorForChild(managed).awaitInputForChildSession(managed.id, {
+      ...input,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+    })
+    if (task?.runtimeState === 'awaiting-input') return true
+    sessionLog.warn(`Ignoring input request for non-awaiting spawned task ${managed.id}`, {
+      taskId: managed.spawnTaskRef.taskId,
+      state: task?.runtimeState,
+    })
+    return false
+  }
+
+  private async resumeSpawnTaskInput(managed: ManagedSession, requestId: string): Promise<boolean> {
+    if (!managed.spawnTaskRef) return true
+    const task = await this.getSpawnTaskCoordinatorForChild(managed).resumeAwaitingInputForChildSession(
+      managed.id,
+      requestId,
+    )
+    if (task?.runtimeState === 'processing') return true
+    sessionLog.warn(`Ignoring input response for non-processing spawned task ${managed.id}`, {
+      taskId: managed.spawnTaskRef.taskId,
+      state: task?.runtimeState,
+      requestId,
+    })
+    return false
+  }
+
+  private async interruptSpawnTaskInput(managed: ManagedSession, error: unknown): Promise<void> {
+    if (!managed.spawnTaskRef) return
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const task = coordinator.getTask(managed.spawnTaskRef.taskId)
+    if (!task || isSpawnTaskTerminal(task.runtimeState) || task.runtimeState !== 'awaiting-input') return
+    await coordinator.interruptAwaitingInputForChildSession(managed.id, error)
+  }
+
+  private spawnedTaskInputResponseIsCurrent(
+    managed: ManagedSession,
+    requestId: string,
+    eventKind: string,
+  ): boolean {
+    if (!managed.spawnTaskRef) return true
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const task = coordinator.getTask(managed.spawnTaskRef.taskId)
+    if (!task) return false
+    if (isSpawnTaskTerminal(task.runtimeState)) {
+      coordinator.recordLateEventForChildSession(managed.id, eventKind)
+      return false
+    }
+    return task.runtimeState === 'awaiting-input'
+      && !task.cancellation
+      && task.awaitingInput?.requestId === requestId
   }
 
   private async finalizeSpawnTaskResult(managed: ManagedSession): Promise<void> {
@@ -7486,6 +7634,19 @@ export class SessionManager implements ISessionManager {
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
+    // Preserve spawned-task records and commit deletion/cancellation metadata
+    // before the session_deleted event or session storage removal. Sent parent
+    // work is intentionally left orphaned; active child work is cancelled first.
+    const taskCoordinator = this.getSpawnTaskCoordinator(managed)
+    if (managed.spawnTaskRef) {
+      await taskCoordinator.markChildDeleted(
+        managed.id,
+        this.spawnTaskRuntimeForSession(managed),
+      )
+    } else {
+      await taskCoordinator.markParentDeleted(managed.id)
+    }
+
     // Quiesce the agent BEFORE anything reads or removes the checkout. A live
     // turn writes into the worktree, so inspecting removal risk or removing the
     // checkout while it runs could discard files the destructive confirmation
@@ -8885,6 +9046,13 @@ export class SessionManager implements ISessionManager {
     options?: import('@kata-sh/shared/protocol').PermissionResponseOptions,
   ): boolean {
     const managed = this.sessions.get(sessionId)
+    if (managed?.spawnTaskRef && !this.spawnedTaskInputResponseIsCurrent(managed, requestId, 'permission_response')) {
+      this.pendingPermissionRequests.delete(requestId)
+      void this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`).catch((error) => {
+        sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, error)
+      })
+      return false
+    }
     if (managed?.agent) {
       const requestMeta = this.pendingPermissionRequests.get(requestId)
       this.pendingPermissionRequests.delete(requestId)
@@ -8896,7 +9064,19 @@ export class SessionManager implements ISessionManager {
         if (!brokerResult.ok) {
           sessionLog.warn(`Admin approval rejected by broker for ${requestId}: ${brokerResult.reason}`)
           // Broker rejection should fail closed.
-          managed.agent.respondToPermission(requestId, false, false)
+          try {
+            managed.agent.respondToPermission(requestId, false, false)
+          } catch (error) {
+            void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+              sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, interruptError)
+            })
+            return false
+          }
+          void this.resumeSpawnTaskInput(managed, requestId).then((resumed) => {
+            if (!resumed) return this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`)
+          }).catch((error) => {
+            sessionLog.warn(`Failed to resume permission task ${requestId}:`, error)
+          })
           return false
         }
 
@@ -8906,9 +9086,26 @@ export class SessionManager implements ISessionManager {
       }
 
       sessionLog.info(`Permission response for ${requestId}: allowed=${allowed}, alwaysAllow=${alwaysAllow}`)
-      managed.agent.respondToPermission(requestId, allowed, alwaysAllow)
+      try {
+        managed.agent.respondToPermission(requestId, allowed, alwaysAllow)
+      } catch (error) {
+        void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+          sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, interruptError)
+        })
+        return false
+      }
+      void this.resumeSpawnTaskInput(managed, requestId).then((resumed) => {
+        if (!resumed) return this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`)
+      }).catch((error) => {
+        sessionLog.warn(`Failed to resume permission task ${requestId}:`, error)
+      })
       return true
     } else {
+      if (managed?.spawnTaskRef) {
+        void this.interruptSpawnTaskInput(managed, `Permission response arrived without a live agent for request ${requestId}.`).catch((error) => {
+          sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, error)
+        })
+      }
       sessionLog.warn(`Cannot respond to permission - no agent for session ${sessionId}`)
       return false
     }
@@ -9214,6 +9411,15 @@ export class SessionManager implements ISessionManager {
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
+
+    // A cancelled/cancel_failed child may still drain provider events after its
+    // abort boundary. Do not append or forward those payloads; the coordinator
+    // records only bounded event facts in the late-event audit seam.
+    if (managed.spawnTaskRef) {
+      const ignored = this.getSpawnTaskCoordinatorForChild(managed)
+        .recordLateEventForChildSession(managed.id, event.type)
+      if (ignored) return
+    }
 
     switch (event.type) {
       case 'text_delta':
