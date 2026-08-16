@@ -230,7 +230,7 @@ export class SpawnTaskStore {
   }
 
   updateMetadata(taskId: string, update: SpawnTaskMetadataUpdate): SpawnTask {
-    if (update.integrityError !== undefined) {
+    if ('integrityError' in update) {
       throw new Error('Integrity metadata is store-owned; use repairResult to clear it');
     }
     const current = this.require(taskId);

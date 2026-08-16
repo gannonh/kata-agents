@@ -15,6 +15,7 @@ const AUTHORIZATION_SECRET = /(\bauthorization\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r
 const NAMED_SECRET = /(\b(?:api[-_ ]?key|cookie|credential|password|secret|token)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi;
 const NAMED_SECRET_WORD = /(\b(?:api[-_ ]?key|password|secret|token)\s+)[A-Za-z0-9._~+/=-]{6,}/gi;
 const LIKELY_BARE_SECRET = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+const UNSAFE_DETAIL_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function sanitizeMessage(value: string): string {
   return value
@@ -59,11 +60,15 @@ function sanitizeValue(value: unknown, depth: number, state: SanitizeState): Spa
   if (typeof value === 'object' && value !== null) {
     const entries = Object.entries(value);
     if (entries.length > 64) state.truncated = true;
-    const sanitized: Record<string, SpawnTaskJsonValue> = {};
+    const sanitized = Object.create(null) as Record<string, SpawnTaskJsonValue>;
     for (const [rawKey, rawValue] of entries.slice(0, 64)) {
       const key = truncateUtf8(rawKey, 128);
       if (key !== rawKey) state.truncated = true;
       if (!key) continue;
+      if (UNSAFE_DETAIL_KEYS.has(key)) {
+        state.truncated = true;
+        continue;
+      }
       if (SENSITIVE_KEY.test(key)) {
         sanitized[key] = '[redacted]';
         continue;
@@ -86,20 +91,18 @@ function sanitizeDetails(details: unknown): SpawnTaskFailureDetails | undefined 
   if (!sanitized || Array.isArray(sanitized) || typeof sanitized !== 'object') return undefined;
 
   const kind = inputKind((details as { kind?: unknown } | null)?.kind);
-  const candidate: SpawnTaskFailureDetails = {
-    ...(sanitized as SpawnTaskFailureDetails),
-    ...(kind ? { kind } : {}),
-    ...(state.truncated ? { truncated: true } : {}),
-  };
+  const candidate = sanitized as Record<string, SpawnTaskJsonValue>;
+  if (kind) candidate.kind = kind;
+  if (state.truncated) candidate.truncated = true;
   const serialized = JSON.stringify(candidate);
   if (Buffer.byteLength(serialized, 'utf8') <= SPAWN_TASK_LIMITS.failureDetailsBytes) {
-    return candidate;
+    return candidate as SpawnTaskFailureDetails;
   }
 
-  return {
-    ...(kind ? { kind } : {}),
-    truncated: true,
-  };
+  const bounded = Object.create(null) as Record<string, SpawnTaskJsonValue>;
+  if (kind) bounded.kind = kind;
+  bounded.truncated = true;
+  return bounded as SpawnTaskFailureDetails;
 }
 
 export function createSpawnTaskFailure(input: CreateSpawnTaskFailureInput): SpawnTaskFailure {

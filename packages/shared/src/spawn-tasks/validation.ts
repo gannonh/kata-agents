@@ -27,6 +27,12 @@ function string(value: unknown, field: string): string {
   return value;
 }
 
+function exactKeys(value: Record<string, unknown>, field: string, allowed: readonly string[]): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) fail(`${field}.${key} is unknown`);
+  }
+}
+
 function timestamp(value: unknown, field: string): string {
   const text = string(value, field);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(text) || !Number.isFinite(Date.parse(text))) {
@@ -66,6 +72,14 @@ function assertJsonValue(value: unknown, field: string): asserts value is SpawnT
 
 export function assertSpawnTaskResult(value: unknown, field = 'result'): SpawnTaskResult {
   const result = object(value, field);
+  exactKeys(result, field, [
+    'artifactPath',
+    'byteLength',
+    'sha256',
+    'sourceMessageId',
+    'committedAt',
+    'preview',
+  ]);
   if (result.artifactPath !== SPAWN_TASK_RESULT_ARTIFACT_PATH) {
     fail(`${field}.artifactPath must be ${SPAWN_TASK_RESULT_ARTIFACT_PATH}`);
   }
@@ -84,6 +98,27 @@ export function assertSpawnTaskResult(value: unknown, field = 'result'): SpawnTa
 
 export function assertSpawnTask(value: unknown): SpawnTask {
   const task = object(value, 'task');
+  exactKeys(task, 'task', [
+    'schemaVersion',
+    'version',
+    'taskId',
+    'workspaceId',
+    'parentSessionId',
+    'childSessionId',
+    'delegatedPrompt',
+    'childConfig',
+    'runtimeState',
+    'stateTimestamps',
+    'dispatch',
+    'awaitingInput',
+    'cancellation',
+    'result',
+    'failure',
+    'resultReadAt',
+    'parentDeletedAt',
+    'childDeletedAt',
+    'integrityError',
+  ]);
   if (task.schemaVersion !== SPAWN_TASK_SCHEMA_VERSION) fail('unsupported schemaVersion');
   positiveInteger(task.version, 'version');
   assertSpawnTaskId(task.taskId, 'taskId');
@@ -98,6 +133,16 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   if (!(SPAWN_TASK_RUNTIME_STATES as readonly string[]).includes(runtimeState)) fail('unknown runtimeState');
 
   const stateTimestamps = object(task.stateTimestamps, 'stateTimestamps');
+  exactKeys(stateTimestamps, 'stateTimestamps', [
+    'createdAt',
+    'updatedAt',
+    'queuedAt',
+    'processingAt',
+    'awaitingInputAt',
+    'completedAt',
+    'failedAt',
+    'cancelledAt',
+  ]);
   timestamp(stateTimestamps.createdAt, 'stateTimestamps.createdAt');
   timestamp(stateTimestamps.updatedAt, 'stateTimestamps.updatedAt');
   timestamp(stateTimestamps.queuedAt, 'stateTimestamps.queuedAt');
@@ -106,6 +151,15 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   }
 
   const dispatch = object(task.dispatch, 'dispatch');
+  exactKeys(dispatch, 'dispatch', [
+    'state',
+    'dispatchAttemptId',
+    'messageId',
+    'reservedAt',
+    'readyAt',
+    'claimedAt',
+    'sentAt',
+  ]);
   const dispatchState = string(dispatch.state, 'dispatch.state');
   if (!(SPAWN_TASK_DISPATCH_STATES as readonly string[]).includes(dispatchState)) fail('unknown dispatch.state');
   assertSpawnTaskId(dispatch.dispatchAttemptId, 'dispatch.dispatchAttemptId');
@@ -129,6 +183,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
 
   if (task.awaitingInput !== undefined) {
     const awaiting = object(task.awaitingInput, 'awaitingInput');
+    exactKeys(awaiting, 'awaitingInput', ['kind', 'requestId', 'promptSummary', 'createdAt']);
     if (awaiting.kind !== 'permission' && awaiting.kind !== 'authentication') fail('unknown awaitingInput.kind');
     assertSpawnTaskId(awaiting.requestId, 'awaitingInput.requestId');
     const summary = string(awaiting.promptSummary, 'awaitingInput.promptSummary');
@@ -138,6 +193,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
 
   if (task.cancellation !== undefined) {
     const cancellation = object(task.cancellation, 'cancellation');
+    exactKeys(cancellation, 'cancellation', ['requestedAt', 'reason']);
     timestamp(cancellation.requestedAt, 'cancellation.requestedAt');
     const reason = string(cancellation.reason, 'cancellation.reason');
     if (!reason.trim() || Buffer.byteLength(reason, 'utf8') > SPAWN_TASK_LIMITS.failureMessageBytes) {
@@ -149,6 +205,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
 
   if (task.failure !== undefined) {
     const failure = object(task.failure, 'failure');
+    exactKeys(failure, 'failure', ['code', 'message', 'retryable', 'details', 'committedAt']);
     const code = string(failure.code, 'failure.code');
     if (!(SPAWN_TASK_FAILURE_CODES as readonly string[]).includes(code)) fail('unknown failure.code');
     const message = string(failure.message, 'failure.message');
@@ -168,6 +225,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
 
   if (task.integrityError !== undefined) {
     const integrity = object(task.integrityError, 'integrityError');
+    exactKeys(integrity, 'integrityError', ['code', 'message', 'detectedAt']);
     if (integrity.code !== 'result_persist_failed') fail('unknown integrityError.code');
     string(integrity.message, 'integrityError.message');
     timestamp(integrity.detectedAt, 'integrityError.detectedAt');

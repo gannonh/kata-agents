@@ -2,14 +2,15 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SPAWN_TASK_CANONICAL_FIXTURE, type SpawnTask } from '@kata-sh/core';
+import { SPAWN_TASK_CANONICAL_FIXTURE, SPAWN_TASK_LIMITS, type SpawnTask } from '@kata-sh/core';
 import {
   assertSpawnTask,
   createSpawnTaskFailure,
   transitionSpawnTask,
-  updateSpawnTaskMetadata,
   SpawnTaskStore,
 } from '../src/spawn-tasks/index.ts';
+import * as spawnTaskApi from '../src/spawn-tasks/index.ts';
+import { updateSpawnTaskMetadata } from '../src/spawn-tasks/metadata.ts';
 
 const at = '2026-02-03T04:05:06.000Z';
 const tempRoots: string[] = [];
@@ -27,6 +28,12 @@ function tempWorkspace(): string {
 function reservedTask(): SpawnTask {
   return structuredClone(SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved) as SpawnTask;
 }
+
+describe('spawn-task public API', () => {
+  it('does not expose direct integrity metadata mutation', () => {
+    expect('updateSpawnTaskMetadata' in spawnTaskApi).toBe(false);
+  });
+});
 
 describe('spawn-task runtime transitions', () => {
   it('moves queued work to processing with a monotonic version', () => {
@@ -105,6 +112,37 @@ describe('spawn-task validation and terminal metadata', () => {
     for (const task of Object.values(SPAWN_TASK_CANONICAL_FIXTURE.tasks)) {
       expect(assertSpawnTask(JSON.parse(JSON.stringify(task)))).toEqual(task);
     }
+  });
+
+  it('rejects unknown canonical task and structural metadata fields after JSON parsing', () => {
+    const cases: Array<{ label: string; task: Record<string, any>; target: Record<string, any> }> = [];
+    const add = (label: string, fixture: SpawnTask, select: (task: Record<string, any>) => Record<string, any>) => {
+      const task = JSON.parse(JSON.stringify(fixture)) as Record<string, any>;
+      cases.push({ label, task, target: select(task) });
+    };
+
+    add('task', SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved, (task) => task);
+    add('stateTimestamps', SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved, (task) => task.stateTimestamps);
+    add('dispatch', SPAWN_TASK_CANONICAL_FIXTURE.tasks.reserved, (task) => task.dispatch);
+    add('awaitingInput', SPAWN_TASK_CANONICAL_FIXTURE.tasks.awaitingInput, (task) => task.awaitingInput);
+    add('cancellation', SPAWN_TASK_CANONICAL_FIXTURE.tasks.cancelled, (task) => task.cancellation);
+    add('result', SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed, (task) => task.result);
+    add('failure', SPAWN_TASK_CANONICAL_FIXTURE.tasks.failed, (task) => task.failure);
+    const completedWithIntegrity = {
+      ...SPAWN_TASK_CANONICAL_FIXTURE.tasks.completed,
+      integrityError: { code: 'result_persist_failed', message: 'missing', detectedAt: at },
+    } as SpawnTask;
+    add('integrityError', completedWithIntegrity, (task) => task.integrityError);
+
+    for (const { label, task, target } of cases) {
+      target.unexpectedField = 'schema drift';
+      expect(() => assertSpawnTask(task)).toThrow(`${label}.unexpectedField`);
+    }
+
+    const openMaps = JSON.parse(JSON.stringify(SPAWN_TASK_CANONICAL_FIXTURE.tasks.failed)) as Record<string, any>;
+    openMaps.childConfig.futureProviderOption = { enabled: true };
+    openMaps.failure.details.futureDiagnostic = { status: 429 };
+    expect(assertSpawnTask(openMaps)).toEqual(openMaps);
   });
 
   it('rejects malformed state timestamps and oversized persisted result metadata', () => {
@@ -212,6 +250,32 @@ describe('spawn-task validation and terminal metadata', () => {
     expect(persistedDetails).not.toContain('sk-detail-secret-123');
     expect(persistedDetails).not.toContain('json-detail-secret');
     expect(persistedDetails).toContain('[redacted]');
+
+    const maliciousDetails = JSON.parse(`{
+      "safe": "kept",
+      "__proto__": { "polluted": true },
+      "constructor": "bad",
+      "prototype": "bad",
+      "nested": { "safe": "nested", "__proto__": { "polluted": true } }
+    }`);
+    const hardened = createSpawnTaskFailure({
+      code: 'provider_error',
+      message: 'Malicious details.',
+      retryable: false,
+      details: maliciousDetails,
+      committedAt: at,
+    });
+    expect(Object.getPrototypeOf(hardened.details)).toBeNull();
+    expect(hardened.details?.safe).toBe('kept');
+    expect(hardened.details?.truncated).toBe(true);
+    expect(Object.hasOwn(hardened.details!, '__proto__')).toBe(false);
+    expect(Object.hasOwn(hardened.details!, 'constructor')).toBe(false);
+    expect(Object.hasOwn(hardened.details!, 'prototype')).toBe(false);
+    const nested = hardened.details?.nested as Record<string, unknown>;
+    expect(Object.getPrototypeOf(nested)).toBeNull();
+    expect(nested.safe).toBe('nested');
+    expect(Object.hasOwn(nested, '__proto__')).toBe(false);
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
   it('allows only read, deletion, and integrity changes after terminal state', () => {
@@ -438,6 +502,16 @@ describe('spawn-task reservation store', () => {
     first.markParentDeleted(reserved.taskId, at);
     expect(() => stale.markChildDeleted(reserved.taskId, at)).toThrow('stale');
     expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cas' }).get(reserved.taskId)?.parentDeletedAt).toBe(at);
+  });
+
+  it('rejects an oversized cancellation reason before committing it', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_cancel_bound', clock: () => at });
+    const reserved = store.reserve({ parentSessionId: 'parent_cancel_bound', delegatedPrompt: 'cancel', childConfig: {} });
+    const oversizedReason = 'é'.repeat(Math.floor(SPAWN_TASK_LIMITS.failureMessageBytes / 2) + 1);
+
+    expect(() => store.requestCancellation(reserved.taskId, at, oversizedReason)).toThrow('byte limit');
+    expect(store.get(reserved.taskId)).toEqual(reserved);
   });
 
   it('durably requests cancellation and preserves the request through terminal races', () => {

@@ -8,7 +8,6 @@ export type { SpawnTaskTransition } from './transitions.ts';
 export { createSpawnTaskFailure } from './failures.ts';
 export type { CreateSpawnTaskFailureInput } from './failures.ts';
 export { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
-export { updateSpawnTaskMetadata } from './metadata.ts';
 export type { SpawnTaskMetadataUpdate } from './metadata.ts';
 export { reserveSpawnTaskIds } from './ids.ts';
 export type { SpawnTaskReservedIds } from './ids.ts';

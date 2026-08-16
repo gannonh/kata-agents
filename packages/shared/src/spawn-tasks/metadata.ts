@@ -1,4 +1,4 @@
-import type { SpawnTask, SpawnTaskIntegrityError } from '@kata-sh/core';
+import { SPAWN_TASK_LIMITS, type SpawnTask, type SpawnTaskIntegrityError } from '@kata-sh/core';
 import { isSpawnTaskTerminal } from './transitions.ts';
 
 export interface SpawnTaskMetadataUpdate {
@@ -6,7 +6,10 @@ export interface SpawnTaskMetadataUpdate {
   readonly resultReadAt?: string;
   readonly parentDeletedAt?: string;
   readonly childDeletedAt?: string;
-  /** null clears the marker after a verified atomic artifact repair. */
+}
+
+interface SpawnTaskInternalMetadataUpdate extends SpawnTaskMetadataUpdate {
+  /** Store-owned: null clears the marker after verified atomic artifact repair. */
   readonly integrityError?: SpawnTaskIntegrityError | null;
 }
 
@@ -15,8 +18,11 @@ export function requestSpawnTaskCancellation(
   requestedAt: string,
   reason: string,
 ): SpawnTask {
-  if (isSpawnTaskTerminal(task.runtimeState)) return task;
   if (!reason.trim()) throw new Error('Spawned-task cancellation reason must not be empty');
+  if (Buffer.byteLength(reason, 'utf8') > SPAWN_TASK_LIMITS.failureMessageBytes) {
+    throw new Error('Spawned-task cancellation reason exceeds the UTF-8 byte limit');
+  }
+  if (isSpawnTaskTerminal(task.runtimeState)) return task;
   if (task.cancellation) {
     if (task.cancellation.requestedAt === requestedAt && task.cancellation.reason === reason) return task;
     throw new Error('Spawned-task cancellation request is immutable once persisted');
@@ -35,7 +41,7 @@ export function requestSpawnTaskCancellation(
 
 export function updateSpawnTaskMetadata(
   task: SpawnTask,
-  update: SpawnTaskMetadataUpdate,
+  update: SpawnTaskInternalMetadataUpdate,
 ): SpawnTask {
   if (update.resultReadAt !== undefined && task.runtimeState !== 'completed') {
     throw new Error('Result read metadata requires a completed spawned task');
