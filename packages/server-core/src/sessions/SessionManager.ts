@@ -51,6 +51,7 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
+import type { SpawnTaskJsonValue } from '@kata-sh/core'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -83,6 +84,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type SpawnTaskSessionReference,
   pickSessionFields,
 } from '@kata-sh/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@kata-sh/shared/sources'
@@ -110,6 +112,8 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { SpawnTaskCoordinator } from './spawn-task-coordinator'
+import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
@@ -779,6 +783,8 @@ type AgentInstance = AgentBackend
 
 interface ManagedSession {
   id: string
+  /** Private durable task relationship; never returned in Session DTOs. */
+  spawnTaskRef?: SpawnTaskSessionReference
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
@@ -1150,8 +1156,9 @@ async function managedToSession(m: ManagedSession, overrides?: Partial<Session>)
       /* adapter capability unavailable — omit; the server blocker remains authoritative */
     }
   }
+  const { spawnTaskRef: _spawnTaskRef, ...publicPersistentFields } = pickSessionFields(m)
   return {
-    ...pickSessionFields(m),
+    ...publicPersistentFields,
     sharedOwnerCount,
     handoffCapable,
     isolatedForkCapable,
@@ -1193,6 +1200,11 @@ interface PendingDelta {
  * preflight entirely — provider establishment happens on first Send (Task 4),
  * not at creation.
  */
+export interface SessionManagerOptions {
+  /** Deterministic seam for C1 task-store fault tests; production uses the default store. */
+  spawnTaskStoreFactory?: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+}
+
 interface ForkChildCreateOptions {
   pendingFork?: {
     transactionId: string
@@ -1211,6 +1223,9 @@ interface ForkChildCreateOptions {
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+  private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
+  private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
@@ -1292,6 +1307,10 @@ export class SessionManager implements ISessionManager {
     sessionId: string
     topicName: string
   }) => Promise<void>
+
+  constructor(options: SessionManagerOptions = {}) {
+    this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
+  }
 
   private registerPreChatBarrier(sessionId: string): () => void {
     let resolveBarrier!: () => void
@@ -2212,6 +2231,7 @@ export class SessionManager implements ISessionManager {
       if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
       if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
+      if (managed.spawnTaskRef === undefined) managed.spawnTaskRef = stored.spawnTaskRef
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
       if (managed.sharedId === undefined) managed.sharedId = stored.sharedId
       if (managed.transferredSessionSummary === undefined) managed.transferredSessionSummary = stored.transferredSessionSummary
@@ -2684,6 +2704,7 @@ export class SessionManager implements ISessionManager {
       managed.tokenUsage = storedSession.tokenUsage
       managed.lastReadMessageId = storedSession.lastReadMessageId
       managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
+      managed.spawnTaskRef = storedSession.spawnTaskRef
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
@@ -2744,9 +2765,111 @@ export class SessionManager implements ISessionManager {
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
+  private getSpawnTaskCoordinator(parent: ManagedSession): SpawnTaskCoordinator {
+    const workspaceKey = parent.workspace.rootPath
+    const existing = this.spawnTaskCoordinators.get(workspaceKey)
+    if (existing) return existing
+
+    let store = this.spawnTaskStores.get(workspaceKey)
+    if (!store) {
+      store = this.spawnTaskStoreFactory({
+        workspaceRoot: parent.workspace.rootPath,
+        workspaceId: parent.workspace.id,
+      })
+      this.spawnTaskStores.set(workspaceKey, store)
+    }
+
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async ({ task }) => {
+        const config = task.childConfig as Record<string, unknown>
+        const child = await this.createSession(parent.workspace.id, {
+          reservedSessionId: task.childSessionId,
+          spawnTaskRef: {
+            taskId: task.taskId,
+            parentSessionId: task.parentSessionId,
+          },
+          name: typeof config.name === 'string' ? config.name : undefined,
+          llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
+          model: typeof config.model === 'string' ? config.model : undefined,
+          enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
+          permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
+          thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
+          labels: Array.isArray(config.labels) ? config.labels as string[] : undefined,
+          workingDirectory: typeof config.workingDirectory === 'string' ? config.workingDirectory : undefined,
+        })
+
+        // Publish the child only after its reserved ID/back-reference is durable.
+        this.sendEvent({ type: 'session_created', sessionId: child.id }, parent.workspace.id)
+      },
+      appendDelegatedPrompt: async ({ task, prompt }) => {
+        await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, parent.workspace.id)
+      },
+      dispatchProvider: ({ task, prompt, attachments }) => {
+        // sendMessage reuses the already flushed stable message instead of
+        // appending a second user turn. Its returned promise is observed by
+        // the coordinator for canonical provider failure persistence.
+        return this.sendMessage(
+          task.childSessionId,
+          prompt,
+          attachments ? [...attachments] as FileAttachment[] : undefined,
+          undefined,
+          undefined,
+          task.dispatch.messageId,
+        )
+      },
+      onAsyncDispatchFailure: (error, task) => {
+        sessionLog.error(`Spawned task provider dispatch failed for ${task.taskId}:`, error)
+      },
+    })
+    this.spawnTaskCoordinators.set(workspaceKey, coordinator)
+    return coordinator
+  }
+
+  private async appendSpawnPrompt(
+    childSessionId: string,
+    messageId: string,
+    prompt: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const managed = this.sessions.get(childSessionId)
+    if (!managed) throw new Error(`Session ${childSessionId} not found after spawn publication`)
+
+    await this.ensureMessagesLoaded(managed)
+    const existing = managed.messages.find((message) => message.id === messageId)
+    if (existing) {
+      if (existing.role !== 'user' || existing.content !== prompt) {
+        throw new Error(`Stable spawned-task message ${messageId} does not match the delegated prompt`)
+      }
+      await this.flushSession(managed.id)
+      return
+    }
+
+    const message: Message = {
+      id: messageId,
+      role: 'user',
+      content: prompt,
+      timestamp: this.monotonic(),
+    }
+    managed.messages.push(message)
+    managed.lastMessageRole = 'user'
+    managed.lastMessageAt = Date.now()
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'user_message',
+      sessionId: childSessionId,
+      message,
+      status: 'accepted',
+    }, workspaceId)
+  }
+
   async createSession(
     workspaceId: string,
-    options?: import('@kata-sh/shared/protocol').CreateSessionOptions & ForkChildCreateOptions,
+    options?: import('@kata-sh/shared/protocol').CreateSessionOptions & ForkChildCreateOptions & {
+      reservedSessionId?: string
+      spawnTaskRef?: SpawnTaskSessionReference
+    },
   ): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -3009,6 +3132,8 @@ export class SessionManager implements ISessionManager {
 
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
+      reservedSessionId: options?.reservedSessionId,
+      spawnTaskRef: options?.spawnTaskRef,
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -4399,18 +4524,8 @@ export class SessionManager implements ISessionManager {
       managed.agent.onSpawnSession = async (request) => {
         sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
 
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-        })
-
-        // Build FileAttachment[] from paths (if any)
+        // Resolve attachments before the child/provider boundary. Invalid or
+        // inaccessible attachments are ignored as in ordinary sendMessage.
         let fileAttachments: FileAttachment[] | undefined
         if (request.attachments?.length) {
           const attachments: FileAttachment[] = []
@@ -4434,23 +4549,24 @@ export class SessionManager implements ISessionManager {
           if (attachments.length > 0) fileAttachments = attachments
         }
 
-        // Notify renderer to hydrate full session metadata (including name)
-        // before streaming events arrive. Without this, the renderer creates
-        // a synthetic empty session and shows "New Chat" in the sidebar.
-        this.sendEvent({ type: 'session_created', sessionId: session.id }, managed.workspace.id)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
+        const childConfig: Record<string, SpawnTaskJsonValue> = {
+          ...(request.name !== undefined ? { name: request.name } : {}),
+          llmConnection: request.llmConnection ?? managed.llmConnection ?? null,
+          model: request.model ?? managed.model ?? null,
+          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs ?? [],
+          permissionMode: request.permissionMode ?? managed.permissionMode ?? null,
+          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel ?? null,
+          labels: request.labels ?? managed.labels ?? [],
+          ...(request.workingDirectory !== undefined ? { workingDirectory: request.workingDirectory } : {}),
         }
+
+        const result = await this.getSpawnTaskCoordinator(managed).spawn({
+          parentSessionId: managed.id,
+          delegatedPrompt: request.prompt,
+          childConfig,
+          attachments: fileAttachments,
+        })
+        return result
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)

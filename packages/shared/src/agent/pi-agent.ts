@@ -1530,6 +1530,12 @@ export class PiAgent extends BaseAgent {
           const result = await this.preExecuteSpawnSession(args);
           return { content: JSON.stringify(result, null, 2), isError: false };
         } catch (error) {
+          const failure = (error && typeof error === 'object' && 'failure' in error)
+            ? (error as { failure?: unknown }).failure
+            : undefined
+          if (failure && typeof failure === 'object') {
+            return { content: JSON.stringify(failure, null, 2), isError: true }
+          }
           const msg = error instanceof Error ? error.message : String(error);
           return { content: `spawn_session failed: ${msg}`, isError: true };
         }

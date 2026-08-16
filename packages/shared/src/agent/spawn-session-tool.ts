@@ -6,7 +6,7 @@
  *
  * Two modes:
  * - help=true: Returns available connections, models, and sources
- * - Default: Creates a session and sends the prompt (fire-and-forget)
+ * - Default: Creates and dispatches a durable spawned task
  */
 
 import { tool } from '@anthropic-ai/claude-agent-sdk';
@@ -48,10 +48,11 @@ Call with help=true first to discover available connections, models, and sources
 When spawning, the 'prompt' parameter is required.
 
 Optional overrides: model, llmConnection, permissionMode, thinkingLevel, enabledSourceSlugs, labels, workingDirectory. Omitted fields inherit from the spawning session or the workspace default.
+A successful spawn returns exactly \`{ taskId, childSessionId, runtimeState, version }\`.
 
 thinkingLevel is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash) — the SDK drops the reasoning param rather than erroring.
 
-The spawned session appears in the session list and runs fire-and-forget.
+The spawned task reserves its child and dispatches at most once after durable persistence.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
     {
       help: z.boolean().optional()
@@ -92,6 +93,15 @@ Only use 'attachments' for existing file paths on disk — the tool reads them a
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         };
       } catch (error) {
+        const failure = (error && typeof error === 'object' && 'failure' in error)
+          ? (error as { failure?: unknown }).failure
+          : undefined
+        if (failure && typeof failure === 'object') {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(failure) }],
+            isError: true,
+          }
+        }
         if (error instanceof Error) {
           return errorResponse(`spawn_session failed: ${error.message}`);
         }

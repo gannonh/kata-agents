@@ -25,9 +25,10 @@ function setup() {
   agent.onSpawnSession = async (request) => {
     captured.push(request);
     const result: SpawnSessionResult = {
-      sessionId: 'spawned-id',
-      name: 'spawned',
-      status: 'started',
+      taskId: 'task-test',
+      childSessionId: 'session-test',
+      runtimeState: 'processing',
+      version: 5,
     };
     return result;
   };

@@ -104,11 +104,10 @@ export interface SpawnSessionRequest {
 }
 
 export interface SpawnSessionResult {
-  sessionId: string;
-  name: string;
-  status: 'started';
-  connection?: string;
-  model?: string;
+  taskId: string;
+  childSessionId: string;
+  runtimeState: import('@kata-sh/core').SpawnTaskRuntimeState;
+  version: number;
 }
 
 export interface SpawnSessionHelpResult {
