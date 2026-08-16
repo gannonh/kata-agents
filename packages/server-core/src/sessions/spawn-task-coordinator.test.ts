@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { SPAWN_TASK_LIMITS } from '@kata-sh/core'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
@@ -377,7 +378,478 @@ describe('SpawnTaskCoordinator', () => {
     expect(providerCalls).toBe(1)
   })
 
-  it('returns while the provider turn is pending and never terminalizes its rejection', async () => {
+  it('finalizes a child result before notifying the versioned task update seam', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Produce a result.',
+      childConfig: { model: 'fixture' },
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: 'workspace_spawn_test',
+        })
+        expect(reloaded.get(change.taskId)).toMatchObject({
+          runtimeState: 'completed',
+          version: change.version,
+          result: {
+            byteLength: Buffer.byteLength('authoritative result', 'utf8'),
+            sourceMessageId: 'message_source',
+          },
+        })
+        updates.push(change)
+      },
+    })
+
+    const completed = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      'authoritative result',
+      'message_source',
+    )
+
+    expect(completed).toMatchObject({
+      taskId: processing.taskId,
+      childSessionId: processing.childSessionId,
+      runtimeState: 'completed',
+      result: {
+        sourceMessageId: 'message_source',
+      },
+    })
+    expect(updates).toEqual([{ taskId: processing.taskId, version: completed!.version }])
+    expect(Object.keys(updates[0]!).sort()).toEqual(['taskId', 'version'])
+  })
+
+  it('consumes rejected task update handlers without changing durable finalization', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Reject the invalidation callback.',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const unhandled: unknown[] = []
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandledRejection)
+
+    try {
+      const coordinator = new SpawnTaskCoordinator({
+        store,
+        createChild: async () => {},
+        appendDelegatedPrompt: async () => {},
+        dispatchProvider: () => {},
+        onTaskUpdated: async () => {
+          throw new Error('invalidation callback failed')
+        },
+      })
+
+      const completed = await coordinator.finalizeResultForChildSession(
+        processing.childSessionId,
+        'still durable',
+      )
+      await new Promise<void>((resolve) => setImmediate(resolve))
+
+      expect(completed?.runtimeState).toBe('completed')
+      expect(store.get(processing.taskId)?.runtimeState).toBe('completed')
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection)
+    }
+  })
+
+  it('finalizes empty output as a zero-byte task-owned result', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Produce no output.',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+    })
+
+    const completed = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      '',
+      'message_empty',
+    )
+
+    expect(completed).toMatchObject({
+      runtimeState: 'completed',
+      result: {
+        byteLength: 0,
+        preview: '',
+        sourceMessageId: 'message_empty',
+      },
+    })
+  })
+
+  it('finalizes oversized output with the store-owned result_too_large failure', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Produce a bounded result.',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    const failed = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      'x'.repeat(SPAWN_TASK_LIMITS.resultBytes + 1),
+    )
+
+    expect(failed).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'result_too_large',
+        retryable: false,
+      },
+    })
+    expect(updates).toEqual([{ taskId: processing.taskId, version: failed!.version }])
+  })
+
+  it('commits result_persist_failed after an injected result artifact persistence fault', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Persist the result.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const faulting = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point) => {
+        if (point === 'before-artifact-write') throw new Error('result artifact write failed')
+      },
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: faulting,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: 'workspace_spawn_test',
+        })
+        expect(reloaded.get(change.taskId)?.failure?.code).toBe('result_persist_failed')
+        updates.push(change)
+      },
+    })
+
+    const failed = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      'result cannot be published',
+    )
+
+    expect(failed).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'result_persist_failed' },
+    })
+    expect(updates).toEqual([{ taskId: processing.taskId, version: failed!.version }])
+  })
+
+  it('reconciles a published artifact after terminal commit throws before notifying', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Reconcile after publication.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    let injected = true
+    const faulting = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point, task) => {
+        if (injected && point === 'before-current-publish' && task.runtimeState === 'completed') {
+          injected = false
+          throw new Error('terminal publication interrupted')
+        }
+      },
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: faulting,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({ workspaceRoot, workspaceId: 'workspace_spawn_test' })
+        expect(reloaded.get(change.taskId)).toMatchObject({
+          runtimeState: 'completed',
+          version: change.version,
+          result: { preview: 'published once' },
+        })
+        updates.push(change)
+      },
+    })
+
+    const completed = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      'published once',
+    )
+
+    expect(completed).toMatchObject({ runtimeState: 'completed', result: { preview: 'published once' } })
+    expect(updates).toEqual([{ taskId: processing.taskId, version: completed!.version }])
+    expect(new SpawnTaskStore({ workspaceRoot, workspaceId: 'workspace_spawn_test' }).get(processing.taskId)).toEqual(completed)
+  })
+
+  it('notifies once after startup finalizes a verified nonterminal artifact', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Recover a published artifact.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const interrupted = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.runtimeState === 'completed') {
+          throw new Error('terminal publication interrupted')
+        }
+      },
+    })
+    expect(() => interrupted.commitResult(processing.taskId, 'recovered output', {
+      committedAt: '2026-08-16T16:00:01.000Z',
+    })).toThrow('terminal publication interrupted')
+
+    const recovered = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: recovered,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: 'workspace_spawn_test',
+        })
+        expect(reloaded.get(change.taskId)).toMatchObject({
+          runtimeState: 'completed',
+          version: change.version,
+        })
+        updates.push(change)
+      },
+    })
+
+    await coordinator.reconcileStartup()
+    await coordinator.reconcileStartup()
+
+    const completed = recovered.get(processing.taskId)!
+    expect(completed.runtimeState).toBe('completed')
+    expect(updates).toEqual([{ taskId: processing.taskId, version: completed.version }])
+  })
+
+  it('preserves completed state while notifying integrity marking and repair', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Repair a result artifact.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const completed = initial.commitResult(processing.taskId, 'repair me', {
+      committedAt: '2026-08-16T16:00:01.000Z',
+    })
+    const generationPath = readFileSync(join(workspaceRoot, 'spawn-tasks', 'tasks', completed.taskId, 'CURRENT'), 'utf8').trim()
+    writeFileSync(join(workspaceRoot, 'spawn-tasks', 'tasks', completed.taskId, 'generations', generationPath, 'result.md'), 'corrupt', 'utf8')
+
+    const recovered = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: recovered,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: 'workspace_spawn_test',
+        })
+        expect(reloaded.get(change.taskId)?.version).toBe(change.version)
+        updates.push(change)
+      },
+    })
+
+    await coordinator.reconcileStartup()
+    const marked = recovered.get(completed.taskId)!
+    expect(marked.runtimeState).toBe('completed')
+    expect(marked.integrityError?.code).toBe('result_persist_failed')
+
+    const repaired = await coordinator.repairResultForChildSession(processing.childSessionId, 'repair me')
+    expect(repaired).toMatchObject({
+      runtimeState: 'completed',
+      integrityError: undefined,
+    })
+    expect(updates).toEqual([
+      { taskId: completed.taskId, version: marked.version },
+      { taskId: completed.taskId, version: repaired!.version },
+    ])
+  })
+
+  it('notifies integrity marking for a missing completed artifact without changing outcome', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const initial = createStore(workspaceRoot)
+    const reserved = initial.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'Detect a missing result artifact.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const completed = initial.commitResult(processing.taskId, 'missing later', {
+      committedAt: '2026-08-16T16:00:01.000Z',
+    })
+    const generation = readFileSync(join(workspaceRoot, 'spawn-tasks', 'tasks', completed.taskId, 'CURRENT'), 'utf8').trim()
+    rmSync(join(workspaceRoot, 'spawn-tasks', 'tasks', completed.taskId, 'generations', generation, 'result.md'))
+
+    const recovered = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: 'workspace_spawn_test',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store: recovered,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+    await coordinator.waitForStartupNotification()
+
+    const marked = recovered.get(completed.taskId)!
+    expect(marked).toMatchObject({
+      runtimeState: 'completed',
+      result: completed.result,
+      integrityError: { code: 'result_persist_failed' },
+    })
+    expect(updates).toEqual([{ taskId: completed.taskId, version: marked.version }])
+  })
+
+  it('keeps the first terminal outcome and suppresses duplicate task updates', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'First terminal outcome wins.',
+      childConfig: {},
+    })
+    const processing = store.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {},
+      onTaskUpdated: (change) => {
+        updates.push(change)
+      },
+    })
+
+    const failed = await coordinator.finalizeProviderFailureForChildSession(
+      processing.childSessionId,
+      new Error('first outcome'),
+    )
+    const lateCompletion = await coordinator.finalizeResultForChildSession(
+      processing.childSessionId,
+      'late output',
+      'late_message',
+    )
+    const lateFailure = await coordinator.finalizeToolFailureForChildSession(
+      processing.childSessionId,
+      'late tool failure',
+    )
+
+    expect(failed).toMatchObject({ runtimeState: 'failed', failure: { code: 'provider_error' } })
+    expect(lateCompletion).toEqual(failed)
+    expect(lateFailure).toEqual(failed)
+    expect(updates).toEqual([{ taskId: processing.taskId, version: failed!.version }])
+  })
+
+  it('returns while the provider turn is pending and finalizes its rejection later', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
     const store = createStore(workspaceRoot)
@@ -432,8 +904,11 @@ describe('SpawnTaskCoordinator', () => {
 
     expect(store.get(result.taskId)).toMatchObject({
       dispatch: { state: 'sent' },
-      runtimeState: 'processing',
+      runtimeState: 'failed',
+      failure: {
+        code: 'provider_error',
+        message: 'provider turn failed',
+      },
     })
-    expect(store.get(result.taskId)?.failure).toBeUndefined()
   })
 })

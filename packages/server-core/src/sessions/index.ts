@@ -10,4 +10,6 @@ export type {
   SpawnTaskAppendPromptInput,
   SpawnTaskDispatchInput,
   SpawnTaskSpawnInput,
+  SpawnTaskUpdated,
+  SpawnTaskUpdatedHandler,
 } from './spawn-task-coordinator'

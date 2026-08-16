@@ -112,7 +112,7 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
-import { SpawnTaskCoordinator, type SpawnTaskDispatchInput } from './spawn-task-coordinator'
+import { SpawnTaskCoordinator, type SpawnTaskDispatchInput, type SpawnTaskUpdated } from './spawn-task-coordinator'
 import { SpawnTaskStore, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
@@ -931,6 +931,7 @@ interface ManagedSession {
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
+  lastSentMessageId?: string
   lastSentAttachments?: FileAttachment[]
   lastSentStoredAttachments?: StoredAttachment[]
   lastSentOptions?: SendMessageOptions
@@ -1200,19 +1201,13 @@ interface PendingDelta {
  * preflight entirely — provider establishment happens on first Send (Task 4),
  * not at creation.
  */
-export interface SpawnTaskProviderRejectionContext {
-  readonly taskId: string
-  readonly childSessionId: string
-  readonly error: unknown
-}
-
 export interface SessionManagerOptions {
   /** Deterministic seam for C1 task-store fault tests; production uses the default store. */
   spawnTaskStoreFactory?: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   /** Deterministic provider boundary for SessionManager/storage integration tests. */
   spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
-  /** C2 lifecycle seam for provider-turn rejections; C1 only logs and consumes them. */
-  spawnTaskProviderRejectionHandler?: (context: SpawnTaskProviderRejectionContext) => void
+  /** Internal C2 invalidation seam; task commits precede this versioned callback. */
+  spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
 }
 
 interface ForkChildCreateOptions {
@@ -1235,7 +1230,7 @@ export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
-  private readonly spawnTaskProviderRejectionHandler?: (context: SpawnTaskProviderRejectionContext) => void
+  private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   /** Sends that have started but have not yet entered agent.chat(). */
@@ -1323,7 +1318,7 @@ export class SessionManager implements ISessionManager {
   constructor(options: SessionManagerOptions = {}) {
     this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
     this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
-    this.spawnTaskProviderRejectionHandler = options.spawnTaskProviderRejectionHandler
+    this.spawnTaskUpdated = options.spawnTaskUpdated
   }
 
   private registerPreChatBarrier(sessionId: string): () => void {
@@ -2148,6 +2143,10 @@ export class SessionManager implements ISessionManager {
         // so a restored session is visible during this same startup pass instead
         // of being silently omitted until a later restart.
         await this.recoverStagedSessionDeletions(workspaceRootPath)
+        // Construct the workspace task coordinator during startup so verified
+        // artifact recovery and integrity markers use the same commit-before-
+        // invalidation seam as live child lifecycle finalization.
+        await this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspace.id).waitForStartupNotification()
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
@@ -2779,35 +2778,14 @@ export class SessionManager implements ISessionManager {
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
-  private handleSpawnTaskProviderRejection(
-    taskId: string,
-    childSessionId: string,
-    error: unknown,
-  ): void {
-    const context: SpawnTaskProviderRejectionContext = { taskId, childSessionId, error }
-    sessionLog.error('Spawned task provider turn rejected', {
-      taskId,
-      childSessionId,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    })
-
-    // C1 consumes the rejection without changing durable task state. C2 can
-    // replace this seam with normalized provider-error finalization.
-    try {
-      this.spawnTaskProviderRejectionHandler?.(context)
-    } catch (handlerError) {
-      sessionLog.error('Spawned task provider rejection handler failed', {
-        taskId,
-        childSessionId,
-        error: handlerError instanceof Error ? handlerError.message : String(handlerError),
-      })
-    }
+  private getSpawnTaskCoordinator(parent: ManagedSession): SpawnTaskCoordinator {
+    return this.getOrCreateSpawnTaskCoordinator(parent.workspace.rootPath, parent.workspace.id)
   }
 
-  private getSpawnTaskCoordinator(parent: ManagedSession): SpawnTaskCoordinator {
-    const workspaceRootPath = parent.workspace.rootPath
-    const workspaceId = parent.workspace.id
+  private getOrCreateSpawnTaskCoordinator(
+    workspaceRootPath: string,
+    workspaceId: string,
+  ): SpawnTaskCoordinator {
     const workspaceKey = workspaceRootPath
     const existing = this.spawnTaskCoordinators.get(workspaceKey)
     if (existing) return existing
@@ -2849,21 +2827,18 @@ export class SessionManager implements ISessionManager {
       },
       dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
         // sendMessage reuses the already flushed stable message instead of
-        // appending a second user turn. C1 intentionally does not await or
-        // observe this full turn; normalized lifecycle handling owns its
-        // eventual completion or failure. The rejection is consumed here so
-        // it reaches the C2 lifecycle seam with task/session identity.
-        void this.sendMessage(
+        // appending a second user turn. SpawnTaskCoordinator consumes the
+        // eventual rejection through the durable provider-error finalizer.
+        return this.sendMessage(
           task.childSessionId,
           prompt,
           attachments ? [...attachments] as FileAttachment[] : undefined,
           undefined,
           undefined,
           task.dispatch.messageId,
-        ).catch((error: unknown) => {
-          this.handleSpawnTaskProviderRejection(task.taskId, task.childSessionId, error)
-        })
+        )
       }),
+      onTaskUpdated: this.spawnTaskUpdated,
     })
     this.spawnTaskCoordinators.set(workspaceKey, coordinator)
     return coordinator
@@ -5378,6 +5353,48 @@ export class SessionManager implements ISessionManager {
     return undefined
   }
 
+  private getFinalAssistantMessageForTurn(managed: ManagedSession): Message | undefined {
+    const baselineId = managed.turnStartFinalMessageId
+    const baselineIndex = baselineId
+      ? managed.messages.findIndex((message) => message.id === baselineId)
+      : -1
+    for (let index = managed.messages.length - 1; index > baselineIndex; index -= 1) {
+      const message = managed.messages[index]
+      if (message.role === 'assistant' && !message.isIntermediate) return message
+    }
+    return undefined
+  }
+
+  private getSpawnTaskCoordinatorForChild(managed: ManagedSession): SpawnTaskCoordinator {
+    // Ownership is resolved by the coordinator's durable child-session index;
+    // the private back-reference merely makes the expected path explicit.
+    return this.getSpawnTaskCoordinator(managed)
+  }
+
+  private async finalizeSpawnTaskResult(managed: ManagedSession): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const finalMessage = this.getFinalAssistantMessageForTurn(managed)
+    await coordinator.finalizeResultForChildSession(
+      managed.id,
+      finalMessage?.content ?? '',
+      finalMessage?.id,
+    )
+  }
+
+  private async finalizeSpawnTaskProviderFailure(managed: ManagedSession, error: unknown): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    await coordinator.finalizeProviderFailureForChildSession(managed.id, error)
+  }
+
+  private async finalizeSpawnTaskToolFailure(
+    managed: ManagedSession,
+    error: unknown,
+    details?: unknown,
+  ): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    await coordinator.finalizeToolFailureForChildSession(managed.id, error, details)
+  }
+
   /**
    * Set which session the user is actively viewing.
    * Called when user navigates to a session. Used to determine whether to mark
@@ -7841,6 +7858,8 @@ export class SessionManager implements ISessionManager {
 
     }
 
+    managed.lastSentMessageId = userMessage.id
+
     // Preserve the immediate prompt-derived title and schedule enhanced title
     // generation for new messages and stable pre-appended spawn messages. Do
     // not change ordinary queued-message replay behavior.
@@ -8167,6 +8186,7 @@ export class SessionManager implements ISessionManager {
 
             if (apiError && apiError.status === 400) {
               const isImageError = apiError.message?.includes('image exceeds')
+              await this.finalizeSpawnTaskProviderFailure(managed, apiError.message)
 
               const errorMessage: Message = {
                 id: generateMessageId(),
@@ -8199,6 +8219,8 @@ export class SessionManager implements ISessionManager {
               }, managed.workspace.id)
             }
           }
+
+          await this.finalizeSpawnTaskResult(managed)
 
           sendSpan.mark('chat.complete')
           sendSpan.end()
@@ -8257,6 +8279,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.mark('chat.error')
         sendSpan.setMetadata('error', error instanceof Error ? error.message : String(error))
         sendSpan.end()
+        await this.finalizeSpawnTaskProviderFailure(managed, error)
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -8406,11 +8429,20 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`[auth-retry] Retrying message for session ${sessionId}`)
           this.setProcessing(managed, false)
 
-          // Remove the user message that was added for this failed attempt
-          // so we don't get duplicate messages when retrying
-          const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
-          if (lastUserMsgIndex !== -1) {
-            managed.messages.splice(lastUserMsgIndex, 1)
+          // Spawned children already own a durable delegated user message. Keep
+          // that exact ID across auth retry; ordinary sessions retain the old
+          // remove-and-recreate behavior.
+          const retryMessageId = managed.spawnTaskRef
+            ? managed.lastSentMessageId ?? managed.messages.findLast((entry) => entry.role === 'user')?.id
+            : undefined
+          if (managed.spawnTaskRef && !retryMessageId) {
+            throw new Error(`Spawned auth retry has no stable delegated message for ${sessionId}`)
+          }
+          if (!managed.spawnTaskRef) {
+            const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
+            if (lastUserMsgIndex !== -1) {
+              managed.messages.splice(lastUserMsgIndex, 1)
+            }
           }
 
           managed.authRetryInProgress = false
@@ -8421,7 +8453,7 @@ export class SessionManager implements ISessionManager {
             retryAttachments,
             retryStoredAttachments,
             retryOptions,
-            undefined,  // existingMessageId
+            retryMessageId,
             true        // _isAuthRetry - prevents infinite retry loop
           )
           sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
@@ -8432,6 +8464,7 @@ export class SessionManager implements ISessionManager {
         managed.authRetryInProgress = false
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
+        await this.finalizeSpawnTaskProviderFailure(managed, retryError)
         const failedMessage: Message = {
           id: generateMessageId(),
           role: 'error',
@@ -9366,6 +9399,13 @@ export class SessionManager implements ISessionManager {
           managed.messages.push(toolMessage)
         }
 
+        if (inferredError) {
+          await this.finalizeSpawnTaskToolFailure(managed, formattedResult, {
+            toolName,
+            toolUseId: event.toolUseId,
+          })
+        }
+
         // Send event to renderer if: (a) first completion, or (b) result content changed
         // (e.g., safety net auto-completed with empty result, then real result arrived later)
         const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
@@ -9498,6 +9538,8 @@ export class SessionManager implements ISessionManager {
           break
         }
 
+        await this.finalizeSpawnTaskProviderFailure(managed, event.message)
+
         // AgentEvent uses `message` not `error`
         const errorMessage: Message = {
           id: generateMessageId(),
@@ -9539,6 +9581,8 @@ export class SessionManager implements ISessionManager {
           // Don't add error message or send to renderer - we're handling it via retry
           break
         }
+
+        await this.finalizeSpawnTaskProviderFailure(managed, event.error.message || event.error.title)
 
         // Build rich error message with all diagnostic fields for persistence and UI display
         const typedErrorMessage: Message = {

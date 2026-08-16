@@ -3,13 +3,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CONFIG_DIR } from '@kata-sh/shared/config'
-import { loadSession, type SessionBundle } from '@kata-sh/shared/sessions'
+import { getSessionPath, loadSession, type SessionBundle } from '@kata-sh/shared/sessions'
+import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
 import type { SpawnTask } from '@kata-sh/core'
 import type { SessionEvent } from '@kata-sh/shared/protocol'
 import {
   SessionManager,
   createManagedSession,
-  type SpawnTaskProviderRejectionContext,
 } from './SessionManager.ts'
 import type { SpawnTaskCoordinator } from './spawn-task-coordinator.ts'
 import { createGitServices } from '../git/index.ts'
@@ -273,6 +273,369 @@ describe('SessionManager spawned-task transcript append', () => {
     }
   })
 
+  it('finalizes normalized child completion through the real SessionManager lifecycle boundary', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_finalize_integration',
+      name: 'Spawn finalize integration workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: workspace.id,
+      randomId: (() => {
+        let sequence = 0
+        return () => `id-${++sequence}`
+      })(),
+    })
+    const updates: Array<{ taskId: string; version: number }> = []
+    let manager!: SessionManager
+    let sessions!: Map<string, any>
+    manager = new SessionManager({
+      spawnTaskStoreFactory: () => store,
+      spawnTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: workspace.id,
+        })
+        const task = reloaded.get(change.taskId)
+        const hasApiError = task?.delegatedPrompt.includes('api-error')
+        expect(task).toMatchObject({
+          runtimeState: hasApiError ? 'failed' : 'completed',
+          version: change.version,
+        })
+        if (hasApiError) {
+          expect(task?.failure?.code).toBe('provider_error')
+        } else {
+          expect(task?.result?.byteLength).toBe(
+            task?.delegatedPrompt.includes('empty')
+              ? 0
+              : Buffer.byteLength('normalized child result', 'utf8'),
+          )
+        }
+        updates.push(change)
+      },
+      spawnTaskDispatchProvider: ({ task, prompt, attachments }) => {
+        const child = sessions.get(task.childSessionId)
+        const output = prompt.includes('empty') || prompt.includes('api-error') ? '' : 'normalized child result'
+        const hasApiError = prompt.includes('api-error')
+        child.agent = {
+          generateTitle: async () => 'Child result title',
+          setAllSources: () => {},
+          getModel: () => 'test-model',
+          getSessionId: () => undefined,
+          async *chat() {
+            if (hasApiError) {
+              writeFileSync(join(getSessionPath(workspaceRoot, task.childSessionId), 'api-error.json'), JSON.stringify({
+                status: 400,
+                statusText: 'Bad Request',
+                message: 'provider rejected the child turn',
+                timestamp: Date.now(),
+              }))
+            }
+            if (output) {
+              yield { type: 'text_complete' as const, text: output, isIntermediate: false }
+            }
+            yield { type: 'complete' as const }
+          },
+        }
+        return manager.sendMessage(
+          task.childSessionId,
+          prompt,
+          attachments ? [...attachments] : undefined,
+          undefined,
+          undefined,
+          task.dispatch.messageId,
+        )
+      },
+    })
+    manager.setEventSink(() => {})
+    const services = createGitServices({
+      worktreeRoot: join(workspaceRoot, 'worktrees'),
+      registryPath: join(workspaceRoot, 'worktrees', 'registry.json'),
+    })
+    manager.setGitServices(services)
+    services.lifecycle.markReady()
+
+    const parent = createManagedSession(
+      { id: 'session_spawn_finalize_parent', name: 'parent' },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(parent.id, parent)
+    ;(manager as any).createSession = async (_workspaceId: string, options: any) => {
+      const child = createManagedSession(
+        {
+          id: options.reservedSessionId,
+          name: options.name ?? 'child',
+          spawnTaskRef: options.spawnTaskRef,
+        },
+        workspace as never,
+        { messagesLoaded: true },
+      )
+      sessions.set(child.id, child)
+      return { id: child.id, name: child.name }
+    }
+    ;(manager as any).getOrCreateAgent = async (managed: any) => managed.agent
+
+    const coordinator = (manager as any).getSpawnTaskCoordinator(parent)
+    const result = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize this child result',
+      childConfig: {},
+    })
+    const emptyResult = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize empty child result',
+      childConfig: {},
+    })
+    const apiErrorResult = await coordinator.spawn({
+      parentSessionId: parent.id,
+      delegatedPrompt: 'normalize api-error child result',
+      childConfig: {},
+    })
+
+    let task = store.get(result.taskId)
+    let emptyTask = store.get(emptyResult.taskId)
+    let apiErrorTask = store.get(apiErrorResult.taskId)
+    for (let attempt = 0; attempt < 40 && (
+      task?.runtimeState !== 'completed'
+      || emptyTask?.runtimeState !== 'completed'
+      || apiErrorTask?.runtimeState !== 'failed'
+    ); attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+      task = store.get(result.taskId)
+      emptyTask = store.get(emptyResult.taskId)
+      apiErrorTask = store.get(apiErrorResult.taskId)
+    }
+
+    expect(task).toMatchObject({
+      childSessionId: result.childSessionId,
+      runtimeState: 'completed',
+      result: {
+        byteLength: Buffer.byteLength('normalized child result', 'utf8'),
+      },
+    })
+    const childHistory = sessions.get(result.childSessionId).messages as Array<{ role: string; id: string }>
+    const finalAssistant = childHistory.findLast((message) => message.role === 'assistant')
+    expect(task?.result?.sourceMessageId).toBe(finalAssistant?.id)
+    expect(emptyTask).toMatchObject({
+      childSessionId: emptyResult.childSessionId,
+      runtimeState: 'completed',
+      result: { byteLength: 0, preview: '' },
+    })
+    expect(apiErrorTask).toMatchObject({
+      childSessionId: apiErrorResult.childSessionId,
+      runtimeState: 'failed',
+      failure: { code: 'provider_error' },
+    })
+    expect(updates.map((change) => change.taskId).sort()).toEqual([
+      result.taskId,
+      emptyResult.taskId,
+      apiErrorResult.taskId,
+    ].sort())
+    expect(sessions.get(result.childSessionId).sessionStatus).toBeUndefined()
+    expect(sessions.get(emptyResult.childSessionId).sessionStatus).toBeUndefined()
+    expect(sessions.get(apiErrorResult.childSessionId).sessionStatus).toBeUndefined()
+  })
+
+  it('finalizes provider and terminal tool failures before task invalidation notifications', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_failure_integration',
+      name: 'Spawn failure integration workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserveTask = (prompt: string) => {
+      const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: prompt, childConfig: {} })
+      return store.transition(reserved.taskId, {
+        runtimeState: 'processing',
+        at: '2026-08-16T16:00:00.000Z',
+      })
+    }
+    const providerTask = reserveTask('provider failure')
+    const toolTask = reserveTask('tool failure')
+    const order: string[] = []
+    const manager = new SessionManager({
+      spawnTaskStoreFactory: () => store,
+      spawnTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+        expect(reloaded.get(change.taskId)?.runtimeState).toBe('failed')
+        order.push(`task:${change.taskId}`)
+      },
+    })
+    manager.setEventSink((_channel, _target, event) => order.push(`event:${(event as SessionEvent).type}`))
+    const providerChild = createManagedSession(
+      {
+        id: providerTask.childSessionId,
+        sessionStatus: 'review',
+        spawnTaskRef: { taskId: providerTask.taskId, parentSessionId: providerTask.parentSessionId },
+      },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    const toolChild = createManagedSession(
+      {
+        id: toolTask.childSessionId,
+        sessionStatus: 'review',
+        spawnTaskRef: { taskId: toolTask.taskId, parentSessionId: toolTask.parentSessionId },
+      },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    providerChild.agent = {} as any
+    toolChild.agent = {} as any
+    providerChild.isProcessing = true
+    toolChild.isProcessing = true
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(providerChild.id, providerChild)
+    sessions.set(toolChild.id, toolChild)
+
+    await (manager as any).processEvent(providerChild, {
+      type: 'error',
+      message: 'provider failed permanently',
+    })
+    await (manager as any).processEvent(toolChild, {
+      type: 'tool_result',
+      toolUseId: 'tool_failure',
+      toolName: 'Bash',
+      result: 'Error: terminal tool failure',
+      isError: true,
+    })
+
+    expect(store.get(providerTask.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'provider_error' },
+    })
+    expect(store.get(toolTask.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: { code: 'tool_error' },
+    })
+    expect(order).toEqual([
+      `task:${providerTask.taskId}`,
+      'event:error',
+      `task:${toolTask.taskId}`,
+      'event:tool_result',
+    ])
+    expect(providerChild.sessionStatus).toBe('review')
+    expect(toolChild.sessionStatus).toBe('review')
+    expect(providerChild.agent).not.toBeNull()
+    expect(toolChild.agent).not.toBeNull()
+  })
+
+  it('surfaces startup task repair through the commit-before-invalidation seam', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_startup',
+      name: 'Spawn startup workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = initial.reserve({
+      parentSessionId: 'session_startup_parent',
+      delegatedPrompt: 'Recover startup result.',
+      childConfig: {},
+    })
+    const processing = initial.transition(reserved.taskId, {
+      runtimeState: 'processing',
+      at: '2026-08-16T16:00:00.000Z',
+    })
+    const interrupted = new SpawnTaskStore({
+      workspaceRoot,
+      workspaceId: workspace.id,
+      faults: (point, task) => {
+        if (point === 'before-current-publish' && task.runtimeState === 'completed') {
+          throw new Error('startup terminal publication interrupted')
+        }
+      },
+    })
+    expect(() => interrupted.commitResult(processing.taskId, 'startup result', {
+      committedAt: '2026-08-16T16:00:01.000Z',
+    })).toThrow('startup terminal publication interrupted')
+
+    const updates: Array<{ taskId: string; version: number }> = []
+    const manager = new SessionManager({
+      spawnTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+        expect(reloaded.get(change.taskId)).toMatchObject({
+          runtimeState: 'completed',
+          version: change.version,
+          result: { byteLength: Buffer.byteLength('startup result', 'utf8') },
+        })
+        updates.push(change)
+      },
+    })
+
+    const coordinator = (manager as any).getOrCreateSpawnTaskCoordinator(workspaceRoot, workspace.id)
+    await coordinator.waitForStartupNotification()
+    const completed = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(processing.taskId)!
+
+    expect(completed.runtimeState).toBe('completed')
+    expect(updates).toEqual([{ taskId: processing.taskId, version: completed.version }])
+  })
+
+  it('keeps a spawned delegated message ID across automatic auth retry', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_auth_retry',
+      name: 'Spawn auth retry workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const manager = new SessionManager()
+    const child = createManagedSession(
+      {
+        id: 'session_auth_retry_child',
+        spawnTaskRef: {
+          taskId: 'task_auth_retry',
+          parentSessionId: 'session_auth_retry_parent',
+        },
+      },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    child.messages = [{
+      id: 'message_stable_delegated',
+      role: 'user',
+      content: 'delegated work',
+      timestamp: 1,
+    }]
+    child.lastSentMessage = 'delegated work'
+    child.lastSentMessageId = 'message_stable_delegated'
+    child.lastSentAttachments = []
+    child.lastSentStoredAttachments = []
+    child.agent = {} as any
+    const sessions = (manager as unknown as { sessions: Map<string, any> }).sessions
+    sessions.set(child.id, child)
+    let retryMessageId: string | undefined
+    ;(manager as any).sendMessage = async (...args: unknown[]) => {
+      retryMessageId = args[5] as string | undefined
+    }
+
+    expect((manager as any).attemptAuthRetry(
+      child.id,
+      child,
+      workspace.id,
+      'invalid_api_key',
+    )).toBe(true)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(retryMessageId).toBe('message_stable_delegated')
+    expect(child.messages).toHaveLength(1)
+    expect(child.messages[0]?.id).toBe('message_stable_delegated')
+    expect(child.messages[0]?.content).toBe('delegated work')
+  })
+
   it('consumes async provider rejection with task and child context', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
     roots.push(workspaceRoot)
@@ -282,10 +645,19 @@ describe('SessionManager spawned-task transcript append', () => {
       rootPath: workspaceRoot,
       createdAt: Date.now(),
     }
-    let rejectionContext: SpawnTaskProviderRejectionContext | undefined
+    const updated: Array<{ taskId: string; version: number }> = []
     const manager = new SessionManager({
-      spawnTaskProviderRejectionHandler: (context) => {
-        rejectionContext = context
+      spawnTaskUpdated: (change) => {
+        const reloaded = new SpawnTaskStore({
+          workspaceRoot,
+          workspaceId: workspace.id,
+        })
+        expect(reloaded.get(change.taskId)).toMatchObject({
+          runtimeState: 'failed',
+          version: change.version,
+          failure: { code: 'provider_error' },
+        })
+        updated.push(change)
       },
     })
     manager.setEventSink(() => {})
@@ -326,11 +698,19 @@ describe('SessionManager spawned-task transcript append', () => {
       await new Promise<void>((resolve) => setImmediate(resolve))
       await new Promise<void>((resolve) => setImmediate(resolve))
 
-      expect(rejectionContext).toMatchObject({
-        taskId: result.taskId,
+      const task = new SpawnTaskStore({
+        workspaceRoot,
+        workspaceId: workspace.id,
+      }).get(result.taskId)
+      expect(task).toMatchObject({
         childSessionId: result.childSessionId,
-        error: providerError,
+        runtimeState: 'failed',
+        failure: {
+          code: 'provider_error',
+          message: providerError.message,
+        },
       })
+      expect(updated).toEqual([{ taskId: result.taskId, version: task!.version }])
       expect(unhandled).toEqual([])
     } finally {
       process.off('unhandledRejection', onUnhandledRejection)
