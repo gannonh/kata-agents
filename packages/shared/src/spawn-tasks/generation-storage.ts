@@ -54,6 +54,13 @@ export interface PublishTaskGenerationResult {
   readonly reconciliationError?: string;
 }
 
+export class SpawnTaskStaleWriterError extends Error {
+  constructor(taskId: string) {
+    super(`Cannot replace spawned task ${taskId} from a stale store view`);
+    this.name = 'SpawnTaskStaleWriterError';
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -155,7 +162,7 @@ function publishTaskGenerationLocked(input: PublishTaskGenerationInput): Publish
   if (existsSync(currentPath)) assertRegularFile(currentPath, 'spawned-task CURRENT');
   const diskGeneration = existsSync(currentPath) ? readFileSync(currentPath, 'utf8').trim() : undefined;
   if (diskGeneration !== indexedGeneration) {
-    throw new Error(`Cannot replace spawned task ${task.taskId} from a stale store view`);
+    throw new SpawnTaskStaleWriterError(task.taskId);
   }
 
   const generationsPath = join(taskPath, 'generations');

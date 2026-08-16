@@ -50,6 +50,7 @@ import {
 import {
   publishTaskGeneration,
   readTaskGenerationFile,
+  SpawnTaskStaleWriterError,
   type SpawnTaskStoreFaultPoint,
 } from './generation-storage.ts';
 export type { SpawnTaskStoreFaultPoint } from './generation-storage.ts';
@@ -197,7 +198,12 @@ export class SpawnTaskStore {
       };
       assertSpawnTask(task);
       const snapshot = clone(task);
-      this.commit(snapshot);
+      try {
+        this.commit(snapshot);
+      } catch (error) {
+        if (error instanceof SpawnTaskStaleWriterError) continue;
+        throw error;
+      }
       if (this.isParentDeleted(snapshot.parentSessionId)) {
         let cancelled = this.markParentDeleted(snapshot.taskId, now);
         cancelled = this.requestCancellation(cancelled.taskId, now, 'parent_deleted');
@@ -336,7 +342,16 @@ export class SpawnTaskStore {
     assertSpawnTaskId(input.parentSessionId, 'parentSessionId');
     assertSpawnTaskId(input.childSessionId, 'childSessionId');
     const existing = this.tasks.get(input.taskId);
-    if (existing) return clone(existing);
+    if (existing) {
+      const matches = existing.parentSessionId === input.parentSessionId
+        && existing.childSessionId === input.childSessionId
+        && (input.delegatedPrompt === undefined || existing.delegatedPrompt === input.delegatedPrompt)
+        && (input.childConfig === undefined || JSON.stringify(existing.childConfig) === JSON.stringify(input.childConfig))
+        && (input.messageId === undefined || existing.dispatch.messageId === input.messageId)
+        && (input.dispatchAttemptId === undefined || existing.dispatch.dispatchAttemptId === input.dispatchAttemptId);
+      if (!matches) throw new Error(`Recovered spawned-task identity does not match task ${input.taskId}`);
+      return clone(existing);
+    }
     if (this.byChild.has(input.childSessionId)) {
       throw new Error(`Spawned-task child session is already owned: ${input.childSessionId}`);
     }

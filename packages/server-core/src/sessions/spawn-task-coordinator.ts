@@ -573,7 +573,13 @@ export class SpawnTaskCoordinator {
 
     const children = recovery.listChildren ? await recovery.listChildren() : []
     for (const reference of children) {
-      if (this.store.get(reference.taskId)) continue
+      const existing = this.store.get(reference.taskId)
+      if (existing) {
+        if (!this.recoveryReferenceMatchesTask(reference, existing)) {
+          this.auditLateEvent(existing, 'recovery_identity_mismatch')
+        }
+        continue
+      }
       try {
         const reconstructed = this.store.reconstructMissingTask({
           taskId: reference.taskId,
@@ -710,6 +716,15 @@ export class SpawnTaskCoordinator {
     }
     if (current.dispatch.state !== 'sent') this.clearDispatchActive(current.taskId)
     return true
+  }
+
+  private recoveryReferenceMatchesTask(reference: SpawnTaskRecoveryReference, task: SpawnTask): boolean {
+    return reference.parentSessionId === task.parentSessionId
+      && reference.childSessionId === task.childSessionId
+      && (reference.delegatedPrompt === undefined || reference.delegatedPrompt === task.delegatedPrompt)
+      && (reference.childConfig === undefined || JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig))
+      && (reference.messageId === undefined || reference.messageId === task.dispatch.messageId)
+      && (reference.dispatchAttemptId === undefined || reference.dispatchAttemptId === task.dispatch.dispatchAttemptId)
   }
 
   private async recoverReadyTask(task: SpawnTask, recovery: SpawnTaskRecoveryAdapter): Promise<void> {
