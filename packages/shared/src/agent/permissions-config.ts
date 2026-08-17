@@ -45,8 +45,8 @@ let permissionsInitialized = false;
  * Default permissions are stored at ~/.kata-agents/permissions/
  * Reads env var dynamically so tests can override via KATA_CONFIG_DIR.
  */
-export function getAppPermissionsDir(): string {
-  const configDir = process.env.KATA_CONFIG_DIR || join(homedir(), '.kata-agents');
+export function getAppPermissionsDir(appConfigDir?: string): string {
+  const configDir = appConfigDir ?? process.env.KATA_CONFIG_DIR ?? join(homedir(), '.kata-agents');
   return join(configDir, 'permissions');
 }
 
@@ -185,8 +185,8 @@ function migratePermissions(
  * Load default permissions from ~/.kata-agents/permissions/default.json
  * Returns null if file doesn't exist or is invalid.
  */
-export function loadDefaultPermissions(): PermissionsCustomConfig | null {
-  const defaultPath = join(getAppPermissionsDir(), 'default.json');
+export function loadDefaultPermissions(appConfigDir?: string): PermissionsCustomConfig | null {
+  const defaultPath = join(getAppPermissionsDir(appConfigDir), 'default.json');
   if (!existsSync(defaultPath)) {
     debug('[Permissions] No default.json found at', defaultPath);
     return null;
@@ -222,11 +222,11 @@ let immutableDefaultBashConfigCache: ModeConfig | undefined;
  * decisions. Commands accepted by this classifier keep existing behavior;
  * everything else is subject to the config-write guard.
  */
-export function getImmutableDefaultBashConfig(): ModeConfig {
-  if (immutableDefaultBashConfigCache) return immutableDefaultBashConfigCache;
+export function getImmutableDefaultBashConfig(appConfigDir?: string): ModeConfig {
+  if (!appConfigDir && immutableDefaultBashConfigCache) return immutableDefaultBashConfigCache;
 
   const readOnlyBashPatterns: CompiledBashPattern[] = [...SAFE_MODE_CONFIG.readOnlyBashPatterns];
-  const defaultConfig = loadDefaultPermissions();
+  const defaultConfig = loadDefaultPermissions(appConfigDir);
   if (defaultConfig) {
     for (const patternEntry of defaultConfig.allowedBashPatterns) {
       const regex = validateRegex(patternEntry.pattern);
@@ -240,8 +240,9 @@ export function getImmutableDefaultBashConfig(): ModeConfig {
     }
   }
 
-  immutableDefaultBashConfigCache = { ...SAFE_MODE_CONFIG, readOnlyBashPatterns };
-  return immutableDefaultBashConfigCache;
+  const config = { ...SAFE_MODE_CONFIG, readOnlyBashPatterns };
+  if (!appConfigDir) immutableDefaultBashConfigCache = config;
+  return config;
 }
 
 // Re-export types from mode-types for external consumers
@@ -315,6 +316,8 @@ export interface MergedPermissionsConfig {
  */
 export interface PermissionsContext {
   workspaceRootPath: string;
+  /** App config root override for isolated callers/tests */
+  appConfigDir?: string;
   /** Active source slugs for source-specific rules */
   activeSourceSlugs?: string[];
 }
@@ -617,7 +620,9 @@ class PermissionsConfigCache {
    * Get or load app-level default permissions
    * These come from ~/.kata-agents/permissions/default.json
    */
-  private getDefaultConfig(): PermissionsCustomConfig | null {
+  private getDefaultConfig(appConfigDir?: string): PermissionsCustomConfig | null {
+    if (appConfigDir) return loadDefaultPermissions(appConfigDir);
+
     if (this.defaultConfig === undefined) {
       this.defaultConfig = loadDefaultPermissions();
     }
@@ -703,6 +708,10 @@ class PermissionsConfigCache {
    * Uses additive merging: custom configs extend defaults
    */
   getMergedConfig(context: PermissionsContext): MergedPermissionsConfig {
+    // An explicit app root belongs to the caller and must not enter the
+    // process-wide cache used by the normal app configuration.
+    if (context.appConfigDir) return this.buildMergedConfig(context);
+
     const cacheKey = this.buildCacheKey(context);
 
     if (!this.mergedConfigs.has(cacheKey)) {
@@ -731,14 +740,14 @@ class PermissionsConfigCache {
       // Add permission file paths for actionable error messages
       permissionPaths: {
         workspacePath: getWorkspacePermissionsPath(context.workspaceRootPath),
-        appDefaultPath: join(getAppPermissionsDir(), 'default.json'),
-        docsPath: join(CONFIG_DIR, 'docs', 'permissions.md'),
+        appDefaultPath: join(getAppPermissionsDir(context.appConfigDir), 'default.json'),
+        docsPath: join(context.appConfigDir ?? CONFIG_DIR, 'docs', 'permissions.md'),
       },
     };
 
     // Load and apply app-level default permissions from JSON
     // This is where the actual bash/MCP patterns come from
-    const defaultConfig = this.getDefaultConfig();
+    const defaultConfig = this.getDefaultConfig(context.appConfigDir);
     if (defaultConfig) {
       this.applyDefaultConfig(merged, defaultConfig);
     }

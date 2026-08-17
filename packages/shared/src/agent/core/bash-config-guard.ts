@@ -64,7 +64,8 @@ export type BashConfigGuardResult =
 export function classifyBashConfigWrite(
   command: string,
   workspaceRootPath: string,
-  workingDirectory?: string
+  workingDirectory?: string,
+  appConfigDir?: string
 ): BashConfigGuardResult {
   const trimmed = command.trim();
   if (!trimmed) return { kind: 'continue' };
@@ -74,20 +75,20 @@ export function classifyBashConfigWrite(
   //    In-place editors with a write flag (-i) are never read-only: a default
   //    pattern like `^sed\s+-n\b` also matches `sed -n -i ...`, which still
   //    edits files in place. They must fall through to mutation detection.
-  if (!hasInPlaceEditFlag(trimmed) && isReadOnlyBashCommandWithConfig(trimmed, getImmutableDefaultBashConfig())) {
+  if (!hasInPlaceEditFlag(trimmed) && isReadOnlyBashCommandWithConfig(trimmed, getImmutableDefaultBashConfig(appConfigDir))) {
     return { kind: 'continue' };
   }
 
   // 2. Derivable `cat <<'DELIM' > target` heredoc → validate exact content.
   const heredoc = parseDerivableCatHeredoc(trimmed);
   if (heredoc) {
-    const detection = detectForTarget(heredoc.target, workspaceRootPath, workingDirectory);
+    const detection = detectForTarget(heredoc.target, workspaceRootPath, workingDirectory, appConfigDir);
     if (!detection) return { kind: 'continue' };
     return { kind: 'validate', detection, content: heredoc.content };
   }
 
   // 3. Identifiable opaque mutations targeting a recognized config → block.
-  const opaqueDetection = findOpaqueRecognizedTarget(trimmed, workspaceRootPath, workingDirectory);
+  const opaqueDetection = findOpaqueRecognizedTarget(trimmed, workspaceRootPath, workingDirectory, appConfigDir);
   if (opaqueDetection) {
     return { kind: 'block', reason: buildOpaqueBlockReason(opaqueDetection) };
   }
@@ -389,7 +390,8 @@ const opaqueAssignments = new Map<string, string>();
 function findOpaqueRecognizedTarget(
   command: string,
   workspaceRootPath: string,
-  workingDirectory?: string
+  workingDirectory?: string,
+  appConfigDir?: string
 ): ConfigFileDetection | null {
   const candidates = new Set<string>();
   opaqueAssignments.clear();
@@ -416,7 +418,7 @@ function findOpaqueRecognizedTarget(
   }
 
   for (const candidate of candidates) {
-    const detection = detectForTarget(candidate, workspaceRootPath, workingDirectory);
+    const detection = detectForTarget(candidate, workspaceRootPath, workingDirectory, appConfigDir);
     if (detection) return detection;
   }
   return null;
@@ -478,10 +480,11 @@ function classifyOpaqueCandidate(candidate: string, candidates: Set<string>): vo
 function detectForTarget(
   target: string,
   workspaceRootPath: string,
-  workingDirectory?: string
+  workingDirectory?: string,
+  appConfigDir?: string
 ): ConfigFileDetection | null {
   const resolved = resolveTarget(target, workspaceRootPath, workingDirectory);
-  return detectConfigFileType(resolved, workspaceRootPath) ?? detectAppConfigFileType(resolved);
+  return detectConfigFileType(resolved, workspaceRootPath) ?? detectAppConfigFileType(resolved, appConfigDir);
 }
 
 function resolveTarget(target: string, workspaceRootPath: string, workingDirectory?: string): string {

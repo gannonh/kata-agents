@@ -2,23 +2,20 @@
  * Non-mocked integration tests for the pre-tool-use Bash config-write guard.
  *
  * Uses REAL config detectors, content validators, the real permission
- * pipeline, and the real immutable-default classifier. `KATA_CONFIG_DIR` is
- * pointed at a hermetic temp directory BEFORE any config path module loads
- * (dynamic imports), so app-level config detection and default permissions
- * are deterministic. The temp dir is seeded with the bundled
- * permissions/default.json so the immutable-default read-only classifier
- * behaves like production.
+ * pipeline, and the real immutable-default classifier. The app config root is
+ * passed through the pipeline context so this suite does not mutate process
+ * environment or depend on module evaluation order. The temp dir is seeded
+ * with the bundled permissions/default.json so the immutable-default
+ * read-only classifier behaves like production.
  */
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 
-// ── Hermetic config dir: MUST be set before config path modules load ────────
+// ── Hermetic app config root (passed explicitly to the pipeline) ────────────
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..', '..', '..', '..');
-const PRIOR_KATA_CONFIG_DIR = process.env.KATA_CONFIG_DIR;
 const APP_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'kata-agents-guard-it-'));
-process.env.KATA_CONFIG_DIR = APP_CONFIG_DIR;
 
 // Seed app-level default permissions from the bundled file.
 const permissionsDir = join(APP_CONFIG_DIR, 'permissions');
@@ -29,9 +26,8 @@ writeFileSync(join(permissionsDir, 'default.json'), readFileSync(bundledDefaults
 // Workspace under test (relative config paths resolve against this).
 const WORKSPACE_ROOT = mkdtempSync(join(tmpdir(), 'kata-agents-guard-ws-'));
 
-// ── Dynamic imports AFTER env setup (CONFIG_DIR is captured at module load) ──
-// `import type` is erased at compile time and never triggers module evaluation,
-// so it is safe to reference the pipeline's types before the dynamic imports.
+// Dynamic imports keep this integration suite's module setup explicit; the
+// app config root is passed per request, so import order is irrelevant.
 import type { PreToolUseInput } from '../pre-tool-use.ts';
 
 type PreToolUseModule = typeof import('../pre-tool-use.ts');
@@ -40,6 +36,7 @@ type PermissionsConfigModule = typeof import('../../permissions-config.ts');
 
 let runPreToolUseChecks: PreToolUseModule['runPreToolUseChecks'];
 let initializeModeState: ModeManagerModule['initializeModeState'];
+let cleanupModeState: ModeManagerModule['cleanupModeState'];
 let permissionsConfigCache: PermissionsConfigModule['permissionsConfigCache'];
 
 const SESSION_ALLOW_ALL = 'guard-it-allow-all';
@@ -86,6 +83,7 @@ function createBashInput(command: string, overrides?: Partial<PreToolUseInput>):
     sessionId: SESSION_ALLOW_ALL,
     permissionMode: 'allow-all',
     workspaceRootPath: WORKSPACE_ROOT,
+    appConfigDir: APP_CONFIG_DIR,
     workspaceId: 'guard-test-ws',
     activeSourceSlugs: [],
     allSourceSlugs: [],
@@ -107,6 +105,7 @@ beforeAll(async () => {
   const permissionsConfig = await import('../../permissions-config.ts');
   runPreToolUseChecks = preToolUse.runPreToolUseChecks;
   initializeModeState = modeManager.initializeModeState;
+  cleanupModeState = modeManager.cleanupModeState;
   permissionsConfigCache = permissionsConfig.permissionsConfigCache;
   initializeModeState(SESSION_ALLOW_ALL, 'allow-all');
   initializeModeState(SESSION_ASK, 'ask');
@@ -114,16 +113,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  cleanupModeState(SESSION_ALLOW_ALL);
+  cleanupModeState(SESSION_ASK);
+  cleanupModeState(SESSION_SAFE);
+  permissionsConfigCache.invalidateWorkspace(WORKSPACE_ROOT);
   rmSync(APP_CONFIG_DIR, { recursive: true, force: true });
   rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
-  // Restore the process-global config dir (including the previously-unset
-  // case) so later test files in the same process resolve config paths
-  // against the original environment.
-  if (PRIOR_KATA_CONFIG_DIR === undefined) {
-    delete process.env.KATA_CONFIG_DIR;
-  } else {
-    process.env.KATA_CONFIG_DIR = PRIOR_KATA_CONFIG_DIR;
-  }
 });
 
 // ============================================================

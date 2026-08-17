@@ -2053,9 +2053,12 @@ export function detectConfigFileType(filePath: string, workspaceRootPath: string
  * Matches patterns:
  * - ~/.kata-agents/tool-icons/tool-icons.json → tool icon mappings
  */
-export function detectAppConfigFileType(filePath: string): ConfigFileDetection | null {
+export function detectAppConfigFileType(
+  filePath: string,
+  appConfigDir: string = CONFIG_DIR
+): ConfigFileDetection | null {
   const normalizedPath = filePath.replace(/\\/g, '/');
-  const normalizedConfigDir = CONFIG_DIR.replace(/\\/g, '/').replace(/\/?$/, '/');
+  const normalizedConfigDir = appConfigDir.replace(/\\/g, '/').replace(/\/?$/, '/');
 
   // Only check files within CONFIG_DIR
   if (!normalizedPath.startsWith(normalizedConfigDir)) {

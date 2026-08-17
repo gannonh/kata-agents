@@ -346,7 +346,8 @@ export function validateConfigWrite(
   toolName: string,
   input: Record<string, unknown>,
   workspaceRootPath: string,
-  onDebug?: (message: string) => void
+  onDebug?: (message: string) => void,
+  appConfigDir?: string
 ): ConfigValidationResult {
   if (!CONFIG_WRITE_TOOLS.has(toolName)) {
     return { valid: true };
@@ -359,7 +360,7 @@ export function validateConfigWrite(
 
   // Check workspace-scoped configs first, then app-level configs
   const detection: ConfigFileDetection | null =
-    detectConfigFileType(filePath, workspaceRootPath) ?? detectAppConfigFileType(filePath);
+    detectConfigFileType(filePath, workspaceRootPath) ?? detectAppConfigFileType(filePath, appConfigDir);
 
   if (!detection) {
     // Not a config file - allow
@@ -467,6 +468,8 @@ export interface PreToolUseInput {
   permissionMode: PermissionMode;
   /** Absolute path to workspace root */
   workspaceRootPath: string;
+  /** App config root override for isolated callers/tests */
+  appConfigDir?: string;
   /** Workspace ID or slug for skill qualification */
   workspaceId: string;
   /** Plans folder path for the session (writes allowed in explore mode) */
@@ -555,6 +558,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     sessionId,
     permissionMode,
     workspaceRootPath,
+    appConfigDir,
     workspaceId,
     plansFolderPath,
     dataFolderPath,
@@ -571,6 +575,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // Build permissions context for custom permissions.json rules
   const permissionsContext: PermissionsContext = {
     workspaceRootPath,
+    appConfigDir,
     activeSourceSlugs,
   };
 
@@ -661,7 +666,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   }
 
   // 5b. Config file validation
-  const configResult = validateConfigWrite(toolName, currentInput, workspaceRootPath, onDebug);
+  const configResult = validateConfigWrite(toolName, currentInput, workspaceRootPath, onDebug, appConfigDir);
   if (!configResult.valid) {
     return { type: 'block', reason: configResult.error! };
   }
@@ -699,7 +704,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (toolName === 'Bash') {
     const command = input.command;
     if (typeof command === 'string' && command.trim().length > 0) {
-      const guardResult = classifyBashConfigWrite(command, workspaceRootPath, workingDirectory);
+      const guardResult = classifyBashConfigWrite(command, workspaceRootPath, workingDirectory, appConfigDir);
       if (guardResult.kind === 'validate') {
         const contentResult = runConfigContentValidation(guardResult.detection, guardResult.content, onDebug);
         if (!contentResult.valid) {
