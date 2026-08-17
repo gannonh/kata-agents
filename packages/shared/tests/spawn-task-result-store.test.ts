@@ -59,6 +59,21 @@ function processingTask(store: SpawnTaskStore) {
 }
 
 describe('spawn-task result artifacts', () => {
+  it('does not steal an ownerless publication lock during owner creation', () => {
+    const root = workspace()
+    const tasksPath = join(root, 'spawn-tasks', 'tasks')
+    mkdirSync(tasksPath, { recursive: true })
+    const lockPath = join(tasksPath, '.publish-lock')
+    mkdirSync(lockPath)
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'workspace_results' })
+
+    expect(() => store.reserve({
+      parentSessionId: 'parent',
+      delegatedPrompt: 'blocked by an in-flight publisher',
+      childConfig: {},
+    })).toThrow('publication is locked by another writer')
+  })
+
   it('re-reads a durable parent-deletion boundary from an older store instance', () => {
     const root = workspace();
     const first = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_parent_boundary' });

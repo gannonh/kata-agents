@@ -31,6 +31,36 @@ describe('spawn child session persistence', () => {
     expect(loadSession(root, created.id)?.spawnTaskRef).toEqual(created.spawnTaskRef)
   })
 
+  it('persists child provider overrides with the reserved session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'spawn-session-storage-'))
+    roots.push(root)
+
+    const created = await createSession(root, {
+      reservedSessionId: 'session_reserved_overrides',
+      spawnTaskRef: {
+        taskId: 'task_reserved_overrides',
+        parentSessionId: 'session_parent',
+      },
+      llmConnection: 'conn_spawn_child',
+      model: 'spawn-model',
+      thinkingLevel: 'off',
+      enabledSourceSlugs: ['src_spawn'],
+    })
+
+    expect(created).toMatchObject({
+      llmConnection: 'conn_spawn_child',
+      model: 'spawn-model',
+      thinkingLevel: 'off',
+      enabledSourceSlugs: ['src_spawn'],
+    })
+    expect(loadSession(root, created.id)).toMatchObject({
+      llmConnection: 'conn_spawn_child',
+      model: 'spawn-model',
+      thinkingLevel: 'off',
+      enabledSourceSlugs: ['src_spawn'],
+    })
+  })
+
   it('requires a private task back-reference for reserved child creation', async () => {
     const root = mkdtempSync(join(tmpdir(), 'spawn-session-storage-'))
     roots.push(root)

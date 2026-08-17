@@ -5,6 +5,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import type { SpawnTask } from '@kata-sh/core';
@@ -66,6 +67,7 @@ function errorMessage(error: unknown): string {
 }
 
 const PUBLICATION_LOCK_DIRECTORY = '.publish-lock';
+const PUBLICATION_LOCK_OWNER_GRACE_MS = 1_000;
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -94,6 +96,17 @@ function acquirePublicationLock(tasksPath: string): string {
     }
     if (ownerPid !== undefined && isProcessAlive(ownerPid)) {
       throw new Error('Spawned-task store publication is locked by another writer');
+    }
+    if (ownerPid === undefined) {
+      let lockAge = 0;
+      try {
+        lockAge = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        // A concurrently removed lock is retried by the mkdir below.
+      }
+      if (lockAge < PUBLICATION_LOCK_OWNER_GRACE_MS) {
+        throw new Error('Spawned-task store publication is locked by another writer');
+      }
     }
     rmSync(lockPath, { recursive: true, force: true });
     mkdirSync(lockPath);

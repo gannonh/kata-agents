@@ -71,6 +71,7 @@ export interface SpawnTaskRecoveryAdapter {
   readonly parentExists?: (parentSessionId: string) => boolean | Promise<boolean>
   readonly findChild: (task: SpawnTask) => SpawnTaskRecoveryChild | Promise<SpawnTaskRecoveryChild>
   readonly listChildren?: () => readonly SpawnTaskRecoveryReference[] | Promise<readonly SpawnTaskRecoveryReference[]>
+  readonly resolveAttachments?: (task: SpawnTask) => readonly FileAttachment[] | undefined | Promise<readonly FileAttachment[] | undefined>
 }
 
 export interface SpawnTaskCancellationResult {
@@ -750,10 +751,21 @@ export class SpawnTaskCoordinator {
       return
     }
 
+    let attachments: readonly FileAttachment[] | undefined
+    if (recovery.resolveAttachments) {
+      try {
+        attachments = await recovery.resolveAttachments(current)
+      } catch (error) {
+        await this.commitRecoveryFailure(current, 'attachments', 'spawn_persist_failed', error)
+        return
+      }
+    }
+
     try {
       await this.appendDelegatedPrompt({
         task: current,
         prompt: current.delegatedPrompt,
+        attachments,
       })
     } catch {
       await this.commitRecoveryFailure(current, 'message_append')
@@ -781,6 +793,7 @@ export class SpawnTaskCoordinator {
       const providerTurn = this.dispatchProvider({
         task: current,
         prompt: current.delegatedPrompt,
+        attachments,
       })
       this.markDispatchActive(current.taskId)
       if (providerTurn) {

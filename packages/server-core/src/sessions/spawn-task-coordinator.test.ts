@@ -119,6 +119,96 @@ describe('SpawnTaskCoordinator', () => {
     })
   })
 
+  it('recovers a ready task with the original attachments', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const attachment = {
+      type: 'text' as const,
+      path: join(workspaceRoot, 'note.txt'),
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      size: 4,
+      text: 'note',
+    }
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'summarize the attachment',
+      childConfig: {
+        attachments: [{ path: attachment.path, name: attachment.name }],
+      },
+    })
+    store.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    let appendedAttachments: unknown
+    let dispatchedAttachments: unknown
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async ({ attachments }) => {
+        appendedAttachments = attachments
+      },
+      dispatchProvider: ({ attachments }) => {
+        dispatchedAttachments = attachments
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+      resolveAttachments: () => [attachment],
+    })
+
+    expect(appendedAttachments).toEqual([attachment])
+    expect(dispatchedAttachments).toEqual([attachment])
+    expect(providerCalls).toBe(1)
+    expect(store.get(reserved.taskId)).toMatchObject({
+      runtimeState: 'processing',
+      dispatch: { state: 'sent' },
+    })
+  })
+
+  it('fails ready recovery when attachments cannot be restored', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'summarize the missing attachment',
+      childConfig: {
+        attachments: [{ path: '/missing/note.txt', name: 'note.txt' }],
+      },
+    })
+    const ready = store.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => {
+        providerCalls += 1
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+      resolveAttachments: () => {
+        throw new Error('attachment missing')
+      },
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(store.get(ready.taskId)).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'spawn_persist_failed',
+        details: { boundary: 'attachments' },
+      },
+    })
+  })
+
   it('interrupts claimed work after restart without replaying the provider call', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)

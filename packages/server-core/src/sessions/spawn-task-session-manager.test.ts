@@ -88,21 +88,53 @@ describe('SessionManager spawned-task transcript append', () => {
       const coordinator = (manager as unknown as {
         getSpawnTaskCoordinator: (session: unknown) => SpawnTaskCoordinator
       }).getSpawnTaskCoordinator(parent)
+      const appendSpawnPrompt = (manager as any).appendSpawnPrompt.bind(manager)
+      ;(manager as any).appendSpawnPrompt = async (...args: unknown[]) => {
+        const childSessionId = args[0] as string
+        const persistedBeforeAppend = loadSession(workspaceRoot, childSessionId)
+        expect(persistedBeforeAppend).toMatchObject({
+          llmConnection: 'conn_spawn_child',
+          model: 'spawn-model',
+          thinkingLevel: 'off',
+          enabledSourceSlugs: ['src_spawn'],
+          permissionMode: 'safe',
+          labels: ['delegated'],
+          workingDirectory: workspaceRoot,
+        })
+        return appendSpawnPrompt(...args)
+      }
       const result = await coordinator.spawn({
         parentSessionId: parent.id,
         delegatedPrompt: 'persist the real child relationship',
-        childConfig: { name: 'child' },
+        childConfig: {
+          name: 'child',
+          llmConnection: 'conn_spawn_child',
+          model: 'spawn-model',
+          thinkingLevel: 'off',
+          enabledSourceSlugs: ['src_spawn'],
+          permissionMode: 'safe',
+          labels: ['delegated'],
+          workingDirectory: workspaceRoot,
+        },
       })
 
       const persistedChild = loadSession(workspaceRoot, result.childSessionId)
       expect(dispatchedTask?.childSessionId).toBe(result.childSessionId)
       expect(persistedChild).toMatchObject({
         id: result.childSessionId,
+        name: 'child',
+        llmConnection: 'conn_spawn_child',
+        thinkingLevel: 'off',
+        enabledSourceSlugs: ['src_spawn'],
+        permissionMode: 'safe',
+        labels: ['delegated'],
+        workingDirectory: workspaceRoot,
         spawnTaskRef: {
           taskId: result.taskId,
           parentSessionId: parent.id,
         },
       })
+      expect(persistedChild?.model).toBeTruthy()
       expect(persistedChild?.id).toBe(dispatchedTask?.childSessionId)
     } finally {
       if (originalConfig === null) rmSync(configFile, { force: true })
@@ -709,6 +741,99 @@ describe('SessionManager spawned-task transcript append', () => {
       expect(new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)?.failure).toBeUndefined()
       expect(dispatched).toEqual([reserved.taskId])
       expect(updates).toHaveLength(updatesAfterFirstRecovery)
+    } finally {
+      if (originalConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, originalConfig)
+    }
+  })
+
+  it('recovers ready-task attachments from durable child config', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_attachment_recovery',
+      name: 'Spawn attachment recovery workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const configFile = join(CONFIG_DIR, 'config.json')
+    const originalConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const config = originalConfig
+      ? JSON.parse(originalConfig) as { workspaces: Array<Record<string, unknown>>; activeWorkspaceId?: string | null; activeSessionId?: string | null }
+      : { workspaces: [], activeWorkspaceId: null, activeSessionId: null }
+    config.workspaces = (config.workspaces ?? []).filter((entry) => entry.id !== workspace.id)
+    config.workspaces.push(workspace)
+    writeFileSync(configFile, JSON.stringify(config, null, 2))
+
+    try {
+      const notePath = join(workspaceRoot, 'note.txt')
+      writeFileSync(notePath, 'note')
+      await saveSession({
+        id: 'session_attachment_parent',
+        workspaceRootPath: workspaceRoot,
+        name: 'Attachment parent',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      const initial = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+      const reserved = initial.reserve({
+        parentSessionId: 'session_attachment_parent',
+        delegatedPrompt: 'summarize the note',
+        childConfig: {
+          attachments: [{ path: notePath, name: 'note.txt' }],
+        },
+      })
+      initial.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+      await saveSession({
+        id: reserved.childSessionId,
+        workspaceRootPath: workspaceRoot,
+        name: 'Attachment child',
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        sessionStatus: 'todo',
+        spawnTaskRef: {
+          taskId: reserved.taskId,
+          parentSessionId: reserved.parentSessionId,
+          delegatedPrompt: reserved.delegatedPrompt,
+          childConfig: reserved.childConfig,
+          messageId: reserved.dispatch.messageId,
+          dispatchAttemptId: reserved.dispatch.dispatchAttemptId,
+        },
+        messages: [],
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+        },
+      } as never)
+      let dispatchedAttachments: Array<{ path?: string; name?: string }> | undefined
+      const manager = new SessionManager({
+        spawnTaskDispatchProvider: ({ attachments }) => {
+          dispatchedAttachments = attachments ? [...attachments] : undefined
+        },
+      })
+      manager.setEventSink(() => {})
+
+      await (manager as any).loadSessionsFromDisk()
+
+      expect(dispatchedAttachments).toEqual([
+        expect.objectContaining({ path: notePath, name: 'note.txt' }),
+      ])
+      expect(new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id }).get(reserved.taskId)).toMatchObject({
+        runtimeState: 'processing',
+        dispatch: { state: 'sent' },
+      })
     } finally {
       if (originalConfig === null) rmSync(configFile, { force: true })
       else writeFileSync(configFile, originalConfig)
@@ -1657,6 +1782,62 @@ describe('SessionManager spawned-task transcript append', () => {
       result: { byteLength: Buffer.byteLength('terminal result', 'utf8') },
     })
     expect(order.at(-1)).toBe(`session:${parent.id}`)
+  })
+
+  it('does not tombstone spawned tasks when managed-worktree deletion is refused', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-session-manager-'))
+    roots.push(workspaceRoot)
+    const workspace = {
+      id: 'workspace_spawn_delete_refused',
+      name: 'Spawn delete refused workspace',
+      rootPath: workspaceRoot,
+      createdAt: Date.now(),
+    }
+    const store = new SpawnTaskStore({ workspaceRoot, workspaceId: workspace.id })
+    const reserved = store.reserve({
+      parentSessionId: 'session_parent_refused',
+      delegatedPrompt: 'must remain queued',
+      childConfig: {},
+    })
+    const manager = new SessionManager({ spawnTaskStoreFactory: () => store })
+    manager.setEventSink(() => {})
+    const services = createGitServices({
+      worktreeRoot: join(workspaceRoot, 'worktrees'),
+      registryPath: join(workspaceRoot, 'worktrees', 'registry.json'),
+    })
+    manager.setGitServices(services)
+    services.lifecycle.markReady()
+    const parent = createManagedSession(
+      { id: 'session_parent_refused', name: 'parent' },
+      workspace as never,
+      { messagesLoaded: true },
+    )
+    parent.isProcessing = true
+    parent.agent = {
+      quiesceForTeardown: async () => {
+        throw new Error('exit unconfirmed')
+      },
+      dispose: () => {},
+    } as never
+    const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions
+    sessions.set(parent.id, parent)
+
+    const result = await manager.deleteSession(parent.id, { removeManagedWorktree: true })
+
+    expect(result).toMatchObject({
+      deleted: false,
+      worktreeRemoval: {
+        blocked: true,
+        blockedReasonCode: 'agent_not_quiesced',
+      },
+    })
+    expect(sessions.has(parent.id)).toBe(true)
+    expect(store.isParentDeleted(parent.id)).toBe(false)
+    expect(store.get(reserved.taskId)).toMatchObject({
+      runtimeState: 'queued',
+      dispatch: { state: 'reserved' },
+    })
+    expect(store.get(reserved.taskId)?.parentDeletedAt).toBeUndefined()
   })
 
   it('cancels active child before deletion and retains terminal child results', async () => {

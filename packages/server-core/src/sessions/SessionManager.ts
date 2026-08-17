@@ -51,7 +51,7 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
-import type { SpawnTaskJsonValue } from '@kata-sh/core'
+import type { SpawnTask, SpawnTaskJsonValue } from '@kata-sh/core'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -2911,7 +2911,29 @@ export class SessionManager implements ISessionManager {
         }
       },
       listChildren: allReferences,
+      resolveAttachments: (task) => this.resolveSpawnTaskAttachments(task),
     }
+  }
+
+  private resolveSpawnTaskAttachments(task: SpawnTask): FileAttachment[] | undefined {
+    const raw = task.childConfig.attachments
+    if (!Array.isArray(raw) || raw.length === 0) return undefined
+    const attachments: FileAttachment[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('Spawned-task recovery attachment metadata is invalid')
+      }
+      const path = entry.path
+      const name = entry.name
+      if (typeof path !== 'string' || !path) {
+        throw new Error('Spawned-task recovery attachment metadata is invalid')
+      }
+      const attachment = readFileAttachment(path)
+      if (!attachment) throw new Error(`Spawned-task recovery attachment missing: ${path}`)
+      if (typeof name === 'string' && name) attachment.name = name
+      attachments.push(attachment)
+    }
+    return attachments
   }
 
   private discardSpawnTaskCoordinator(
@@ -3364,6 +3386,10 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
+      llmConnection: options?.llmConnection,
+      model: resolvedModelOption,
+      enabledSourceSlugs: defaultEnabledSourceSlugs,
+      thinkingLevel: defaultThinkingLevel,
     })
 
     // Phase 4: durable pending isolated-fork intent, computed once so the
@@ -4817,6 +4843,14 @@ export class SessionManager implements ISessionManager {
           thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel ?? null,
           labels: request.labels ?? managed.labels ?? [],
           ...(request.workingDirectory !== undefined ? { workingDirectory: request.workingDirectory } : {}),
+          ...(fileAttachments?.length
+            ? {
+                attachments: fileAttachments.map((attachment) => ({
+                  path: attachment.path,
+                  name: attachment.name,
+                })),
+              }
+            : {}),
         }
 
         const result = await this.getSpawnTaskCoordinator(managed).spawn({
@@ -7752,19 +7786,6 @@ export class SessionManager implements ISessionManager {
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
 
-    // Preserve spawned-task records and commit deletion/cancellation metadata
-    // before the session_deleted event or session storage removal. Sent parent
-    // work is intentionally left orphaned; active child work is cancelled first.
-    const taskCoordinator = this.getSpawnTaskCoordinator(managed)
-    if (managed.spawnTaskRef) {
-      await taskCoordinator.markChildDeleted(
-        managed.id,
-        this.spawnTaskRuntimeForSession(managed),
-      )
-    } else {
-      await taskCoordinator.markParentDeleted(managed.id)
-    }
-
     // Quiesce the agent BEFORE anything reads or removes the checkout. A live
     // turn writes into the worktree, so inspecting removal risk or removing the
     // checkout while it runs could discard files the destructive confirmation
@@ -7868,6 +7889,20 @@ export class SessionManager implements ISessionManager {
         return { deleted: false, worktreeRemoval: removal.result }
       }
       if (removal.outcome === 'removed') completedWorktreeRemoval = removal.result
+    }
+
+    // Preserve spawned-task records and commit deletion/cancellation metadata
+    // after deletion can no longer be refused, and before session_deleted or
+    // session storage removal. Sent parent work is intentionally left orphaned;
+    // active child work is cancelled first.
+    const taskCoordinator = this.getSpawnTaskCoordinator(managed)
+    if (managed.spawnTaskRef) {
+      await taskCoordinator.markChildDeleted(
+        managed.id,
+        this.spawnTaskRuntimeForSession(managed),
+      )
+    } else {
+      await taskCoordinator.markParentDeleted(managed.id)
     }
 
     // Drop managed-worktree ownership for this session. Deleting a session never
