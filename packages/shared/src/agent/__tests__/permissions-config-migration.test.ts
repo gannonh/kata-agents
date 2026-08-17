@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 
 const originalCwd = process.cwd();
 const originalConfigDir = process.env.KATA_CONFIG_DIR;
@@ -10,6 +10,16 @@ afterEach(() => {
   process.chdir(originalCwd);
   if (originalConfigDir === undefined) delete process.env.KATA_CONFIG_DIR;
   else process.env.KATA_CONFIG_DIR = originalConfigDir;
+});
+
+describe('app-level permissions paths', () => {
+  it('falls back to the home config directory when KATA_CONFIG_DIR is empty', async () => {
+    process.env.KATA_CONFIG_DIR = '';
+
+    const mod = await import(`../permissions-config.ts?empty-config-dir=${Date.now()}`);
+
+    expect(mod.getAppPermissionsDir()).toBe(join(homedir(), '.kata-agents', 'permissions'));
+  });
 });
 
 describe('ensureDefaultPermissions migration', () => {

@@ -46,7 +46,7 @@ let permissionsInitialized = false;
  * Reads env var dynamically so tests can override via KATA_CONFIG_DIR.
  */
 export function getAppPermissionsDir(appConfigDir?: string): string {
-  const configDir = appConfigDir ?? process.env.KATA_CONFIG_DIR ?? join(homedir(), '.kata-agents');
+  const configDir = appConfigDir || process.env.KATA_CONFIG_DIR || join(homedir(), '.kata-agents');
   return join(configDir, 'permissions');
 }
 
