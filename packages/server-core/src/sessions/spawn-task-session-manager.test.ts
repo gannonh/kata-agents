@@ -134,7 +134,7 @@ describe('SessionManager spawned-task transcript append', () => {
           parentSessionId: parent.id,
         },
       })
-      expect(persistedChild?.model).toBeTruthy()
+      expect(persistedChild?.model).toBe('spawn-model')
       expect(persistedChild?.id).toBe(dispatchedTask?.childSessionId)
     } finally {
       if (originalConfig === null) rmSync(configFile, { force: true })

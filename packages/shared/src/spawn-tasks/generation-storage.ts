@@ -98,13 +98,13 @@ function acquirePublicationLock(tasksPath: string): string {
       throw new Error('Spawned-task store publication is locked by another writer');
     }
     if (ownerPid === undefined) {
-      let lockAge = 0;
+      let lockAge: number | undefined;
       try {
         lockAge = Date.now() - statSync(lockPath).mtimeMs;
       } catch {
         // A concurrently removed lock is retried by the mkdir below.
       }
-      if (lockAge < PUBLICATION_LOCK_OWNER_GRACE_MS) {
+      if (lockAge !== undefined && lockAge < PUBLICATION_LOCK_OWNER_GRACE_MS) {
         throw new Error('Spawned-task store publication is locked by another writer');
       }
     }
