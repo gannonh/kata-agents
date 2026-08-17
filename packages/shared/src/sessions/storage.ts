@@ -26,7 +26,7 @@ import { join, basename } from 'path';
 import { getWorkspaceSessionsPath } from '../workspaces/storage.ts';
 import { generateUniqueSessionId } from './slug-generator.ts';
 import { toPortablePath, expandPath } from '../utils/paths.ts';
-import { sanitizeSessionId } from './validation.ts';
+import { sanitizeSessionId, validateSessionId } from './validation.ts';
 import { perf } from '../utils/perf.ts';
 import type {
   SessionConfig,
@@ -177,12 +177,17 @@ export function generateSessionId(workspaceRootPath: string): string {
 export async function createSession(
   workspaceRootPath: string,
   options?: {
+    /** Internal-only reserved ID used by the spawned-task coordinator. */
+    reservedSessionId?: string;
+    /** Internal-only durable relationship used by spawned children. */
+    spawnTaskRef?: SessionConfig['spawnTaskRef'];
     name?: string;
     workingDirectory?: string;
     permissionMode?: SessionConfig['permissionMode'];
     enabledSourceSlugs?: string[];
     model?: string;
     llmConnection?: string;
+    thinkingLevel?: SessionConfig['thinkingLevel'];
     hidden?: boolean;
     sessionStatus?: SessionConfig['sessionStatus'];
     labels?: string[];
@@ -192,7 +197,19 @@ export async function createSession(
   ensureSessionsDir(workspaceRootPath);
 
   const now = Date.now();
-  const sessionId = generateSessionId(workspaceRootPath);
+  const sessionId = options?.reservedSessionId ?? generateSessionId(workspaceRootPath);
+  const spawnTaskRef = options?.spawnTaskRef;
+  if (options?.reservedSessionId && !spawnTaskRef) {
+    throw new Error('Reserved child session requires a private spawn-task back-reference');
+  }
+  if (options?.reservedSessionId && spawnTaskRef) {
+    validateSessionId(options.reservedSessionId);
+    validateSessionId(spawnTaskRef.taskId);
+    validateSessionId(spawnTaskRef.parentSessionId);
+    if (existsSync(getSessionPath(workspaceRootPath, options.reservedSessionId))) {
+      throw new Error(`Session ${options.reservedSessionId} already exists`);
+    }
+  }
 
   // Create session directory with all subdirectories (plans, attachments)
   ensureSessionDir(workspaceRootPath, sessionId);
@@ -210,10 +227,12 @@ export async function createSession(
     lastUsedAt: now,
     workingDirectory: options?.workingDirectory,
     sdkCwd,
+    spawnTaskRef,
     permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
     model: options?.model,
     llmConnection: options?.llmConnection,
+    thinkingLevel: options?.thinkingLevel,
     hidden: options?.hidden,
     sessionStatus: options?.sessionStatus,
     labels: options?.labels,
@@ -232,7 +251,27 @@ export async function createSession(
       costUsd: 0,
     },
   };
-  await saveSession(storedSession);
+  try {
+    await saveSession(storedSession);
+    if (options?.reservedSessionId) {
+      const persisted = loadSession(workspaceRootPath, sessionId);
+      const persistedReference = persisted?.spawnTaskRef;
+      const expectedReference = storedSession.spawnTaskRef;
+      if (
+        !persisted
+        || persisted.id !== sessionId
+        || persistedReference?.taskId !== expectedReference?.taskId
+        || persistedReference?.parentSessionId !== expectedReference?.parentSessionId
+      ) {
+        throw new Error(`Reserved child session ${sessionId} did not persist`);
+      }
+    }
+  } catch (error) {
+    if (options?.reservedSessionId) {
+      rmSync(getSessionPath(workspaceRootPath, sessionId), { recursive: true, force: true });
+    }
+    throw error;
+  }
 
   return session;
 }

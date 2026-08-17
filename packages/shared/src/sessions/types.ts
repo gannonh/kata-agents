@@ -10,6 +10,7 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { SpawnTaskJsonValue } from '@kata-sh/core';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { SessionCheckout } from '../protocol/git.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@kata-sh/core/types';
@@ -27,6 +28,8 @@ import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthSt
 export const SESSION_PERSISTENT_FIELDS = [
   // Identity
   'id', 'workspaceRootPath', 'sdkSessionId', 'sdkCwd',
+  // Private spawned-task relationship (not exposed in renderer Session DTOs)
+  'spawnTaskRef',
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
@@ -75,6 +78,17 @@ export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
  */
 export type SessionStatus = string;
 
+/** Durable private relationship used to recover a spawned child without trusting its transcript. */
+export interface SpawnTaskSessionReference {
+  readonly taskId: string;
+  readonly parentSessionId: string;
+  /** Recovery metadata is private and omitted from public session projections. */
+  readonly delegatedPrompt?: string;
+  readonly childConfig?: Readonly<Record<string, SpawnTaskJsonValue>>;
+  readonly messageId?: string;
+  readonly dispatchAttemptId?: string;
+}
+
 /**
  * Built-in status IDs (for TypeScript consumers)
  * These are the default statuses but users can add/remove custom ones
@@ -109,6 +123,8 @@ export interface SessionConfig {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
+  /** Private durable spawned-task relationship; omitted from public session DTOs. */
+  spawnTaskRef?: SpawnTaskSessionReference;
   /** Workspace root path this session belongs to */
   workspaceRootPath: string;
   /** Optional user-defined name */
@@ -269,6 +285,8 @@ export interface StoredSession extends SessionConfig {
  */
 export interface SessionHeader {
   id: string;
+  /** Private durable spawned-task relationship; omitted from public session DTOs. */
+  spawnTaskRef?: SpawnTaskSessionReference;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
   /** Workspace root path (stored as portable path, e.g., ~/.kata-agents/...) */
@@ -367,6 +385,8 @@ export interface SessionHeader {
 export interface SessionMetadata {
   id: string;
   workspaceRootPath: string;
+  /** Private spawned-task relationship used only during server recovery. */
+  spawnTaskRef?: SpawnTaskSessionReference;
   name?: string;
   createdAt: number;
   lastUsedAt: number;

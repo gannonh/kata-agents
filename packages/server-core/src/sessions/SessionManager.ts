@@ -51,6 +51,7 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
+import type { SpawnTask, SpawnTaskJsonValue } from '@kata-sh/core'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -83,6 +84,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type SpawnTaskSessionReference,
   pickSessionFields,
 } from '@kata-sh/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@kata-sh/shared/sources'
@@ -110,6 +112,8 @@ import { ensureLabelsExist } from '@kata-sh/shared/labels/crud'
 import { loadStatusConfig } from '@kata-sh/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@kata-sh/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskRecoveryAdapter, type SpawnTaskRecoveryReference, type SpawnTaskUpdated } from './spawn-task-coordinator'
+import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
@@ -777,8 +781,26 @@ async function resolveToolDisplayMeta(
 /** Agent type - unified backend interface for all providers */
 type AgentInstance = AgentBackend
 
+interface TurnToolFailureEvidence {
+  toolName: string
+  toolUseId?: string
+}
+
+const MAX_TURN_TOOL_EVIDENCE_FIELD_LENGTH = 128
+
+function boundTurnToolEvidenceField(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const bounded = value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .slice(0, MAX_TURN_TOOL_EVIDENCE_FIELD_LENGTH)
+    .trim()
+  return bounded || undefined
+}
+
 interface ManagedSession {
   id: string
+  /** Private durable task relationship; never returned in Session DTOs. */
+  spawnTaskRef?: SpawnTaskSessionReference
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
@@ -889,6 +911,9 @@ interface ManagedSession {
   lastFinalMessageId?: string
   // Turn baseline: last final assistant message ID at turn start (runtime-only, not persisted)
   turnStartFinalMessageId?: string
+  // Runtime-only evidence for a tool failure observed during the current turn.
+  // The result payload is intentionally excluded because it may contain secrets.
+  turnToolFailureEvidence?: TurnToolFailureEvidence
   // External session metadata updates seen while processing (applied after turn stop)
   pendingExternalMetadata?: SessionHeader
   // Guard: suppress external metadata revert after programmatic writes (setSessionStatus/setSessionLabels).
@@ -925,6 +950,7 @@ interface ManagedSession {
   // Auth retry tracking (for mid-session token expiry)
   // Store last sent message/attachments to enable retry after token refresh
   lastSentMessage?: string
+  lastSentMessageId?: string
   lastSentAttachments?: FileAttachment[]
   lastSentStoredAttachments?: StoredAttachment[]
   lastSentOptions?: SendMessageOptions
@@ -1150,8 +1176,9 @@ async function managedToSession(m: ManagedSession, overrides?: Partial<Session>)
       /* adapter capability unavailable — omit; the server blocker remains authoritative */
     }
   }
+  const { spawnTaskRef: _spawnTaskRef, ...publicPersistentFields } = pickSessionFields(m)
   return {
-    ...pickSessionFields(m),
+    ...publicPersistentFields,
     sharedOwnerCount,
     handoffCapable,
     isolatedForkCapable,
@@ -1193,6 +1220,17 @@ interface PendingDelta {
  * preflight entirely — provider establishment happens on first Send (Task 4),
  * not at creation.
  */
+export interface SessionManagerOptions {
+  /** Deterministic seam for C1 task-store fault tests; production uses the default store. */
+  spawnTaskStoreFactory?: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+  /** Deterministic provider boundary for SessionManager/storage integration tests. */
+  spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
+  /** Internal C2 invalidation seam; task commits precede this versioned callback. */
+  spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
+  /** Internal C3 audit seam for ignored late child lifecycle events. */
+  spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
+}
+
 interface ForkChildCreateOptions {
   pendingFork?: {
     transactionId: string
@@ -1211,6 +1249,13 @@ interface ForkChildCreateOptions {
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
+  private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
+  private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
+  private readonly spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
+  private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
+  private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
+  private readonly spawnTaskRecoveryPending = new Set<string>()
   /** Sends that have started but have not yet entered agent.chat(). */
   private pendingPreChatBarriers: Map<string, Set<Promise<void>>> = new Map()
   /** Counts concurrent delete operations so a fence is cleared only after all settle. */
@@ -1292,6 +1337,13 @@ export class SessionManager implements ISessionManager {
     sessionId: string
     topicName: string
   }) => Promise<void>
+
+  constructor(options: SessionManagerOptions = {}) {
+    this.spawnTaskStoreFactory = options.spawnTaskStoreFactory ?? ((storeOptions) => new SpawnTaskStore(storeOptions))
+    this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
+    this.spawnTaskUpdated = options.spawnTaskUpdated
+    this.spawnTaskLateEvent = options.spawnTaskLateEvent
+  }
 
   private registerPreChatBarrier(sessionId: string): () => void {
     let resolveBarrier!: () => void
@@ -2115,6 +2167,23 @@ export class SessionManager implements ISessionManager {
         // so a restored session is visible during this same startup pass instead
         // of being silently omitted until a later restart.
         await this.recoverStagedSessionDeletions(workspaceRootPath)
+        // Construct the workspace task coordinator during startup so verified
+        // artifact recovery and integrity markers use the same commit-before-
+        // invalidation seam as live child lifecycle finalization. A task-store
+        // startup failure must not prevent ordinary sessions in this workspace
+        // from loading; the coordinator cache is discarded so first use retries.
+        let startupCoordinator: SpawnTaskCoordinator | undefined
+        try {
+          startupCoordinator = this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspace.id)
+          await startupCoordinator.waitForStartupNotification()
+        } catch (error) {
+          this.spawnTaskRecoveryPending.add(workspaceRootPath)
+          this.discardSpawnTaskCoordinator(workspaceRootPath, startupCoordinator)
+          sessionLog.error(
+            `Failed to reconcile spawned tasks during startup for workspace ${workspace.id} (${workspaceRootPath}):`,
+            error,
+          )
+        }
         const sessionMetadata = listStoredSessions(workspaceRootPath)
         // Load workspace config once per workspace for default working directory
         const wsConfig = loadWorkspaceConfig(workspaceRootPath)
@@ -2161,6 +2230,19 @@ export class SessionManager implements ISessionManager {
           }
 
           totalSessions++
+        }
+
+        if (startupCoordinator) {
+          try {
+            await startupCoordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspace.id, workspaceRootPath))
+          } catch (error) {
+            this.spawnTaskRecoveryPending.add(workspaceRootPath)
+            this.discardSpawnTaskCoordinator(workspaceRootPath, startupCoordinator)
+            sessionLog.error(
+              `Failed to recover spawned tasks during startup for workspace ${workspace.id} (${workspaceRootPath}):`,
+              error,
+            )
+          }
         }
       }
 
@@ -2212,6 +2294,7 @@ export class SessionManager implements ISessionManager {
       if (managed.enabledSourceSlugs === undefined) managed.enabledSourceSlugs = stored.enabledSourceSlugs
       if (managed.lastReadMessageId === undefined) managed.lastReadMessageId = stored.lastReadMessageId
       if (managed.hasUnread === undefined) managed.hasUnread = stored.hasUnread
+      if (managed.spawnTaskRef === undefined) managed.spawnTaskRef = stored.spawnTaskRef
       if (managed.sharedUrl === undefined) managed.sharedUrl = stored.sharedUrl
       if (managed.sharedId === undefined) managed.sharedId = stored.sharedId
       if (managed.transferredSessionSummary === undefined) managed.transferredSessionSummary = stored.transferredSessionSummary
@@ -2334,6 +2417,25 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn(`Cannot complete auth request - session ${sessionId} not found`)
+      return
+    }
+
+    // A spawned task must resume durably before any auth UI, credential, or
+    // bridge side effect can revive a terminal child. Ordinary sessions keep
+    // the existing auth flow unchanged.
+    if (managed.spawnTaskRef && !this.spawnedTaskInputResponseIsCurrent(
+      managed,
+      result.requestId,
+      'authentication_response',
+    )) {
+      await this.interruptSpawnTaskInput(managed, `Authentication response could not resume request ${result.requestId}.`)
+      sessionLog.warn(`Ignoring authentication response for non-awaiting spawned task ${managed.id}`)
+      return
+    }
+    const canResumeSpawnTask = await this.resumeSpawnTaskInput(managed, result.requestId)
+    if (!canResumeSpawnTask && managed.spawnTaskRef) {
+      await this.interruptSpawnTaskInput(managed, `Authentication response could not resume request ${result.requestId}.`)
+      sessionLog.warn(`Ignoring authentication response for non-awaiting spawned task ${managed.id}`)
       return
     }
 
@@ -2684,6 +2786,7 @@ export class SessionManager implements ISessionManager {
       managed.tokenUsage = storedSession.tokenUsage
       managed.lastReadMessageId = storedSession.lastReadMessageId
       managed.hasUnread = storedSession.hasUnread  // Explicit unread flag for NEW badge state machine
+      managed.spawnTaskRef = storedSession.spawnTaskRef
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
@@ -2744,9 +2847,274 @@ export class SessionManager implements ISessionManager {
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
+  private getSpawnTaskCoordinator(parent: ManagedSession): SpawnTaskCoordinator {
+    return this.getOrCreateSpawnTaskCoordinator(parent.workspace.rootPath, parent.workspace.id)
+  }
+
+  private getSpawnTaskRecoveryAdapter(
+    workspaceId: string,
+    workspaceRootPath: string,
+  ): SpawnTaskRecoveryAdapter {
+    const sessions = () => [...this.sessions.values()].filter((managed) => managed.workspace.id === workspaceId)
+    const storedSessions = () => listStoredSessions(workspaceRootPath)
+    const referenceFor = (
+      sessionId: string,
+      reference: SpawnTaskSessionReference | undefined,
+    ): SpawnTaskRecoveryReference | undefined => {
+      if (!reference) return undefined
+      return {
+        taskId: reference.taskId,
+        parentSessionId: reference.parentSessionId,
+        childSessionId: sessionId,
+        delegatedPrompt: reference.delegatedPrompt,
+        childConfig: reference.childConfig,
+        messageId: reference.messageId,
+        dispatchAttemptId: reference.dispatchAttemptId,
+      }
+    }
+    const allReferences = (): readonly SpawnTaskRecoveryReference[] => {
+      const references = new Map<string, SpawnTaskRecoveryReference>()
+      for (const meta of storedSessions()) {
+        const reference = referenceFor(meta.id, meta.spawnTaskRef)
+        if (reference) references.set(meta.id, reference)
+      }
+      for (const managed of sessions()) {
+        const reference = referenceFor(managed.id, managed.spawnTaskRef)
+        if (reference) references.set(managed.id, reference)
+      }
+      return [...references.values()]
+    }
+
+    return {
+      parentExists: (parentSessionId) => sessions().some((managed) => managed.id === parentSessionId)
+        || storedSessions().some((meta) => meta.id === parentSessionId),
+      findChild: (task) => {
+        const managed = sessions().find((candidate) => candidate.id === task.childSessionId)
+        const stored = storedSessions().find((candidate) => candidate.id === task.childSessionId)
+        const reference = referenceFor(
+          task.childSessionId,
+          managed?.spawnTaskRef ?? stored?.spawnTaskRef,
+        )
+        const exists = managed !== undefined || stored !== undefined
+        const matches = exists
+          && reference?.childSessionId === task.childSessionId
+          && reference.taskId === task.taskId
+          && reference.parentSessionId === task.parentSessionId
+          && (reference.delegatedPrompt === undefined || reference.delegatedPrompt === task.delegatedPrompt)
+          && (reference.childConfig === undefined || JSON.stringify(reference.childConfig) === JSON.stringify(task.childConfig))
+          && (reference.messageId === undefined || reference.messageId === task.dispatch.messageId)
+          && (reference.dispatchAttemptId === undefined || reference.dispatchAttemptId === task.dispatch.dispatchAttemptId)
+        return {
+          exists,
+          matches,
+          ...(reference ? { reference } : {}),
+        }
+      },
+      listChildren: allReferences,
+      resolveAttachments: (task) => this.resolveSpawnTaskAttachments(task),
+    }
+  }
+
+  private resolveSpawnTaskAttachments(task: SpawnTask): FileAttachment[] | undefined {
+    const raw = task.childConfig.attachments
+    if (!Array.isArray(raw) || raw.length === 0) return undefined
+    const attachments: FileAttachment[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('Spawned-task recovery attachment metadata is invalid')
+      }
+      const path = entry.path
+      const name = entry.name
+      if (typeof path !== 'string' || !path) {
+        throw new Error('Spawned-task recovery attachment metadata is invalid')
+      }
+      const attachment = readFileAttachment(path)
+      if (!attachment) throw new Error(`Spawned-task recovery attachment missing: ${path}`)
+      if (typeof name === 'string' && name) attachment.name = name
+      attachments.push(attachment)
+    }
+    return attachments
+  }
+
+  private discardSpawnTaskCoordinator(
+    workspaceRootPath: string,
+    expectedCoordinator?: SpawnTaskCoordinator,
+  ): void {
+    const currentCoordinator = this.spawnTaskCoordinators.get(workspaceRootPath)
+    if (expectedCoordinator ? currentCoordinator !== expectedCoordinator : currentCoordinator) return
+    currentCoordinator?.dispose()
+    this.spawnTaskCoordinators.delete(workspaceRootPath)
+    this.spawnTaskStores.delete(workspaceRootPath)
+  }
+
+  private getOrCreateSpawnTaskCoordinator(
+    workspaceRootPath: string,
+    workspaceId: string,
+  ): SpawnTaskCoordinator {
+    const workspaceKey = workspaceRootPath
+    const existing = this.spawnTaskCoordinators.get(workspaceKey)
+    if (existing) return existing
+
+    const cachedStore = this.spawnTaskStores.get(workspaceKey)
+    let store: SpawnTaskStore
+    try {
+      store = cachedStore ?? this.spawnTaskStoreFactory({
+        workspaceRoot: workspaceRootPath,
+        workspaceId,
+      })
+
+      const coordinator = new SpawnTaskCoordinator({
+        store,
+        createChild: async ({ task }) => {
+          const config = task.childConfig as Record<string, unknown>
+          const child = await this.createSession(workspaceId, {
+            reservedSessionId: task.childSessionId,
+            spawnTaskRef: {
+              taskId: task.taskId,
+              parentSessionId: task.parentSessionId,
+              delegatedPrompt: task.delegatedPrompt,
+              childConfig: task.childConfig,
+              messageId: task.dispatch.messageId,
+              dispatchAttemptId: task.dispatch.dispatchAttemptId,
+            },
+            name: typeof config.name === 'string' ? config.name : undefined,
+            llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
+            model: typeof config.model === 'string' ? config.model : undefined,
+            enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
+            permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
+            thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
+            labels: Array.isArray(config.labels) ? config.labels as string[] : undefined,
+            workingDirectory: typeof config.workingDirectory === 'string' ? config.workingDirectory : undefined,
+          })
+
+          // Publish the child only after its reserved ID/back-reference is durable.
+          this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+        },
+        appendDelegatedPrompt: async ({ task, prompt }) => {
+          await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
+        },
+        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
+          // sendMessage reuses the already flushed stable message instead of
+          // appending a second user turn. SpawnTaskCoordinator consumes the
+          // eventual rejection through the durable provider-error finalizer.
+          return this.sendMessage(
+            task.childSessionId,
+            prompt,
+            attachments ? [...attachments] as FileAttachment[] : undefined,
+            undefined,
+            undefined,
+            task.dispatch.messageId,
+          )
+        }),
+        onTaskUpdated: this.spawnTaskUpdated,
+        onLateEvent: this.spawnTaskLateEvent ?? ((event) => {
+          sessionLog.warn('Ignored late spawned-task event:', event)
+        }),
+      })
+      this.spawnTaskStores.set(workspaceKey, store)
+      this.spawnTaskCoordinators.set(workspaceKey, coordinator)
+      const retryRecovery = this.spawnTaskRecoveryPending.has(workspaceKey)
+        && [...this.sessions.values()].some((managed) => managed.workspace.id === workspaceId)
+      if (retryRecovery) this.spawnTaskRecoveryPending.delete(workspaceKey)
+      void coordinator.waitForStartupNotification()
+        .then(async () => {
+          if (retryRecovery) await coordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspaceId, workspaceRootPath))
+        })
+        .catch((error) => {
+          if (retryRecovery) this.spawnTaskRecoveryPending.add(workspaceKey)
+          this.discardSpawnTaskCoordinator(workspaceKey, coordinator)
+          sessionLog.error(
+            `Spawned-task startup reconciliation failed for workspace ${workspaceId} (${workspaceRootPath}):`,
+            error,
+          )
+        })
+      return coordinator
+    } catch (error) {
+      this.discardSpawnTaskCoordinator(workspaceKey)
+      throw error
+    }
+  }
+
+  private async appendSpawnPrompt(
+    childSessionId: string,
+    messageId: string,
+    prompt: string,
+    workspaceId: string,
+  ): Promise<void> {
+    const managed = this.sessions.get(childSessionId)
+    if (!managed) throw new Error(`Session ${childSessionId} not found after spawn publication`)
+
+    await this.ensureMessagesLoaded(managed)
+    const existing = managed.messages.find((message) => message.id === messageId)
+    if (existing) {
+      if (existing.role !== 'user' || existing.content !== prompt) {
+        throw new Error(`Stable spawned-task message ${messageId} does not match the delegated prompt`)
+      }
+      await this.flushSession(managed.id)
+      return
+    }
+
+    const message: Message = {
+      id: messageId,
+      role: 'user',
+      content: prompt,
+      timestamp: this.monotonic(),
+    }
+    managed.messages.push(message)
+    managed.lastMessageRole = 'user'
+    managed.lastMessageAt = Date.now()
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'user_message',
+      sessionId: childSessionId,
+      message,
+      status: 'accepted',
+    }, workspaceId)
+  }
+
+  private async applyInitialSessionTitle(
+    managed: ManagedSession,
+    message: string,
+    options?: SendMessageOptions,
+  ): Promise<void> {
+    const isFirstUserMessage = managed.messages.filter((entry) => entry.role === 'user').length === 1
+    if (!isFirstUserMessage || managed.name || managed.triggeredBy) return
+
+    // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
+    // so titles show human-readable names instead of raw IDs.
+    let titleSource = message
+    if (options?.badges) {
+      for (const badge of options.badges) {
+        if (badge.rawText && badge.label) {
+          titleSource = titleSource.replace(badge.rawText, badge.label)
+        }
+      }
+    }
+
+    const sanitized = sanitizeForTitle(titleSource)
+    const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
+    managed.name = initialTitle
+    this.persistSession(managed)
+    // Flush immediately so disk is authoritative before notifying the renderer.
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'title_generated',
+      sessionId: managed.id,
+      title: initialTitle,
+    }, managed.workspace.id)
+
+    // Preserve the existing enhanced title behavior without duplicating the
+    // already-persisted user message (including the stable spawn message path).
+    this.generateTitle(managed, message)
+  }
+
   async createSession(
     workspaceId: string,
-    options?: import('@kata-sh/shared/protocol').CreateSessionOptions & ForkChildCreateOptions,
+    options?: import('@kata-sh/shared/protocol').CreateSessionOptions & ForkChildCreateOptions & {
+      reservedSessionId?: string
+      spawnTaskRef?: SpawnTaskSessionReference
+    },
   ): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -3009,6 +3377,8 @@ export class SessionManager implements ISessionManager {
 
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
+      reservedSessionId: options?.reservedSessionId,
+      spawnTaskRef: options?.spawnTaskRef,
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -3016,6 +3386,10 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
+      llmConnection: options?.llmConnection,
+      model: resolvedModelOption,
+      enabledSourceSlugs: defaultEnabledSourceSlugs,
+      thinkingLevel: defaultThinkingLevel,
     })
 
     // Phase 4: durable pending isolated-fork intent, computed once so the
@@ -4168,68 +4542,90 @@ export class SessionManager implements ISessionManager {
         commandHash?: string;
         approvalTtlSeconds?: number;
       }) => {
-        sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
-        let brokerMetadata: {
-          commandHash?: string
-          approvalTtlSeconds?: number
-        } = {}
-
-        if (request.type === 'admin_approval' && request.command) {
-          const brokerRequest = this.privilegedExecutionBroker.createRequest({
+        void (async () => {
+          const canAwait = await this.enterSpawnTaskAwaitingInput(managed, {
+            kind: 'permission',
             requestId: request.requestId,
-            sessionId: managed.id,
-            command: request.command,
-            reason: request.reason,
-            impact: request.impact,
-            approvalTtlSeconds: request.approvalTtlSeconds,
+            promptSummary: `${request.toolName} permission requested`,
           })
+          if (!canAwait) return
 
-          brokerMetadata = {
-            commandHash: brokerRequest.commandHash,
-            approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
-          }
-        }
+          sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+          let brokerMetadata: {
+            commandHash?: string
+            approvalTtlSeconds?: number
+          } = {}
 
-        const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
-
-        this.pendingPermissionRequests.set(request.requestId, {
-          sessionId: managed.id,
-          type: request.type,
-          commandHash: effectiveCommandHash,
-        })
-
-        if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
-          const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
-            expectedCommandHash: effectiveCommandHash,
-          })
-
-          this.pendingPermissionRequests.delete(request.requestId)
-
-          if (brokerResult.ok) {
-            this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
-              sessionId: managed.id,
+          if (request.type === 'admin_approval' && request.command) {
+            const brokerRequest = this.privilegedExecutionBroker.createRequest({
               requestId: request.requestId,
-              commandHash: effectiveCommandHash,
+              sessionId: managed.id,
+              command: request.command,
+              reason: request.reason,
+              impact: request.impact,
+              approvalTtlSeconds: request.approvalTtlSeconds,
             })
-            const liveAgent = managed.agent
-            if (liveAgent) {
-              liveAgent.respondToPermission(request.requestId, true, false)
-              return
+
+            brokerMetadata = {
+              commandHash: brokerRequest.commandHash,
+              approvalTtlSeconds: brokerRequest.approvalTtlSeconds,
             }
           }
 
-          sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
-        }
+          const effectiveCommandHash = brokerMetadata.commandHash ?? request.commandHash
 
-        this.sendEvent({
-          type: 'permission_request',
-          sessionId: managed.id,
-          request: {
-            ...request,
-            ...brokerMetadata,
+          this.pendingPermissionRequests.set(request.requestId, {
             sessionId: managed.id,
+            type: request.type,
+            commandHash: effectiveCommandHash,
+          })
+
+          if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
+            const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
+              expectedCommandHash: effectiveCommandHash,
+            })
+
+            this.pendingPermissionRequests.delete(request.requestId)
+
+            if (brokerResult.ok) {
+              this.privilegedExecutionBroker.auditEvent('privileged_auto_approved_remember_window', {
+                sessionId: managed.id,
+                requestId: request.requestId,
+                commandHash: effectiveCommandHash,
+              })
+              const liveAgent = managed.agent
+              if (liveAgent) {
+                try {
+                  liveAgent.respondToPermission(request.requestId, true, false)
+                  const resumed = await this.resumeSpawnTaskInput(managed, request.requestId)
+                  if (!resumed) {
+                    await this.interruptSpawnTaskInput(managed, `Permission auto-approval could not resume request ${request.requestId}.`)
+                  }
+                } catch (error) {
+                  await this.interruptSpawnTaskInput(managed, error)
+                }
+                return
+              }
+            }
+
+            sessionLog.warn(`Remember-window auto-approval skipped for ${request.requestId}: ${brokerResult.reason}`)
           }
-        }, managed.workspace.id)
+
+          this.sendEvent({
+            type: 'permission_request',
+            sessionId: managed.id,
+            request: {
+              ...request,
+              ...brokerMetadata,
+              sessionId: managed.id,
+            }
+          }, managed.workspace.id)
+        })().catch((error) => {
+          void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+            sessionLog.warn(`Failed to interrupt permission task for session ${managed.id}:`, interruptError)
+          })
+          sessionLog.error(`Failed to persist permission input state for session ${managed.id}:`, error)
+        })
       }
 
       // Note: Credential requests now flow through onAuthRequest (unified auth flow)
@@ -4331,6 +4727,14 @@ export class SessionManager implements ISessionManager {
 
       // Wire up onAuthRequest to add auth message to conversation and pause execution
       managed.agent.onAuthRequest = (request) => {
+        void (async () => {
+          const canAwait = await this.enterSpawnTaskAwaitingInput(managed, {
+            kind: 'authentication',
+            requestId: request.requestId,
+            promptSummary: this.getAuthRequestDescription(request),
+          })
+          if (!canAwait) return
+
         sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
 
         // Create auth-request message
@@ -4393,24 +4797,20 @@ export class SessionManager implements ISessionManager {
 
         // OAuth flow is client-driven via performOAuth() (preload).
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
+        })().catch((error) => {
+          void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+            sessionLog.warn(`Failed to interrupt authentication task for session ${managed.id}:`, interruptError)
+          })
+          sessionLog.error(`Failed to persist authentication input state for session ${managed.id}:`, error)
+        })
       }
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
       managed.agent.onSpawnSession = async (request) => {
         sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
 
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-        })
-
-        // Build FileAttachment[] from paths (if any)
+        // Resolve attachments before the child/provider boundary. Invalid or
+        // inaccessible attachments are ignored as in ordinary sendMessage.
         let fileAttachments: FileAttachment[] | undefined
         if (request.attachments?.length) {
           const attachments: FileAttachment[] = []
@@ -4434,23 +4834,32 @@ export class SessionManager implements ISessionManager {
           if (attachments.length > 0) fileAttachments = attachments
         }
 
-        // Notify renderer to hydrate full session metadata (including name)
-        // before streaming events arrive. Without this, the renderer creates
-        // a synthetic empty session and shows "New Chat" in the sidebar.
-        this.sendEvent({ type: 'session_created', sessionId: session.id }, managed.workspace.id)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
+        const childConfig: Record<string, SpawnTaskJsonValue> = {
+          ...(request.name !== undefined ? { name: request.name } : {}),
+          llmConnection: request.llmConnection ?? managed.llmConnection ?? null,
+          model: request.model ?? managed.model ?? null,
+          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs ?? [],
+          permissionMode: request.permissionMode ?? managed.permissionMode ?? null,
+          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel ?? null,
+          labels: request.labels ?? managed.labels ?? [],
+          ...(request.workingDirectory !== undefined ? { workingDirectory: request.workingDirectory } : {}),
+          ...(fileAttachments?.length
+            ? {
+                attachments: fileAttachments.map((attachment) => ({
+                  path: attachment.path,
+                  name: attachment.name,
+                })),
+              }
+            : {}),
         }
+
+        const result = await this.getSpawnTaskCoordinator(managed).spawn({
+          parentSessionId: managed.id,
+          delegatedPrompt: request.prompt,
+          childConfig,
+          attachments: fileAttachments,
+        })
+        return result
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
@@ -5181,6 +5590,186 @@ export class SessionManager implements ISessionManager {
       }
     }
     return undefined
+  }
+
+  private getFinalAssistantMessageForTurn(managed: ManagedSession): Message | undefined {
+    const baselineId = managed.turnStartFinalMessageId
+    const baselineIndex = baselineId
+      ? managed.messages.findIndex((message) => message.id === baselineId)
+      : -1
+    for (let index = managed.messages.length - 1; index > baselineIndex; index -= 1) {
+      const message = managed.messages[index]
+      if (message.role === 'assistant' && !message.isIntermediate) return message
+    }
+    return undefined
+  }
+
+  private getSpawnTaskCoordinatorForChild(managed: ManagedSession): SpawnTaskCoordinator {
+    // Ownership is resolved by the coordinator's durable child-session index;
+    // the private back-reference merely makes the expected path explicit.
+    return this.getSpawnTaskCoordinator(managed)
+  }
+
+  private spawnTaskRuntimeForSession(managed: ManagedSession): SpawnTaskCancellationRuntime {
+    return {
+      abort: () => {
+        if (!managed.agent) return
+        managed.stopRequested = true
+        managed.agent.forceAbort(AbortReason.UserStop)
+      },
+      cleanup: () => {
+        const agent = managed.agent
+        managed.agent = null
+        this.setProcessing(managed, false)
+        managed.stopRequested = false
+        try {
+          agent?.dispose()
+        } catch (error) {
+          sessionLog.warn(`Failed to clean up spawned child ${managed.id}:`, error)
+        }
+      },
+    }
+  }
+
+  async cancelSpawnTask(taskId: string, reason = 'cancelled'): Promise<SpawnTaskCancellationResult> {
+    const managed = Array.from(this.sessions.values()).find((session) => session.spawnTaskRef?.taskId === taskId)
+    if (managed) {
+      return this.getSpawnTaskCoordinatorForChild(managed).cancelTask(
+        taskId,
+        reason,
+        this.spawnTaskRuntimeForSession(managed),
+      )
+    }
+
+    for (const coordinator of this.spawnTaskCoordinators.values()) {
+      if (coordinator.getTask(taskId)) return coordinator.cancelTask(taskId, reason)
+    }
+    return { status: 'already_terminal', task: null }
+  }
+
+  private async enterSpawnTaskAwaitingInput(
+    managed: ManagedSession,
+    input: Omit<CreateSpawnTaskAwaitingInputInput, 'createdAt'> & { createdAt?: string },
+  ): Promise<boolean> {
+    if (!managed.spawnTaskRef) return true
+    const task = await this.getSpawnTaskCoordinatorForChild(managed).awaitInputForChildSession(managed.id, {
+      ...input,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+    })
+    if (task?.runtimeState === 'awaiting-input') return true
+    sessionLog.warn(`Ignoring input request for non-awaiting spawned task ${managed.id}`, {
+      taskId: managed.spawnTaskRef.taskId,
+      state: task?.runtimeState,
+    })
+    return false
+  }
+
+  private async resumeSpawnTaskInput(managed: ManagedSession, requestId: string): Promise<boolean> {
+    if (!managed.spawnTaskRef) return true
+    const task = await this.getSpawnTaskCoordinatorForChild(managed).resumeAwaitingInputForChildSession(
+      managed.id,
+      requestId,
+    )
+    if (task?.runtimeState === 'processing') return true
+    sessionLog.warn(`Ignoring input response for non-processing spawned task ${managed.id}`, {
+      taskId: managed.spawnTaskRef.taskId,
+      state: task?.runtimeState,
+      requestId,
+    })
+    return false
+  }
+
+  private async interruptSpawnTaskInput(managed: ManagedSession, error: unknown): Promise<void> {
+    if (!managed.spawnTaskRef) return
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const task = coordinator.getTask(managed.spawnTaskRef.taskId)
+    if (!task || isSpawnTaskTerminal(task.runtimeState) || task.runtimeState !== 'awaiting-input') return
+    const interrupted = await coordinator.interruptAwaitingInputForChildSession(managed.id, error)
+    if (interrupted?.runtimeState !== 'failed' || interrupted.failure?.code !== 'input_interrupted') return
+    await this.unwindSpawnTaskRuntime(managed)
+  }
+
+  private async unwindSpawnTaskRuntime(managed: ManagedSession): Promise<void> {
+    const runtime = this.spawnTaskRuntimeForSession(managed)
+    try {
+      await runtime.abort?.()
+    } catch (error) {
+      sessionLog.warn(`Failed to abort paused spawned child ${managed.id}:`, error)
+    }
+    try {
+      await runtime.cleanup?.()
+    } catch (error) {
+      sessionLog.warn(`Failed to clean up paused spawned child ${managed.id}:`, error)
+    }
+  }
+
+  private spawnedTaskInputResponseIsCurrent(
+    managed: ManagedSession,
+    requestId: string,
+    eventKind: string,
+  ): boolean {
+    if (!managed.spawnTaskRef) return true
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const task = coordinator.getTask(managed.spawnTaskRef.taskId)
+    if (!task) return false
+    if (isSpawnTaskTerminal(task.runtimeState)) {
+      coordinator.recordLateEventForChildSession(managed.id, eventKind)
+      return false
+    }
+    const current = task.runtimeState === 'awaiting-input'
+      && !task.cancellation
+      && task.awaitingInput?.requestId === requestId
+    if (!current) coordinator.recordRejectedInputForChildSession(managed.id, eventKind)
+    return current
+  }
+
+  private async finalizeSpawnTaskResult(managed: ManagedSession): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    const finalMessage = this.getFinalAssistantMessageForTurn(managed)
+    await coordinator.finalizeResultForChildSession(
+      managed.id,
+      finalMessage?.content ?? '',
+      finalMessage?.id,
+    )
+  }
+
+  private async finalizeSpawnTaskProviderFailure(managed: ManagedSession, error: unknown): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    await coordinator.finalizeProviderFailureForChildSession(managed.id, error)
+  }
+
+  private async finalizeSpawnTaskToolFailure(
+    managed: ManagedSession,
+    error: unknown,
+    details?: unknown,
+  ): Promise<void> {
+    const coordinator = this.getSpawnTaskCoordinatorForChild(managed)
+    await coordinator.finalizeToolFailureForChildSession(managed.id, error, details)
+  }
+
+  private recordSpawnTaskToolFailureEvidence(
+    managed: ManagedSession,
+    toolName: unknown,
+    toolUseId: unknown,
+  ): void {
+    if (!managed.spawnTaskRef) return
+    const boundedToolName = boundTurnToolEvidenceField(toolName) ?? 'unknown'
+    const boundedToolUseId = boundTurnToolEvidenceField(toolUseId)
+    managed.turnToolFailureEvidence = {
+      toolName: boundedToolName,
+      ...(boundedToolUseId ? { toolUseId: boundedToolUseId } : {}),
+    }
+  }
+
+  private async finalizeSpawnTaskToolFailureEvidence(managed: ManagedSession): Promise<void> {
+    const evidence = managed.turnToolFailureEvidence
+    if (!evidence) return
+    managed.turnToolFailureEvidence = undefined
+    await this.finalizeSpawnTaskToolFailure(
+      managed,
+      `Tool ${evidence.toolName} reported an error`,
+      evidence,
+    )
   }
 
   /**
@@ -7302,6 +7891,20 @@ export class SessionManager implements ISessionManager {
       if (removal.outcome === 'removed') completedWorktreeRemoval = removal.result
     }
 
+    // Preserve spawned-task records and commit deletion/cancellation metadata
+    // after deletion can no longer be refused, and before session_deleted or
+    // session storage removal. Sent parent work is intentionally left orphaned;
+    // active child work is cancelled first.
+    const taskCoordinator = this.getSpawnTaskCoordinator(managed)
+    if (managed.spawnTaskRef) {
+      await taskCoordinator.markChildDeleted(
+        managed.id,
+        this.spawnTaskRuntimeForSession(managed),
+      )
+    } else {
+      await taskCoordinator.markParentDeleted(managed.id)
+    }
+
     // Drop managed-worktree ownership for this session. Deleting a session never
     // removes the checkout on its own; it only releases the owner reference so
     // shared-owner counts stay correct. When explicit removal was requested,
@@ -7644,38 +8247,15 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      // If this is the first user message and no title exists, set one immediately
-      // AI generation will enhance it later, but we always have a title from the start
-      // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
-        // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
-        // so titles show human-readable names instead of raw IDs
-        let titleSource = message
-        if (options?.badges) {
-          for (const badge of options.badges) {
-            if (badge.rawText && badge.label) {
-              titleSource = titleSource.replace(badge.rawText, badge.label)
-            }
-          }
-        }
-        // Sanitize: strip any remaining bracket mentions, XML blocks, tags
-        const sanitized = sanitizeForTitle(titleSource)
-        const initialTitle = sanitized.slice(0, 50) + (sanitized.length > 50 ? '…' : '')
-        managed.name = initialTitle
-        this.persistSession(managed)
-        // Flush immediately so disk is authoritative before notifying renderer
-        await this.flushSession(managed.id)
-        this.sendEvent({
-          type: 'title_generated',
-          sessionId,
-          title: initialTitle,
-        }, managed.workspace.id)
+    }
 
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
-      }
+    managed.lastSentMessageId = userMessage.id
+
+    // Preserve the immediate prompt-derived title and schedule enhanced title
+    // generation for new messages and stable pre-appended spawn messages. Do
+    // not change ordinary queued-message replay behavior.
+    if (!existingMessageId || managed.spawnTaskRef) {
+      await this.applyInitialSessionTitle(managed, message, options)
     }
 
     // Phase 4 Task 4: first-Send provider establishment for a pending
@@ -7720,6 +8300,7 @@ export class SessionManager implements ISessionManager {
     managed.streamingText = ''
     managed.processingGeneration++
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    managed.turnToolFailureEvidence = undefined
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
@@ -7977,16 +8558,15 @@ export class SessionManager implements ISessionManager {
 
           sessionLog.info('Chat completed via complete event')
 
-          // Check if we got an assistant response in this turn
-          // If not, the SDK may have hit context limits or other issues
-          const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate
-          )
+          // Check if we got a final assistant response in this turn. An intermediate
+          // response after a recoverable tool error does not count as task completion.
+          const finalAssistantForTurn = this.getFinalAssistantMessageForTurn(managed)
           const lastUserMsg = [...managed.messages].reverse().find(m => m.role === 'user')
+          let terminalSpawnTaskFailure = false
 
-          // If the last user message is newer than any assistant response, we got no reply
-          // This can happen due to context overflow or API issues
-          if (lastUserMsg && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)) {
+          // If the last user message is newer than any final assistant response, we got no reply.
+          // This can happen due to context overflow, API issues, or a terminal tool failure.
+          if (lastUserMsg && !finalAssistantForTurn) {
             sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
 
             // Check if there's a captured API error that explains the silent failure.
@@ -7995,39 +8575,58 @@ export class SessionManager implements ISessionManager {
             const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
             const apiError = getLastApiError(sessionErrorPath)
 
-            if (apiError && apiError.status === 400) {
-              const isImageError = apiError.message?.includes('image exceeds')
+            if (apiError) {
+              const isBadRequest = apiError.status === 400
+              const isImageError = isBadRequest && apiError.message?.includes('image exceeds')
+              await this.finalizeSpawnTaskProviderFailure(managed, apiError.message)
+              managed.turnToolFailureEvidence = undefined
+              terminalSpawnTaskFailure = true
 
-              const errorMessage: Message = {
-                id: generateMessageId(),
-                role: 'error',
-                content: isImageError
-                  ? `Image Too Large: ${apiError.message}`
-                  : `Request Error: ${apiError.message}`,
-                timestamp: this.monotonic(),
-                errorCode: isImageError ? 'image_too_large' : 'invalid_request',
-                errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
-                errorDetails: isImageError
-                  ? ['An image in the conversation exceeds the 5 MB API limit.',
-                     'This session cannot recover — the image is embedded in the history.',
-                     'Please start a new session to continue.']
-                  : [apiError.message],
-                errorCanRetry: false,
+              // Preserve the existing specialized transcript/UI copy for 400
+              // request and image errors. Other captured API statuses still
+              // classify the task as provider_error without inventing a new
+              // no-output failure or changing the existing UI contract.
+              if (isBadRequest) {
+                const errorMessage: Message = {
+                  id: generateMessageId(),
+                  role: 'error',
+                  content: isImageError
+                    ? `Image Too Large: ${apiError.message}`
+                    : `Request Error: ${apiError.message}`,
+                  timestamp: this.monotonic(),
+                  errorCode: isImageError ? 'image_too_large' : 'invalid_request',
+                  errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
+                  errorDetails: isImageError
+                    ? ['An image in the conversation exceeds the 5 MB API limit.',
+                       'This session cannot recover — the image is embedded in the history.',
+                       'Please start a new session to continue.']
+                    : [apiError.message],
+                  errorCanRetry: false,
+                }
+                managed.messages.push(errorMessage)
+                this.sendEvent({
+                  type: 'typed_error',
+                  sessionId,
+                  error: {
+                    code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
+                    title: errorMessage.errorTitle!,
+                    message: apiError.message,
+                    actions: [],
+                    canRetry: false,
+                    details: errorMessage.errorDetails,
+                  },
+                }, managed.workspace.id)
               }
-              managed.messages.push(errorMessage)
-              this.sendEvent({
-                type: 'typed_error',
-                sessionId,
-                error: {
-                  code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
-                  title: errorMessage.errorTitle!,
-                  message: apiError.message,
-                  actions: [],
-                  canRetry: false,
-                  details: errorMessage.errorDetails,
-                },
-              }, managed.workspace.id)
             }
+          }
+
+          if (!terminalSpawnTaskFailure && !finalAssistantForTurn && managed.turnToolFailureEvidence) {
+            await this.finalizeSpawnTaskToolFailureEvidence(managed)
+            terminalSpawnTaskFailure = true
+          }
+
+          if (!terminalSpawnTaskFailure) {
+            await this.finalizeSpawnTaskResult(managed)
           }
 
           sendSpan.mark('chat.complete')
@@ -8087,6 +8686,8 @@ export class SessionManager implements ISessionManager {
         sendSpan.mark('chat.error')
         sendSpan.setMetadata('error', error instanceof Error ? error.message : String(error))
         sendSpan.end()
+        await this.finalizeSpawnTaskProviderFailure(managed, error)
+        managed.turnToolFailureEvidence = undefined
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -8236,14 +8837,24 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`[auth-retry] Retrying message for session ${sessionId}`)
           this.setProcessing(managed, false)
 
-          // Remove the user message that was added for this failed attempt
-          // so we don't get duplicate messages when retrying
-          const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
-          if (lastUserMsgIndex !== -1) {
-            managed.messages.splice(lastUserMsgIndex, 1)
+          // Spawned children already own a durable delegated user message. Keep
+          // that exact ID across auth retry; ordinary sessions retain the old
+          // remove-and-recreate behavior.
+          const retryMessageId = managed.spawnTaskRef
+            ? managed.lastSentMessageId ?? managed.messages.findLast((entry) => entry.role === 'user')?.id
+            : undefined
+          if (managed.spawnTaskRef && !retryMessageId) {
+            throw new Error(`Spawned auth retry has no stable delegated message for ${sessionId}`)
+          }
+          if (!managed.spawnTaskRef) {
+            const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
+            if (lastUserMsgIndex !== -1) {
+              managed.messages.splice(lastUserMsgIndex, 1)
+            }
           }
 
           managed.authRetryInProgress = false
+          managed.turnToolFailureEvidence = undefined
 
           await this.sendMessage(
             sessionId,
@@ -8251,7 +8862,7 @@ export class SessionManager implements ISessionManager {
             retryAttachments,
             retryStoredAttachments,
             retryOptions,
-            undefined,  // existingMessageId
+            retryMessageId,
             true        // _isAuthRetry - prevents infinite retry loop
           )
           sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
@@ -8262,6 +8873,7 @@ export class SessionManager implements ISessionManager {
         managed.authRetryInProgress = false
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
+        await this.finalizeSpawnTaskProviderFailure(managed, retryError)
         const failedMessage: Message = {
           id: generateMessageId(),
           role: 'error',
@@ -8315,6 +8927,7 @@ export class SessionManager implements ISessionManager {
 
     const turnStartFinalMessageId = managed.turnStartFinalMessageId
     managed.turnStartFinalMessageId = undefined
+    managed.turnToolFailureEvidence = undefined
 
     // Clear agent control overlay between turns. The session keeps browser
     // ownership (boundSessionId) — only the visual overlay is removed.
@@ -8586,6 +9199,13 @@ export class SessionManager implements ISessionManager {
     options?: import('@kata-sh/shared/protocol').PermissionResponseOptions,
   ): boolean {
     const managed = this.sessions.get(sessionId)
+    if (managed?.spawnTaskRef && !this.spawnedTaskInputResponseIsCurrent(managed, requestId, 'permission_response')) {
+      this.pendingPermissionRequests.delete(requestId)
+      void this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`).catch((error) => {
+        sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, error)
+      })
+      return false
+    }
     if (managed?.agent) {
       const requestMeta = this.pendingPermissionRequests.get(requestId)
       this.pendingPermissionRequests.delete(requestId)
@@ -8597,7 +9217,19 @@ export class SessionManager implements ISessionManager {
         if (!brokerResult.ok) {
           sessionLog.warn(`Admin approval rejected by broker for ${requestId}: ${brokerResult.reason}`)
           // Broker rejection should fail closed.
-          managed.agent.respondToPermission(requestId, false, false)
+          try {
+            managed.agent.respondToPermission(requestId, false, false)
+          } catch (error) {
+            void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+              sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, interruptError)
+            })
+            return false
+          }
+          void this.resumeSpawnTaskInput(managed, requestId).then((resumed) => {
+            if (!resumed) return this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`)
+          }).catch((error) => {
+            sessionLog.warn(`Failed to resume permission task ${requestId}:`, error)
+          })
           return false
         }
 
@@ -8607,9 +9239,26 @@ export class SessionManager implements ISessionManager {
       }
 
       sessionLog.info(`Permission response for ${requestId}: allowed=${allowed}, alwaysAllow=${alwaysAllow}`)
-      managed.agent.respondToPermission(requestId, allowed, alwaysAllow)
+      try {
+        managed.agent.respondToPermission(requestId, allowed, alwaysAllow)
+      } catch (error) {
+        void this.interruptSpawnTaskInput(managed, error).catch((interruptError) => {
+          sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, interruptError)
+        })
+        return false
+      }
+      void this.resumeSpawnTaskInput(managed, requestId).then((resumed) => {
+        if (!resumed) return this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${requestId}.`)
+      }).catch((error) => {
+        sessionLog.warn(`Failed to resume permission task ${requestId}:`, error)
+      })
       return true
     } else {
+      if (managed?.spawnTaskRef) {
+        void this.interruptSpawnTaskInput(managed, `Permission response arrived without a live agent for request ${requestId}.`).catch((error) => {
+          sessionLog.warn(`Failed to interrupt permission task ${requestId}:`, error)
+        })
+      }
       sessionLog.warn(`Cannot respond to permission - no agent for session ${sessionId}`)
       return false
     }
@@ -8916,6 +9565,15 @@ export class SessionManager implements ISessionManager {
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
+    // A cancelled/cancel_failed child may still drain provider events after its
+    // abort boundary. Do not append or forward those payloads; the coordinator
+    // records only bounded event facts in the late-event audit seam.
+    if (managed.spawnTaskRef) {
+      const ignored = this.getSpawnTaskCoordinatorForChild(managed)
+        .recordLateEventForChildSession(managed.id, event.type)
+      if (ignored) return
+    }
+
     switch (event.type) {
       case 'text_delta':
         managed.streamingText += event.text
@@ -9196,6 +9854,16 @@ export class SessionManager implements ISessionManager {
           managed.messages.push(toolMessage)
         }
 
+        if (inferredError) {
+          // Tool failures can be recoverable while the provider turn is still active.
+          // Keep only bounded, non-secret evidence and defer task finalization until
+          // the terminal complete/error boundary decides whether recovery occurred.
+          this.recordSpawnTaskToolFailureEvidence(managed, toolName, event.toolUseId)
+        } else if (managed.spawnTaskRef) {
+          // A later successful tool outcome supersedes earlier recoverable failure evidence.
+          managed.turnToolFailureEvidence = undefined
+        }
+
         // Send event to renderer if: (a) first completion, or (b) result content changed
         // (e.g., safety net auto-completed with empty result, then real result arrived later)
         const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
@@ -9328,6 +9996,9 @@ export class SessionManager implements ISessionManager {
           break
         }
 
+        await this.finalizeSpawnTaskProviderFailure(managed, event.message)
+        managed.turnToolFailureEvidence = undefined
+
         // AgentEvent uses `message` not `error`
         const errorMessage: Message = {
           id: generateMessageId(),
@@ -9369,6 +10040,9 @@ export class SessionManager implements ISessionManager {
           // Don't add error message or send to renderer - we're handling it via retry
           break
         }
+
+        await this.finalizeSpawnTaskProviderFailure(managed, event.error.message || event.error.title)
+        managed.turnToolFailureEvidence = undefined
 
         // Build rich error message with all diagnostic fields for persistence and UI display
         const typedErrorMessage: Message = {
@@ -9985,8 +10659,9 @@ export class SessionManager implements ISessionManager {
     // Create session directory with all subdirectories
     const sessionDir = ensureSessionDir(workspaceRootPath, sessionId)
 
-    // Build the stored session from bundle data
-    const header = bundle.session.header
+    // Build the stored session from bundle data. Spawn ownership is bound to
+    // the source server/workspace and must never cross the import boundary.
+    const { spawnTaskRef: _spawnTaskRef, ...header } = bundle.session.header
     const storedSession: StoredSession = {
       id: sessionId,
       workspaceRootPath,

@@ -124,6 +124,10 @@ export {
 // Export BaseAgent - shared abstract class for all agent backends
 export {
   BaseAgent,
+  // Spawn-session contracts are shared by every backend and the server coordinator.
+  type SpawnSessionRequest,
+  type SpawnSessionResult,
+  type SpawnSessionHelpResult,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
   MINI_AGENT_TOOLS,

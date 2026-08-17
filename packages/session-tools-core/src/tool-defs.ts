@@ -443,7 +443,7 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 
 \`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash) — the SDK drops the reasoning param rather than erroring. Use it when you want to force deeper reasoning on a supported model, or set it to \`off\` when spawning a session that doesn't need to think.
 
-The spawned session appears in the session list and runs fire-and-forget.
+A successful spawn returns exactly \`{ taskId, childSessionId, runtimeState, version }\`. The task reserves its child and dispatches at most once after durable persistence.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
   send_developer_feedback: `Send freeform feedback to the Kata Agent development team.
@@ -473,7 +473,7 @@ Use get_session_info for full details on a specific session (list-then-detail pa
   send_agent_message: `Send a message to another session. The message is delivered with your session ID so the target can reply back.
 
 Use this to coordinate with spawned sessions, send follow-up instructions, or relay information between sessions.
-Use list_sessions to find session IDs, or use the sessionId returned by spawn_session.
+Use list_sessions to find child sessions, or use the childSessionId returned by spawn_session; retain taskId for task-scoped operations.
 
 The target session receives your message with a sender envelope containing your session ID, so it can use send_agent_message to reply.`,
 

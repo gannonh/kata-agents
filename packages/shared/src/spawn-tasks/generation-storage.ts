@@ -5,6 +5,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import type { SpawnTask } from '@kata-sh/core';
@@ -54,8 +55,69 @@ export interface PublishTaskGenerationResult {
   readonly reconciliationError?: string;
 }
 
+export class SpawnTaskStaleWriterError extends Error {
+  constructor(taskId: string) {
+    super(`Cannot replace spawned task ${taskId} from a stale store view`);
+    this.name = 'SpawnTaskStaleWriterError';
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const PUBLICATION_LOCK_DIRECTORY = '.publish-lock';
+const PUBLICATION_LOCK_OWNER_GRACE_MS = 1_000;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquirePublicationLock(tasksPath: string): string {
+  const lockPath = join(tasksPath, PUBLICATION_LOCK_DIRECTORY);
+  const ownerPath = join(lockPath, 'owner');
+  try {
+    mkdirSync(lockPath);
+    writeDurableFile(ownerPath, `${process.pid}\n`);
+    return lockPath;
+  } catch (error) {
+    if (!existsSync(lockPath)) throw error;
+    let ownerPid: number | undefined;
+    try {
+      const parsed = Number.parseInt(readFileSync(ownerPath, 'utf8').trim(), 10);
+      if (Number.isSafeInteger(parsed) && parsed > 0) ownerPid = parsed;
+    } catch {
+      // A crashed writer may have created the directory before its owner file.
+    }
+    if (ownerPid !== undefined && isProcessAlive(ownerPid)) {
+      throw new Error('Spawned-task store publication is locked by another writer');
+    }
+    if (ownerPid === undefined) {
+      let lockAge: number | undefined;
+      try {
+        lockAge = Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        // A concurrently removed lock is retried by the mkdir below.
+      }
+      if (lockAge !== undefined && lockAge < PUBLICATION_LOCK_OWNER_GRACE_MS) {
+        throw new Error('Spawned-task store publication is locked by another writer');
+      }
+    }
+    rmSync(lockPath, { recursive: true, force: true });
+    mkdirSync(lockPath);
+    writeDurableFile(ownerPath, `${process.pid}\n`);
+    return lockPath;
+  }
+}
+
+function releasePublicationLock(lockPath: string): void {
+  rmSync(lockPath, { recursive: true, force: true });
+  syncDirectory(join(lockPath, '..'));
 }
 
 function rollbackPublishedCurrent(
@@ -104,7 +166,7 @@ function copyGenerationFiles(
   }
 }
 
-export function publishTaskGeneration(input: PublishTaskGenerationInput): PublishTaskGenerationResult {
+function publishTaskGenerationLocked(input: PublishTaskGenerationInput): PublishTaskGenerationResult {
   const { task, currentTask, indexedGeneration, tasksPath } = input;
   const taskPath = join(tasksPath, task.taskId);
   const currentPath = join(taskPath, CURRENT_FILE);
@@ -113,7 +175,7 @@ export function publishTaskGeneration(input: PublishTaskGenerationInput): Publis
   if (existsSync(currentPath)) assertRegularFile(currentPath, 'spawned-task CURRENT');
   const diskGeneration = existsSync(currentPath) ? readFileSync(currentPath, 'utf8').trim() : undefined;
   if (diskGeneration !== indexedGeneration) {
-    throw new Error(`Cannot replace spawned task ${task.taskId} from a stale store view`);
+    throw new SpawnTaskStaleWriterError(task.taskId);
   }
 
   const generationsPath = join(taskPath, 'generations');
@@ -183,6 +245,15 @@ export function publishTaskGeneration(input: PublishTaskGenerationInput): Publis
       generation,
       reconciliationError: errorMessage(error),
     };
+  }
+}
+
+export function publishTaskGeneration(input: PublishTaskGenerationInput): PublishTaskGenerationResult {
+  const lockPath = acquirePublicationLock(input.tasksPath);
+  try {
+    return publishTaskGenerationLocked(input);
+  } finally {
+    releasePublicationLock(lockPath);
   }
 }
 

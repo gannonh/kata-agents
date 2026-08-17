@@ -18,6 +18,7 @@ export type {
   SessionMetadata,
   SessionHeader,
   SessionPersistentField,
+  SpawnTaskSessionReference,
 } from './types.ts';
 
 // Field constants

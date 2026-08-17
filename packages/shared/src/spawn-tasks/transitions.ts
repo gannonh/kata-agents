@@ -8,7 +8,7 @@ import type {
 } from '@kata-sh/core';
 
 const LEGAL_TRANSITIONS: Readonly<Record<SpawnTaskRuntimeState, readonly SpawnTaskRuntimeState[]>> = {
-  queued: ['processing', 'cancelled'],
+  queued: ['processing', 'failed', 'cancelled'],
   processing: ['awaiting-input', 'completed', 'failed', 'cancelled'],
   'awaiting-input': ['processing', 'failed', 'cancelled'],
   completed: [],

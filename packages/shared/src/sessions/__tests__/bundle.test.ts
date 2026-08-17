@@ -203,6 +203,21 @@ describe('serializeSession', () => {
     expect(bundle!.session.header.sessionStatus).toBe('in-progress')
     expect(bundle!.session.header.labels).toEqual(['bug', 'priority::high'])
   })
+
+  it('does not export the private spawned-task relationship', () => {
+    const session = makeStoredSession({
+      spawnTaskRef: {
+        taskId: 'task_private',
+        parentSessionId: 'session_parent',
+      },
+    })
+    setupSessionDir(tmpDir, session)
+
+    const bundle = serializeSession(tmpDir, session.id)
+
+    expect(bundle).not.toBeNull()
+    expect('spawnTaskRef' in bundle!.session.header).toBe(false)
+  })
 })
 
 describe('validateBundle', () => {

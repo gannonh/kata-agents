@@ -5,6 +5,8 @@ export {
   SpawnTaskTransitionError,
 } from './transitions.ts';
 export type { SpawnTaskTransition } from './transitions.ts';
+export { createSpawnTaskAwaitingInput } from './awaiting-input.ts';
+export type { CreateSpawnTaskAwaitingInputInput } from './awaiting-input.ts';
 export { createSpawnTaskFailure } from './failures.ts';
 export type { CreateSpawnTaskFailureInput } from './failures.ts';
 export { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
@@ -16,6 +18,7 @@ export type {
   SpawnTaskStoreOptions,
   SpawnTaskStoreFaultPoint,
   ReserveSpawnTaskInput,
+  ReconstructSpawnTaskInput,
   SpawnTaskStartupChange,
   SpawnTaskFinalizedStartupChange,
   SpawnTaskStartupReport,

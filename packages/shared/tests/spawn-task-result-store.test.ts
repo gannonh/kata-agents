@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPAWN_TASK_LIMITS } from '@kata-sh/core';
-import { SpawnTaskStore } from '../src/spawn-tasks/index.ts';
+import { createSpawnTaskAwaitingInput, SpawnTaskStore } from '../src/spawn-tasks/index.ts';
 
 const at = '2026-02-03T04:05:06.000Z';
 const later = '2026-02-03T04:06:06.000Z';
@@ -59,6 +59,85 @@ function processingTask(store: SpawnTaskStore) {
 }
 
 describe('spawn-task result artifacts', () => {
+  it('does not steal an ownerless publication lock during owner creation', () => {
+    const root = workspace()
+    const tasksPath = join(root, 'spawn-tasks', 'tasks')
+    mkdirSync(tasksPath, { recursive: true })
+    const lockPath = join(tasksPath, '.publish-lock')
+    mkdirSync(lockPath)
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'workspace_results' })
+
+    expect(() => store.reserve({
+      parentSessionId: 'parent',
+      delegatedPrompt: 'blocked by an in-flight publisher',
+      childConfig: {},
+    })).toThrow('publication is locked by another writer')
+  })
+
+  it('re-reads a durable parent-deletion boundary from an older store instance', () => {
+    const root = workspace();
+    const first = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_parent_boundary' });
+    const second = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_parent_boundary' });
+
+    expect(second.isParentDeleted('session_deleted')).toBe(false);
+    expect(first.markParentDeletedBoundary('session_deleted', later)).toBe(true);
+    expect(second.isParentDeleted('session_deleted')).toBe(true);
+    expect(first.markParentDeletedBoundary('session_deleted', later)).toBe(false);
+  });
+
+  it('commits claimed dispatch interruption as a retryable terminal failure', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch_interrupt' });
+    const reserved = store.reserve({ parentSessionId: 'session_parent', delegatedPrompt: 'never replay', childConfig: {} });
+    const ready = store.updateDispatch(reserved.taskId, 'ready', at);
+    const claimed = store.updateDispatch(ready.taskId, 'claimed', later);
+
+    const failed = store.interruptDispatch(claimed.taskId, '2026-02-03T04:07:06.000Z');
+
+    expect(failed).toMatchObject({
+      runtimeState: 'failed',
+      failure: {
+        code: 'dispatch_interrupted',
+        retryable: true,
+        details: { dispatchState: 'claimed' },
+      },
+    });
+    expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch_interrupt' }).get(claimed.taskId)).toEqual(failed);
+  });
+
+  it('reconstructs a bounded failed task from child recovery metadata', () => {
+    const root = workspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_reconstruct' });
+
+    const recovered = store.reconstructMissingTask({
+      taskId: 'task_recovered',
+      parentSessionId: 'session_parent',
+      childSessionId: 'session_child',
+      delegatedPrompt: 'recover without dispatch',
+      childConfig: { model: 'fixture' },
+      messageId: 'message_recovered',
+      dispatchAttemptId: 'attempt_recovered',
+      at: later,
+    });
+
+    expect(recovered).toMatchObject({
+      taskId: 'task_recovered',
+      runtimeState: 'failed',
+      delegatedPrompt: 'recover without dispatch',
+      failure: {
+        code: 'spawn_persist_failed',
+        retryable: true,
+        details: { boundary: 'recovery' },
+      },
+    });
+    expect(store.reconstructMissingTask({
+      taskId: 'task_recovered',
+      parentSessionId: 'session_parent',
+      childSessionId: 'session_child',
+      at: later,
+    })).toEqual(recovered);
+  });
+
   it('commits zero-byte output as a valid task-owned result', () => {
     const root = workspace();
     const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_result' });
@@ -172,6 +251,48 @@ describe('spawn-task result artifacts', () => {
 });
 
 describe('spawn-task artifact recovery and retention', () => {
+  it('interrupts awaiting permission and authentication input during startup', () => {
+    const root = workspace();
+    const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_awaiting_restart' });
+    const taskIds: string[] = [];
+
+    for (const [index, kind] of (['permission', 'authentication'] as const).entries()) {
+      const processing = processingTask(initial);
+      const awaitingInput = createSpawnTaskAwaitingInput({
+        kind,
+        requestId: `${kind}_request_${index}`,
+        promptSummary: `${kind} input`,
+        createdAt: later,
+      });
+      initial.transition(processing.taskId, {
+        runtimeState: 'awaiting-input',
+        at: later,
+        awaitingInput,
+      });
+      taskIds.push(processing.taskId);
+    }
+
+    const restarted = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_awaiting_restart' });
+    const report = restarted.getLastStartupReport();
+
+    expect([...report.inputInterrupted].sort((left, right) => left.taskId.localeCompare(right.taskId))).toEqual([...taskIds]
+      .sort()
+      .map((taskId) => ({
+        taskId,
+        version: restarted.get(taskId)!.version,
+      })));
+    for (const [index, kind] of (['permission', 'authentication'] as const).entries()) {
+      expect(restarted.get(taskIds[index])).toMatchObject({
+        runtimeState: 'failed',
+        failure: {
+          code: 'input_interrupted',
+          retryable: true,
+          details: { kind },
+        },
+      });
+    }
+  })
+
   it('finalizes a verified artifact left with a nonterminal record exactly once', () => {
     const root = workspace();
     const initial = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_finalize' });
@@ -251,7 +372,7 @@ describe('spawn-task artifact recovery and retention', () => {
     expect(recovered.reload().finalized).toEqual([]);
   });
 
-  it('finalizes verified artifacts from queued and awaiting-input recovery states', () => {
+  it('finalizes verified queued artifacts and interrupts awaiting-input recovery', () => {
     for (const state of ['queued', 'awaiting-input'] as const) {
       const root = workspace();
       const workspaceId = `ws_finalize_${state.replace('-', '_')}`;
@@ -283,16 +404,32 @@ describe('spawn-task artifact recovery and retention', () => {
       });
 
       const recovered = new SpawnTaskStore({ workspaceRoot: root, workspaceId });
-      const completed = recovered.get(processing.taskId)!;
-      expect(completed.runtimeState).toBe('completed');
-      expect(completed.awaitingInput).toBeUndefined();
-      expect(recovered.getLastStartupReport().finalized).toEqual([{
-        taskId: processing.taskId,
-        previousRuntimeState: state,
-        version: completed.version,
-      }]);
-      expect(recovered.reload().finalized).toEqual([]);
-      expect(recovered.get(processing.taskId)?.version).toBe(completed.version);
+      const task = recovered.get(processing.taskId)!;
+      if (state === 'queued') {
+        expect(task.runtimeState).toBe('completed');
+        expect(task.awaitingInput).toBeUndefined();
+        expect(recovered.getLastStartupReport().finalized).toEqual([{
+          taskId: processing.taskId,
+          previousRuntimeState: state,
+          version: task.version,
+        }]);
+        expect(recovered.reload().finalized).toEqual([]);
+      } else {
+        expect(task).toMatchObject({
+          runtimeState: 'failed',
+          failure: {
+            code: 'input_interrupted',
+            retryable: true,
+            details: { kind: 'authentication' },
+          },
+        });
+        expect(recovered.getLastStartupReport().inputInterrupted).toEqual([{
+          taskId: processing.taskId,
+          version: task.version,
+        }]);
+        expect(recovered.reload().inputInterrupted).toEqual([]);
+      }
+      expect(recovered.get(processing.taskId)?.version).toBe(task.version);
     }
   });
 
