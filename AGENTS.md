@@ -6,10 +6,26 @@ Specs for this repository are GitHub Issues, not files. `docs/specs/` holds only
 
 - Read the roadmap with `gh issue list --label kind:spec --state open`.
 - Read a spec with `gh issue view <N>`; read an epic's phases with `gh sub-issue list <N>`.
-- Do not create spec files under `docs/specs/`. Use the `plan-build-verify-github` skill, which publishes specs as issues.
+- Do not create spec files under `docs/specs/`. Use the `plan-build-verify` skill, which publishes specs as issues.
 - Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
 - Post build reports and acceptance evidence as comments on the spec issue.
 - ADRs remain files under `docs/adrs/`. Cross-link them with the issues they constrain.
+
+## Skills
+
+Install project skills with Vercel `npx skills` (project-local, not `-g`) so cloud VMs pick them up:
+
+```bash
+./scripts/install-skills.sh
+```
+
+Same command, written out:
+
+```bash
+npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
+```
+
+That installs only those two skills from `gannonh/skills`. Repo-local skills under `.agents/skills/` stay as they are: `plan-build-verify`, `e2e-test-author`, `mintlify`, `release-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it.
 
 ## Package-level context
 
