@@ -19,13 +19,7 @@ Install project skills with Vercel `npx skills` (project-local, not `-g`) so clo
 ./scripts/install-skills.sh
 ```
 
-Same command, written out:
-
-```bash
-npx skills add gannonh/skills --skill plan-build-verify --skill address-pr-comments -y
-```
-
-That installs only those two skills from `gannonh/skills`. Repo-local skills under `.agents/skills/` stay as they are: `plan-build-verify`, `e2e-test-author`, `mintlify`, `release-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it.
+That copies skills into `.agents/skills/` and `.claude/skills/`; those copies and `skills-lock.json` are gitignored. Repo-local skills under `.agents/skills/` stay tracked: `e2e-test-author`, `release-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it.
 
 ## Package-level context
 
