@@ -12,6 +12,17 @@ export type { ChannelRouterOptions, DispatchRequest, SendChannelMessageResult, S
 export { RouteStore } from './routes.ts';
 export type { RouteStoreOptions } from './routes.ts';
 export {
+  channelsRootPath,
+  channelsPath,
+  channelPath,
+  channelRecordPath,
+  channelRoutesPath,
+  channelRoutePath,
+  channelMemberPath,
+  channelProviderSessionPath,
+  channelIdempotencyPath,
+} from './layout.ts';
+export {
   assertChannelId,
   assertChannelName,
   assertChannelRecord,

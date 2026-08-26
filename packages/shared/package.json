@@ -56,6 +56,7 @@
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
     "./spawn-tasks": "./src/spawn-tasks/index.ts",
+    "./spawn-tasks/durable-fs": "./src/spawn-tasks/durable-fs.ts",
     "./tools": "./src/tools/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/icon": "./src/utils/icon.ts",
