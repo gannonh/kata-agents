@@ -298,6 +298,21 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.bots.CONVERT_SESSION,
   RPC_CHANNELS.bots.EVENT,
 
+  // channels — ChannelDirectory + ChannelRouter
+  RPC_CHANNELS.channels.LIST,
+  RPC_CHANNELS.channels.GET,
+  RPC_CHANNELS.channels.CREATE,
+  RPC_CHANNELS.channels.RENAME,
+  RPC_CHANNELS.channels.ARCHIVE,
+  RPC_CHANNELS.channels.REOPEN,
+  RPC_CHANNELS.channels.DELETE,
+  RPC_CHANNELS.channels.ADD_MEMBER,
+  RPC_CHANNELS.channels.REMOVE_MEMBER,
+  RPC_CHANNELS.channels.GET_JOURNAL,
+  RPC_CHANNELS.channels.SEND_MESSAGE,
+  RPC_CHANNELS.channels.LIST_ROUTES,
+  RPC_CHANNELS.channels.EVENT,
+
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,
