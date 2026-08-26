@@ -1,12 +1,11 @@
 import { readdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import {
   ensureDurableDirectory,
 } from '../spawn-tasks/durable-fs.ts';
 import { readJsonFile, writeJsonIfAbsent, writeJsonRecord } from '../conversations/durable-json.ts';
 import type { RouteRecord } from '@kata-sh/core';
 import { channelsRootPath, channelRoutePath, channelRoutesPath } from './layout.ts';
-import { assertChannelId, assertRouteRecord } from './validation.ts';
+import { assertChannelId, assertRouteId, assertRouteRecord } from './validation.ts';
 
 export interface RouteStoreOptions {
   readonly workspaceRoot: string;
@@ -18,21 +17,19 @@ export class RouteStore {
   readonly rootPath: string;
   readonly workspaceId: string;
 
-  private readonly clock: () => string;
-
   constructor(options: RouteStoreOptions) {
     assertChannelId(options.workspaceId, 'workspaceId');
     this.rootPath = channelsRootPath(options.workspaceRoot);
     this.workspaceId = options.workspaceId;
-    this.clock = options.clock ?? (() => new Date().toISOString());
     ensureDurableDirectory(this.rootPath);
   }
 
   get(channelId: string, routeId: string): RouteRecord | null {
     assertChannelId(channelId);
-    const record = readJsonFile(channelRoutePath(this.rootPath, channelId, routeId));
+    const safeRouteId = assertRouteId(routeId);
+    const record = readJsonFile(channelRoutePath(this.rootPath, channelId, safeRouteId));
     if (!record) return null;
-    return this.assertOwned(record, channelId, routeId);
+    return this.assertOwned(record, channelId, safeRouteId);
   }
 
   list(channelId: string, options?: { limit?: number }): RouteRecord[] {
@@ -43,7 +40,10 @@ export class RouteStore {
     ensureDurableDirectory(directory);
     return readdirSync(directory, { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-      .map((entry) => this.assertOwned(readJsonFile(`${directory}/${entry.name}`), channelId, entry.name.slice(0, -5)))
+      .map((entry) => {
+        const routeId = assertRouteId(entry.name.slice(0, -5));
+        return this.assertOwned(readJsonFile(channelRoutePath(this.rootPath, channelId, routeId)), channelId, routeId);
+      })
       .sort((left, right) => right.routeSeq - left.routeSeq || right.routeId.localeCompare(left.routeId))
       .slice(0, limit);
   }
@@ -77,4 +77,3 @@ export class RouteStore {
     return record;
   }
 }
-

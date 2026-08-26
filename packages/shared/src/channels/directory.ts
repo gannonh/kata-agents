@@ -77,6 +77,7 @@ export class ChannelDirectory {
     const botIds = [...new Set(input.botIds ?? [])];
     if (botIds.length > CHANNEL_LIMITS.maxMembers) throw new Error(`members exceeds ${CHANNEL_LIMITS.maxMembers} entries`);
     const members = botIds.map((botId, priority) => {
+      assertChannelId(botId, 'botId');
       const bot = this.resolveBot(botId);
       if (!bot) throw new Error(`Bot not found in workspace: ${botId}`);
       return { botId, priority, addedAt: this.clock() };
@@ -168,6 +169,7 @@ export class ChannelDirectory {
   }
 
   addMember(channelId: string, botId: string): ChannelRecord {
+    assertChannelId(botId, 'botId');
     const current = this.require(channelId);
     const bot = this.resolveBot(botId);
     if (!bot) throw new Error(`Bot not found in workspace: ${botId}`);
@@ -231,4 +233,3 @@ export class ChannelDirectory {
     return assertChannelId(value, 'pointer');
   }
 }
-

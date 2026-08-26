@@ -133,6 +133,7 @@ export function assertChannelRecord(value: unknown): ChannelRecord {
   timestamp(record.updatedAt, 'updatedAt');
   if (record.archivedAt !== undefined) timestamp(record.archivedAt, 'archivedAt');
   if (lifecycle === 'archived' && record.archivedAt === undefined) fail('archived channels require archivedAt');
+  if (lifecycle === 'active' && record.archivedAt !== undefined) fail('active channels cannot have archivedAt');
   return {
     schemaVersion: CHANNEL_SCHEMA_VERSION,
     channelId: record.channelId as string,
@@ -256,4 +257,3 @@ export function assertRouteRecord(value: unknown): RouteRecord {
 
 export { CLAIM_OUTCOMES, STAGE_CANCEL_REASONS };
 export type { ClaimOutcome };
-
