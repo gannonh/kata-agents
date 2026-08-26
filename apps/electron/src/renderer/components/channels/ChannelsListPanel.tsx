@@ -1,10 +1,3 @@
-/**
- * ChannelsListPanel
- *
- * Navigator panel for Channels. Lists the workspace's active Channels and hosts
- * the inline create control. Selecting a Channel opens its journal.
- */
-
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessagesSquare, Plus } from 'lucide-react'

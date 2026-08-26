@@ -31,6 +31,7 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isBotsNavigation,
+  isChannelsNavigation,
   isAutomationsNavigation,
   isBrowserNavigation,
 } from '@/contexts/NavigationContext'
@@ -43,6 +44,7 @@ import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import { BotChatPanel } from '../bots/BotChatPanel'
+import { ChannelChatPanel } from '../channels/ChannelChatPanel'
 import { BrowserPanel } from '../browser/BrowserPanel'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
@@ -336,6 +338,23 @@ export function MainContentPanel({
       <Panel variant="grow" className={className}>
         <div className="flex items-center justify-center h-full text-muted-foreground">
           <p className="text-sm">{t("bots.noBotSelected")}</p>
+        </div>
+      </Panel>
+    )
+  }
+
+  if (isChannelsNavigation(navState)) {
+    if (navState.details && activeWorkspaceId) {
+      return wrapWithStoplight(
+        <Panel variant="grow" className={className}>
+          <ChannelChatPanel workspaceId={activeWorkspaceId} channelId={navState.details.channelId} />
+        </Panel>
+      )
+    }
+    return wrapWithStoplight(
+      <Panel variant="grow" className={className}>
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm">{t("channels.noChannelSelected")}</p>
         </div>
       </Panel>
     )

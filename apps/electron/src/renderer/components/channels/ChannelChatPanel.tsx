@@ -1,12 +1,3 @@
-/**
- * ChannelChatPanel
- *
- * One Channel's ordered ConversationJournal, its member bar, and the routing
- * evidence behind each inbound message. Sending waits for the replies, then
- * re-reads the journal and the routes so the committed records — not optimistic
- * local state — are what the user sees.
- */
-
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, X } from 'lucide-react'
