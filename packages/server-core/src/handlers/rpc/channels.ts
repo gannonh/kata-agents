@@ -193,6 +193,7 @@ function routerFor(
   deps: HandlerDeps,
   runtime: ChannelRuntime,
   callerClientId?: string,
+  onRouteCommitted?: (route: RouteRecord) => void,
 ): ChannelRouter {
   return new ChannelRouter({
     directory: runtime.directory,
@@ -200,6 +201,7 @@ function routerFor(
     routes: runtime.routes,
     evaluateClaim: createProviderClaimEvaluator(deps, runtime.workspace, runtime.bots),
     dispatch: createStageDispatcher(deps, runtime, callerClientId),
+    onRouteCommitted,
   })
 }
 
@@ -304,16 +306,49 @@ export function registerChannelsHandlers(server: RpcServer, deps: HandlerDeps): 
   ) => {
     const runtime = openRuntime(ctx, workspaceId, deps)
     await deps.sessionManager.waitForInit()
-    const router = routerFor(deps, runtime, ctx.clientId)
-    const recovered = await router.recover(channelId)
-    for (const route of recovered) emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
-    const result = await router.send({
+    let resolveRouteCommit!: (route: RouteRecord) => void
+    let rejectRouteCommit!: (error: unknown) => void
+    const routeCommit = new Promise<RouteRecord>((resolve, reject) => {
+      resolveRouteCommit = resolve
+      rejectRouteCommit = reject
+    })
+    // A rejected commit promise is only observed when waitForReplies is false.
+    // Attach a handler here so a pre-commit validation failure cannot become an
+    // unhandled rejection for callers that wait for the full route operation.
+    void routeCommit.catch(() => undefined)
+    const router = routerFor(deps, runtime, ctx.clientId, (route) => {
+      emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
+      resolveRouteCommit(route)
+    })
+    void router.recover(channelId).then((recovered) => {
+      for (const route of recovered) emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
+    }).catch((error: unknown) => {
+      console.error('[Channels] Background route recovery failed:', error)
+    })
+    const operation = router.send({
       channelId,
       message,
       idempotencyKey: options?.idempotencyKey ?? `send.${randomUUID()}`,
+    }).then((result) => {
+      emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route: result.route })
+      emit(server, runtime.workspace.id, { type: 'journal-updated', channelId, throughSeq: result.userEntry.seq })
+      return result
+    }, (error: unknown) => {
+      rejectRouteCommit(error)
+      throw error
     })
-    emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route: result.route })
-    emit(server, runtime.workspace.id, { type: 'journal-updated', channelId, throughSeq: result.userEntry.seq })
+
+    if (options?.waitForReplies === false) {
+      void operation.catch((error: unknown) => {
+        console.error('[Channels] Background route operation failed:', error)
+      })
+      const route = await routeCommit
+      const userEntry = runtime.journal.getEntry(channelId, route.messageEntryId)
+      if (!userEntry) throw new Error(`Channel route user entry not found: ${route.messageEntryId}`)
+      return { accepted: true as const, userEntry, route, replies: [] }
+    }
+
+    const result = await operation
     return { accepted: true as const, ...result }
   })
 

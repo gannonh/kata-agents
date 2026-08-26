@@ -60,7 +60,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     try {
       await window.electronAPI.sendChannelMessage(workspaceId, channelId, trimmed, {
         idempotencyKey: crypto.randomUUID(),
-        waitForReplies: true,
+        waitForReplies: false,
       })
       setMessage('')
       await refresh()

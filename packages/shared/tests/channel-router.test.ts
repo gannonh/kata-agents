@@ -14,6 +14,7 @@ function makeFixture(options?: {
   bots?: Record<string, { name: string; lifecycle: 'active' | 'hidden' | 'archived'; profile?: string }>;
   evaluate?: (botId: string) => Promise<string | null>;
   dispatch?: (ownerBotId: string, request: { dispatchIdempotencyKey: string; isFirstDispatch: boolean }) => Promise<string>;
+  onRouteCommitted?: (route: RouteRecord) => void;
 }) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-channel-router-'));
   const botRecords = new Map(Object.entries(options?.bots ?? {
@@ -49,6 +50,7 @@ function makeFixture(options?: {
       dispatchCount += 1;
       return options?.dispatch?.(request.ownerBotId, request) ?? `reply from ${request.ownerBotId}`;
     },
+    onRouteCommitted: options?.onRouteCommitted,
   });
   return { directory, journal, routes, router, channel, botRecords, get dispatchCount() { return dispatchCount; } };
 }
@@ -68,6 +70,31 @@ describe('ChannelRouter', () => {
     expect(result.route.stages[0]?.ownerEpoch).toBe(result.route.routeSeq);
     expect(result.route.stages[0]?.dispatchIdempotencyKey).toBe(dispatchIdempotencyKey(result.route.stages[0]?.stageId ?? ''));
     expect(result.replies).toHaveLength(1);
+  });
+
+  it('notifies after durable commit and before provider dispatch', async () => {
+    const events: string[] = [];
+    let committed: RouteRecord | undefined;
+    const fixture = makeFixture({
+      onRouteCommitted: (route) => {
+        events.push('committed');
+        committed = route;
+      },
+      dispatch: async () => {
+        events.push('dispatched');
+        return 'reply';
+      },
+    });
+
+    const result = await fixture.router.send({
+      channelId: fixture.channel.channelId,
+      message: 'notify me',
+      idempotencyKey: 'send-committed-callback',
+    });
+
+    expect(events).toEqual(['committed', 'dispatched']);
+    expect(committed?.routeId).toBe(result.route.routeId);
+    expect(committed?.stages[0]?.state).toBe('committed');
   });
 
   it('breaks equal confidence by Channel priority', async () => {

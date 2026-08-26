@@ -36,6 +36,8 @@ export interface ChannelRouterOptions {
   readonly routes: RouteStore;
   readonly evaluateClaim: ClaimEvaluator;
   readonly dispatch: StageDispatcher;
+  /** Called after a route is durably committed and before any stage dispatch. */
+  readonly onRouteCommitted?: (route: RouteRecord) => void;
   readonly clock?: () => string;
   readonly claimWindowMs?: number;
 }
@@ -129,6 +131,7 @@ export class ChannelRouter {
   private readonly routes: RouteStore;
   private readonly evaluateClaim: ClaimEvaluator;
   private readonly dispatch: StageDispatcher;
+  private readonly onRouteCommitted: ((route: RouteRecord) => void) | undefined;
   private readonly clock: () => string;
   private readonly claimWindowMs: number;
 
@@ -138,6 +141,7 @@ export class ChannelRouter {
     this.routes = options.routes;
     this.evaluateClaim = options.evaluateClaim;
     this.dispatch = options.dispatch;
+    this.onRouteCommitted = options.onRouteCommitted;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.claimWindowMs = options.claimWindowMs ?? CHANNEL_LIMITS.claimWindowMs;
     if (!Number.isSafeInteger(this.claimWindowMs) || this.claimWindowMs < 0) throw new Error('claimWindowMs must be a non-negative safe integer');
@@ -164,7 +168,10 @@ export class ChannelRouter {
     const routeId = deriveRouteId(channel.channelId, userEntry.entryId);
     return withRouteQueue(`${this.routes.rootPath}/${channel.channelId}/${routeId}`, async () => {
       const existing = this.routes.get(channel.channelId, routeId);
-      if (existing) return this.finish(existing, userEntry);
+      if (existing) {
+        this.onRouteCommitted?.(existing);
+        return this.finish(existing, userEntry);
+      }
 
       const eligible = snapshot.filter(({ bot }) => bot?.lifecycle === 'active').sort(memberSort);
       const mode = mentions.botIds.length > 0 || mentions.everyone ? 'explicit' : 'autonomous';
@@ -200,6 +207,7 @@ export class ChannelRouter {
         updatedAt: now,
       };
       const committed = this.routes.commit(route);
+      this.onRouteCommitted?.(committed);
       return this.finish(committed, userEntry);
     });
   }
