@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   BOT_SCHEMA_VERSION,
@@ -93,7 +94,7 @@ export class BotDirectory {
     ensureDurableDirectory(botsPath(this.rootPath));
     ensureDurableDirectory(intentsPath(this.rootPath));
     for (const directory of ['chats', 'by-idempotency', 'by-bot-chat', 'by-legacy-session', 'dispositions']) {
-      ensureDurableDirectory(`${this.rootPath}/${directory}`);
+      ensureDurableDirectory(join(this.rootPath, directory));
     }
     this.reload();
   }
@@ -309,7 +310,7 @@ export class BotDirectory {
         throw new Error(`Bot ${intent.botId} already maps to direct chat ${owned}`);
       }
     } else {
-      syncDirectory(`${this.rootPath}/by-bot-chat`);
+      syncDirectory(dirname(pointerPath));
     }
     if (intent.legacySessionId) {
       const legacyPath = legacySessionPointerPath(this.rootPath, intent.legacySessionId);
@@ -317,7 +318,7 @@ export class BotDirectory {
         const owned = this.readPointer(legacyPath);
         if (owned !== intent.botId) throw new Error(`Legacy session ${intent.legacySessionId} maps to another Bot`);
       } else {
-        syncDirectory(`${this.rootPath}/by-legacy-session`);
+        syncDirectory(dirname(legacyPath));
       }
     }
 
