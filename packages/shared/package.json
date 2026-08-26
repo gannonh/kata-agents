@@ -24,6 +24,7 @@
     "./auth/types": "./src/auth/types.ts",
     "./automations": "./src/automations/index.ts",
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
+    "./bots": "./src/bots/index.ts",
     "./branding": "./src/branding.ts",
     "./colors": "./src/colors/index.ts",
     "./config": "./src/config/index.ts",

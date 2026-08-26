@@ -21,6 +21,7 @@ export {
   getWorkspaceSourcesPath,
   getWorkspaceSessionsPath,
   getWorkspaceSpawnTasksPath,
+  getWorkspaceBotsPath,
   getWorkspaceSkillsPath,
   // Config operations
   loadWorkspaceConfig,
