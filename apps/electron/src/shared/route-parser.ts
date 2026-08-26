@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'settings' | 'browser'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'bots' | 'automations' | 'settings' | 'browser'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -61,7 +61,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'settings', 'browser'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'bots', 'automations', 'settings', 'browser'
 ]
 
 /**
@@ -165,6 +165,23 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
       return {
         navigator: 'skills',
         details: { type: 'skill', id: segments[2] },
+      }
+    }
+
+    return null
+  }
+
+  // Bots navigator
+  if (first === 'bots') {
+    if (segments.length === 1) {
+      return { navigator: 'bots', details: null }
+    }
+
+    // bots/bot/{botId}
+    if (segments[1] === 'bot' && segments[2]) {
+      return {
+        navigator: 'bots',
+        details: { type: 'bot', id: segments[2] },
       }
     }
 
@@ -294,6 +311,11 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
     return `skills/skill/${parsed.details.id}`
   }
 
+  if (parsed.navigator === 'bots') {
+    if (!parsed.details) return 'bots'
+    return `bots/bot/${parsed.details.id}`
+  }
+
   if (parsed.navigator === 'automations') {
     // Build base from filter (automations, automations/scheduled, automations/event, automations/agentic)
     let base = 'automations'
@@ -421,6 +443,14 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
       return { type: 'view', name: 'skills', params: {} }
     }
     return { type: 'view', name: 'skill-info', id: compound.details.id, params: {} }
+  }
+
+  // Bots
+  if (compound.navigator === 'bots') {
+    if (!compound.details) {
+      return { type: 'view', name: 'bots', params: {} }
+    }
+    return { type: 'view', name: 'bot-chat', id: compound.details.id, params: {} }
   }
 
   // Automations
@@ -557,6 +587,17 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
+  // Bots
+  if (compound.navigator === 'bots') {
+    if (!compound.details) {
+      return { navigator: 'bots', details: null }
+    }
+    return {
+      navigator: 'bots',
+      details: { type: 'bot', botId: compound.details.id },
+    }
+  }
+
   // Automations - include filter if present
   if (compound.navigator === 'automations') {
     if (!compound.details) {
@@ -637,6 +678,19 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'skills', details: null }
+    case 'bots':
+      return { navigator: 'bots', details: null }
+    case 'bot-chat':
+      if (parsed.id) {
+        return {
+          navigator: 'bots',
+          details: {
+            type: 'bot',
+            botId: parsed.id,
+          },
+        }
+      }
+      return { navigator: 'bots', details: null }
     case 'automations':
       return { navigator: 'automations', details: null }
     case 'automation-info':
@@ -759,6 +813,13 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     return {
       navigator: 'skills',
       details: state.details?.type === 'skill' ? { type: 'skill', id: state.details.skillSlug } : null,
+    }
+  }
+
+  if (state.navigator === 'bots') {
+    return {
+      navigator: 'bots',
+      details: state.details?.type === 'bot' ? { type: 'bot', id: state.details.botId } : null,
     }
   }
 

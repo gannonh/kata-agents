@@ -1061,6 +1061,15 @@ export interface SkillsNavigationState {
 }
 
 /**
+ * Bots navigation state
+ */
+export interface BotsNavigationState {
+  navigator: 'bots'
+  details: { type: 'bot'; botId: string } | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Automations navigation state
  */
 export interface AutomationsNavigationState {
@@ -1087,6 +1096,7 @@ export type NavigationState =
   | SourcesNavigationState
   | SettingsNavigationState
   | SkillsNavigationState
+  | BotsNavigationState
   | AutomationsNavigationState
   | BrowserNavigationState
 
@@ -1105,6 +1115,10 @@ export const isSettingsNavigation = (
 export const isSkillsNavigation = (
   state: NavigationState
 ): state is SkillsNavigationState => state.navigator === 'skills'
+
+export const isBotsNavigation = (
+  state: NavigationState
+): state is BotsNavigationState => state.navigator === 'bots'
 
 export const isAutomationsNavigation = (
   state: NavigationState
@@ -1135,6 +1149,12 @@ export const getNavigationStateKey = (state: NavigationState): string => {
       return `skills/skill/${state.details.skillSlug}`
     }
     return 'skills'
+  }
+  if (state.navigator === 'bots') {
+    if (state.details?.type === 'bot') {
+      return `bots/bot/${state.details.botId}`
+    }
+    return 'bots'
   }
   if (state.navigator === 'automations') {
     if (state.details?.type === 'automation') {
@@ -1178,6 +1198,16 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
       return { navigator: 'skills', details: { type: 'skill', skillSlug } }
     }
     return { navigator: 'skills', details: null }
+  }
+
+  // Handle bots
+  if (key === 'bots') return { navigator: 'bots', details: null }
+  if (key.startsWith('bots/bot/')) {
+    const botId = key.slice(9)
+    if (botId) {
+      return { navigator: 'bots', details: { type: 'bot', botId } }
+    }
+    return { navigator: 'bots', details: null }
   }
 
   // Handle automations
