@@ -8,7 +8,7 @@ import {
   buildDeterministicAgentTurn,
   runWithAgentProviderFallback,
 } from "../../src/flows/agentChat.ts";
-import { configureAgentConnection, completeDeferredSetup } from "../../src/flows/onboarding.ts";
+import { configureAgentConnection, resumeAfterAppRestart } from "../../src/flows/onboarding.ts";
 import { waitForAppReady } from "../../src/flows/shell.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 import { buildElectronLaunchEnv } from "../../src/harness/launchEnv.ts";
@@ -36,7 +36,7 @@ async function restartElectron(
     env,
   });
   const page = await app.firstWindow();
-  await completeDeferredSetup(page);
+  await resumeAfterAppRestart(page);
   await expect(page.locator("body")).toContainText(/New Session|Bots/i, {
     timeout: 30_000,
   });
@@ -58,32 +58,36 @@ test.describe(`Named bots durable chat ${E2E_TAGS.bots}`, () => {
 
     let page = appWindow;
     let app = electronApp;
-    const turn = buildDeterministicAgentTurn();
-    const botName = `E2E Bot ${Date.now()}`;
 
     await runWithAgentProviderFallback(page, "Bots durable chat", async (candidate) => {
+      const turn = buildDeterministicAgentTurn();
+      const botName = `E2E Bot ${candidate.provider} ${Date.now()}`;
+
       await configureAgentConnection(page, candidate);
       await waitForAppReady(page);
 
+      await page.getByTestId("bots-nav").scrollIntoViewIfNeeded();
       await page.getByTestId("bots-nav").click();
+      await expect(page.getByTestId("bots-create-button")).toBeVisible({ timeout: 15_000 });
       await page.getByTestId("bots-create-button").click();
       await page.getByTestId("bots-name-input").fill(botName);
       await page.getByTestId("bots-create-submit").click();
 
-      const botRow = page.locator("[data-testid^='bot-row-']").filter({ hasText: botName });
+      await expect(page.getByTestId("bot-chat")).toBeVisible({ timeout: 15_000 });
+      const botRow = page.locator("[data-testid^='bot-row-']").filter({ hasText: botName }).first();
       await expect(botRow).toBeVisible({ timeout: 15_000 });
-      await botRow.click();
 
-      await expect(page.getByTestId("bot-chat")).toBeVisible();
       await page.getByTestId("bot-chat-input").fill(turn.prompt);
       await page.getByTestId("bot-chat-send").click();
 
-      await expect(page.locator("[data-testid^='bot-journal-entry-']").filter({ hasText: turn.prompt })).toBeVisible({
-        timeout: E2E_TIMEOUTS.agentReplyMs,
+      const userEntry = page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({
+        hasText: turn.prompt,
       });
-      await expect(page.locator("[data-testid^='bot-journal-entry-']").filter({ hasText: turn.expected })).toBeVisible({
-        timeout: E2E_TIMEOUTS.agentReplyMs,
+      const botEntry = page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="bot"]').filter({
+        hasText: turn.expected,
       });
+      await expect(userEntry).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+      await expect(botEntry).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
 
       const beforeRestart = await page.locator("[data-testid^='bot-journal-entry-']").allTextContents();
       const restarted = await restartElectron(app, runContext);
@@ -91,14 +95,23 @@ test.describe(`Named bots durable chat ${E2E_TAGS.bots}`, () => {
       page = restarted.page;
       await waitForAppReady(page);
 
+      await page.getByTestId("bots-nav").scrollIntoViewIfNeeded();
       await page.getByTestId("bots-nav").click();
-      const reopened = page.locator("[data-testid^='bot-row-']").filter({ hasText: botName });
+      const reopened = page.locator("[data-testid^='bot-row-']").filter({ hasText: botName }).first();
       await expect(reopened).toBeVisible({ timeout: 15_000 });
       await reopened.click();
 
       await expect(page.getByTestId("bot-chat")).toBeVisible();
-      await expect(page.locator("[data-testid^='bot-journal-entry-']").filter({ hasText: turn.prompt })).toBeVisible();
-      await expect(page.locator("[data-testid^='bot-journal-entry-']").filter({ hasText: turn.expected })).toBeVisible();
+      await expect(
+        page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({
+          hasText: turn.prompt,
+        }),
+      ).toBeVisible();
+      await expect(
+        page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="bot"]').filter({
+          hasText: turn.expected,
+        }),
+      ).toBeVisible();
       const afterRestart = await page.locator("[data-testid^='bot-journal-entry-']").allTextContents();
       expect(afterRestart).toEqual(beforeRestart);
     });

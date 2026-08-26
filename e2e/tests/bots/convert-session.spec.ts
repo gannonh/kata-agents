@@ -12,7 +12,7 @@ import {
   sendAgentPrompt,
   startNewSession,
 } from "../../src/flows/agentChat.ts";
-import { configureAgentConnection, completeDeferredSetup } from "../../src/flows/onboarding.ts";
+import { configureAgentConnection, resumeAfterAppRestart } from "../../src/flows/onboarding.ts";
 import { waitForAppReady } from "../../src/flows/shell.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 import { buildElectronLaunchEnv } from "../../src/harness/launchEnv.ts";
@@ -40,7 +40,7 @@ async function restartElectron(
     env,
   });
   const page = await app.firstWindow();
-  await completeDeferredSetup(page);
+  await resumeAfterAppRestart(page);
   await expect(page.locator("body")).toContainText(/New Session|Bots/i, {
     timeout: 30_000,
   });
