@@ -90,20 +90,33 @@ export {
 } from './spawn-task.ts';
 export { SPAWN_TASK_CANONICAL_FIXTURE } from './spawn-task-fixture.ts';
 
-// Bot identity, DirectChat, and ConversationJournal contracts
+// Ordered public conversation history
 export type {
+  ConversationId,
+  JournalEntry,
+  JournalEntryId,
+  JournalEntryKind,
+  JournalCursor,
+} from './conversation.ts';
+export {
+  CONVERSATION_SCHEMA_VERSION,
+  CONVERSATION_LIMITS,
+  JOURNAL_ENTRY_KINDS,
+} from './conversation.ts';
+
+// Bot identity and DirectChat contracts
+export type {
+  BotId,
   BotLifecycle,
   BotPermissionMode,
+  DirectChatId,
   LegacySessionDisposition,
-  JournalEntryKind,
   CreationIntentState,
   BotProviderConfig,
   BotRecord,
   BotPublicDto,
   DirectChatRecord,
   CreationIntent,
-  JournalEntry,
-  JournalCursor,
   SessionDispositionRecord,
 } from './bot.ts';
 export {
@@ -111,10 +124,40 @@ export {
   BOT_LIFECYCLES,
   BOT_PERMISSION_MODES,
   LEGACY_SESSION_DISPOSITIONS,
-  JOURNAL_ENTRY_KINDS,
   CREATION_INTENT_STATES,
   BOT_LIMITS,
 } from './bot.ts';
+
+// Channel membership and autonomous routing contracts
+export type {
+  ChannelId,
+  ChannelLifecycle,
+  ChannelMember,
+  ChannelPublicDto,
+  ChannelRecord,
+  ClaimOutcome,
+  MemberAvailability,
+  RouteBlockReason,
+  RouteClaim,
+  RouteId,
+  RouteMode,
+  RouteRecord,
+  RouteStage,
+  RouteStageState,
+  StageCancelReason,
+  StageId,
+} from './channel.ts';
+export {
+  CHANNEL_SCHEMA_VERSION,
+  CHANNEL_LIFECYCLES,
+  CHANNEL_LIMITS,
+  CLAIM_OUTCOMES,
+  MEMBER_AVAILABILITIES,
+  ROUTE_BLOCK_REASONS,
+  ROUTE_MODES,
+  ROUTE_STAGE_STATES,
+  STAGE_CANCEL_REASONS,
+} from './channel.ts';
 
 // Message persistence mappers
 export { messageToStored, storedToMessage } from './message-mapper.ts';

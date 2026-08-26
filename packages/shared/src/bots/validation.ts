@@ -4,13 +4,11 @@ import {
   BOT_PERMISSION_MODES,
   BOT_SCHEMA_VERSION,
   CREATION_INTENT_STATES,
-  JOURNAL_ENTRY_KINDS,
   LEGACY_SESSION_DISPOSITIONS,
   type BotProviderConfig,
   type BotRecord,
   type CreationIntent,
   type DirectChatRecord,
-  type JournalEntry,
   type SessionDispositionRecord,
 } from '@kata-sh/core';
 
@@ -174,31 +172,6 @@ export function assertCreationIntent(value: unknown): CreationIntent {
   if (intent.publishedAt !== undefined) timestamp(intent.publishedAt, 'publishedAt');
   if (state === 'published' && intent.publishedAt === undefined) fail('published intents require publishedAt');
   return value as CreationIntent;
-}
-
-export function assertJournalEntry(value: unknown): JournalEntry {
-  const entry = object(value, 'entry');
-  exactKeys(entry, 'entry', [
-    'schemaVersion',
-    'entryId',
-    'chatId',
-    'botId',
-    'seq',
-    'kind',
-    'idempotencyKey',
-    'body',
-    'createdAt',
-  ]);
-  assertSchemaVersion(entry.schemaVersion);
-  assertBotId(entry.entryId, 'entryId');
-  assertBotId(entry.chatId, 'chatId');
-  assertBotId(entry.botId, 'botId');
-  if (!Number.isSafeInteger(entry.seq) || (entry.seq as number) < 1) fail('seq must be a positive safe integer');
-  member(entry.kind, 'kind', JOURNAL_ENTRY_KINDS);
-  assertIdempotencyKey(entry.idempotencyKey);
-  bounded(entry.body, 'body', BOT_LIMITS.journalEntryBytes);
-  timestamp(entry.createdAt, 'createdAt');
-  return value as JournalEntry;
 }
 
 export function assertSessionDispositionRecord(value: unknown): SessionDispositionRecord {

@@ -7,12 +7,9 @@ import {
   type SessionDispositionRecord,
 } from '@kata-sh/core';
 import type { BotDirectory } from './directory.ts';
-import type { ConversationJournal } from './journal.ts';
-import {
-  dispositionPath,
-  readJsonFile,
-  writeJsonRecord,
-} from './layout.ts';
+import type { ConversationJournal } from '../conversations/index.ts';
+import { dispositionPath } from './layout.ts';
+import { readJsonFile, writeJsonRecord } from '../conversations/index.ts';
 import { assertBotId, assertSessionDispositionRecord } from './validation.ts';
 
 export interface ConvertSessionMessage {
@@ -75,8 +72,7 @@ export function convertSessionToBot(
   });
 
   const entries = input.messages.map((message, index) => journal.append({
-    chatId: bot.directChatId,
-    botId: bot.botId,
+    conversationId: bot.directChatId,
     kind: message.role === 'user' ? 'user' : 'bot',
     body: message.text,
     idempotencyKey: `convert.${sessionId}.${index}`,
@@ -85,8 +81,7 @@ export function convertSessionToBot(
   }));
 
   const cutover = journal.append({
-    chatId: bot.directChatId,
-    botId: bot.botId,
+    conversationId: bot.directChatId,
     kind: 'lifecycle',
     body: `Converted from session ${sessionId}. Earlier history is imported above.`,
     idempotencyKey: `convert.${sessionId}.cutover`,
@@ -109,6 +104,6 @@ export function convertSessionToBot(
 }
 
 function readDisposition(rootPath: string, sessionId: string): SessionDispositionRecord | null {
-  const record = readJsonFile(dispositionPath(rootPath, sessionId), 'session disposition');
+  const record = readJsonFile(dispositionPath(rootPath, sessionId));
   return record ? assertSessionDispositionRecord(record) : null;
 }

@@ -26,10 +26,8 @@ import {
   intentRecordPath,
   intentsPath,
   legacySessionPointerPath,
-  readJsonFile,
-  removePointer,
-  writeJsonRecord,
 } from './layout.ts';
+import { readJsonFile, removePointer, writeJsonRecord } from '../conversations/index.ts';
 import {
   assertBotId,
   assertBotName,
@@ -367,7 +365,7 @@ export class BotDirectory {
 
   private requireIntent(intentId: string): CreationIntent {
     assertBotId(intentId, 'intentId');
-    const record = readJsonFile(intentRecordPath(this.rootPath, intentId), 'bot creation intent');
+    const record = readJsonFile(intentRecordPath(this.rootPath, intentId));
     if (!record) throw new Error(`Bot creation intent not found: ${intentId}`);
     return assertCreationIntent(record);
   }
@@ -400,7 +398,7 @@ export class BotDirectory {
   }
 
   private readBot(botId: string): BotRecord | null {
-    const record = readJsonFile(botRecordPath(this.rootPath, botId), 'bot record');
+    const record = readJsonFile(botRecordPath(this.rootPath, botId));
     if (!record) return null;
     const bot = assertBotRecord(record);
     if (bot.botId !== botId) throw new Error(`Bot record identity mismatch for ${botId}`);
@@ -409,7 +407,7 @@ export class BotDirectory {
   }
 
   private readChat(chatId: string): DirectChatRecord | null {
-    const record = readJsonFile(chatRecordPath(this.rootPath, chatId), 'direct chat record');
+    const record = readJsonFile(chatRecordPath(this.rootPath, chatId));
     return record ? assertDirectChatRecord(record) : null;
   }
 

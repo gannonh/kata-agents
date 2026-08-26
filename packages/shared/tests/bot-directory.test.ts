@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BotDirectory, ConversationJournal, convertSessionToBot, toBotPublicDto } from '../src/bots/index.ts';
+import { BotDirectory, convertSessionToBot, createDirectChatJournal, toBotPublicDto } from '../src/bots/index.ts';
 
 const at = '2026-08-26T00:00:00.000Z';
 const tempRoots: string[] = [];
@@ -124,7 +124,7 @@ describe('ConversationJournal', () => {
   it('appends ordered entries and dedupes by idempotency key', () => {
     const root = tempWorkspace();
     const directory = new BotDirectory({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
-    const journal = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const journal = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     const bot = directory.createBot({
       name: 'Chat',
       permissionMode: 'ask',
@@ -132,22 +132,19 @@ describe('ConversationJournal', () => {
       idempotencyKey: 'journal-bot',
     });
     const first = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'hello',
       idempotencyKey: 'msg-1',
     });
     const again = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'hello again',
       idempotencyKey: 'msg-1',
     });
     const second = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'bot',
       body: 'hi',
       idempotencyKey: 'msg-2',
@@ -161,7 +158,7 @@ describe('ConversationJournal', () => {
   it('survives directory reload', () => {
     const root = tempWorkspace();
     const directory = new BotDirectory({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
-    const journal = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const journal = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     const bot = directory.createBot({
       name: 'Chat',
       permissionMode: 'ask',
@@ -169,13 +166,12 @@ describe('ConversationJournal', () => {
       idempotencyKey: 'reload-bot',
     });
     journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'persist me',
       idempotencyKey: 'reload-msg',
     });
-    const reloaded = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const reloaded = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     expect(reloaded.list(bot.directChatId)[0]!.body).toBe('persist me');
   });
 });
@@ -184,7 +180,7 @@ describe('convertSessionToBot', () => {
   it('converts once and retries without duplicating or reordering', () => {
     const root = tempWorkspace();
     const directory = new BotDirectory({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
-    const journal = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const journal = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     const messages = [
       { role: 'user' as const, text: 'one', createdAt: '2026-08-26T00:00:01.000Z' },
       { role: 'assistant' as const, text: 'two', createdAt: '2026-08-26T00:00:02.000Z' },
@@ -211,7 +207,7 @@ describe('convertSessionToBot', () => {
     expect(second.entries.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
 
     const reloadedDir = new BotDirectory({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
-    const reloadedJournal = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const reloadedJournal = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     const third = convertSessionToBot(reloadedDir, reloadedJournal, {
       sessionId: 'session_legacy_convert',
       idempotencyKey: 'convert-after-restart',

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { BotDirectory, ConversationJournal } from '../src/bots/index.ts';
-import { journalEntriesPath, journalEntryPath, journalIndexPath, readJsonFile } from '../src/bots/layout.ts';
+import { BotDirectory, createDirectChatJournal } from '../src/bots/index.ts';
+import { journalEntriesPath, journalEntryPath, journalIndexPath, readJsonFile } from '../src/conversations/index.ts';
 
 const at = '2026-08-26T00:00:00.000Z';
 const tempRoots: string[] = [];
@@ -25,7 +25,7 @@ function provider() {
 function setup(workspaceId = 'ws_1') {
   const root = tempWorkspace();
   const directory = new BotDirectory({ workspaceRoot: root, workspaceId, clock: () => at });
-  const journal = new ConversationJournal({ workspaceRoot: root, workspaceId, clock: () => at });
+  const journal = createDirectChatJournal({ workspaceRoot: root, workspaceId, clock: () => at });
   const bot = directory.createBot({
     name: 'Journal Bot',
     permissionMode: 'ask',
@@ -41,8 +41,7 @@ describe('ConversationJournal ordering', () => {
 
     for (const index of [0, 1, 2, 3]) {
       journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: index % 2 === 0 ? 'user' : 'bot',
         body: `entry-${index}`,
         idempotencyKey: `key-${index}`,
@@ -61,14 +60,13 @@ describe('ConversationJournal ordering', () => {
     const { journal, bot } = setup();
 
     const entry = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'durable',
       idempotencyKey: 'durable-1',
     });
 
-    const botsRoot = journal.rootPath;
+    const botsRoot = journal.journalRoot;
     const files = readdirSync(journalEntriesPath(botsRoot, bot.directChatId));
     expect(files).toHaveLength(1);
     expect(files[0]).toBe(basename(journalEntryPath(botsRoot, bot.directChatId, 1, entry.entryId)));
@@ -84,8 +82,7 @@ describe('ConversationJournal ordering', () => {
   it('returns the existing entry for a repeated idempotency key', () => {
     const { journal, bot } = setup();
     const input = {
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user' as const,
       idempotencyKey: 'once',
     };
@@ -101,8 +98,7 @@ describe('ConversationJournal ordering', () => {
     const { journal, bot } = setup();
 
     const entry = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'historical',
       idempotencyKey: 'historical-1',
@@ -118,8 +114,7 @@ describe('ConversationJournal cursors', () => {
     const { journal, bot } = setup();
     for (const index of [0, 1, 2]) {
       journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: 'bot',
         body: `m${index}`,
         idempotencyKey: `cursor-${index}`,
@@ -127,7 +122,7 @@ describe('ConversationJournal cursors', () => {
     }
 
     expect(journal.getCursor(bot.directChatId)).toEqual({
-      chatId: bot.directChatId,
+      conversationId: bot.directChatId,
       lastReadSeq: 0,
       unreadCount: 3,
     });
@@ -140,17 +135,16 @@ describe('ConversationJournal cursors', () => {
   it('survives a restart', () => {
     const { root, journal, bot } = setup();
     journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'bot',
       body: 'persisted',
       idempotencyKey: 'restart-1',
     });
     journal.markRead(bot.directChatId, 1);
 
-    const reloaded = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const reloaded = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     expect(reloaded.getCursor(bot.directChatId)).toEqual({
-      chatId: bot.directChatId,
+      conversationId: bot.directChatId,
       lastReadSeq: 1,
       unreadCount: 0,
     });
@@ -162,22 +156,29 @@ describe('ConversationJournal boundaries', () => {
     const { root, journal, bot } = setup();
 
     expect(() => journal.append({
-      chatId: 'chat_missing',
-      botId: bot.botId,
+      conversationId: 'chat_missing',
       kind: 'user',
       body: 'nope',
       idempotencyKey: 'missing-chat',
-    })).toThrow(/Direct chat not found/);
+    })).toThrow(/Conversation not found/);
 
     expect(() => journal.append({
-      chatId: bot.directChatId,
-      botId: 'bot_other',
-      kind: 'user',
+      conversationId: bot.directChatId,
+      authorBotId: 'bot_other',
+      kind: 'bot',
       body: 'nope',
       idempotencyKey: 'foreign-bot',
     })).toThrow(/not owned by bot/);
 
-    const foreign = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      authorBotId: bot.botId,
+      kind: 'user',
+      body: 'nope',
+      idempotencyKey: 'authored-user',
+    })).toThrow(/User entries have no Bot author/);
+
+    const foreign = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
     expect(() => foreign.list(bot.directChatId)).toThrow(/belongs to another workspace/);
   });
 });

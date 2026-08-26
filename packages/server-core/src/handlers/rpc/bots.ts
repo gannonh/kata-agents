@@ -5,8 +5,8 @@ import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
 import {
   BotDirectory,
-  ConversationJournal,
   convertSessionToBot,
+  createDirectChatJournal,
   toBotPublicDto,
 } from '@kata-sh/shared/bots'
 import type { BotPermissionMode, BotProviderConfig, JournalEntry } from '@kata-sh/core'
@@ -40,7 +40,7 @@ function openStores(workspaceId: string) {
     workspaceId: workspace.id,
   })
   directory.recover()
-  const journal = new ConversationJournal({
+  const journal = createDirectChatJournal({
     workspaceRoot: workspace.rootPath,
     workspaceId: workspace.id,
   })
@@ -185,8 +185,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
 
       const idempotencyKey = options?.idempotencyKey ?? `send.${randomUUID()}`
       const userEntry = journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: 'user',
         body: message,
         idempotencyKey,
@@ -245,8 +244,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
             const body = lastAssistant.content ?? lastAssistant.text ?? ''
             if (body) {
               botEntry = journal.append({
-                chatId: bot.directChatId,
-                botId: bot.botId,
+                conversationId: bot.directChatId,
                 kind: 'bot',
                 body,
                 idempotencyKey: `reply.${userEntry.entryId}`,
