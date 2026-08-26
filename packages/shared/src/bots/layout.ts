@@ -27,7 +27,7 @@ export const journalEntriesPath = (root: string, chatId: string): string => join
 export const journalIndexPath = (root: string, chatId: string): string => join(root, 'journals', chatId, 'index.json');
 export const journalCursorPath = (root: string, chatId: string): string => join(root, 'journals', chatId, 'cursor.json');
 export const journalEntryPath = (root: string, chatId: string, seq: number, entryId: string): string =>
-  join(journalEntriesPath(root, chatId), `${String(seq).padStart(10, '0')}-${entryId}.json`);
+  join(journalEntriesPath(root, chatId), `${String(seq).padStart(12, '0')}-${entryId}.json`);
 
 export function readJsonFile(path: string, _label: string): unknown | null {
   try {
