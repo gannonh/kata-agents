@@ -288,6 +288,72 @@ export interface ElectronAPI {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+
+  // Bots
+  listBots(workspaceId: string, filter?: { lifecycle?: 'active' | 'hidden' | 'archived' | 'all' }): Promise<import('@kata-sh/core').BotPublicDto[]>
+  getBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  createBot(
+    workspaceId: string,
+    input: {
+      name: string
+      permissionMode: import('@kata-sh/core').BotPermissionMode
+      providerConfig: import('@kata-sh/core').BotProviderConfig
+      profile?: string
+      idempotencyKey?: string
+    },
+  ): Promise<import('@kata-sh/core').BotPublicDto>
+  renameBot(workspaceId: string, botId: string, name: string): Promise<import('@kata-sh/core').BotPublicDto>
+  updateBot(
+    workspaceId: string,
+    botId: string,
+    patch: {
+      name?: string
+      profile?: string
+      permissionMode?: import('@kata-sh/core').BotPermissionMode
+      providerConfig?: import('@kata-sh/core').BotProviderConfig
+    },
+  ): Promise<import('@kata-sh/core').BotPublicDto>
+  hideBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  archiveBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  reopenBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  getBotJournal(
+    workspaceId: string,
+    botId: string,
+    opts?: { afterSeq?: number; limit?: number },
+  ): Promise<{
+    bot: import('@kata-sh/core').BotPublicDto
+    entries: import('@kata-sh/core').JournalEntry[]
+    cursor: import('@kata-sh/core').JournalCursor
+  }>
+  sendBotMessage(
+    workspaceId: string,
+    botId: string,
+    message: string,
+    options?: { idempotencyKey?: string; waitForReply?: boolean },
+  ): Promise<{
+    accepted: true
+    userEntry: import('@kata-sh/core').JournalEntry
+    botEntry: import('@kata-sh/core').JournalEntry | null
+    bot: import('@kata-sh/core').BotPublicDto
+  }>
+  convertSessionToBot(
+    workspaceId: string,
+    input: {
+      sessionId: string
+      idempotencyKey?: string
+      name: string
+      permissionMode: import('@kata-sh/core').BotPermissionMode
+      providerConfig: import('@kata-sh/core').BotProviderConfig
+      profile?: string
+    },
+  ): Promise<{
+    bot: import('@kata-sh/core').BotPublicDto
+    chatId: string
+    entries: import('@kata-sh/core').JournalEntry[]
+    disposition: import('@kata-sh/core').SessionDispositionRecord
+  }>
+  onBotEvent(callback: (event: { type: string; botId?: string; chatId?: string; bot?: unknown }) => void): () => void
+
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
 
