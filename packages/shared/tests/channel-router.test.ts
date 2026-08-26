@@ -61,6 +61,7 @@ describe('ChannelRouter', () => {
     expect(result.route.mode).toBe('autonomous');
     expect(result.route.membershipRevision).toBe(3);
     expect(result.route.routeSeq).toBe(result.userEntry.seq);
+    expect(Date.parse(result.route.offerDeadline) - Date.parse(result.route.createdAt)).toBe(100);
     expect(result.route.claims.map((claim) => claim.outcome)).toEqual(['claimed', 'claimed']);
     expect(result.route.stages).toHaveLength(1);
     expect(result.route.stages[0]?.ownerBotId).toBe('bot-a');
@@ -146,6 +147,24 @@ describe('ChannelRouter', () => {
     expect(second.route.routeId).toBe(first.route.routeId);
     expect(fixture.journal.list(fixture.channel.channelId).filter((entry) => entry.kind === 'user')).toHaveLength(1);
     expect(fixture.dispatchCount).toBe(1);
+  });
+
+  it('serializes concurrent retries for one route', async () => {
+    const fixture = makeFixture({
+      dispatch: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return 'one reply';
+      },
+    });
+    const input = { channelId: fixture.channel.channelId, message: 'concurrent retry', idempotencyKey: 'send-concurrent' };
+    const [first, second] = await Promise.all([
+      fixture.router.send(input),
+      fixture.router.send(input),
+    ]);
+
+    expect(first.route.routeId).toBe(second.route.routeId);
+    expect(fixture.dispatchCount).toBe(1);
+    expect(fixture.journal.list(fixture.channel.channelId).filter((entry) => entry.kind === 'bot')).toHaveLength(1);
   });
 
   it('cancels a committed stage when membership changes before dispatch', async () => {

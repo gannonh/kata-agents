@@ -1,4 +1,5 @@
 import {
+  CHANNEL_SCHEMA_VERSION,
   CHANNEL_LIMITS,
   type ChannelMember,
   type JournalEntry,
@@ -65,6 +66,8 @@ interface ClaimResult {
   readonly member: MemberSnapshot;
 }
 
+const routeQueues = new Map<string, Promise<void>>();
+
 const CLAIM_SCHEMA = {
   type: 'object',
   properties: {
@@ -87,8 +90,8 @@ function memberSort(left: MemberSnapshot, right: MemberSnapshot): number {
   return left.member.priority - right.member.priority || left.member.botId.localeCompare(right.member.botId);
 }
 
-function deadlineIso(clock: () => string, windowMs: number): string {
-  const now = Date.parse(clock());
+function deadlineIso(start: string, windowMs: number): string {
+  const now = Date.parse(start);
   if (!Number.isFinite(now)) throw new Error('Channel clock must return an ISO timestamp');
   return new Date(now + windowMs).toISOString();
 }
@@ -97,6 +100,21 @@ function safeDate(clock: () => string): string {
   const value = clock();
   if (!Number.isFinite(Date.parse(value))) throw new Error('Channel clock must return an ISO timestamp');
   return value;
+}
+
+async function withRouteQueue<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const prior = routeQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve });
+  const queued = prior.then(() => current);
+  routeQueues.set(key, queued);
+  await prior;
+  try {
+    return await task();
+  } finally {
+    release();
+    if (routeQueues.get(key) === queued) routeQueues.delete(key);
+  }
 }
 
 function blockedMessage(reason: 'no-claim' | 'no-eligible-members'): string {
@@ -144,43 +162,46 @@ export class ChannelRouter {
       idempotencyKey: input.idempotencyKey,
     });
     const routeId = deriveRouteId(channel.channelId, userEntry.entryId);
-    const existing = this.routes.get(channel.channelId, routeId);
-    if (existing) return this.finish(existing, userEntry);
+    return withRouteQueue(`${this.routes.rootPath}/${channel.channelId}/${routeId}`, async () => {
+      const existing = this.routes.get(channel.channelId, routeId);
+      if (existing) return this.finish(existing, userEntry);
 
-    const eligible = snapshot.filter(({ bot }) => bot?.lifecycle === 'active').sort(memberSort);
-    const mode = mentions.botIds.length > 0 || mentions.everyone ? 'explicit' : 'autonomous';
-    const claims = mode === 'explicit'
-      ? this.explicitClaims(snapshot, mentions)
-      : await this.autonomousClaims(channel.channelId, channel.name, routeId, input.message, eligible);
+      const eligible = snapshot.filter(({ bot }) => bot?.lifecycle === 'active').sort(memberSort);
+      const mode = mentions.botIds.length > 0 || mentions.everyone ? 'explicit' : 'autonomous';
+      const now = safeDate(this.clock);
+      const offerDeadline = mode === 'autonomous' ? deadlineIso(now, this.claimWindowMs) : now;
+      const claims = mode === 'explicit'
+        ? this.explicitClaims(snapshot, mentions)
+        : await this.autonomousClaims(channel.channelId, channel.name, routeId, input.message, eligible);
 
-    const targets = mode === 'explicit'
-      ? eligible.filter(({ member }) => mentions.everyone || mentions.botIds.includes(member.botId))
-      : this.autonomousWinners(claims, eligible);
-    const blockedReason = targets.length === 0
-      ? (mode === 'autonomous' && eligible.length === 0 ? 'no-eligible-members' : 'no-claim')
-      : undefined;
-    const now = safeDate(this.clock);
-    const route: RouteRecord = {
-      schemaVersion: 1,
-      routeId,
-      channelId: channel.channelId,
-      workspaceId: channel.workspaceId,
-      routeSeq: userEntry.seq,
-      messageEntryId: userEntry.entryId,
-      mode,
-      membershipRevision: channel.membershipRevision,
-      eligibleBotIds: eligible.map(({ member }) => member.botId),
-      offerDeadline: mode === 'autonomous' ? deadlineIso(this.clock, this.claimWindowMs) : now,
-      claims,
-      stages: targets
-        .sort(memberSort)
-        .map(({ member }, index) => this.newStage(routeId, member.botId, userEntry.seq, index, now)),
-      ...(blockedReason ? { blockedReason } : {}),
-      createdAt: now,
-      updatedAt: now,
-    };
-    const committed = this.routes.commit(route);
-    return this.finish(committed, userEntry);
+      const targets = mode === 'explicit'
+        ? eligible.filter(({ member }) => mentions.everyone || mentions.botIds.includes(member.botId))
+        : this.autonomousWinners(claims, eligible);
+      const blockedReason = targets.length === 0
+        ? (mode === 'autonomous' && eligible.length === 0 ? 'no-eligible-members' : 'no-claim')
+        : undefined;
+      const route: RouteRecord = {
+        schemaVersion: CHANNEL_SCHEMA_VERSION,
+        routeId,
+        channelId: channel.channelId,
+        workspaceId: channel.workspaceId,
+        routeSeq: userEntry.seq,
+        messageEntryId: userEntry.entryId,
+        mode,
+        membershipRevision: channel.membershipRevision,
+        eligibleBotIds: eligible.map(({ member }) => member.botId),
+        offerDeadline,
+        claims,
+        stages: targets
+          .sort(memberSort)
+          .map(({ member }, index) => this.newStage(routeId, member.botId, userEntry.seq, index, now)),
+        ...(blockedReason ? { blockedReason } : {}),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const committed = this.routes.commit(route);
+      return this.finish(committed, userEntry);
+    });
   }
 
   async recover(channelId: string): Promise<RouteRecord[]> {
@@ -189,8 +210,12 @@ export class ChannelRouter {
       if (!route.stages.some((stage) => stage.state === 'committed' || stage.state === 'dispatched')) continue;
       const userEntry = this.journal.getEntry(channelId, route.messageEntryId);
       if (!userEntry) continue;
-      const result = await this.finish(route, userEntry);
-      recovered.push(result.route);
+      const result = await withRouteQueue(`${this.routes.rootPath}/${channelId}/${route.routeId}`, async () => {
+        const current = this.routes.get(channelId, route.routeId);
+        if (!current || !current.stages.some((stage) => stage.state === 'committed' || stage.state === 'dispatched')) return null;
+        return this.finish(current, userEntry);
+      });
+      if (result) recovered.push(result.route);
     }
     return recovered;
   }
