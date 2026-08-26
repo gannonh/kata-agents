@@ -93,6 +93,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
   const [
     auth,
     automations,
+    bots,
     files,
     git,
     labels,
@@ -111,6 +112,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
   ] = await Promise.all([
     import('@kata-sh/server-core/handlers/rpc/auth'),
     import('@kata-sh/server-core/handlers/rpc/automations'),
+    import('@kata-sh/server-core/handlers/rpc/bots'),
     import('@kata-sh/server-core/handlers/rpc/files'),
     import('@kata-sh/server-core/handlers/rpc/git'),
     import('@kata-sh/server-core/handlers/rpc/labels'),
@@ -131,6 +133,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
   return new Set([
     ...auth.HANDLED_CHANNELS,
     ...automations.HANDLED_CHANNELS,
+    ...bots.HANDLED_CHANNELS,
     ...files.HANDLED_CHANNELS,
     ...git.GIT_HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
