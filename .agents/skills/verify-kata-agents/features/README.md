@@ -27,4 +27,5 @@ This directory is the maintained user-facing verification map for the Kata Agent
 - [Appearance settings](./appearance-settings.md) covers the user-facing settings menu, mode changes, and persistence after reload.
 - [Embedded browser panel](./browser-panel.md) covers creating, showing, detaching, reattaching, hiding, and enabling Annotate on a fixture page.
 - [Agent session](./agent-session.md) covers a real provider-backed session, model selection, a deterministic prompt, and the assistant reply.
+- [Channel routing](./channels.md) covers durable Channel creation, Bot membership, autonomous and explicit routing, fan-out, restart, and persisted route evidence.
 - [Git workspaces](./git-workspaces.md) covers current checkout versus managed worktree selection, branch identity, configured roots, and cleanup.

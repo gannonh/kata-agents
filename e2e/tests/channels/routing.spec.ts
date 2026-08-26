@@ -114,7 +114,7 @@ test.describe(`Channel routing ${E2E_TAGS.channels}`, () => {
     appWindow,
     electronApp,
     runContext,
-  }) => {
+    }, testInfo) => {
     const prerequisite = readAgentProviderPrerequisite();
     if (!prerequisite.ok) {
       throw new Error(
@@ -125,7 +125,8 @@ test.describe(`Channel routing ${E2E_TAGS.channels}`, () => {
     let page = appWindow;
     let app = electronApp;
 
-    await runWithAgentProviderFallback(page, "Channel routing", async (candidate) => {
+    try {
+      await runWithAgentProviderFallback(page, "Channel routing", async (candidate) => {
       const stamp = `${candidate.provider} ${Date.now()}`;
       const researchName = `Research Bot ${stamp}`;
       const releaseName = `Release Bot ${stamp}`;
@@ -140,6 +141,7 @@ test.describe(`Channel routing ${E2E_TAGS.channels}`, () => {
       await createChannel(page, channelName);
       await addMember(page, researchName, researchId);
       await addMember(page, releaseName, releaseId);
+      await page.screenshot({ path: testInfo.outputPath("channels-created.png"), fullPage: true });
 
       const autonomous = await sendAndAwaitRoute(
         page,
@@ -176,6 +178,7 @@ test.describe(`Channel routing ${E2E_TAGS.channels}`, () => {
         .locator("[data-testid^='channel-journal-entry-']")
         .allTextContents();
       const routeEvidenceBefore = await routeRows(page).allTextContents();
+      await page.screenshot({ path: testInfo.outputPath("channels-routing.png"), fullPage: true });
 
       const restarted = await restartElectron(app, runContext);
       app = restarted.app;
@@ -196,6 +199,10 @@ test.describe(`Channel routing ${E2E_TAGS.channels}`, () => {
         await page.locator("[data-testid^='channel-journal-entry-']").allTextContents(),
       ).toEqual(beforeRestart);
       expect(await routeRows(page).allTextContents()).toEqual(routeEvidenceBefore);
-    });
+      await page.screenshot({ path: testInfo.outputPath("channels-restored.png"), fullPage: true });
+      });
+    } finally {
+      if (app !== electronApp) await app.close();
+    }
   });
 });

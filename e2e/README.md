@@ -26,6 +26,7 @@ bun run e2e --list                              # list desktop-dev tests
 bun run e2e                                     # all tests, desktop-dev project
 bun run e2e --grep @smoke                       # one tier
 bun run e2e --grep @browser                     # integrated browser panel
+bun run e2e --grep @channels                    # real Channel routing and restart
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
@@ -75,6 +76,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@smoke`    | `appWindow`                            | Launch → `#root` mounts → onboarding wizard visible → assert 0 fatal errors. Fully offline.                                                                                                            |
 | `@settings` | `authenticatedAppWindow`               | Settings UI: deferred-setup → ready shell → change appearance Mode → reload → assert persisted. Cookie import lives here.                                                                              |
 | `@browser`  | `authenticatedAppWindow` or in-test    | Integrated browser panel: open/detach/attach, Annotate a guest page, send notes to a session. The annotation send path uses a real provider the same way `@agent` does.                                |
+| `@channels` | (in-test)                              | Real provider Channel flow: create two profiled Bots, route autonomous and mentioned messages, fan out, restart, and compare durable evidence.                                                                  |
 | `@agent`    | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
 | `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
