@@ -88,6 +88,14 @@ export function getWorkspaceSpawnTasksPath(rootPath: string): string {
 }
 
 /**
+ * Get path to the BotDirectory / ConversationJournal persistence namespace.
+ * @param rootPath - Absolute path to workspace root folder
+ */
+export function getWorkspaceBotsPath(rootPath: string): string {
+  return join(rootPath, 'bots');
+}
+
+/**
  * Get path to workspace skills directory
  * @param rootPath - Absolute path to workspace root folder
  */

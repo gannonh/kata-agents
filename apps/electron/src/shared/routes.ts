@@ -151,6 +151,10 @@ export const routes = {
         ? `sources/local/source/${sourceSlug}` as const
         : 'sources/local' as const,
 
+    /** Bots view (bots navigator). Pass a bot ID for that Bot's direct chat. */
+    bots: (botId?: string) =>
+      botId ? `bots/bot/${botId}` as const : 'bots' as const,
+
     /** Skills view (skills navigator). Pass a slug string for a local skill detail view. */
     skills: (skillSlug?: string) => {
       if (!skillSlug) return 'skills' as const

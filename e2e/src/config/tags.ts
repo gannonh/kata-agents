@@ -4,6 +4,7 @@ export const E2E_TAGS = {
   settings: "@settings",
   browser: "@browser",
   agent: "@agent",
+  bots: "@bots",
   oauth: "@oauth",
   /** Serial Git/GitHub V1 flows, including the authenticated UAT repository path. */
   git: "@git",

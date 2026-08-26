@@ -288,6 +288,72 @@ export interface ElectronAPI {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+
+  // Bots
+  listBots(workspaceId: string, filter?: { lifecycle?: 'active' | 'hidden' | 'archived' | 'all' }): Promise<import('@kata-sh/core').BotPublicDto[]>
+  getBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  createBot(
+    workspaceId: string,
+    input: {
+      name: string
+      permissionMode: import('@kata-sh/core').BotPermissionMode
+      providerConfig: import('@kata-sh/core').BotProviderConfig
+      profile?: string
+      idempotencyKey?: string
+    },
+  ): Promise<import('@kata-sh/core').BotPublicDto>
+  renameBot(workspaceId: string, botId: string, name: string): Promise<import('@kata-sh/core').BotPublicDto>
+  updateBot(
+    workspaceId: string,
+    botId: string,
+    patch: {
+      name?: string
+      profile?: string
+      permissionMode?: import('@kata-sh/core').BotPermissionMode
+      providerConfig?: import('@kata-sh/core').BotProviderConfig
+    },
+  ): Promise<import('@kata-sh/core').BotPublicDto>
+  hideBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  archiveBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  reopenBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  getBotJournal(
+    workspaceId: string,
+    botId: string,
+    opts?: { afterSeq?: number; limit?: number },
+  ): Promise<{
+    bot: import('@kata-sh/core').BotPublicDto
+    entries: import('@kata-sh/core').JournalEntry[]
+    cursor: import('@kata-sh/core').JournalCursor
+  }>
+  sendBotMessage(
+    workspaceId: string,
+    botId: string,
+    message: string,
+    options?: { idempotencyKey?: string; waitForReply?: boolean },
+  ): Promise<{
+    accepted: true
+    userEntry: import('@kata-sh/core').JournalEntry
+    botEntry: import('@kata-sh/core').JournalEntry | null
+    bot: import('@kata-sh/core').BotPublicDto
+  }>
+  convertSessionToBot(
+    workspaceId: string,
+    input: {
+      sessionId: string
+      idempotencyKey?: string
+      name: string
+      permissionMode: import('@kata-sh/core').BotPermissionMode
+      providerConfig: import('@kata-sh/core').BotProviderConfig
+      profile?: string
+    },
+  ): Promise<{
+    bot: import('@kata-sh/core').BotPublicDto
+    chatId: string
+    entries: import('@kata-sh/core').JournalEntry[]
+    disposition: import('@kata-sh/core').SessionDispositionRecord
+  }>
+  onBotEvent(callback: (event: { type: string; botId?: string; chatId?: string; bot?: unknown }) => void): () => void
+
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
 
@@ -995,6 +1061,15 @@ export interface SkillsNavigationState {
 }
 
 /**
+ * Bots navigation state
+ */
+export interface BotsNavigationState {
+  navigator: 'bots'
+  details: { type: 'bot'; botId: string } | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Automations navigation state
  */
 export interface AutomationsNavigationState {
@@ -1021,6 +1096,7 @@ export type NavigationState =
   | SourcesNavigationState
   | SettingsNavigationState
   | SkillsNavigationState
+  | BotsNavigationState
   | AutomationsNavigationState
   | BrowserNavigationState
 
@@ -1039,6 +1115,10 @@ export const isSettingsNavigation = (
 export const isSkillsNavigation = (
   state: NavigationState
 ): state is SkillsNavigationState => state.navigator === 'skills'
+
+export const isBotsNavigation = (
+  state: NavigationState
+): state is BotsNavigationState => state.navigator === 'bots'
 
 export const isAutomationsNavigation = (
   state: NavigationState
@@ -1069,6 +1149,12 @@ export const getNavigationStateKey = (state: NavigationState): string => {
       return `skills/skill/${state.details.skillSlug}`
     }
     return 'skills'
+  }
+  if (state.navigator === 'bots') {
+    if (state.details?.type === 'bot') {
+      return `bots/bot/${state.details.botId}`
+    }
+    return 'bots'
   }
   if (state.navigator === 'automations') {
     if (state.details?.type === 'automation') {
@@ -1112,6 +1198,16 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
       return { navigator: 'skills', details: { type: 'skill', skillSlug } }
     }
     return { navigator: 'skills', details: null }
+  }
+
+  // Handle bots
+  if (key === 'bots') return { navigator: 'bots', details: null }
+  if (key.startsWith('bots/bot/')) {
+    const botId = key.slice(9)
+    if (botId) {
+      return { navigator: 'bots', details: { type: 'bot', botId } }
+    }
+    return { navigator: 'bots', details: null }
   }
 
   // Handle automations

@@ -57,6 +57,20 @@ export const RPC_CHANNELS = {
   tasks: {
     GET_OUTPUT: 'tasks:getOutput',
   },
+  bots: {
+    LIST: 'bots:list',
+    GET: 'bots:get',
+    CREATE: 'bots:create',
+    RENAME: 'bots:rename',
+    UPDATE: 'bots:update',
+    HIDE: 'bots:hide',
+    ARCHIVE: 'bots:archive',
+    REOPEN: 'bots:reopen',
+    GET_JOURNAL: 'bots:getJournal',
+    SEND_MESSAGE: 'bots:sendMessage',
+    CONVERT_SESSION: 'bots:convertSession',
+    EVENT: 'bots:event',
+  },
   workspaces: {
     GET: 'workspaces:get',
     CREATE: 'workspaces:create',

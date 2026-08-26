@@ -113,12 +113,14 @@ import {
   isSourcesNavigation,
   isSettingsNavigation,
   isSkillsNavigation,
+  isBotsNavigation,
   isAutomationsNavigation,
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
+import { BotsListPanel } from "../bots/BotsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { SidebarUpdatePill } from "./SidebarUpdatePill"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -1068,6 +1070,11 @@ function AppShellContent({
     navigate(routes.view.skills(skill.slug))
   }, [activeWorkspaceId, navigate])
 
+  // Handle selecting a Bot from the list — opens its one DirectChat
+  const handleBotSelect = React.useCallback((bot: import('@kata-sh/core').BotPublicDto) => {
+    navigate(routes.view.bots(bot.botId))
+  }, [navigate])
+
   // Handle selecting an automation from the list
   const handleAutomationSelect = React.useCallback((automationId: string) => {
     // Preserve current automation filter when selecting an automation
@@ -1715,6 +1722,11 @@ function AppShellContent({
     navigate(routes.view.skills())
   }, [])
 
+  // Handler for bots view
+  const handleBotsClick = useCallback(() => {
+    navigate(routes.view.bots())
+  }, [])
+
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
     navigate(routes.view.automations())
@@ -1976,12 +1988,13 @@ function AppShellContent({
     // 3. Sources, Skills, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+    result.push({ id: 'nav:bots', type: 'nav', action: handleBotsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleBotsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2098,6 +2111,11 @@ function AppShellContent({
     // Skills navigator
     if (isSkillsNavigation(navState)) {
       return t("sidebar.allSkills")
+    }
+
+    // Bots navigator
+    if (isBotsNavigation(navState)) {
+      return t("sidebar.bots")
     }
 
     // Automations navigator
@@ -2439,6 +2457,14 @@ function AppShellContent({
                         type: 'skills',
                         onAddSkill: openAddSkill,
                       },
+                    },
+                    {
+                      id: "nav:bots",
+                      title: t("sidebar.bots"),
+                      icon: Bot,
+                      variant: isBotsNavigation(navState) ? "default" : "ghost",
+                      onClick: handleBotsClick,
+                      dataTestId: "bots-nav",
                     },
                     {
                       id: "nav:automations",
@@ -3191,6 +3217,13 @@ function AppShellContent({
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
+              />
+            )}
+            {isBotsNavigation(navState) && activeWorkspaceId && (
+              <BotsListPanel
+                workspaceId={activeWorkspaceId}
+                onBotClick={handleBotSelect}
+                selectedBotId={isBotsNavigation(navState) && navState.details?.type === 'bot' ? navState.details.botId : null}
               />
             )}
             {isAutomationsNavigation(navState) && (

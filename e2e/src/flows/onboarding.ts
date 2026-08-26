@@ -54,6 +54,23 @@ export async function completeDeferredSetup(page: Page): Promise<void> {
   await handleWorkspacePickerIfPresent(page);
 }
 
+/**
+ * After a full Electron relaunch, the shell may land on onboarding (never
+ * configured), the workspace picker, or the ready shell (setup already
+ * persisted). Drive whichever appears so tests can continue.
+ */
+export async function resumeAfterAppRestart(page: Page): Promise<void> {
+  const shell = await waitForOnboardingOrReady(page);
+  if (shell === "onboarding") {
+    await page.locator('[data-testid="onboarding-setup-later"]').click();
+    await handleWorkspacePickerIfPresent(page);
+    return;
+  }
+  if (shell === "workspace-picker") {
+    await handleWorkspacePickerIfPresent(page);
+  }
+}
+
 async function setAgentWorkingDirectory(page: Page): Promise<void> {
   await page.evaluate(async (workingDirectory) => {
     const api = (
