@@ -244,7 +244,12 @@ export class ConversationJournal {
       return undefined;
     }
     const authorBotId = input.authorBotId ?? conversation.soleAuthorBotId;
-    if (authorBotId === undefined) throw new Error(`A ${input.kind} entry requires an author Bot`);
+    if (authorBotId === undefined) {
+      if (input.kind === 'bot' || input.kind === 'tool') {
+        throw new Error(`A ${input.kind} entry requires an author Bot`);
+      }
+      return undefined;
+    }
     assertConversationId(authorBotId, 'authorBotId');
     if (conversation.soleAuthorBotId !== undefined && conversation.soleAuthorBotId !== authorBotId) {
       throw new Error(`Conversation ${conversation.conversationId} is not owned by bot ${authorBotId}`);
