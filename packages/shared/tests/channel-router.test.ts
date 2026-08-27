@@ -5,7 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import type { RouteRecord } from '@kata-sh/core';
 import { ChannelDirectory } from '../src/channels/directory.ts';
 import { createChannelJournal } from '../src/channels/conversation.ts';
-import { ChannelRouter, ChannelMentionError } from '../src/channels/router.ts';
+import { ChannelRouter, ChannelMentionError, type DispatchRequest } from '../src/channels/router.ts';
 import { RouteStore } from '../src/channels/routes.ts';
 import { dispatchIdempotencyKey, stageId } from '../src/channels/ids.ts';
 
@@ -13,7 +13,7 @@ function makeFixture(options?: {
   claimWindowMs?: number;
   bots?: Record<string, { name: string; lifecycle: 'active' | 'hidden' | 'archived'; profile?: string }>;
   evaluate?: (botId: string) => Promise<string | null>;
-  dispatch?: (ownerBotId: string, request: { dispatchIdempotencyKey: string; isFirstDispatch: boolean }) => Promise<string>;
+  dispatch?: (ownerBotId: string, request: DispatchRequest) => Promise<string>;
   onRouteCommitted?: (route: RouteRecord) => void;
 }) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-channel-router-'));
@@ -294,17 +294,48 @@ describe('ChannelRouter', () => {
   });
 
   it('carries first-dispatch context only once per Bot and never copies the Channel transcript', async () => {
-    const requests: Array<{ isFirstDispatch: boolean; message: string }> = [];
+    const requests: DispatchRequest[] = [];
     const fixture = makeFixture({
       dispatch: async (_owner, request) => {
-        requests.push({ isFirstDispatch: request.isFirstDispatch, message: 'message' });
+        requests.push(request);
         return 'ok';
       },
     });
     await fixture.router.send({ channelId: fixture.channel.channelId, message: 'first', idempotencyKey: 'send-12' });
     await fixture.router.send({ channelId: fixture.channel.channelId, message: 'second', idempotencyKey: 'send-13' });
+
+    expect(requests).toHaveLength(2);
     expect(requests.map((request) => request.isFirstDispatch)).toEqual([true, false]);
-    expect(requests.map((request) => request.message)).toEqual(['message', 'message']);
+
+    const dispatchKeys = [
+      'channelId',
+      'channelName',
+      'routeId',
+      'stageId',
+      'ownerBotId',
+      'ownerEpoch',
+      'dispatchIdempotencyKey',
+      'message',
+      'memberNames',
+      'isFirstDispatch',
+    ] as const;
+    for (const [index, message] of (['first', 'second'] as const).entries()) {
+      const request = requests[index];
+      expect(request).toMatchObject({
+        channelId: fixture.channel.channelId,
+        channelName: 'Engineering',
+        ownerBotId: 'bot-a',
+        message,
+        memberNames: ['Alpha Bot', 'Beta Bot'],
+        isFirstDispatch: index === 0,
+      });
+      expect(Object.keys(request!).sort()).toEqual([...dispatchKeys].sort());
+      expect(request).not.toHaveProperty('transcript');
+      expect(request).not.toHaveProperty('journal');
+      expect(request).not.toHaveProperty('entries');
+      expect(request).not.toHaveProperty('history');
+      expect(request!.message).not.toContain(index === 0 ? 'second' : 'first');
+    }
   });
 
   it('exposes deterministic stage IDs', () => {
