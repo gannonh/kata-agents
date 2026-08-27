@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
 import { ensureDurableDirectory, syncDirectory, writeDurableFile, writeDurableFileIfAbsent } from '@kata-sh/shared/spawn-tasks/durable-fs'
@@ -53,13 +54,73 @@ function messageText(message: { content?: string; text?: string }): string {
   return message.content ?? message.text ?? ''
 }
 
+function dispatchResultPath(sessionPointerPath: string, dispatchIdempotencyKey: string): string {
+  const digest = createHash('sha256').update(dispatchIdempotencyKey, 'utf8').digest('hex')
+  return join(dirname(sessionPointerPath), 'provider-dispatches', `${digest}.json`)
+}
+
+function readDispatchResult(
+  sessionPointerPath: string,
+  dispatchIdempotencyKey: string,
+): { sessionId: string; reply: string } | null {
+  const path = dispatchResultPath(sessionPointerPath, dispatchIdempotencyKey)
+  if (!existsSync(path)) return null
+  try {
+    const record = JSON.parse(readFileSync(path, 'utf8')) as {
+      dispatchIdempotencyKey?: unknown
+      sessionId?: unknown
+      reply?: unknown
+    }
+    if (record.dispatchIdempotencyKey !== dispatchIdempotencyKey) return null
+    if (typeof record.sessionId !== 'string' || !record.sessionId) return null
+    if (typeof record.reply !== 'string') return null
+    return { sessionId: record.sessionId, reply: record.reply }
+  } catch {
+    return null
+  }
+}
+
+function writeDispatchResult(
+  sessionPointerPath: string,
+  dispatchIdempotencyKey: string,
+  result: { sessionId: string; reply: string },
+): void {
+  const path = dispatchResultPath(sessionPointerPath, dispatchIdempotencyKey)
+  const directory = dirname(path)
+  ensureDurableDirectory(directory)
+  const payload = `${JSON.stringify({
+    schemaVersion: 1,
+    dispatchIdempotencyKey,
+    sessionId: result.sessionId,
+    reply: result.reply,
+  }, null, 2)}\n`
+  if (writeDurableFileIfAbsent(path, payload)) {
+    syncDirectory(directory)
+    return
+  }
+  const existing = readDispatchResult(sessionPointerPath, dispatchIdempotencyKey)
+  if (!existing || existing.sessionId !== result.sessionId || existing.reply !== result.reply) {
+    writeDurableFile(path, payload)
+    syncDirectory(directory)
+  }
+}
+
 export async function sendToBotSession(
   sessionManager: HandlerDeps['sessionManager'],
   target: BotSessionTarget,
   message: string,
-  options: { callerClientId?: string; waitForReply: boolean },
+  options: {
+    callerClientId?: string
+    waitForReply: boolean
+    dispatchIdempotencyKey?: string
+  },
 ): Promise<{ sessionId: string; reply: string | null }> {
   return withSessionQueue(target.sessionPointerPath, async () => {
+    if (options.dispatchIdempotencyKey) {
+      const cached = readDispatchResult(target.sessionPointerPath, options.dispatchIdempotencyKey)
+      if (cached) return { sessionId: cached.sessionId, reply: cached.reply }
+    }
+
     let sessionId = readSessionId(target.sessionPointerPath)
     if (sessionId && !(await sessionManager.getSession(sessionId))) sessionId = null
     if (!sessionId) {
@@ -117,7 +178,12 @@ export async function sendToBotSession(
       const processing = Boolean((session as { isProcessing?: boolean } | null)?.isProcessing)
       if (!processing && assistantMessages.length > beforeAssistantCount) {
         const reply = messageText(assistantMessages[assistantMessages.length - 1]!)
-        if (reply) return { sessionId, reply }
+        if (reply) {
+          if (options.dispatchIdempotencyKey) {
+            writeDispatchResult(target.sessionPointerPath, options.dispatchIdempotencyKey, { sessionId, reply })
+          }
+          return { sessionId, reply }
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 250))
     }

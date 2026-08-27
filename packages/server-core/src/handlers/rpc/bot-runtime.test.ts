@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
@@ -66,5 +66,32 @@ describe('sendToBotSession', () => {
     expect(fixture.created).toBe(1)
     expect(fixture.calls).toEqual(['session-1', 'session-1'])
     expect(readFileSync(sessionPointerPath, 'utf8')).toBe('session-1\n')
+  })
+
+  it('reuses a durable dispatch result instead of sending a second provider turn', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-dispatch-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    const completeTarget = { ...target, sessionPointerPath }
+    const key = 'dispatch.route_abc.s0'
+
+    const first = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      completeTarget,
+      'hello',
+      { waitForReply: true, dispatchIdempotencyKey: key },
+    )
+    const second = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      completeTarget,
+      'hello again',
+      { waitForReply: true, dispatchIdempotencyKey: key },
+    )
+
+    expect(first.reply).toBe('reply: hello')
+    expect(second.reply).toBe('reply: hello')
+    expect(second.sessionId).toBe(first.sessionId)
+    expect(fixture.calls).toEqual(['session-1'])
+    expect(readdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches'))).toHaveLength(1)
   })
 })
