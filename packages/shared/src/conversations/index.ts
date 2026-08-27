@@ -8,6 +8,7 @@ export {
   journalEntriesPath,
   journalEntryPath,
   journalIndexPath,
+  migrateLegacyJournalEntry,
   mintJournalEntryId,
 } from './journal.ts';
 export type {

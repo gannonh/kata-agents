@@ -110,9 +110,37 @@ export function assertJournalIdempotencyKey(value: unknown, field = 'idempotency
   return value;
 }
 
-export function assertJournalEntry(value: unknown): JournalEntry {
+/**
+ * Legacy Bot DirectChat journals used `chatId` / `botId`. Rewrite those fields
+ * into the conversation-generic shape before schema validation.
+ */
+export function migrateLegacyJournalEntry(value: unknown): { record: Record<string, unknown>; migrated: boolean } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('entry must be an object');
   const entry = value as Record<string, unknown>;
+  const hasLegacyChatId = Object.hasOwn(entry, 'chatId');
+  const hasLegacyBotId = Object.hasOwn(entry, 'botId');
+  if (!hasLegacyChatId && !hasLegacyBotId) return { record: entry, migrated: false };
+
+  const next: Record<string, unknown> = { ...entry };
+  if (hasLegacyChatId) {
+    if (typeof next.chatId !== 'string') fail('chatId must be a string');
+    if (next.conversationId === undefined) next.conversationId = next.chatId;
+    else if (next.conversationId !== next.chatId) fail('chatId does not match conversationId');
+    delete next.chatId;
+  }
+  if (hasLegacyBotId) {
+    const legacyBotId = next.botId;
+    delete next.botId;
+    if (next.kind !== 'user' && next.authorBotId === undefined) {
+      if (typeof legacyBotId !== 'string') fail('botId must be a string');
+      next.authorBotId = legacyBotId;
+    }
+  }
+  return { record: next, migrated: true };
+}
+
+export function assertJournalEntry(value: unknown): JournalEntry {
+  const { record: entry } = migrateLegacyJournalEntry(value);
   const allowed = [
     'schemaVersion',
     'entryId',
@@ -143,7 +171,7 @@ export function assertJournalEntry(value: unknown): JournalEntry {
   if (typeof entry.createdAt !== 'string' || !Number.isFinite(Date.parse(entry.createdAt))) {
     fail('createdAt must be an ISO timestamp');
   }
-  return value as JournalEntry;
+  return entry as unknown as JournalEntry;
 }
 
 export class ConversationJournal {
@@ -280,19 +308,28 @@ export class ConversationJournal {
   }
 
   private readLastReadSeq(conversationId: string): number {
-    const record = readJsonFile(journalCursorPath(this.journalRoot, conversationId)) as
-      | { lastReadSeq?: unknown }
+    const raw = readJsonFile(journalCursorPath(this.journalRoot, conversationId)) as
+      | Record<string, unknown>
       | null;
-    if (!record) return 0;
-    if (!Number.isSafeInteger(record.lastReadSeq) || (record.lastReadSeq as number) < 0) {
+    if (!raw) return 0;
+    const migrated = this.migrateLegacyCursor(raw, conversationId);
+    if (!Number.isSafeInteger(migrated.lastReadSeq) || (migrated.lastReadSeq as number) < 0) {
       throw new Error(`Journal cursor for ${conversationId} is corrupt`);
     }
-    return record.lastReadSeq as number;
+    if (migrated.rewritten) {
+      writeJsonRecord(journalCursorPath(this.journalRoot, conversationId), {
+        conversationId,
+        lastReadSeq: migrated.lastReadSeq,
+      });
+    }
+    return migrated.lastReadSeq as number;
   }
 
   private readIndex(conversationId: string): JournalIndex {
-    const record = readJsonFile(journalIndexPath(this.journalRoot, conversationId)) as JournalIndex | null;
-    if (!record) {
+    const raw = readJsonFile(journalIndexPath(this.journalRoot, conversationId)) as
+      | Record<string, unknown>
+      | null;
+    if (!raw) {
       return {
         schemaVersion: CONVERSATION_SCHEMA_VERSION,
         conversationId,
@@ -301,26 +338,78 @@ export class ConversationJournal {
         entries: [],
       };
     }
-    if (record.schemaVersion !== CONVERSATION_SCHEMA_VERSION) {
+    const { index, migrated } = this.migrateLegacyIndex(raw, conversationId);
+    if (index.schemaVersion !== CONVERSATION_SCHEMA_VERSION) {
       throw new Error(`Unsupported journal index for ${conversationId}`);
     }
-    if (record.conversationId !== conversationId) {
+    if (index.conversationId !== conversationId) {
       throw new Error(`Journal index identity mismatch for ${conversationId}`);
     }
-    if (!Number.isSafeInteger(record.nextSeq) || record.nextSeq < 1) {
+    if (!Number.isSafeInteger(index.nextSeq) || index.nextSeq < 1) {
       throw new Error(`Journal index for ${conversationId} is corrupt`);
     }
-    return record;
+    if (migrated) {
+      writeJsonRecord(journalIndexPath(this.journalRoot, conversationId), index);
+    }
+    return index;
   }
 
   private requireEntry(conversationId: string, seq: number, entryId: string): JournalEntry {
-    const record = readJsonFile(journalEntryPath(this.journalRoot, conversationId, seq, entryId));
+    const path = journalEntryPath(this.journalRoot, conversationId, seq, entryId);
+    const record = readJsonFile(path);
     if (!record) throw new Error(`Journal entry not found: ${entryId}`);
-    const entry = assertJournalEntry(record);
+    const { record: normalized, migrated } = migrateLegacyJournalEntry(record);
+    const entry = assertJournalEntry(normalized);
+    if (migrated) writeJsonRecord(path, entry);
     if (entry.conversationId !== conversationId || entry.seq !== seq || entry.entryId !== entryId) {
       throw new Error(`Journal entry identity mismatch for ${entryId}`);
     }
     return entry;
+  }
+
+  private migrateLegacyIndex(
+    raw: Record<string, unknown>,
+    conversationId: string,
+  ): { index: JournalIndex; migrated: boolean } {
+    let migrated = false;
+    const next: Record<string, unknown> = { ...raw };
+    if (Object.hasOwn(next, 'chatId')) {
+      if (typeof next.chatId !== 'string') {
+        throw new Error(`Journal index for ${conversationId} is corrupt`);
+      }
+      if (next.conversationId === undefined) next.conversationId = next.chatId;
+      else if (next.conversationId !== next.chatId) {
+        throw new Error(`Journal index identity mismatch for ${conversationId}`);
+      }
+      delete next.chatId;
+      migrated = true;
+    }
+    return {
+      index: next as unknown as JournalIndex,
+      migrated,
+    };
+  }
+
+  private migrateLegacyCursor(
+    raw: Record<string, unknown>,
+    conversationId: string,
+  ): { lastReadSeq: unknown; rewritten: boolean } {
+    if (Object.hasOwn(raw, 'chatId')) {
+      if (typeof raw.chatId !== 'string') {
+        throw new Error(`Journal cursor for ${conversationId} is corrupt`);
+      }
+      if (raw.conversationId !== undefined && raw.conversationId !== raw.chatId) {
+        throw new Error(`Journal cursor identity mismatch for ${conversationId}`);
+      }
+      if (raw.chatId !== conversationId) {
+        throw new Error(`Journal cursor identity mismatch for ${conversationId}`);
+      }
+      return { lastReadSeq: raw.lastReadSeq, rewritten: true };
+    }
+    if (raw.conversationId !== undefined && raw.conversationId !== conversationId) {
+      throw new Error(`Journal cursor identity mismatch for ${conversationId}`);
+    }
+    return { lastReadSeq: raw.lastReadSeq, rewritten: false };
   }
 
   private require(conversationId: string): ConversationRef {

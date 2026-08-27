@@ -3,7 +3,14 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { BotDirectory, createDirectChatJournal } from '../src/bots/index.ts';
-import { journalEntriesPath, journalEntryPath, journalIndexPath, readJsonFile } from '../src/conversations/index.ts';
+import {
+  journalCursorPath,
+  journalEntriesPath,
+  journalEntryPath,
+  journalIndexPath,
+  readJsonFile,
+  writeJsonRecord,
+} from '../src/conversations/index.ts';
 
 const at = '2026-08-26T00:00:00.000Z';
 const tempRoots: string[] = [];
@@ -180,5 +187,115 @@ describe('ConversationJournal boundaries', () => {
 
     const foreign = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
     expect(() => foreign.list(bot.directChatId)).toThrow(/belongs to another workspace/);
+  });
+});
+
+describe('ConversationJournal legacy Bot schema migration', () => {
+  it('reads and rewrites old chatId/botId index, entry, and cursor records', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const entryId = 'entry_legacy0123456789abcdef012345';
+    const entryPath = journalEntryPath(botsRoot, bot.directChatId, 1, entryId);
+
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      chatId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { 'legacy-1': entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(entryPath, {
+      schemaVersion: 1,
+      entryId,
+      chatId: bot.directChatId,
+      botId: bot.botId,
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'legacy-1',
+      body: 'hello from legacy',
+      createdAt: at,
+    });
+    writeJsonRecord(journalCursorPath(botsRoot, bot.directChatId), {
+      chatId: bot.directChatId,
+      lastReadSeq: 1,
+    });
+
+    const entries = journal.list(bot.directChatId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({
+      schemaVersion: 1,
+      entryId,
+      conversationId: bot.directChatId,
+      authorBotId: bot.botId,
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'legacy-1',
+      body: 'hello from legacy',
+      createdAt: at,
+    });
+    expect(entries[0]).not.toHaveProperty('chatId');
+    expect(entries[0]).not.toHaveProperty('botId');
+
+    expect(journal.getCursor(bot.directChatId)).toEqual({
+      conversationId: bot.directChatId,
+      lastReadSeq: 1,
+      unreadCount: 0,
+    });
+
+    const indexOnDisk = readJsonFile(journalIndexPath(botsRoot, bot.directChatId)) as Record<string, unknown>;
+    expect(indexOnDisk.conversationId).toBe(bot.directChatId);
+    expect(indexOnDisk).not.toHaveProperty('chatId');
+
+    const entryOnDisk = readJsonFile(entryPath) as Record<string, unknown>;
+    expect(entryOnDisk.conversationId).toBe(bot.directChatId);
+    expect(entryOnDisk.authorBotId).toBe(bot.botId);
+    expect(entryOnDisk).not.toHaveProperty('chatId');
+    expect(entryOnDisk).not.toHaveProperty('botId');
+
+    const cursorOnDisk = readJsonFile(journalCursorPath(botsRoot, bot.directChatId)) as Record<string, unknown>;
+    expect(cursorOnDisk).toEqual({
+      conversationId: bot.directChatId,
+      lastReadSeq: 1,
+    });
+
+    const appended = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'after migration',
+      idempotencyKey: 'legacy-followup',
+    });
+    expect(appended.seq).toBe(2);
+    expect(journal.list(bot.directChatId).map((entry) => entry.seq)).toEqual([1, 2]);
+  });
+
+  it('migrates legacy user entries without carrying botId into authorBotId', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const entryId = 'entry_legacyuser0123456789abcdef01';
+
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      chatId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { 'legacy-user': entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(journalEntryPath(botsRoot, bot.directChatId, 1, entryId), {
+      schemaVersion: 1,
+      entryId,
+      chatId: bot.directChatId,
+      botId: bot.botId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'legacy-user',
+      body: 'user said hi',
+      createdAt: at,
+    });
+
+    const [entry] = journal.list(bot.directChatId);
+    expect(entry?.kind).toBe('user');
+    expect(entry?.conversationId).toBe(bot.directChatId);
+    expect(entry).not.toHaveProperty('authorBotId');
+    expect(entry).not.toHaveProperty('botId');
   });
 });
