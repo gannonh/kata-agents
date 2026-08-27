@@ -101,6 +101,55 @@ describe('ConversationJournal ordering', () => {
     expect(journal.list(bot.directChatId)).toHaveLength(1);
   });
 
+  it('reconciles an entry written before the index commit after a crash', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const orphanId = 'entry_orphan0123456789abcdef0123456';
+    const orphanPath = journalEntryPath(botsRoot, bot.directChatId, 1, orphanId);
+
+    // Simulate: entry file landed, then process died before index.json update.
+    writeJsonRecord(orphanPath, {
+      schemaVersion: 1,
+      entryId: orphanId,
+      conversationId: bot.directChatId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'crash-orphan',
+      body: 'survived on disk',
+      createdAt: at,
+    });
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 1,
+      byIdempotencyKey: {},
+      entries: [],
+    });
+
+    const next = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'after crash',
+      idempotencyKey: 'crash-followup',
+    });
+    expect(next.seq).toBe(2);
+
+    const listed = journal.list(bot.directChatId);
+    expect(listed.map((entry) => entry.seq)).toEqual([1, 2]);
+    expect(listed[0]?.entryId).toBe(orphanId);
+    expect(listed[0]?.body).toBe('survived on disk');
+    expect(listed[1]?.body).toBe('after crash');
+
+    const sameKey = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'ignored',
+      idempotencyKey: 'crash-orphan',
+    });
+    expect(sameKey.entryId).toBe(orphanId);
+    expect(journal.list(bot.directChatId)).toHaveLength(2);
+  });
+
   it('preserves imported authorship timestamps', () => {
     const { journal, bot } = setup();
 

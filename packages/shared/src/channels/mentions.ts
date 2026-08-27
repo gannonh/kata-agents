@@ -36,6 +36,17 @@ export function parseChannelMentions(
 
     const remainder = text.slice(index + 1);
     const lowerRemainder = remainder.toLocaleLowerCase();
+
+    // Reserved @everyone wins over a member whose display name is "everyone".
+    if (
+      lowerRemainder.startsWith(EVERYONE_MENTION)
+      && isBoundary(remainder[EVERYONE_MENTION.length])
+    ) {
+      everyone = true;
+      index += EVERYONE_MENTION.length;
+      continue;
+    }
+
     const matched = normalized.find((member) => {
       if (!lowerRemainder.startsWith(member.normalizedName)) return false;
       return isBoundary(remainder[member.normalizedName.length]);
@@ -52,9 +63,7 @@ export function parseChannelMentions(
     const tokenMatch = remainder.match(/^[A-Za-z0-9_.-]+/);
     if (!tokenMatch) continue;
     const token = tokenMatch[0];
-    if (token.toLocaleLowerCase() === EVERYONE_MENTION) {
-      everyone = true;
-    } else if (!unresolvedSet.has(token)) {
+    if (!unresolvedSet.has(token)) {
       unresolvedSet.add(token);
       unresolved.push(token);
     }

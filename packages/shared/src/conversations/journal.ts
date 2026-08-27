@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CONVERSATION_LIMITS,
@@ -24,6 +25,7 @@ import { ensureDurableDirectory } from '../spawn-tasks/durable-fs.ts';
 import { readJsonFile, writeJsonIfAbsent, writeJsonRecord } from './durable-json.ts';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$/;
+const ENTRY_FILENAME = /^(\d+)-(.+)\.json$/;
 
 /** Resolved identity of one conversation, as its owning store sees it. */
 export interface ConversationRef {
@@ -195,7 +197,7 @@ export class ConversationJournal {
     const idempotencyKey = assertJournalIdempotencyKey(input.idempotencyKey);
     const authorBotId = this.resolveAuthor(conversation, input);
 
-    const index = this.readIndex(conversation.conversationId);
+    const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId));
     const existingId = Object.hasOwn(index.byIdempotencyKey, idempotencyKey)
       ? index.byIdempotencyKey[idempotencyKey]
       : undefined;
@@ -300,6 +302,63 @@ export class ConversationJournal {
     };
     writeJsonRecord(journalIndexPath(this.journalRoot, index.conversationId), next);
     return entry;
+  }
+
+  /**
+   * After a crash between entry write and index commit, entry files can exist
+   * on disk while missing from the index. Fold those orphans into the index and
+   * advance nextSeq past the highest on-disk seq before allocating a new one.
+   */
+  private reconcileOrphanedEntries(index: JournalIndex): JournalIndex {
+    let files: string[];
+    try {
+      files = readdirSync(journalEntriesPath(this.journalRoot, index.conversationId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return index;
+      throw error;
+    }
+
+    const indexedIds = new Set(index.entries.map((item) => item.entryId));
+    let nextSeq = index.nextSeq;
+    let byIdempotencyKey = index.byIdempotencyKey;
+    let entries = index.entries;
+    let changed = false;
+
+    for (const file of files) {
+      const match = ENTRY_FILENAME.exec(file);
+      if (!match) continue;
+      const seq = Number(match[1]);
+      const entryId = match[2]!;
+      if (!Number.isSafeInteger(seq) || seq < 1) continue;
+
+      if (seq >= nextSeq) {
+        nextSeq = seq + 1;
+        changed = true;
+      }
+      if (indexedIds.has(entryId)) continue;
+
+      const entry = this.requireEntry(index.conversationId, seq, entryId);
+      if (!changed) {
+        byIdempotencyKey = { ...index.byIdempotencyKey };
+        entries = [...index.entries];
+      }
+      byIdempotencyKey = { ...byIdempotencyKey, [entry.idempotencyKey]: entry.entryId };
+      entries = [...entries, { entryId: entry.entryId, seq: entry.seq }];
+      indexedIds.add(entryId);
+      changed = true;
+    }
+
+    if (!changed) return index;
+
+    const reconciled: JournalIndex = {
+      schemaVersion: CONVERSATION_SCHEMA_VERSION,
+      conversationId: index.conversationId,
+      nextSeq,
+      byIdempotencyKey,
+      entries: [...entries].sort((left, right) => left.seq - right.seq),
+    };
+    writeJsonRecord(journalIndexPath(this.journalRoot, index.conversationId), reconciled);
+    return reconciled;
   }
 
   private buildCursor(conversationId: string, lastReadSeq: number): JournalCursor {

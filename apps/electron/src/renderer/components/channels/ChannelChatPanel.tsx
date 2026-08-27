@@ -16,6 +16,13 @@ export interface ChannelChatPanelProps {
   channelId: string
 }
 
+function mentionNameFromError(err: unknown): string | null {
+  const message = err instanceof Error ? err.message : String(err)
+  const match = /^Unknown Channel mention: @(.+)$/.exec(message)
+  if (!match?.[1]) return null
+  return match[1].split(', @')[0] ?? null
+}
+
 export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelProps) {
   const { t } = useTranslation()
   const [channel, setChannel] = React.useState<ChannelPublicDto | null>(null)
@@ -27,12 +34,22 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [isAddingMember, setIsAddingMember] = React.useState(false)
   const [memberName, setMemberName] = React.useState('')
   const [memberBusy, setMemberBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const refreshGeneration = React.useRef(0)
+
+  const mapError = React.useCallback((err: unknown): string => {
+    const mentionName = mentionNameFromError(err)
+    if (mentionName !== null) return t('channels.mentionUnknown', { name: mentionName })
+    return err instanceof Error ? err.message : String(err)
+  }, [t])
 
   const refresh = React.useCallback(async () => {
+    const generation = ++refreshGeneration.current
     const [journal, loadedRoutes] = await Promise.all([
       window.electronAPI.getChannelJournal(workspaceId, channelId),
       window.electronAPI.listChannelRoutes(workspaceId, channelId),
     ])
+    if (generation !== refreshGeneration.current) return
     setChannel(journal.channel)
     setMembers(journal.members)
     setEntries(journal.entries)
@@ -41,9 +58,13 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
 
   React.useEffect(() => {
     refresh().catch(err => console.error('[Channels] Failed to load journal:', err))
-    return window.electronAPI.onChannelEvent(() => {
+    const unsubscribe = window.electronAPI.onChannelEvent(() => {
       refresh().catch(err => console.error('[Channels] Failed to refresh journal:', err))
     })
+    return () => {
+      refreshGeneration.current += 1
+      unsubscribe()
+    }
   }, [refresh])
 
   const memberNameById = React.useMemo(
@@ -57,6 +78,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     if (!trimmed || sending) return
 
     setSending(true)
+    setError(null)
     try {
       await window.electronAPI.sendChannelMessage(workspaceId, channelId, trimmed, {
         idempotencyKey: crypto.randomUUID(),
@@ -66,10 +88,11 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       await refresh()
     } catch (err) {
       console.error('[Channels] Failed to send message:', err)
+      setError(mapError(err))
     } finally {
       setSending(false)
     }
-  }, [message, sending, workspaceId, channelId, refresh])
+  }, [message, sending, workspaceId, channelId, refresh, mapError])
 
   const handleAddMember = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -77,28 +100,36 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     if (!trimmed || memberBusy) return
 
     setMemberBusy(true)
+    setError(null)
     try {
       const bots = await window.electronAPI.listBots(workspaceId, { lifecycle: 'active' })
       const match = bots.find(bot => bot.name.trim().toLowerCase() === trimmed.toLowerCase())
-      await window.electronAPI.addChannelMember(workspaceId, channelId, match?.botId ?? trimmed)
+      if (!match) {
+        setError(t('channels.mentionUnknown', { name: trimmed }))
+        return
+      }
+      await window.electronAPI.addChannelMember(workspaceId, channelId, match.botId)
       setMemberName('')
       setIsAddingMember(false)
       await refresh()
     } catch (err) {
       console.error('[Channels] Failed to add member:', err)
+      setError(mapError(err))
     } finally {
       setMemberBusy(false)
     }
-  }, [memberName, memberBusy, workspaceId, channelId, refresh])
+  }, [memberName, memberBusy, workspaceId, channelId, refresh, mapError, t])
 
   const handleRemoveMember = React.useCallback(async (botId: string) => {
+    setError(null)
     try {
       await window.electronAPI.removeChannelMember(workspaceId, channelId, botId)
       await refresh()
     } catch (err) {
       console.error('[Channels] Failed to remove member:', err)
+      setError(mapError(err))
     }
-  }, [workspaceId, channelId, refresh])
+  }, [workspaceId, channelId, refresh, mapError])
 
   const describeRoute = React.useCallback((route: RouteRecord) => {
     if (route.blockedReason === 'no-eligible-members') return t('channels.blockedNoMembers')
@@ -212,6 +243,16 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
               {describeRoute(route)}
             </div>
           ))}
+        </div>
+      )}
+
+      {error && (
+        <div
+          data-testid="channel-chat-error"
+          role="alert"
+          className="px-4 py-2 text-sm text-destructive border-t border-foreground/10"
+        >
+          {error}
         </div>
       )}
 

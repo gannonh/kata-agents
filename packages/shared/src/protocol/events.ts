@@ -18,6 +18,14 @@ import type { BrowserAnnotationState } from './browser-annotations'
 import type { GitStatusChangedEvent } from './git'
 import type { ChannelPublicDto, RouteRecord } from '@kata-sh/core'
 
+/** Server → client push payload for `channels:event`. */
+export type ChannelEvent =
+  | { type: 'channel-created'; channel: ChannelPublicDto }
+  | { type: 'channel-updated'; channel: ChannelPublicDto }
+  | { type: 'channel-deleted'; channelId: string }
+  | { type: 'journal-updated'; channelId: string; throughSeq: number }
+  | { type: 'route-updated'; channelId: string; route: RouteRecord }
+
 export interface BroadcastEventMap {
   // Session events (workspace-scoped via broadcastToWorkspace)
   [RPC_CHANNELS.sessions.EVENT]: [event: SessionEvent]
@@ -31,13 +39,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.sources.CHANGED]: [workspaceId: string, sources: LoadedSource[]]
   [RPC_CHANNELS.labels.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.bots.EVENT]: [event: { type: string; botId?: string; chatId?: string; bot?: unknown }]
-  [RPC_CHANNELS.channels.EVENT]: [event:
-    | { type: 'channel-created'; channel: ChannelPublicDto }
-    | { type: 'channel-updated'; channel: ChannelPublicDto }
-    | { type: 'channel-deleted'; channelId: string }
-    | { type: 'journal-updated'; channelId: string; throughSeq: number }
-    | { type: 'route-updated'; channelId: string; route: RouteRecord }
-  ]
+  [RPC_CHANNELS.channels.EVENT]: [event: ChannelEvent]
   [RPC_CHANNELS.statuses.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.automations.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.skills.CHANGED]: [workspaceId: string, skills: LoadedSkill[]]

@@ -195,7 +195,7 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     }
 
     // channels/channel/{channelId}
-    if (segments[1] === 'channel' && segments[2]) {
+    if (segments.length === 3 && segments[1] === 'channel' && segments[2]) {
       return {
         navigator: 'channels',
         details: { type: 'channel', id: segments[2] },

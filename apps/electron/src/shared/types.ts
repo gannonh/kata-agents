@@ -185,6 +185,7 @@ import type {
   FileAttachment,
   SendMessageOptions,
   SessionEvent,
+  ChannelEvent,
   PermissionResponseOptions,
   CredentialResponse,
   SessionCommand,
@@ -393,7 +394,7 @@ export interface ElectronAPI {
     channelId: string,
     opts?: { limit?: number },
   ): Promise<import('@kata-sh/core').RouteRecord[]>
-  onChannelEvent(callback: (event: { type: string; channelId?: string; channel?: unknown }) => void): () => void
+  onChannelEvent(callback: (event: ChannelEvent) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>

@@ -202,7 +202,7 @@
   "channels.namePlaceholder": "Channel 名称",
   "channels.newChannel": "新建 Channel",
   "channels.noChannelSelected": "选择一个 Channel 打开其对话",
-  "channels.noChannels": "还没有 channel",
+  "channels.noChannels": "还没有 Channel",
   "channels.removeMember": "移除",
   "channels.routing": "路由",
   "channels.send": "发送",

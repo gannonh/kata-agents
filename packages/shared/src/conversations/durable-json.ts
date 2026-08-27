@@ -17,10 +17,18 @@ export function readJsonFile(path: string): unknown | null {
   }
 }
 
+function serializeJsonRecord(value: unknown): string {
+  const serialized = JSON.stringify(value, null, 2);
+  if (serialized === undefined) {
+    throw new TypeError('Cannot persist undefined as JSON');
+  }
+  return `${serialized}\n`;
+}
+
 export function writeJsonRecord(path: string, value: unknown): void {
   ensureDurableDirectory(dirname(path));
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  writeDurableFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  writeDurableFile(temporary, serializeJsonRecord(value));
   renameSync(temporary, path);
   syncDirectory(dirname(path));
 }
@@ -28,7 +36,7 @@ export function writeJsonRecord(path: string, value: unknown): void {
 /** Compare-and-set write. Returns false when the path already exists. */
 export function writeJsonIfAbsent(path: string, value: unknown): boolean {
   ensureDurableDirectory(dirname(path));
-  const written = writeDurableFileIfAbsent(path, `${JSON.stringify(value, null, 2)}\n`);
+  const written = writeDurableFileIfAbsent(path, serializeJsonRecord(value));
   if (written) syncDirectory(dirname(path));
   return written;
 }

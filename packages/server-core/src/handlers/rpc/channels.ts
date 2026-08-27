@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
+import { RPC_CHANNELS, type ChannelEvent } from '@kata-sh/shared/protocol'
 import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
 import { createBackendFromConnection, type AgentBackend } from '@kata-sh/shared/agent/backend'
 import {
@@ -16,7 +16,6 @@ import {
 import { BotDirectory, toBotPublicDto } from '@kata-sh/shared/bots'
 import type {
   BotRecord,
-  ChannelPublicDto,
   RouteRecord,
 } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
@@ -37,13 +36,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.channels.SEND_MESSAGE,
   RPC_CHANNELS.channels.LIST_ROUTES,
 ] as const
-
-type ChannelEvent =
-  | { type: 'channel-created'; channel: ChannelPublicDto }
-  | { type: 'channel-updated'; channel: ChannelPublicDto }
-  | { type: 'channel-deleted'; channelId: string }
-  | { type: 'journal-updated'; channelId: string; throughSeq: number }
-  | { type: 'route-updated'; channelId: string; route: RouteRecord }
 
 interface ChannelRuntime {
   readonly workspace: NonNullable<ReturnType<typeof getWorkspaceByNameOrId>>
@@ -150,10 +142,11 @@ function createProviderClaimEvaluator(
         signal.addEventListener('abort', onAbort, { once: true })
         removeAbortListener = () => signal.removeEventListener('abort', onAbort)
       })
-      return await Promise.race([
-        agent.runMiniCompletion(buildClaimPrompt(request)),
-        aborted,
-      ])
+      const completion = agent.runMiniCompletion(buildClaimPrompt(request))
+      // Swallow late rejection if abort wins the race; otherwise the completion
+      // promise becomes an unhandled rejection after race settles on null.
+      void completion.catch(() => undefined)
+      return await Promise.race([completion, aborted])
     } finally {
       removeAbortListener?.()
       agent.destroy()

@@ -39,4 +39,15 @@ describe('parseChannelMentions', () => {
       unresolved: ['Unknown_Bot', 'another.bot'],
     });
   });
+
+  it('treats @everyone as the reserved token even when a member is named everyone', () => {
+    expect(parseChannelMentions('@everyone please help', [
+      { botId: 'bot-everyone', name: 'everyone' },
+      { botId: 'bot-research', name: 'Research' },
+    ])).toEqual({
+      everyone: true,
+      botIds: [],
+      unresolved: [],
+    });
+  });
 });
