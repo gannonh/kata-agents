@@ -412,6 +412,16 @@ export class ChannelRouter {
           dispatchedAt: safeDate(this.clock),
         });
       }
+      const existingReply = this.journal.list(current.channelId).find(
+        (entry) => entry.kind === 'bot' && entry.idempotencyKey === latest.dispatchIdempotencyKey,
+      );
+      if (existingReply) {
+        current = this.updateStage(current, latest.stageId, {
+          state: 'completed',
+          settledAt: safeDate(this.clock),
+        });
+        continue;
+      }
       const owner = this.directory.resolveBot(latest.ownerBotId);
       if (!owner) {
         current = await this.failStage(current, latest, 'Bot is no longer available');

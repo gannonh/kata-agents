@@ -167,6 +167,11 @@ function createStageDispatcher(
   callerClientId?: string,
 ) {
   return async (request: DispatchRequest): Promise<string> => {
+    const existing = runtime.journal.list(request.channelId).find(
+      (entry) => entry.kind === 'bot' && entry.idempotencyKey === request.dispatchIdempotencyKey,
+    )
+    if (existing) return existing.body
+
     const bot = runtime.bots.getBot(request.ownerBotId)
     if (!bot) throw new Error(`Bot not found: ${request.ownerBotId}`)
     const message = request.isFirstDispatch
@@ -182,7 +187,11 @@ function createStageDispatcher(
         sessionPointerPath: channelProviderSessionPath(runtime.directory.rootPath, request.channelId, bot.botId),
       },
       message,
-      { callerClientId, waitForReply: true },
+      {
+        callerClientId,
+        waitForReply: true,
+        dispatchIdempotencyKey: request.dispatchIdempotencyKey,
+      },
     )
     if (result.reply === null) throw new Error('Bot did not return a reply')
     return result.reply
@@ -203,6 +212,21 @@ function routerFor(
     dispatch: createStageDispatcher(deps, runtime, callerClientId),
     onRouteCommitted,
   })
+}
+
+async function recoverAndEmit(
+  deps: HandlerDeps,
+  runtime: ChannelRuntime,
+  server: RpcServer,
+  channelId: string,
+  callerClientId?: string,
+): Promise<RouteRecord[]> {
+  await deps.sessionManager.waitForInit()
+  const recovered = await routerFor(deps, runtime, callerClientId).recover(channelId)
+  for (const route of recovered) {
+    emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
+  }
+  return recovered
 }
 
 function membersFor(runtime: ChannelRuntime, channelId: string) {
@@ -289,6 +313,11 @@ export function registerChannelsHandlers(server: RpcServer, deps: HandlerDeps): 
     const runtime = openRuntime(ctx, workspaceId, deps)
     const channel = runtime.directory.getChannel(channelId)
     if (!channel) throw new Error('Channel not found')
+    try {
+      await recoverAndEmit(deps, runtime, server, channelId, ctx.clientId)
+    } catch (error: unknown) {
+      console.error('[Channels] Route recovery on journal load failed:', error)
+    }
     return {
       channel: toChannelPublicDto(channel),
       members: membersFor(runtime, channelId),
@@ -320,9 +349,7 @@ export function registerChannelsHandlers(server: RpcServer, deps: HandlerDeps): 
       emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
       resolveRouteCommit(route)
     })
-    void router.recover(channelId).then((recovered) => {
-      for (const route of recovered) emit(server, runtime.workspace.id, { type: 'route-updated', channelId, route })
-    }).catch((error: unknown) => {
+    void recoverAndEmit(deps, runtime, server, channelId, ctx.clientId).catch((error: unknown) => {
       console.error('[Channels] Background route recovery failed:', error)
     })
     const operation = router.send({

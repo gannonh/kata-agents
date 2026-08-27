@@ -253,6 +253,46 @@ describe('ChannelRouter', () => {
     expect(fixture.journal.list(fixture.channel.channelId).filter((entry) => entry.kind === 'bot')).toHaveLength(1);
   });
 
+  it('settles a dispatched stage from the load path without a new send when a journal reply already exists', async () => {
+    const fixture = makeFixture();
+    const sent = await fixture.router.send({
+      channelId: fixture.channel.channelId,
+      message: 'finish me later',
+      idempotencyKey: 'send-dispatched-journal',
+    });
+    const stage = sent.route.stages[0];
+    if (!stage) throw new Error('expected a stage');
+
+    const pending: RouteRecord = {
+      ...sent.route,
+      stages: [{
+        ...stage,
+        state: 'dispatched',
+        dispatchedAt: stage.dispatchedAt ?? sent.route.createdAt,
+        settledAt: undefined,
+      }],
+      updatedAt: sent.route.updatedAt,
+    };
+    fixture.routes.update(pending);
+
+    let dispatches = 0;
+    const loadRouter = new ChannelRouter({
+      directory: fixture.directory,
+      journal: fixture.journal,
+      routes: new RouteStore({ workspaceRoot: fixture.directory.rootPath.replace(/\/channels$/, ''), workspaceId: 'workspace-one' }),
+      evaluateClaim: async () => null,
+      dispatch: async () => {
+        dispatches += 1;
+        return 'should not run';
+      },
+    });
+    const recovered = await loadRouter.recover(fixture.channel.channelId);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]?.stages[0]?.state).toBe('completed');
+    expect(dispatches).toBe(0);
+    expect(fixture.journal.list(fixture.channel.channelId).filter((entry) => entry.kind === 'bot')).toHaveLength(1);
+  });
+
   it('carries first-dispatch context only once per Bot and never copies the Channel transcript', async () => {
     const requests: Array<{ isFirstDispatch: boolean; message: string }> = [];
     const fixture = makeFixture({
