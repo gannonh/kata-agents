@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
 import type { JournalEntry } from '@kata-sh/core'
-import { BOT_MEMORY_SCHEMA_VERSION } from '@kata-sh/core'
+import { BOT_MEMORY_LIMITS, BOT_MEMORY_SCHEMA_VERSION } from '@kata-sh/core'
 import { ConversationJournal } from '../src/conversations/journal.ts'
 import { BotContextLedger, ContextAssembler, extractMemoryCandidate, MemoryStore, sanitizeMemoryContent, StaleCompactionError } from '../src/bots/memory.ts'
 
-const entry = (body: string): JournalEntry => ({
+const entry = (body: string, overrides: Partial<JournalEntry> = {}): JournalEntry => ({
   schemaVersion: 1,
   entryId: 'entry_source',
   conversationId: 'chat_one',
@@ -16,11 +16,26 @@ const entry = (body: string): JournalEntry => ({
   idempotencyKey: 'send.one',
   body,
   createdAt: '2025-01-01T00:00:00.000Z',
+  ...overrides,
 })
 
 function store() {
   const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-'))
   return new MemoryStore({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one' })
+}
+
+async function fillActiveMemories(memoryStore: MemoryStore, count: number, clockBase = '2025-01-01T00:00:00.000Z') {
+  for (let index = 0; index < count; index += 1) {
+    const candidate = extractMemoryCandidate({
+      workspaceId: 'workspace_one',
+      botId: 'bot_one',
+      userEntry: entry(`Remember: preference ${index}.`, { entryId: `entry_fill_${index}`, seq: index + 1, idempotencyKey: `fill.${index}` }),
+      operationId: `fill.${index}`,
+      clock: () => new Date(Date.parse(clockBase) + index * 1000).toISOString(),
+    })!
+    const head = await memoryStore.applyCandidate(candidate, `fill.${index}`)
+    expect(head.memories.filter(item => item.state !== 'forgotten')).toHaveLength(index + 1)
+  }
 }
 
 describe('Bot memory', () => {
@@ -94,6 +109,110 @@ describe('Bot memory', () => {
     expect(await assembler.compact({ botId: 'bot_one', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })).toEqual(checkpoint)
     await expect(assembler.compact({ botId: 'bot_two', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 1, operationId: 'compact.foreign' })).rejects.toBeInstanceOf(StaleCompactionError)
     expect(journal.list('chat_one')).toHaveLength(30)
+  })
+
+  test('carries prior checkpoint summary across later compaction', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-compact-carry-'))
+    const journal = new ConversationJournal({
+      journalRoot: workspaceRoot,
+      workspaceId: 'workspace_one',
+      resolveConversation: conversationId => conversationId === 'chat_one' ? { conversationId, workspaceId: 'workspace_one', soleAuthorBotId: 'bot_one' } : null,
+    })
+    for (let seq = 0; seq < 30; seq += 1) {
+      journal.append({ conversationId: 'chat_one', kind: 'user', body: `early unique marker ${seq}`, idempotencyKey: `early.${seq}` })
+    }
+    const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    const assembler = new ContextAssembler({ ledger, journal })
+    const first = await assembler.compact({
+      botId: 'bot_one',
+      conversationId: 'chat_one',
+      expectedJournalHeadSequence: 30,
+      expectedMemoryRevision: 0,
+      expectedCheckpointRevision: 0,
+      operationId: 'compact.first',
+    })
+    expect(first).toMatchObject({ coveredFromSeq: 1, coveredThroughSeq: 18, checkpointRevision: 1 })
+    expect(first?.summary).toContain('early unique marker 0')
+    expect(first?.summary).toContain('early unique marker 17')
+
+    for (let seq = 30; seq < 44; seq += 1) {
+      journal.append({ conversationId: 'chat_one', kind: 'user', body: `later unique marker ${seq}`, idempotencyKey: `later.${seq}` })
+    }
+    const second = await assembler.compact({
+      botId: 'bot_one',
+      conversationId: 'chat_one',
+      expectedJournalHeadSequence: 44,
+      expectedMemoryRevision: 0,
+      expectedCheckpointRevision: 1,
+      operationId: 'compact.second',
+    })
+    expect(second).toMatchObject({ coveredFromSeq: 1, coveredThroughSeq: 32, checkpointRevision: 2, journalHeadSequence: 44 })
+    expect(second?.summary).toContain('early unique marker 0')
+    expect(second?.summary).toContain('later unique marker 30')
+    expect(second?.summary).toContain('later unique marker 31')
+
+    const assembled = assembler.assemble({ conversationId: 'chat_one', operationId: 'context.after.second' })
+    expect(assembled.checkpoint?.coveredFromSeq).toBe(1)
+    expect(assembled.checkpoint?.coveredThroughSeq).toBe(32)
+    expect(assembled.context.text).toContain('early unique marker 0')
+    expect(assembled.context.text).toContain('later unique marker 31')
+    expect(assembled.context.text).toContain('later unique marker 43')
+    expect(assembled.context.text).not.toContain('<entry seq="18"')
+    expect(assembled.context.text).not.toContain('<entry seq="32"')
+  })
+
+  test('rejects restore when the active memory set is already full', async () => {
+    const memoryStore = store()
+    const firstCandidate = extractMemoryCandidate({
+      workspaceId: 'workspace_one',
+      botId: 'bot_one',
+      userEntry: entry('Remember: keep this preference.', { entryId: 'entry_restore_target', seq: 1, idempotencyKey: 'restore.target' }),
+      operationId: 'seed.restore',
+    })!
+    const seeded = await memoryStore.applyCandidate(firstCandidate, 'seed.restore')
+    const forgotten = await memoryStore.mutate({
+      kind: 'forget',
+      memoryId: firstCandidate.candidateId,
+      expectedRevision: seeded.revision,
+      idempotencyKey: 'forget.restore.target',
+    })
+    expect(forgotten.memories[0]?.state).toBe('forgotten')
+
+    await fillActiveMemories(memoryStore, BOT_MEMORY_LIMITS.activeItems)
+    expect(memoryStore.getHead().memories.filter(item => item.state !== 'forgotten')).toHaveLength(BOT_MEMORY_LIMITS.activeItems)
+
+    await expect(memoryStore.mutate({
+      kind: 'restore',
+      memoryId: firstCandidate.candidateId,
+      expectedRevision: memoryStore.getHead().revision,
+      idempotencyKey: 'restore.overflow',
+    })).rejects.toThrow(`Bot memory active item limit reached (${BOT_MEMORY_LIMITS.activeItems})`)
+    expect(memoryStore.getHead().memories.find(item => item.memoryId === firstCandidate.candidateId)?.state).toBe('forgotten')
+    expect(memoryStore.getHead().memories.filter(item => item.state !== 'forgotten')).toHaveLength(BOT_MEMORY_LIMITS.activeItems)
+  })
+
+  test('restores a forgotten memory when capacity remains', async () => {
+    const memoryStore = store()
+    const candidate = extractMemoryCandidate({
+      workspaceId: 'workspace_one',
+      botId: 'bot_one',
+      userEntry: entry('Remember: restore me.', { entryId: 'entry_restore_ok', seq: 1 }),
+      operationId: 'seed.ok',
+    })!
+    const created = await memoryStore.applyCandidate(candidate, 'seed.ok')
+    const forgotten = await memoryStore.mutate({
+      kind: 'forget',
+      memoryId: candidate.candidateId,
+      expectedRevision: created.revision,
+      idempotencyKey: 'forget.ok',
+    })
+    const restored = await memoryStore.mutate({
+      kind: 'restore',
+      memoryId: candidate.candidateId,
+      expectedRevision: forgotten.revision,
+      idempotencyKey: 'restore.ok',
+    })
+    expect(restored.memories[0]?.state).toBe('active')
   })
 
   test('reconciles a committed reply after a post-processing interruption', async () => {

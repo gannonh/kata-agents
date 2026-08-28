@@ -222,6 +222,13 @@ export class MemoryStore {
       const memory = current.memories.find(item => item.memoryId === mutation.memoryId)
       if (!memory) throw new Error(`Memory not found: ${mutation.memoryId}`)
       if (mutation.kind === 'edit' && memory.state === 'forgotten') throw new Error('Forgotten memory must be restored before editing')
+      if (
+        mutation.kind === 'restore'
+        && memory.state === 'forgotten'
+        && current.memories.filter(item => item.state !== 'forgotten').length >= BOT_MEMORY_LIMITS.activeItems
+      ) {
+        throw new Error(`Bot memory active item limit reached (${BOT_MEMORY_LIMITS.activeItems})`)
+      }
       const now = this.clock()
       const nextRevision = current.revision + 1
       const nextMemory: BotMemoryRecord = mutation.kind === 'edit'
@@ -369,11 +376,14 @@ export class BotContextLedger {
 
       const throughSeq = Math.max(0, head - BOT_MEMORY_LIMITS.recentEntries)
       if (throughSeq <= (previous?.coveredThroughSeq ?? 0)) return previous
-      const coveredFromSeq = (previous?.coveredThroughSeq ?? 0) + 1
+      const deltaFromSeq = (previous?.coveredThroughSeq ?? 0) + 1
+      const coveredFromSeq = previous?.coveredFromSeq ?? deltaFromSeq
       const entries = this.journal
-        .list(conversationId, { afterSeq: coveredFromSeq - 1, limit: throughSeq - coveredFromSeq + 1 })
+        .list(conversationId, { afterSeq: deltaFromSeq - 1, limit: throughSeq - deltaFromSeq + 1 })
         .filter(entry => entry.kind !== 'tool')
-      const summary = sanitizeSummary(entries.map(entry => `${entry.seq} ${entry.kind}: ${redactSensitiveText(entry.body)}`).join('\n')) || '(empty)'
+      const deltaSummary = sanitizeSummary(entries.map(entry => `${entry.seq} ${entry.kind}: ${redactSensitiveText(entry.body)}`).join('\n'))
+      const summary = combineCheckpointSummary(previous?.summary, deltaSummary)
+      const deltaDigest = digest(entries.map(entry => `${entry.entryId}:${sourceHash(entry)}`).join('|'))
       const checkpoint: BotCompactionCheckpoint = {
         schemaVersion: BOT_MEMORY_SCHEMA_VERSION,
         workspaceId: this.store.workspaceId,
@@ -382,7 +392,7 @@ export class BotContextLedger {
         coveredFromSeq,
         coveredThroughSeq: throughSeq,
         journalHeadSequence: head,
-        sourceDigest: digest(entries.map(entry => `${entry.entryId}:${sourceHash(entry)}`).join('|')),
+        sourceDigest: previous ? digest(`${previous.sourceDigest}|${deltaDigest}`) : deltaDigest,
         memoryRevision: memory.revision,
         checkpointRevision: previousRevision + 1,
         operationId: input.operationId,
@@ -525,6 +535,32 @@ function redactSensitiveText(value: string): string {
 
 function sanitizeSummary(summary: string): string {
   return truncateBytes(redactSensitiveText(summary).replace(/\s+/g, ' ').trim(), BOT_MEMORY_LIMITS.checkpointSummaryBytes)
+}
+
+function combineCheckpointSummary(previousSummary: string | undefined, deltaSummary: string): string {
+  const parts = [previousSummary, deltaSummary]
+    .map(part => part?.trim())
+    .filter((part): part is string => Boolean(part) && part !== '(empty)')
+  if (parts.length === 0) return '(empty)'
+  const combined = parts.join('\n')
+  if (Buffer.byteLength(combined, 'utf8') <= BOT_MEMORY_LIMITS.checkpointSummaryBytes) {
+    return sanitizeSummary(combined) || '(empty)'
+  }
+  return truncateBytesKeepEnd(redactSensitiveText(combined).replace(/\s+/g, ' ').trim(), BOT_MEMORY_LIMITS.checkpointSummaryBytes) || '(empty)'
+}
+
+function truncateBytesKeepEnd(value: string, limit: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= limit) return value
+  const characters = [...value]
+  let start = characters.length
+  let size = 0
+  while (start > 0) {
+    const next = Buffer.byteLength(characters[start - 1]!, 'utf8')
+    if (size + next > limit) break
+    size += next
+    start -= 1
+  }
+  return characters.slice(start).join('').trimStart()
 }
 
 function escapeText(value: string): string { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') }
