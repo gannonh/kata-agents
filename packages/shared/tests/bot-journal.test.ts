@@ -2,8 +2,15 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { BotDirectory, ConversationJournal } from '../src/bots/index.ts';
-import { journalEntriesPath, journalEntryPath, journalIndexPath, readJsonFile } from '../src/bots/layout.ts';
+import { BotDirectory, createDirectChatJournal } from '../src/bots/index.ts';
+import {
+  journalCursorPath,
+  journalEntriesPath,
+  journalEntryPath,
+  journalIndexPath,
+  readJsonFile,
+  writeJsonRecord,
+} from '../src/conversations/index.ts';
 
 const at = '2026-08-26T00:00:00.000Z';
 const tempRoots: string[] = [];
@@ -25,7 +32,7 @@ function provider() {
 function setup(workspaceId = 'ws_1') {
   const root = tempWorkspace();
   const directory = new BotDirectory({ workspaceRoot: root, workspaceId, clock: () => at });
-  const journal = new ConversationJournal({ workspaceRoot: root, workspaceId, clock: () => at });
+  const journal = createDirectChatJournal({ workspaceRoot: root, workspaceId, clock: () => at });
   const bot = directory.createBot({
     name: 'Journal Bot',
     permissionMode: 'ask',
@@ -41,8 +48,7 @@ describe('ConversationJournal ordering', () => {
 
     for (const index of [0, 1, 2, 3]) {
       journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: index % 2 === 0 ? 'user' : 'bot',
         body: `entry-${index}`,
         idempotencyKey: `key-${index}`,
@@ -61,14 +67,13 @@ describe('ConversationJournal ordering', () => {
     const { journal, bot } = setup();
 
     const entry = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'durable',
       idempotencyKey: 'durable-1',
     });
 
-    const botsRoot = journal.rootPath;
+    const botsRoot = journal.journalRoot;
     const files = readdirSync(journalEntriesPath(botsRoot, bot.directChatId));
     expect(files).toHaveLength(1);
     expect(files[0]).toBe(basename(journalEntryPath(botsRoot, bot.directChatId, 1, entry.entryId)));
@@ -84,8 +89,7 @@ describe('ConversationJournal ordering', () => {
   it('returns the existing entry for a repeated idempotency key', () => {
     const { journal, bot } = setup();
     const input = {
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user' as const,
       idempotencyKey: 'once',
     };
@@ -97,12 +101,60 @@ describe('ConversationJournal ordering', () => {
     expect(journal.list(bot.directChatId)).toHaveLength(1);
   });
 
+  it('reconciles an entry written before the index commit after a crash', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const orphanId = 'entry_orphan0123456789abcdef0123456';
+    const orphanPath = journalEntryPath(botsRoot, bot.directChatId, 1, orphanId);
+
+    // Simulate: entry file landed, then process died before index.json update.
+    writeJsonRecord(orphanPath, {
+      schemaVersion: 1,
+      entryId: orphanId,
+      conversationId: bot.directChatId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'crash-orphan',
+      body: 'survived on disk',
+      createdAt: at,
+    });
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 1,
+      byIdempotencyKey: {},
+      entries: [],
+    });
+
+    const next = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'after crash',
+      idempotencyKey: 'crash-followup',
+    });
+    expect(next.seq).toBe(2);
+
+    const listed = journal.list(bot.directChatId);
+    expect(listed.map((entry) => entry.seq)).toEqual([1, 2]);
+    expect(listed[0]?.entryId).toBe(orphanId);
+    expect(listed[0]?.body).toBe('survived on disk');
+    expect(listed[1]?.body).toBe('after crash');
+
+    const sameKey = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'ignored',
+      idempotencyKey: 'crash-orphan',
+    });
+    expect(sameKey.entryId).toBe(orphanId);
+    expect(journal.list(bot.directChatId)).toHaveLength(2);
+  });
+
   it('preserves imported authorship timestamps', () => {
     const { journal, bot } = setup();
 
     const entry = journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'historical',
       idempotencyKey: 'historical-1',
@@ -118,8 +170,7 @@ describe('ConversationJournal cursors', () => {
     const { journal, bot } = setup();
     for (const index of [0, 1, 2]) {
       journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: 'bot',
         body: `m${index}`,
         idempotencyKey: `cursor-${index}`,
@@ -127,7 +178,7 @@ describe('ConversationJournal cursors', () => {
     }
 
     expect(journal.getCursor(bot.directChatId)).toEqual({
-      chatId: bot.directChatId,
+      conversationId: bot.directChatId,
       lastReadSeq: 0,
       unreadCount: 3,
     });
@@ -140,17 +191,16 @@ describe('ConversationJournal cursors', () => {
   it('survives a restart', () => {
     const { root, journal, bot } = setup();
     journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'bot',
       body: 'persisted',
       idempotencyKey: 'restart-1',
     });
     journal.markRead(bot.directChatId, 1);
 
-    const reloaded = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+    const reloaded = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
     expect(reloaded.getCursor(bot.directChatId)).toEqual({
-      chatId: bot.directChatId,
+      conversationId: bot.directChatId,
       lastReadSeq: 1,
       unreadCount: 0,
     });
@@ -162,22 +212,139 @@ describe('ConversationJournal boundaries', () => {
     const { root, journal, bot } = setup();
 
     expect(() => journal.append({
-      chatId: 'chat_missing',
-      botId: bot.botId,
+      conversationId: 'chat_missing',
       kind: 'user',
       body: 'nope',
       idempotencyKey: 'missing-chat',
-    })).toThrow(/Direct chat not found/);
+    })).toThrow(/Conversation not found/);
 
     expect(() => journal.append({
-      chatId: bot.directChatId,
-      botId: 'bot_other',
-      kind: 'user',
+      conversationId: bot.directChatId,
+      authorBotId: 'bot_other',
+      kind: 'bot',
       body: 'nope',
       idempotencyKey: 'foreign-bot',
     })).toThrow(/not owned by bot/);
 
-    const foreign = new ConversationJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      authorBotId: bot.botId,
+      kind: 'user',
+      body: 'nope',
+      idempotencyKey: 'authored-user',
+    })).toThrow(/User entries have no Bot author/);
+
+    const foreign = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
     expect(() => foreign.list(bot.directChatId)).toThrow(/belongs to another workspace/);
+  });
+});
+
+describe('ConversationJournal legacy Bot schema migration', () => {
+  it('reads and rewrites old chatId/botId index, entry, and cursor records', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const entryId = 'entry_legacy0123456789abcdef012345';
+    const entryPath = journalEntryPath(botsRoot, bot.directChatId, 1, entryId);
+
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      chatId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { 'legacy-1': entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(entryPath, {
+      schemaVersion: 1,
+      entryId,
+      chatId: bot.directChatId,
+      botId: bot.botId,
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'legacy-1',
+      body: 'hello from legacy',
+      createdAt: at,
+    });
+    writeJsonRecord(journalCursorPath(botsRoot, bot.directChatId), {
+      chatId: bot.directChatId,
+      lastReadSeq: 1,
+    });
+
+    const entries = journal.list(bot.directChatId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({
+      schemaVersion: 1,
+      entryId,
+      conversationId: bot.directChatId,
+      authorBotId: bot.botId,
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'legacy-1',
+      body: 'hello from legacy',
+      createdAt: at,
+    });
+    expect(entries[0]).not.toHaveProperty('chatId');
+    expect(entries[0]).not.toHaveProperty('botId');
+
+    expect(journal.getCursor(bot.directChatId)).toEqual({
+      conversationId: bot.directChatId,
+      lastReadSeq: 1,
+      unreadCount: 0,
+    });
+
+    const indexOnDisk = readJsonFile(journalIndexPath(botsRoot, bot.directChatId)) as Record<string, unknown>;
+    expect(indexOnDisk.conversationId).toBe(bot.directChatId);
+    expect(indexOnDisk).not.toHaveProperty('chatId');
+
+    const entryOnDisk = readJsonFile(entryPath) as Record<string, unknown>;
+    expect(entryOnDisk.conversationId).toBe(bot.directChatId);
+    expect(entryOnDisk.authorBotId).toBe(bot.botId);
+    expect(entryOnDisk).not.toHaveProperty('chatId');
+    expect(entryOnDisk).not.toHaveProperty('botId');
+
+    const cursorOnDisk = readJsonFile(journalCursorPath(botsRoot, bot.directChatId)) as Record<string, unknown>;
+    expect(cursorOnDisk).toEqual({
+      conversationId: bot.directChatId,
+      lastReadSeq: 1,
+    });
+
+    const appended = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'user',
+      body: 'after migration',
+      idempotencyKey: 'legacy-followup',
+    });
+    expect(appended.seq).toBe(2);
+    expect(journal.list(bot.directChatId).map((entry) => entry.seq)).toEqual([1, 2]);
+  });
+
+  it('migrates legacy user entries without carrying botId into authorBotId', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const entryId = 'entry_legacyuser0123456789abcdef01';
+
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      chatId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { 'legacy-user': entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(journalEntryPath(botsRoot, bot.directChatId, 1, entryId), {
+      schemaVersion: 1,
+      entryId,
+      chatId: bot.directChatId,
+      botId: bot.botId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'legacy-user',
+      body: 'user said hi',
+      createdAt: at,
+    });
+
+    const [entry] = journal.list(bot.directChatId);
+    expect(entry?.kind).toBe('user');
+    expect(entry?.conversationId).toBe(bot.directChatId);
+    expect(entry).not.toHaveProperty('authorBotId');
+    expect(entry).not.toHaveProperty('botId');
   });
 });

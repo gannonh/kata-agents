@@ -32,6 +32,7 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
   const [bots, setBots] = React.useState<BotPublicDto[]>([])
   const [isCreating, setIsCreating] = React.useState(false)
   const [name, setName] = React.useState('')
+  const [profile, setProfile] = React.useState('')
   const [busy, setBusy] = React.useState(false)
 
   const refresh = React.useCallback(async () => {
@@ -54,6 +55,8 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
     const connection =
       llmConnections.find(c => c.slug === workspaceDefaultLlmConnection) ?? llmConnections[0]
 
+    const trimmedProfile = profile.trim()
+
     setBusy(true)
     try {
       const bot = await window.electronAPI.createBot(workspaceId, {
@@ -63,9 +66,11 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
           providerId: connection?.slug ?? FALLBACK_PROVIDER_ID,
           modelId: connection?.defaultModel ?? FALLBACK_MODEL_ID,
         },
+        ...(trimmedProfile ? { profile: trimmedProfile } : {}),
         idempotencyKey: crypto.randomUUID(),
       })
       setName('')
+      setProfile('')
       setIsCreating(false)
       await refresh()
       onBotClick(bot)
@@ -74,13 +79,13 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
     } finally {
       setBusy(false)
     }
-  }, [name, busy, llmConnections, workspaceDefaultLlmConnection, workspaceId, refresh, onBotClick])
+  }, [name, profile, busy, llmConnections, workspaceDefaultLlmConnection, workspaceId, refresh, onBotClick])
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="px-3 py-2">
         {isCreating ? (
-          <form onSubmit={handleCreate} className="flex items-center gap-2">
+          <form onSubmit={handleCreate} className="flex flex-col gap-2">
             <Input
               data-testid="bots-name-input"
               autoFocus
@@ -89,9 +94,18 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
               placeholder={t('bots.namePlaceholder')}
               className="h-8 text-sm"
             />
-            <Button type="submit" size="sm" disabled={busy} data-testid="bots-create-submit">
-              {t('bots.createSubmit')}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                data-testid="bots-profile-input"
+                value={profile}
+                onChange={e => setProfile(e.target.value)}
+                placeholder={t('bots.profilePlaceholder')}
+                className="h-8 text-sm"
+              />
+              <Button type="submit" size="sm" disabled={busy} data-testid="bots-create-submit">
+                {t('bots.createSubmit')}
+              </Button>
+            </div>
           </form>
         ) : (
           <Button

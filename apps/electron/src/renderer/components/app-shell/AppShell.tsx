@@ -30,6 +30,7 @@ import {
   Clock,
   Radio,
   Bot,
+  MessagesSquare,
   Info,
   MailOpen,
 } from "lucide-react"
@@ -114,6 +115,7 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isBotsNavigation,
+  isChannelsNavigation,
   isAutomationsNavigation,
   type NavigationState,
 } from "@/contexts/NavigationContext"
@@ -121,6 +123,7 @@ import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { BotsListPanel } from "../bots/BotsListPanel"
+import { ChannelsListPanel } from "../channels/ChannelsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { SidebarUpdatePill } from "./SidebarUpdatePill"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -1075,6 +1078,10 @@ function AppShellContent({
     navigate(routes.view.bots(bot.botId))
   }, [navigate])
 
+  const handleChannelSelect = React.useCallback((channel: import('@kata-sh/core').ChannelPublicDto) => {
+    navigate(routes.view.channels(channel.channelId))
+  }, [navigate])
+
   // Handle selecting an automation from the list
   const handleAutomationSelect = React.useCallback((automationId: string) => {
     // Preserve current automation filter when selecting an automation
@@ -1727,6 +1734,10 @@ function AppShellContent({
     navigate(routes.view.bots())
   }, [])
 
+  const handleChannelsClick = useCallback(() => {
+    navigate(routes.view.channels())
+  }, [])
+
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
     navigate(routes.view.automations())
@@ -1989,12 +2000,13 @@ function AppShellContent({
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:bots', type: 'nav', action: handleBotsClick })
+    result.push({ id: 'nav:channels', type: 'nav', action: handleChannelsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleBotsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleBotsClick, handleChannelsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2116,6 +2128,10 @@ function AppShellContent({
     // Bots navigator
     if (isBotsNavigation(navState)) {
       return t("sidebar.bots")
+    }
+
+    if (isChannelsNavigation(navState)) {
+      return t("sidebar.channels")
     }
 
     // Automations navigator
@@ -2465,6 +2481,14 @@ function AppShellContent({
                       variant: isBotsNavigation(navState) ? "default" : "ghost",
                       onClick: handleBotsClick,
                       dataTestId: "bots-nav",
+                    },
+                    {
+                      id: "nav:channels",
+                      title: t("sidebar.channels"),
+                      icon: MessagesSquare,
+                      variant: isChannelsNavigation(navState) ? "default" : "ghost",
+                      onClick: handleChannelsClick,
+                      dataTestId: "channels-nav",
                     },
                     {
                       id: "nav:automations",
@@ -3224,6 +3248,13 @@ function AppShellContent({
                 workspaceId={activeWorkspaceId}
                 onBotClick={handleBotSelect}
                 selectedBotId={isBotsNavigation(navState) && navState.details?.type === 'bot' ? navState.details.botId : null}
+              />
+            )}
+            {isChannelsNavigation(navState) && activeWorkspaceId && (
+              <ChannelsListPanel
+                workspaceId={activeWorkspaceId}
+                onChannelClick={handleChannelSelect}
+                selectedChannelId={isChannelsNavigation(navState) && navState.details?.type === 'channel' ? navState.details.channelId : null}
               />
             )}
             {isAutomationsNavigation(navState) && (

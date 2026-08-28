@@ -1,17 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
 import {
   BotDirectory,
-  ConversationJournal,
   convertSessionToBot,
+  createDirectChatJournal,
   toBotPublicDto,
 } from '@kata-sh/shared/bots'
-import type { BotPermissionMode, BotProviderConfig, JournalEntry } from '@kata-sh/core'
+import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import { sendToBotSession } from './bot-runtime'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.bots.LIST,
@@ -40,38 +39,11 @@ function openStores(workspaceId: string) {
     workspaceId: workspace.id,
   })
   directory.recover()
-  const journal = new ConversationJournal({
+  const journal = createDirectChatJournal({
     workspaceRoot: workspace.rootPath,
     workspaceId: workspace.id,
   })
   return { workspace, directory, journal }
-}
-
-function providerSessionPath(botsRoot: string, botId: string): string {
-  return join(botsRoot, 'bots', botId, 'provider-session')
-}
-
-function readProviderSessionId(botsRoot: string, botId: string): string | null {
-  const path = providerSessionPath(botsRoot, botId)
-  if (!existsSync(path)) return null
-  const value = readFileSync(path, 'utf8').trim()
-  return value || null
-}
-
-function writeProviderSessionId(botsRoot: string, botId: string, sessionId: string): void {
-  const path = providerSessionPath(botsRoot, botId)
-  mkdirSync(dirname(path), { recursive: true })
-  if (!existsSync(path)) {
-    writeFileSync(path, `${sessionId}\n`, { flag: 'wx' })
-    return
-  }
-  if (readFileSync(path, 'utf8').trim() !== sessionId) {
-    writeFileSync(path, `${sessionId}\n`)
-  }
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -185,78 +157,34 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
 
       const idempotencyKey = options?.idempotencyKey ?? `send.${randomUUID()}`
       const userEntry = journal.append({
-        chatId: bot.directChatId,
-        botId: bot.botId,
+        conversationId: bot.directChatId,
         kind: 'user',
         body: message,
         idempotencyKey,
       })
 
       await sessionManager.waitForInit()
-      let sessionId = readProviderSessionId(directory.rootPath, bot.botId)
-      if (!sessionId) {
-        const session = await sessionManager.createSession(workspaceId, {
+      const runtime = await sendToBotSession(
+        sessionManager,
+        {
+          workspaceId,
           name: bot.name,
-          hidden: true,
           permissionMode: bot.permissionMode,
-          model: bot.providerConfig.modelId,
-          llmConnection: bot.providerConfig.providerId,
+          providerConfig: bot.providerConfig,
+          sessionPointerPath: `${directory.rootPath}/bots/${bot.botId}/provider-session`,
+        },
+        message,
+        { callerClientId: ctx.clientId, waitForReply: options?.waitForReply !== false },
+      )
+
+      const botEntry = runtime.reply
+        ? journal.append({
+          conversationId: bot.directChatId,
+          kind: 'bot',
+          body: runtime.reply,
+          idempotencyKey: `reply.${userEntry.entryId}`,
         })
-        sessionId = session.id
-        writeProviderSessionId(directory.rootPath, bot.botId, sessionId)
-      }
-
-      const callerClientId = ctx.clientId
-      await new Promise<{ accepted: true; messageId: string }>((resolve, reject) => {
-        let acked = false
-        const onAck = (messageId: string) => {
-          if (!acked) {
-            acked = true
-            resolve({ accepted: true, messageId })
-          }
-        }
-        sessionManager
-          .sendMessage(sessionId!, message, undefined, undefined, undefined, undefined, undefined, onAck, {
-            callerClientId,
-          })
-          .then(() => {
-            if (!acked) {
-              acked = true
-              reject(new Error('sendMessage completed without persisting a user message'))
-            }
-          })
-          .catch((error) => {
-            if (!acked) {
-              acked = true
-              reject(error)
-            }
-          })
-      })
-
-      let botEntry: JournalEntry | undefined
-      if (options?.waitForReply !== false) {
-        const deadline = Date.now() + 120_000
-        while (Date.now() < deadline) {
-          const session = await sessionManager.getSession(sessionId)
-          const processing = Boolean((session as { isProcessing?: boolean } | null)?.isProcessing)
-          const messages = (session as { messages?: Array<{ role: string; content?: string; text?: string }> } | null)?.messages ?? []
-          const lastAssistant = [...messages].reverse().find((entry) => entry.role === 'assistant')
-          if (!processing && lastAssistant) {
-            const body = lastAssistant.content ?? lastAssistant.text ?? ''
-            if (body) {
-              botEntry = journal.append({
-                chatId: bot.directChatId,
-                botId: bot.botId,
-                kind: 'bot',
-                body,
-                idempotencyKey: `reply.${userEntry.entryId}`,
-              })
-              break
-            }
-          }
-          await sleep(500)
-        }
-      }
+        : undefined
 
       pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, {
         type: 'journal-updated',

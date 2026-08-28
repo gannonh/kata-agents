@@ -155,6 +155,10 @@ export const routes = {
     bots: (botId?: string) =>
       botId ? `bots/bot/${botId}` as const : 'bots' as const,
 
+    /** Channels view (channels navigator). Pass a channel ID for that Channel's journal. */
+    channels: (channelId?: string) =>
+      channelId ? `channels/channel/${channelId}` as const : 'channels' as const,
+
     /** Skills view (skills navigator). Pass a slug string for a local skill detail view. */
     skills: (skillSlug?: string) => {
       if (!skillSlug) return 'skills' as const

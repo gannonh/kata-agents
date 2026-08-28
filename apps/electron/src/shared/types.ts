@@ -185,6 +185,7 @@ import type {
   FileAttachment,
   SendMessageOptions,
   SessionEvent,
+  ChannelEvent,
   PermissionResponseOptions,
   CredentialResponse,
   SessionCommand,
@@ -353,6 +354,47 @@ export interface ElectronAPI {
     disposition: import('@kata-sh/core').SessionDispositionRecord
   }>
   onBotEvent(callback: (event: { type: string; botId?: string; chatId?: string; bot?: unknown }) => void): () => void
+
+  // Channels
+  listChannels(workspaceId: string, filter?: { lifecycle?: 'active' | 'archived' | 'all' }): Promise<import('@kata-sh/core').ChannelPublicDto[]>
+  getChannel(workspaceId: string, channelId: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  createChannel(
+    workspaceId: string,
+    input: { name: string; botIds?: string[]; idempotencyKey?: string },
+  ): Promise<import('@kata-sh/core').ChannelPublicDto>
+  renameChannel(workspaceId: string, channelId: string, name: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  archiveChannel(workspaceId: string, channelId: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  reopenChannel(workspaceId: string, channelId: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  deleteChannel(workspaceId: string, channelId: string): Promise<{ deleted: true; channelId: string }>
+  addChannelMember(workspaceId: string, channelId: string, botId: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  removeChannelMember(workspaceId: string, channelId: string, botId: string): Promise<import('@kata-sh/core').ChannelPublicDto>
+  getChannelJournal(
+    workspaceId: string,
+    channelId: string,
+    opts?: { afterSeq?: number; limit?: number },
+  ): Promise<{
+    channel: import('@kata-sh/core').ChannelPublicDto
+    members: import('@kata-sh/core').BotPublicDto[]
+    entries: import('@kata-sh/core').JournalEntry[]
+    cursor: import('@kata-sh/core').JournalCursor
+  }>
+  sendChannelMessage(
+    workspaceId: string,
+    channelId: string,
+    message: string,
+    options?: { idempotencyKey?: string; waitForReplies?: boolean },
+  ): Promise<{
+    accepted: true
+    userEntry: import('@kata-sh/core').JournalEntry
+    route: import('@kata-sh/core').RouteRecord
+    replies: import('@kata-sh/core').JournalEntry[]
+  }>
+  listChannelRoutes(
+    workspaceId: string,
+    channelId: string,
+    opts?: { limit?: number },
+  ): Promise<import('@kata-sh/core').RouteRecord[]>
+  onChannelEvent(callback: (event: ChannelEvent) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
@@ -1070,6 +1112,15 @@ export interface BotsNavigationState {
 }
 
 /**
+ * Channels navigation state
+ */
+export interface ChannelsNavigationState {
+  navigator: 'channels'
+  details: { type: 'channel'; channelId: string } | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Automations navigation state
  */
 export interface AutomationsNavigationState {
@@ -1097,6 +1148,7 @@ export type NavigationState =
   | SettingsNavigationState
   | SkillsNavigationState
   | BotsNavigationState
+  | ChannelsNavigationState
   | AutomationsNavigationState
   | BrowserNavigationState
 
@@ -1119,6 +1171,10 @@ export const isSkillsNavigation = (
 export const isBotsNavigation = (
   state: NavigationState
 ): state is BotsNavigationState => state.navigator === 'bots'
+
+export const isChannelsNavigation = (
+  state: NavigationState
+): state is ChannelsNavigationState => state.navigator === 'channels'
 
 export const isAutomationsNavigation = (
   state: NavigationState
@@ -1155,6 +1211,12 @@ export const getNavigationStateKey = (state: NavigationState): string => {
       return `bots/bot/${state.details.botId}`
     }
     return 'bots'
+  }
+  if (state.navigator === 'channels') {
+    if (state.details?.type === 'channel') {
+      return `channels/channel/${state.details.channelId}`
+    }
+    return 'channels'
   }
   if (state.navigator === 'automations') {
     if (state.details?.type === 'automation') {
@@ -1208,6 +1270,16 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
       return { navigator: 'bots', details: { type: 'bot', botId } }
     }
     return { navigator: 'bots', details: null }
+  }
+
+  // Handle channels
+  if (key === 'channels') return { navigator: 'channels', details: null }
+  if (key.startsWith('channels/channel/')) {
+    const channelId = key.slice('channels/channel/'.length)
+    if (channelId) {
+      return { navigator: 'channels', details: { type: 'channel', channelId } }
+    }
+    return { navigator: 'channels', details: null }
   }
 
   // Handle automations

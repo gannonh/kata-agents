@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BotDirectory, ConversationJournal, convertSessionToBot, toBotPublicDto } from '../src/bots/index.ts';
+import { BotDirectory, convertSessionToBot, createDirectChatJournal, toBotPublicDto } from '../src/bots/index.ts';
 
 const at = '2026-08-26T00:00:00.000Z';
 const tempRoots: string[] = [];
@@ -30,7 +30,7 @@ const messages = [
 function pair(root: string, workspaceId = 'ws_1') {
   return {
     directory: new BotDirectory({ workspaceRoot: root, workspaceId, clock: () => at }),
-    journal: new ConversationJournal({ workspaceRoot: root, workspaceId, clock: () => at }),
+    journal: createDirectChatJournal({ workspaceRoot: root, workspaceId, clock: () => at }),
   };
 }
 
@@ -125,8 +125,7 @@ describe('convertSessionToBot', () => {
       legacySessionId: 'session_epsilon',
     });
     journal.append({
-      chatId: bot.directChatId,
-      botId: bot.botId,
+      conversationId: bot.directChatId,
       kind: 'user',
       body: 'first',
       idempotencyKey: 'convert.session_epsilon.0',

@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Channels route messages among Bots** — Create a Channel, add several Bots, and send. An ordinary message is offered to every eligible member and the Bot with the highest claim confidence owns the reply; `@Bot` assigns it outright and several mentions fan out to separately owned replies. Every decision is persisted as an inspectable route record ([#78](https://github.com/gannonh/kata-agents/issues/78)).
 - **Named Bots with durable direct chat** — Create a named Bot that keeps one DirectChat and ConversationJournal across restart; provider Sessions stay internal execution records ([#77](https://github.com/gannonh/kata-agents/issues/77)).
 - **Integrated browser panel** — New Browser now opens in the app shell by default, with HTML address-bar chrome and a close control. Detach to a native window and return without losing the page, cookies, or agent control ([#29](https://github.com/gannonh/kata-agents/issues/29)).
 - **Import Chrome cookies** — Import cookies from a local Google Chrome profile into Kata's shared browser session so signed-in sites work in the integrated panel and detached windows ([#30](https://github.com/gannonh/kata-agents/issues/30)).

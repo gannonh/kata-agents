@@ -18,11 +18,3 @@ export function idempotencyPointerName(key: string): string {
   return createHash('sha256').update(key, 'utf8').digest('hex');
 }
 
-export function mintJournalEntryId(randomId: () => string = randomUUID): string {
-  return `entry_${randomId()}`;
-}
-
-export function deriveJournalEntryId(chatId: string, idempotencyKey: string): string {
-  const digest = createHash('sha256').update(`${chatId}\0${idempotencyKey}`, 'utf8').digest('hex');
-  return `entry_${digest.slice(0, 32)}`;
-}

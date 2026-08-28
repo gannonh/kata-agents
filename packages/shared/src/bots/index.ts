@@ -5,8 +5,22 @@ export type {
   CreateBotInput,
   UpdateBotInput,
 } from './directory.ts';
-export { ConversationJournal } from './journal.ts';
-export type { AppendJournalEntryInput, ConversationJournalOptions } from './journal.ts';
+export { createDirectChatJournal } from './conversation.ts';
+export type { DirectChatJournalOptions } from './conversation.ts';
+// Journal symbols moved to `@kata-sh/shared/conversations`; keep prior public
+// surface available from `@kata-sh/shared/bots` for existing importers.
+export {
+  ConversationJournal,
+  assertConversationId,
+  assertJournalEntry,
+  assertJournalIdempotencyKey,
+  deriveJournalEntryId,
+  mintJournalEntryId,
+} from '../conversations/index.ts';
+export type {
+  AppendJournalEntryInput,
+  ConversationJournalOptions,
+} from '../conversations/index.ts';
 export { convertSessionToBot } from './convert.ts';
 export type {
   ConvertSessionMessage,
@@ -14,19 +28,14 @@ export type {
   ConvertSessionToBotResult,
 } from './convert.ts';
 export { toBotPublicDto } from './dto.ts';
-export {
-  deriveJournalEntryId,
-  idempotencyPointerName,
-  mintJournalEntryId,
-  reserveBotIds,
-} from './ids.ts';
+export { idempotencyPointerName, reserveBotIds } from './ids.ts';
 export type { BotReservedIds } from './ids.ts';
+export { botsRootPath } from './layout.ts';
 export {
   assertBotId,
   assertBotRecord,
   assertCreationIntent,
   assertDirectChatRecord,
   assertIdempotencyKey,
-  assertJournalEntry,
   assertSessionDispositionRecord,
 } from './validation.ts';

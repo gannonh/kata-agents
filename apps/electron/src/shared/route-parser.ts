@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'bots' | 'automations' | 'settings' | 'browser'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'bots' | 'channels' | 'automations' | 'settings' | 'browser'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -61,7 +61,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'bots', 'automations', 'settings', 'browser'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'bots', 'channels', 'automations', 'settings', 'browser'
 ]
 
 /**
@@ -182,6 +182,23 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
       return {
         navigator: 'bots',
         details: { type: 'bot', id: segments[2] },
+      }
+    }
+
+    return null
+  }
+
+  // Channels navigator
+  if (first === 'channels') {
+    if (segments.length === 1) {
+      return { navigator: 'channels', details: null }
+    }
+
+    // channels/channel/{channelId}
+    if (segments.length === 3 && segments[1] === 'channel' && segments[2]) {
+      return {
+        navigator: 'channels',
+        details: { type: 'channel', id: segments[2] },
       }
     }
 
@@ -314,6 +331,11 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   if (parsed.navigator === 'bots') {
     if (!parsed.details) return 'bots'
     return `bots/bot/${parsed.details.id}`
+  }
+
+  if (parsed.navigator === 'channels') {
+    if (!parsed.details) return 'channels'
+    return `channels/channel/${parsed.details.id}`
   }
 
   if (parsed.navigator === 'automations') {
@@ -451,6 +473,14 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
       return { type: 'view', name: 'bots', params: {} }
     }
     return { type: 'view', name: 'bot-chat', id: compound.details.id, params: {} }
+  }
+
+  // Channels
+  if (compound.navigator === 'channels') {
+    if (!compound.details) {
+      return { type: 'view', name: 'channels', params: {} }
+    }
+    return { type: 'view', name: 'channel-chat', id: compound.details.id, params: {} }
   }
 
   // Automations
@@ -598,6 +628,17 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
+  // Channels
+  if (compound.navigator === 'channels') {
+    if (!compound.details) {
+      return { navigator: 'channels', details: null }
+    }
+    return {
+      navigator: 'channels',
+      details: { type: 'channel', channelId: compound.details.id },
+    }
+  }
+
   // Automations - include filter if present
   if (compound.navigator === 'automations') {
     if (!compound.details) {
@@ -691,6 +732,19 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'bots', details: null }
+    case 'channels':
+      return { navigator: 'channels', details: null }
+    case 'channel-chat':
+      if (parsed.id) {
+        return {
+          navigator: 'channels',
+          details: {
+            type: 'channel',
+            channelId: parsed.id,
+          },
+        }
+      }
+      return { navigator: 'channels', details: null }
     case 'automations':
       return { navigator: 'automations', details: null }
     case 'automation-info':
@@ -820,6 +874,13 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     return {
       navigator: 'bots',
       details: state.details?.type === 'bot' ? { type: 'bot', id: state.details.botId } : null,
+    }
+  }
+
+  if (state.navigator === 'channels') {
+    return {
+      navigator: 'channels',
+      details: state.details?.type === 'channel' ? { type: 'channel', id: state.details.channelId } : null,
     }
   }
 

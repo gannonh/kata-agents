@@ -1,10 +1,12 @@
 /**
- * Canonical Bot directory and conversation journal contract.
+ * Canonical Bot directory and DirectChat contract.
  *
- * A Bot owns exactly one DirectChat. The journal holds the ordered public
- * entries for that chat. Public DTOs never carry session IDs, credentials,
- * host paths, or callback identities.
+ * A Bot owns exactly one DirectChat. Ordered public entries for that chat live
+ * in the ConversationJournal (see `conversation.ts`). Public DTOs never carry
+ * session IDs, credentials, host paths, or callback identities.
  */
+
+import type { JournalEntryId } from './conversation.ts';
 
 export const BOT_SCHEMA_VERSION = 1 as const;
 
@@ -12,7 +14,6 @@ export const BOT_SCHEMA_VERSION = 1 as const;
 export const BOT_LIMITS = Object.freeze({
   nameBytes: 256,
   profileBytes: 8 * 1024,
-  journalEntryBytes: 256 * 1024,
   idempotencyKeyBytes: 512,
   providerIdBytes: 256,
   modelIdBytes: 256,
@@ -31,9 +32,6 @@ export const LEGACY_SESSION_DISPOSITIONS = [
 ] as const;
 export type LegacySessionDisposition = (typeof LEGACY_SESSION_DISPOSITIONS)[number];
 
-export const JOURNAL_ENTRY_KINDS = ['user', 'bot', 'tool', 'error', 'lifecycle'] as const;
-export type JournalEntryKind = (typeof JOURNAL_ENTRY_KINDS)[number];
-
 export const CREATION_INTENT_STATES = ['reserved', 'published', 'abandoned'] as const;
 export type CreationIntentState = (typeof CREATION_INTENT_STATES)[number];
 
@@ -41,8 +39,6 @@ export type CreationIntentState = (typeof CREATION_INTENT_STATES)[number];
 export type BotId = string;
 /** `chat_<uuid>` */
 export type DirectChatId = string;
-/** `entry_<hash>` */
-export type JournalEntryId = string;
 
 export interface BotProviderConfig {
   readonly providerId: string;
@@ -105,24 +101,6 @@ export interface CreationIntent {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly publishedAt?: string;
-}
-
-export interface JournalEntry {
-  readonly schemaVersion: typeof BOT_SCHEMA_VERSION;
-  readonly entryId: JournalEntryId;
-  readonly chatId: DirectChatId;
-  readonly botId: BotId;
-  readonly seq: number;
-  readonly kind: JournalEntryKind;
-  readonly idempotencyKey: string;
-  readonly body: string;
-  readonly createdAt: string;
-}
-
-export interface JournalCursor {
-  readonly chatId: DirectChatId;
-  readonly lastReadSeq: number;
-  readonly unreadCount: number;
 }
 
 export interface SessionDispositionRecord {
