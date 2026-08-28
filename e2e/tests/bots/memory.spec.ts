@@ -37,7 +37,7 @@ test.describe(`Bot memory and compaction ${E2E_TAGS.memory}`, () => {
       await page.getByTestId("bots-create-submit").click();
       await expect(page.getByTestId("bot-chat")).toBeVisible();
 
-      const preference = "Please remember for future chats: I prefer violet replies.";
+      const preference = "I prefer violet replies.";
       await page.getByTestId("bot-chat-input").fill(preference);
       await page.getByTestId("bot-chat-send").click();
       await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: preference })).toBeVisible();
