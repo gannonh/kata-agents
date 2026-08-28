@@ -122,6 +122,7 @@
   "bots.memoryEmpty": "Bot メモリはまだありません。好みを記憶するよう Bot に頼んでください。",
   "bots.memoryForget": "忘れる",
   "bots.memoryHeading": "Bot メモリ",
+  "bots.memoryRestore": "復元",
   "bots.memorySave": "保存",
   "bots.memoryStateActive": "有効",
   "bots.memoryStateEdited": "編集済み",

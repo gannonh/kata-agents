@@ -14,7 +14,7 @@ import {
   type DispatchRequest,
 } from '@kata-sh/shared/channels'
 import { BotDirectory, BotContextLedger, ContextAssembler, StaleCompactionError, toBotPublicDto } from '@kata-sh/shared/bots'
-import { BOT_MEMORY_LIMITS, type BotRecord, type RouteRecord } from '@kata-sh/core'
+import { BOT_MEMORY_LIMITS, type BotRecord, type JournalEntry, type RouteRecord } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { sendToBotSession } from './bot-runtime'
@@ -169,12 +169,14 @@ function createStageDispatcher(
       : request.message
     const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: bot.botId, journal: runtime.journal })
     const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
+    await ledger.reconcile(request.channelId, () => completedTurnsFor(runtime, request.channelId, bot.botId))
     const prepared = assembler.assemble({ conversationId: request.channelId, operationId: request.dispatchIdempotencyKey, currentEntryId: request.sourceEntryId, conversationKind: 'channel' })
     await ledger.recordRun(prepared.context)
     const result = await sendToBotSession(
       deps.sessionManager,
       {
         workspaceId: runtime.workspace.id,
+        botId: bot.botId,
         name: bot.name,
         permissionMode: bot.permissionMode,
         providerConfig: bot.providerConfig,
@@ -268,6 +270,34 @@ function membersFor(runtime: ChannelRuntime, channelId: string) {
   })
 }
 
+function completedTurnsFor(
+  runtime: ChannelRuntime,
+  channelId: string,
+  botId: string,
+): { userEntry: JournalEntry; replyEntry: JournalEntry; throughSeq: number }[] {
+  const entries = runtime.journal.list(channelId)
+  const completed: { userEntry: JournalEntry; replyEntry: JournalEntry; throughSeq: number }[] = []
+  for (const route of runtime.routes.list(channelId)) {
+    const userEntry = entries.find(entry => entry.entryId === route.messageEntryId && entry.kind === 'user')
+    if (!userEntry) continue
+    const completedStages = route.stages.filter(stage => stage.state === 'completed')
+    const replies = completedStages
+      .map(stage => entries.find(entry => entry.kind === 'bot' && entry.idempotencyKey === stage.dispatchIdempotencyKey))
+      .filter((entry): entry is JournalEntry => entry !== undefined)
+    const botStage = completedStages.find(stage => stage.ownerBotId === botId)
+    const botReply = botStage
+      ? entries.find(entry => entry.kind === 'bot' && entry.idempotencyKey === botStage.dispatchIdempotencyKey)
+      : undefined
+    if (!botReply) continue
+    completed.push({
+      userEntry,
+      replyEntry: botReply,
+      throughSeq: Math.max(botReply.seq, ...replies.map(entry => entry.seq)),
+    })
+  }
+  return completed
+}
+
 export function registerChannelsHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(RPC_CHANNELS.channels.LIST, async (ctx, workspaceId: string, filter?: { lifecycle?: 'active' | 'archived' | 'all' }) => {
     const runtime = openRuntime(ctx, workspaceId, deps)
@@ -345,6 +375,10 @@ export function registerChannelsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (!channel) throw new Error('Channel not found')
     try {
       await recoverAndEmit(deps, runtime, server, channelId, ctx.clientId)
+      await Promise.all(channel.members.map(async member => {
+        const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: member.botId, journal: runtime.journal })
+        await ledger.reconcile(channelId, () => completedTurnsFor(runtime, channelId, member.botId))
+      }))
     } catch (error: unknown) {
       console.error('[Channels] Route recovery on journal load failed:', error)
     }

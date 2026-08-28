@@ -28,13 +28,17 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
   const [savingMemory, setSavingMemory] = React.useState<string | null>(null)
+  const refreshGeneration = React.useRef(0)
+  const pendingSend = React.useRef<{ message: string; idempotencyKey: string } | null>(null)
 
   const refresh = React.useCallback(async () => {
+    const generation = ++refreshGeneration.current
     const [journal, loadedMemory, loadedContext] = await Promise.all([
       window.electronAPI.getBotJournal(workspaceId, botId),
       window.electronAPI.getBotMemory(workspaceId, botId),
       window.electronAPI.getBotContext(workspaceId, botId),
     ])
+    if (generation !== refreshGeneration.current) return
     setBot(journal.bot)
     setEntries(journal.entries)
     setMemory(loadedMemory)
@@ -43,9 +47,17 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
 
   React.useEffect(() => {
     refresh().catch(err => console.error('[Bots] Failed to load journal:', err))
-  }, [refresh])
+    const unsubscribe = window.electronAPI.onBotEvent(event => {
+      if (event.botId && event.botId !== botId) return
+      refresh().catch(err => console.error('[Bots] Failed to refresh journal:', err))
+    })
+    return () => {
+      refreshGeneration.current += 1
+      unsubscribe()
+    }
+  }, [refresh, botId])
 
-  const updateMemory = React.useCallback(async (memoryId: string, kind: 'edit' | 'forget', content?: string) => {
+  const updateMemory = React.useCallback(async (memoryId: string, kind: 'edit' | 'forget' | 'restore', content?: string) => {
     if (!memory) return
     setSavingMemory(memoryId)
     try {
@@ -66,8 +78,16 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     if (!trimmed || sending) return
 
     setSending(true)
+    const pending = pendingSend.current?.message === trimmed
+      ? pendingSend.current
+      : { message: trimmed, idempotencyKey: crypto.randomUUID() }
+    pendingSend.current = pending
     try {
-      await window.electronAPI.sendBotMessage(workspaceId, botId, trimmed, { waitForReply: true })
+      await window.electronAPI.sendBotMessage(workspaceId, botId, trimmed, {
+        waitForReply: true,
+        idempotencyKey: pending.idempotencyKey,
+      })
+      pendingSend.current = null
       setMessage('')
       await refresh()
     } catch (err) {
@@ -110,6 +130,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
               <div className="flex gap-2">
                 {item.state !== 'forgotten' && <Button type="button" size="sm" disabled={savingMemory === item.memoryId} data-testid={`bot-memory-save-${item.memoryId}`} onClick={() => updateMemory(item.memoryId, 'edit', drafts[item.memoryId] ?? item.content)}>{t('bots.memorySave')}</Button>}
                 {item.state !== 'forgotten' && <Button type="button" size="sm" variant="outline" disabled={savingMemory === item.memoryId} data-testid={`bot-memory-forget-${item.memoryId}`} onClick={() => updateMemory(item.memoryId, 'forget')}>{t('bots.memoryForget')}</Button>}
+                {item.state === 'forgotten' && <Button type="button" size="sm" variant="outline" disabled={savingMemory === item.memoryId} data-testid={`bot-memory-restore-${item.memoryId}`} onClick={() => updateMemory(item.memoryId, 'restore')}>{t('bots.memoryRestore')}</Button>}
               </div>
               <div className="text-xs text-muted-foreground">{item.provenance.map(source => `${source.conversationId}:${source.seq}`).join(', ')}</div>
             </div>

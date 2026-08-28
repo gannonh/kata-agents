@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import type { JournalEntry } from '@kata-sh/core'
 import { BOT_MEMORY_SCHEMA_VERSION } from '@kata-sh/core'
 import { ConversationJournal } from '../src/conversations/journal.ts'
-import { BotContextLedger, ContextAssembler, extractMemoryCandidate, MemoryStore, sanitizeMemoryContent } from '../src/bots/memory.ts'
+import { BotContextLedger, ContextAssembler, extractMemoryCandidate, MemoryStore, sanitizeMemoryContent, StaleCompactionError } from '../src/bots/memory.ts'
 
 const entry = (body: string): JournalEntry => ({
   schemaVersion: 1,
@@ -88,9 +88,53 @@ describe('Bot memory', () => {
     expect(prepared.context.text).not.toContain('message 29')
     await ledger.completeTurn({ userEntry: journal.list('chat_one')[0]!, operationId: 'cursor.one' })
     expect(ledger.getCursor('chat_one').lastProcessedSeq).toBe(1)
-    await assembler.compact({ botId: 'bot_one', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })
-    expect(ledger.getCheckpoint('chat_one')).toMatchObject({ coveredFromSeq: 1, coveredThroughSeq: 18, journalHeadSequence: 30 })
+    const checkpoint = await assembler.compact({ botId: 'bot_one', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })
+    expect(checkpoint).toMatchObject({ coveredFromSeq: 1, coveredThroughSeq: 18, journalHeadSequence: 30 })
+    expect(await assembler.compact({ botId: 'bot_one', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })).toEqual(checkpoint)
+    await expect(assembler.compact({ botId: 'bot_two', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 1, operationId: 'compact.foreign' })).rejects.toBeInstanceOf(StaleCompactionError)
     expect(journal.list('chat_one')).toHaveLength(30)
+  })
+
+  test('reconciles a committed reply after a post-processing interruption', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-recovery-'))
+    const journal = new ConversationJournal({
+      journalRoot: workspaceRoot,
+      workspaceId: 'workspace_one',
+      resolveConversation: conversationId => conversationId === 'chat_one' ? { conversationId, workspaceId: 'workspace_one', soleAuthorBotId: 'bot_one' } : null,
+    })
+    const userEntry = journal.append({ conversationId: 'chat_one', kind: 'user', body: 'Remember: concise replies.', idempotencyKey: 'recovery.user' })
+    const replyEntry = journal.append({ conversationId: 'chat_one', kind: 'bot', authorBotId: 'bot_one', body: 'Understood.', idempotencyKey: 'recovery.reply' })
+    const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    await ledger.reconcile('chat_one')
+    expect(ledger.getCursor('chat_one').lastProcessedSeq).toBe(replyEntry.seq)
+    expect(ledger.store.getHead().memories[0]?.content).toBe('concise replies.')
+    const restarted = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    await restarted.reconcile('chat_one')
+    expect(restarted.getCursor('chat_one').lastProcessedSeq).toBe(replyEntry.seq)
+    expect(restarted.store.getHead().memories[0]?.provenance[0]?.entryId).toBe(userEntry.entryId)
+  })
+
+  test('reconciles interleaved Channel turns for the selected Bot', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-channel-recovery-'))
+    const journal = new ConversationJournal({
+      journalRoot: workspaceRoot,
+      workspaceId: 'workspace_one',
+      resolveConversation: conversationId => conversationId === 'channel_one'
+        ? { conversationId, workspaceId: 'workspace_one', mayAuthor: botId => botId === 'bot_one' || botId === 'bot_two' }
+        : null,
+    })
+    const firstUser = journal.append({ conversationId: 'channel_one', kind: 'user', body: 'Remember: Bot One should not store this turn.', idempotencyKey: 'channel.user.one' })
+    journal.append({ conversationId: 'channel_one', kind: 'bot', authorBotId: 'bot_two', body: 'Bot Two handled it.', idempotencyKey: 'channel.reply.two' })
+    const secondUser = journal.append({ conversationId: 'channel_one', kind: 'user', body: 'Remember: Bot One prefers concise replies.', idempotencyKey: 'channel.user.two' })
+    const secondReply = journal.append({ conversationId: 'channel_one', kind: 'bot', authorBotId: 'bot_one', body: 'Understood.', idempotencyKey: 'channel.reply.one' })
+    const trailingReply = journal.append({ conversationId: 'channel_one', kind: 'bot', authorBotId: 'bot_two', body: 'Bot Two also handled it.', idempotencyKey: 'channel.reply.two.trailing' })
+    const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    await ledger.reconcile('channel_one')
+    expect(ledger.getCursor('channel_one').lastProcessedSeq).toBe(trailingReply.seq)
+    expect(secondReply.seq).toBeLessThan(trailingReply.seq)
+    expect(ledger.store.getHead().memories).toHaveLength(1)
+    expect(ledger.store.getHead().memories[0]?.provenance[0]?.entryId).toBe(secondUser.entryId)
+    expect(ledger.store.getHead().memories[0]?.provenance[0]?.entryId).not.toBe(firstUser.entryId)
   })
 
   test('keeps memory isolated by workspace and Bot', async () => {

@@ -177,8 +177,22 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         providerConfig?: BotProviderConfig
       },
     ) => {
-      const { directory } = openStores(ctx, workspaceId)
-      return toBotPublicDto(directory.updateBot(botId, patch))
+      const { workspace, directory } = openStores(ctx, workspaceId)
+      const current = directory.getBot(botId)
+      if (!current) throw new Error('Bot not found')
+      const providerChanged = patch.providerConfig !== undefined && (
+        patch.providerConfig.providerId !== current.providerConfig.providerId
+        || patch.providerConfig.modelId !== current.providerConfig.modelId
+      )
+      const updated = directory.updateBot(botId, patch)
+      if (providerChanged) {
+        try {
+          await resetBotProviderSessions(sessionManager, workspace.rootPath, workspace.id, updated.botId)
+        } catch (error) {
+          console.error('[Bots] Failed to reset hidden provider sessions after provider change', error)
+        }
+      }
+      return toBotPublicDto(updated)
     },
   )
 
@@ -216,6 +230,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     const bot = directory.getBot(botId)
     if (!bot) throw new Error('Bot not found')
     const { ledger } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    await ledger.reconcile(bot.directChatId)
     return ledger.store.getHead()
   })
 
@@ -223,7 +238,8 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     const { workspace, directory, journal } = openStores(ctx, workspaceId)
     const bot = directory.getBot(botId)
     if (!bot) throw new Error('Bot not found')
-    const { assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    const { ledger, assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    await ledger.reconcile(bot.directChatId)
     return assembler.assemble({ conversationId: bot.directChatId, operationId: `inspect.${randomUUID()}`, conversationKind: 'direct' })
   })
 
@@ -234,7 +250,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     const { ledger } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
     const head = await ledger.store.mutate(mutation)
     try {
-      await resetBotProviderSessions(sessionManager, workspace.rootPath, bot.botId)
+      await resetBotProviderSessions(sessionManager, workspace.rootPath, workspace.id, bot.botId)
     } catch (error) {
       console.error('[Bots] Failed to reset hidden provider sessions after memory mutation', error)
     }
@@ -255,6 +271,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
       const bot = directory.getBot(botId)
       if (!bot) throw new Error('Bot not found')
       const { ledger, assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+      await ledger.reconcile(bot.directChatId)
 
       const idempotencyKey = options?.idempotencyKey ?? `send.${randomUUID()}`
       const userEntry = journal.append({
@@ -264,6 +281,18 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         idempotencyKey,
       })
       const operationId = `turn.${userEntry.entryId}`
+      const existingReply = journal.list(bot.directChatId).find(
+        entry => entry.kind === 'bot' && entry.idempotencyKey === `reply.${userEntry.entryId}`,
+      )
+      if (existingReply) {
+        try {
+          await ledger.completeTurn({ userEntry, replyEntry: existingReply, operationId })
+        } catch (error) {
+          console.error('[Bots] Durable memory recovery failed after existing reply', error)
+        }
+        publishDirectEvents(server, workspaceId, bot.botId, bot.directChatId)
+        return { accepted: true as const, userEntry, botEntry: existingReply, bot: toBotPublicDto(bot) }
+      }
       const prepared = assembler.assemble({ conversationId: bot.directChatId, operationId, currentEntryId: userEntry.entryId, conversationKind: 'direct' })
       await ledger.recordRun(prepared.context)
 
@@ -272,6 +301,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         sessionManager,
         {
           workspaceId,
+          botId: bot.botId,
           name: bot.name,
           permissionMode: bot.permissionMode,
           providerConfig: bot.providerConfig,

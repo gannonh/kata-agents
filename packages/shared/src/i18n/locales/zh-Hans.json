@@ -122,6 +122,7 @@
   "bots.memoryEmpty": "暂无 Bot 记忆。请让 Bot 记住一项偏好。",
   "bots.memoryForget": "忘记",
   "bots.memoryHeading": "Bot 记忆",
+  "bots.memoryRestore": "恢复",
   "bots.memorySave": "保存",
   "bots.memoryStateActive": "活跃",
   "bots.memoryStateEdited": "已编辑",

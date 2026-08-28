@@ -60,6 +60,13 @@ export class ChannelMentionError extends Error {
   }
 }
 
+export class RetryableStageDispatchError extends Error {
+  constructor(message = 'Bot reply is still pending') {
+    super(message);
+    this.name = 'RetryableStageDispatchError';
+  }
+}
+
 interface MemberSnapshot {
   readonly member: ChannelMember;
   readonly bot: ChannelBotView | null;
@@ -154,6 +161,21 @@ export class ChannelRouter {
   async send(input: { channelId: string; message: string; idempotencyKey: string }): Promise<SendChannelMessageResult> {
     const channel = this.directory.getChannel(input.channelId);
     if (!channel) throw new Error(`Channel not found: ${input.channelId}`);
+
+    const existingUserEntry = this.journal.list(input.channelId).find(
+      (entry) => entry.kind === 'user' && entry.idempotencyKey === input.idempotencyKey,
+    );
+    if (existingUserEntry) {
+      const existingRouteId = deriveRouteId(channel.channelId, existingUserEntry.entryId);
+      const existingRoute = this.routes.get(channel.channelId, existingRouteId);
+      if (existingRoute) {
+        return withRouteQueue(`${this.routes.rootPath}/${channel.channelId}/${existingRouteId}`, async () => {
+          const current = this.routes.get(channel.channelId, existingRouteId);
+          if (!current) return this.finish(existingRoute, existingUserEntry);
+          return this.finish(current, existingUserEntry);
+        });
+      }
+    }
     if (channel.lifecycle !== 'active') throw new Error(`Channel is archived: ${input.channelId}`);
 
     const snapshot = channel.members.map((member) => ({ member, bot: this.directory.resolveBot(member.botId) }));
@@ -472,7 +494,11 @@ export class ChannelRouter {
         });
       } catch (error) {
         const reason = trimReason(error instanceof Error ? error.message : String(error));
-        current = await this.failStage(current, latest, reason);
+        if (error instanceof RetryableStageDispatchError) {
+          current = this.updateStage(current, latest.stageId, { state: 'dispatched', reason });
+        } else {
+          current = await this.failStage(current, latest, reason);
+        }
       }
     }
     return current;

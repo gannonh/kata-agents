@@ -122,6 +122,7 @@
   "bots.memoryEmpty": "Brak pamięci Bota. Poproś Bota o zapamiętanie preferencji.",
   "bots.memoryForget": "Zapomnij",
   "bots.memoryHeading": "Pamięć Bota",
+  "bots.memoryRestore": "Przywróć",
   "bots.memorySave": "Zapisz",
   "bots.memoryStateActive": "Aktywne",
   "bots.memoryStateEdited": "Edytowane",

@@ -122,6 +122,7 @@
   "bots.memoryEmpty": "No Bot memory yet. Ask the Bot to remember a preference.",
   "bots.memoryForget": "Forget",
   "bots.memoryHeading": "Bot memory",
+  "bots.memoryRestore": "Restore",
   "bots.memorySave": "Save",
   "bots.memoryStateActive": "Active",
   "bots.memoryStateEdited": "Edited",

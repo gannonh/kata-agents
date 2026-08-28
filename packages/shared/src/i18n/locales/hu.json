@@ -122,6 +122,7 @@
   "bots.memoryEmpty": "Még nincs Bot-memória. Kérd meg a Botot, hogy jegyezzen meg egy beállítást.",
   "bots.memoryForget": "Elfelejtés",
   "bots.memoryHeading": "Bot-memória",
+  "bots.memoryRestore": "Visszaállítás",
   "bots.memorySave": "Mentés",
   "bots.memoryStateActive": "Aktív",
   "bots.memoryStateEdited": "Szerkesztve",

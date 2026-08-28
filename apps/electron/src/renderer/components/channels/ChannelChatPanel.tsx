@@ -36,6 +36,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [memberBusy, setMemberBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const refreshGeneration = React.useRef(0)
+  const pendingSend = React.useRef<{ message: string; idempotencyKey: string } | null>(null)
 
   const mapError = React.useCallback((err: unknown): string => {
     const mentionName = mentionNameFromError(err)
@@ -79,11 +80,16 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
 
     setSending(true)
     setError(null)
+    const pending = pendingSend.current?.message === trimmed
+      ? pendingSend.current
+      : { message: trimmed, idempotencyKey: crypto.randomUUID() }
+    pendingSend.current = pending
     try {
       await window.electronAPI.sendChannelMessage(workspaceId, channelId, trimmed, {
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: pending.idempotencyKey,
         waitForReplies: false,
       })
+      pendingSend.current = null
       setMessage('')
       await refresh()
     } catch (err) {

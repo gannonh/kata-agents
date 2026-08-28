@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
-import { channelProviderSessionPath } from '@kata-sh/shared/channels'
+import { channelProviderSessionPath, RetryableStageDispatchError } from '@kata-sh/shared/channels'
 import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
 import type { BotTurnContext } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
@@ -10,6 +10,7 @@ import { ensureDurableDirectory, syncDirectory, writeDurableFile, writeDurableFi
 
 export interface BotSessionTarget {
   readonly workspaceId: string
+  readonly botId: string
   readonly name: string
   readonly permissionMode: BotPermissionMode
   readonly providerConfig: BotProviderConfig
@@ -53,6 +54,29 @@ function writeSessionId(path: string, sessionId: string): void {
 
 function messageText(message: { content?: string; text?: string }): string { return message.content ?? message.text ?? '' }
 function dispatchResultPath(sessionPointerPath: string, key: string): string { return join(dirname(sessionPointerPath), 'provider-dispatches', `${createHash('sha256').update(key, 'utf8').digest('hex')}.json`) }
+type BotSession = {
+  id: string
+  workspaceId: string
+  hidden: true
+  model?: string
+  llmConnection?: string
+  messages?: Array<{ id?: string; role?: string; content?: string; text?: string }>
+  isProcessing?: boolean
+}
+
+function isUsableBotSession(
+  session: { id?: string; workspaceId?: string; hidden?: boolean; model?: string; llmConnection?: string } | null,
+  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig'>,
+): session is BotSession {
+  return !!session
+    && session.workspaceId === target.workspaceId
+    && session.hidden === true
+    && session.model === target.providerConfig.modelId
+    && session.llmConnection === target.providerConfig.providerId
+    && typeof session.id === 'string'
+    && session.id.length > 0
+}
+function clearDispatchRecord(sessionPointerPath: string, key: string): void { rmSync(dispatchResultPath(sessionPointerPath, key), { force: true }) }
 
 type DispatchRecord = { dispatchIdempotencyKey: string; sessionId: string; state: 'pending' | 'completed'; userMessageId?: string; reply?: string }
 
@@ -62,7 +86,7 @@ function readDispatchRecord(sessionPointerPath: string, key: string): DispatchRe
   try {
     const record = JSON.parse(readFileSync(path, 'utf8')) as Partial<DispatchRecord> & { schemaVersion?: unknown }
     if (record.schemaVersion !== 1 || record.dispatchIdempotencyKey !== key || typeof record.sessionId !== 'string' || !record.sessionId) return null
-    if (record.state === 'completed' && typeof record.reply === 'string') return { dispatchIdempotencyKey: key, sessionId: record.sessionId, state: 'completed', reply: record.reply }
+    if (record.state === 'completed' && typeof record.reply === 'string' && record.reply.trim()) return { dispatchIdempotencyKey: key, sessionId: record.sessionId, state: 'completed', reply: record.reply }
     if (record.state === 'pending' && typeof record.userMessageId === 'string' && record.userMessageId) return { dispatchIdempotencyKey: key, sessionId: record.sessionId, state: 'pending', userMessageId: record.userMessageId }
     return null
   } catch { return null }
@@ -85,10 +109,12 @@ function writeDispatchRecord(sessionPointerPath: string, key: string, record: Om
 }
 
 function assistantAfter(messages: readonly { id?: string; role?: string; content?: string; text?: string }[], userMessageId: string): string | null {
-  let index = messages.findIndex(message => message.id === userMessageId)
-  if (index < 0) index = messages.map(message => message.role).lastIndexOf('user')
+  const index = messages.findIndex(message => message.id === userMessageId)
   if (index < 0) return null
-  const assistant = messages.slice(index + 1).find(message => message.role === 'assistant' && messageText(message))
+  const afterUser = messages.slice(index + 1)
+  const nextUser = afterUser.findIndex(message => message.role === 'user')
+  const turn = nextUser < 0 ? afterUser : afterUser.slice(0, nextUser)
+  const assistant = turn.find(message => message.role === 'assistant' && messageText(message))
   return assistant ? messageText(assistant) : null
 }
 
@@ -96,11 +122,12 @@ async function recoverPending(
   sessionManager: HandlerDeps['sessionManager'],
   pointerPath: string,
   pending: DispatchRecord,
+  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig'>,
 ): Promise<{ sessionId: string; reply: string } | null> {
   const deadline = Date.now() + SEND_TIMEOUT_MS
   while (Date.now() < deadline) {
     const session = await sessionManager.getSession(pending.sessionId)
-    if (!session) return null
+    if (!isUsableBotSession(session, target)) return null
     const messages = (session.messages ?? []) as Array<{ id?: string; role?: string; content?: string; text?: string }>
     const reply = assistantAfter(messages, pending.userMessageId!)
     if (reply && !(session as { isProcessing?: boolean }).isProcessing) {
@@ -110,12 +137,17 @@ async function recoverPending(
     if (!(session as { isProcessing?: boolean }).isProcessing && !reply) return null
     await new Promise(resolve => setTimeout(resolve, 250))
   }
+  const session = await sessionManager.getSession(pending.sessionId)
+  if (isUsableBotSession(session, target) && session.isProcessing) {
+    throw new RetryableStageDispatchError()
+  }
   return null
 }
 
 export async function resetBotProviderSessions(
   sessionManager: HandlerDeps['sessionManager'],
   workspaceRoot: string,
+  workspaceId: string,
   botId: string,
 ): Promise<void> {
   const pointers = [botProviderSessionPath(workspaceRoot, botId)]
@@ -124,13 +156,18 @@ export async function resetBotProviderSessions(
     if (channelId.isDirectory()) pointers.push(channelProviderSessionPath(workspaceRoot, channelId.name, botId))
   }
   for (const pointer of pointers) {
-    const sessionId = readSessionId(pointer)
-    if (sessionId) {
-      const session = await sessionManager.getSession(sessionId)
-      if (session && !(session as { hidden?: boolean }).hidden) continue
-      if (session) await sessionManager.deleteSession(sessionId)
-    }
-    rmSync(pointer, { force: true })
+    await withSessionQueue(pointer, async () => {
+      const sessionId = readSessionId(pointer)
+      if (sessionId) {
+        const session = await sessionManager.getSession(sessionId)
+        if (session && (
+          !(session as { hidden?: boolean }).hidden
+          || session.workspaceId !== workspaceId
+        )) return
+        if (session) await sessionManager.deleteSession(sessionId)
+      }
+      rmSync(pointer, { force: true })
+    })
   }
 }
 
@@ -140,32 +177,53 @@ export async function sendToBotSession(
   message: string,
   options: { callerClientId?: string; waitForReply: boolean; dispatchIdempotencyKey?: string; botTurnContext?: BotTurnContext },
 ): Promise<{ sessionId: string; reply: string | null }> {
+  if (options.botTurnContext && (
+    options.botTurnContext.workspaceId !== target.workspaceId
+    || options.botTurnContext.botId !== target.botId
+  )) {
+    throw new Error('Bot runtime context identity mismatch')
+  }
   return withSessionQueue(target.sessionPointerPath, async () => {
     const key = options.dispatchIdempotencyKey
     if (key) {
       const cached = readDispatchRecord(target.sessionPointerPath, key)
-      if (cached?.state === 'completed') return { sessionId: cached.sessionId, reply: cached.reply! }
-      if (cached?.state === 'pending') {
-        const recovered = await recoverPending(sessionManager, target.sessionPointerPath, cached)
+      const cachedSession = cached ? await sessionManager.getSession(cached.sessionId) : null
+      if (cached?.state === 'completed' && isUsableBotSession(cachedSession, target)) {
+        return { sessionId: cached.sessionId, reply: cached.reply! }
+      }
+      if (cached?.state === 'pending' && isUsableBotSession(cachedSession, target)) {
+        const recovered = await recoverPending(sessionManager, target.sessionPointerPath, cached, target)
         if (recovered) return recovered
       }
+      if (cached && !isUsableBotSession(cachedSession, target)) clearDispatchRecord(target.sessionPointerPath, key)
     }
 
-    const pending = key ? readDispatchRecord(target.sessionPointerPath, key) : null
-    let sessionId = readSessionId(target.sessionPointerPath)
-    if (sessionId && !(await sessionManager.getSession(sessionId))) sessionId = null
-    if (!sessionId && pending?.state === 'pending' && await sessionManager.getSession(pending.sessionId)) {
-      sessionId = pending.sessionId
-      writeSessionId(target.sessionPointerPath, sessionId)
+    let pending = key ? readDispatchRecord(target.sessionPointerPath, key) : null
+    const pendingSession = pending?.state === 'pending'
+      ? await sessionManager.getSession(pending.sessionId)
+      : null
+    if (pending && !isUsableBotSession(pendingSession, target)) {
+      clearDispatchRecord(target.sessionPointerPath, key!)
+      pending = null
+    }
+    let sessionId = isUsableBotSession(pendingSession, target)
+      ? pendingSession.id
+      : readSessionId(target.sessionPointerPath)
+    const pointedSession = sessionId ? await sessionManager.getSession(sessionId) : null
+    if (sessionId && !isUsableBotSession(pointedSession, target)) {
+      sessionId = null
+      rmSync(target.sessionPointerPath, { force: true })
     }
     if (!sessionId) {
       const session = await sessionManager.createSession(target.workspaceId, { name: target.name, hidden: true, permissionMode: target.permissionMode, model: target.providerConfig.modelId, llmConnection: target.providerConfig.providerId })
+      if (!isUsableBotSession(session, target)) throw new Error('Bot provider session was not created as a hidden workspace session')
       sessionId = session.id
       writeSessionId(target.sessionPointerPath, sessionId)
     }
 
     const before = await sessionManager.getSession(sessionId)
-    const beforeAssistantCount = (before?.messages ?? []).filter((entry: { role?: string }) => entry.role === 'assistant').length
+    if (!isUsableBotSession(before, target)) throw new Error('Bot provider session identity changed before dispatch')
+    if (before.isProcessing) throw new RetryableStageDispatchError()
     let acknowledgedMessageId: string | undefined = pending?.state === 'pending' ? pending.userMessageId : undefined
     await new Promise<void>((resolve, reject) => {
       let settled = false
@@ -194,18 +252,19 @@ export async function sendToBotSession(
     const deadline = Date.now() + SEND_TIMEOUT_MS
     while (Date.now() < deadline) {
       const session = await sessionManager.getSession(sessionId)
-      const messages = (session?.messages ?? []) as Array<{ role?: string; content?: string; text?: string }>
-      const assistantMessages = messages.filter(entry => entry.role === 'assistant')
-      const processing = Boolean((session as { isProcessing?: boolean } | null)?.isProcessing)
-      if (!processing && assistantMessages.length > beforeAssistantCount) {
-        const reply = messageText(assistantMessages[assistantMessages.length - 1]!)
-        if (reply) {
-          if (key) writeDispatchRecord(target.sessionPointerPath, key, { sessionId, state: 'completed', reply })
-          return { sessionId, reply }
-        }
+      if (!isUsableBotSession(session, target)) throw new Error('Bot provider session identity changed while dispatching')
+      const messages = session.messages ?? []
+      const reply = acknowledgedMessageId
+        ? assistantAfter(messages, acknowledgedMessageId)
+        : null
+      if (!session.isProcessing && reply) {
+        if (key) writeDispatchRecord(target.sessionPointerPath, key, { sessionId, state: 'completed', reply })
+        return { sessionId, reply }
       }
       await new Promise(resolve => setTimeout(resolve, 250))
     }
+    const session = await sessionManager.getSession(sessionId)
+    if (isUsableBotSession(session, target) && session.isProcessing) throw new RetryableStageDispatchError()
     return { sessionId, reply: null }
   })
 }

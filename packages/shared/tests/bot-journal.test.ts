@@ -236,6 +236,27 @@ describe('ConversationJournal boundaries', () => {
 
     const foreign = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_2', clock: () => at });
     expect(() => foreign.list(bot.directChatId)).toThrow(/belongs to another workspace/);
+
+    const entryId = 'entry_foreign_author0123456789abcdef';
+    writeJsonRecord(journalIndexPath(journal.journalRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { foreign: entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(journalEntryPath(journal.journalRoot, bot.directChatId, 1, entryId), {
+      schemaVersion: 1,
+      entryId,
+      conversationId: bot.directChatId,
+      authorBotId: 'bot_other',
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'foreign',
+      body: 'should not be readable',
+      createdAt: at,
+    });
+    expect(() => journal.list(bot.directChatId)).toThrow(/wrong Bot/);
   });
 });
 

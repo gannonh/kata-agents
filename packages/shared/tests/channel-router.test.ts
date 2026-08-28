@@ -5,7 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import type { RouteRecord } from '@kata-sh/core';
 import { ChannelDirectory } from '../src/channels/directory.ts';
 import { createChannelJournal } from '../src/channels/conversation.ts';
-import { ChannelRouter, ChannelMentionError, type DispatchRequest } from '../src/channels/router.ts';
+import { ChannelRouter, ChannelMentionError, RetryableStageDispatchError, type DispatchRequest } from '../src/channels/router.ts';
 import { RouteStore } from '../src/channels/routes.ts';
 import { dispatchIdempotencyKey, stageId } from '../src/channels/ids.ts';
 
@@ -111,6 +111,27 @@ describe('ChannelRouter', () => {
     expect(result.route.stages[0]?.ownerBotId).toBe('bot-b');
   });
 
+  it('keeps a timed-out dispatch recoverable', async () => {
+    let firstAttempt = true;
+    const fixture = makeFixture({
+      dispatch: async () => {
+        if (firstAttempt) {
+          firstAttempt = false;
+          throw new RetryableStageDispatchError();
+        }
+        return 'recovered reply';
+      },
+    });
+    const first = await fixture.router.send({ channelId: fixture.channel.channelId, message: 'retry this', idempotencyKey: 'send-retryable' });
+    expect(first.route.stages[0]?.state).toBe('dispatched');
+    expect(first.replies).toEqual([]);
+
+    const recovered = await fixture.router.recover(fixture.channel.channelId);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]?.stages[0]?.state).toBe('completed');
+    expect(fixture.journal.list(fixture.channel.channelId).some(entry => entry.body === 'recovered reply')).toBe(true);
+  });
+
   it('records malformed, timeout, and no-claim outcomes without dispatching', async () => {
     const fixture = makeFixture({
       claimWindowMs: 5,
@@ -157,6 +178,26 @@ describe('ChannelRouter', () => {
 
     const everyone = await fixture.router.send({ channelId: fixture.channel.channelId, message: '@everyone status update', idempotencyKey: 'send-7' });
     expect(everyone.route.stages.map((stage) => stage.ownerBotId)).toEqual(['bot-a', 'bot-b']);
+  });
+
+  it('retains historical replies after a Bot leaves the Channel', async () => {
+    const fixture = makeFixture();
+    const result = await fixture.router.send({ channelId: fixture.channel.channelId, message: '@Alpha Bot retain this', idempotencyKey: 'send-history' });
+    fixture.directory.removeMember(fixture.channel.channelId, 'bot-a');
+
+    expect(fixture.journal.list(fixture.channel.channelId)).toContainEqual(
+      expect.objectContaining({ entryId: result.replies[0]?.entryId, authorBotId: 'bot-a' }),
+    );
+  });
+
+  it('resolves an existing Channel operation before archived-state validation', async () => {
+    const fixture = makeFixture();
+    const first = await fixture.router.send({ channelId: fixture.channel.channelId, message: 'archive me', idempotencyKey: 'send-archived-retry' });
+    fixture.directory.archiveChannel(fixture.channel.channelId);
+
+    const retried = await fixture.router.send({ channelId: fixture.channel.channelId, message: 'changed after archive', idempotencyKey: 'send-archived-retry' });
+    expect(retried.userEntry.entryId).toBe(first.userEntry.entryId);
+    expect(retried.route.routeId).toBe(first.route.routeId);
   });
 
   it('rejects a non-member mention before appending a journal entry', async () => {

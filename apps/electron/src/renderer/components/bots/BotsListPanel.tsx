@@ -34,6 +34,7 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
   const [name, setName] = React.useState('')
   const [profile, setProfile] = React.useState('')
   const [busy, setBusy] = React.useState(false)
+  const pendingCreate = React.useRef<{ signature: string; idempotencyKey: string } | null>(null)
 
   const refresh = React.useCallback(async () => {
     const loaded = await window.electronAPI.listBots(workspaceId, { lifecycle: 'active' })
@@ -56,6 +57,13 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
       llmConnections.find(c => c.slug === workspaceDefaultLlmConnection) ?? llmConnections[0]
 
     const trimmedProfile = profile.trim()
+    const providerId = connection?.slug ?? FALLBACK_PROVIDER_ID
+    const modelId = connection?.defaultModel ?? FALLBACK_MODEL_ID
+    const signature = [trimmed, trimmedProfile, providerId, modelId].join('\u0000')
+    const idempotencyKey = pendingCreate.current?.signature === signature
+      ? pendingCreate.current.idempotencyKey
+      : crypto.randomUUID()
+    pendingCreate.current = { signature, idempotencyKey }
 
     setBusy(true)
     try {
@@ -63,12 +71,13 @@ export function BotsListPanel({ workspaceId, selectedBotId, onBotClick }: BotsLi
         name: trimmed,
         permissionMode: 'ask',
         providerConfig: {
-          providerId: connection?.slug ?? FALLBACK_PROVIDER_ID,
-          modelId: connection?.defaultModel ?? FALLBACK_MODEL_ID,
+          providerId,
+          modelId,
         },
         ...(trimmedProfile ? { profile: trimmedProfile } : {}),
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey,
       })
+      pendingCreate.current = null
       setName('')
       setProfile('')
       setIsCreating(false)
