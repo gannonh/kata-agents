@@ -7,6 +7,8 @@
  * hidden execution records.
  */
 
+import type { HandoffId } from './handoff.ts';
+
 export const CONVERSATION_SCHEMA_VERSION = 1 as const;
 
 /** Bounds are UTF-8 byte counts, not JavaScript string lengths. */
@@ -15,7 +17,7 @@ export const CONVERSATION_LIMITS = Object.freeze({
   idempotencyKeyBytes: 512,
 });
 
-export const JOURNAL_ENTRY_KINDS = ['user', 'bot', 'tool', 'error', 'lifecycle'] as const;
+export const JOURNAL_ENTRY_KINDS = ['user', 'bot', 'tool', 'error', 'lifecycle', 'handoff'] as const;
 export type JournalEntryKind = (typeof JOURNAL_ENTRY_KINDS)[number];
 
 /** `chat_<uuid>` or `channel_<uuid>` */
@@ -29,6 +31,8 @@ export interface JournalEntry {
   readonly conversationId: ConversationId;
   /** Author of a Bot-produced entry. Absent on user entries. */
   readonly authorBotId?: string;
+  /** Handoff this entry announces. Required on handoff entries; absent otherwise. */
+  readonly handoffId?: HandoffId;
   readonly seq: number;
   readonly kind: JournalEntryKind;
   readonly idempotencyKey: string;

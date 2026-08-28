@@ -128,6 +128,24 @@ export {
   BOT_LIMITS,
 } from './bot.ts';
 
+// Bot-to-bot handoff delivery contracts
+export type {
+  HandoffId,
+  HandoffDeliveryId,
+  DeliveryClaimId,
+  HandoffMailState,
+  HandoffDeliveryClaim,
+  HandoffDeliveryFailure,
+  HandoffDeliveryRecord,
+  HandoffTaskView,
+} from './handoff.ts';
+export {
+  HANDOFF_SCHEMA_VERSION,
+  HANDOFF_LIMITS,
+  HANDOFF_MAIL_STATES,
+  HANDOFF_MAIL_TRANSITIONS,
+} from './handoff.ts';
+
 export type {
   BotMemoryState,
   BotMemoryMutationKind,
