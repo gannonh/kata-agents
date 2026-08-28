@@ -15,6 +15,7 @@
               "root": "es/cli/index",
               "pages": [
                 "es/cli/install",
+                "es/cli/mdx-extension",
                 "es/cli/preview",
                 "es/cli/commands"
               ]
@@ -99,15 +100,11 @@
               "root": "es/editor/index",
               "pages": [
                 "es/editor/tutorial",
-                "es/editor/git-essentials",
                 "es/editor/pages",
-                "es/editor/navigation",
-                "es/editor/live-preview",
-                "es/editor/branching-and-publishing",
-                "es/editor/comments",
-                "es/editor/suggestions",
+                "es/editor/publish",
+                "es/editor/review",
+                "es/editor/collaborate",
                 "es/editor/agent",
-                "es/editor/configurations",
                 "es/editor/settings",
                 "es/editor/keyboard-shortcuts"
               ]
@@ -186,7 +183,6 @@
                     "es/deploy/cloudflare",
                     "es/deploy/route53-cloudfront",
                     "es/deploy/vercel",
-                    "es/deploy/vercel-external-proxies",
                     "es/deploy/reverse-proxy"
                   ]
                 },
@@ -464,7 +460,8 @@
             "es/help-center/domain-already-claimed-by-another-organization",
             "es/help-center/configure-oauth-with-auth0",
             "es/help-center/private-repo-missing-when-creating-second-deployment",
-            "es/help-center/static-file-not-served"
+            "es/help-center/static-file-not-served",
+            "es/help-center/preview-deployment-not-created-for-fork-branch"
           ]
         }
       ]

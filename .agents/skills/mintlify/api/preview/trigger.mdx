@@ -2,12 +2,15 @@
 title: "Trigger preview deployment"
 openapi: "/openapi.json POST /project/preview/{projectId}"
 keywords: ["preview", "preview deployment", "branch preview", "staging"]
-
 ---
 
 Use this endpoint to programmatically create or update a preview deployment for a Git branch. If a preview already exists for the specified branch, the endpoint triggers a redeployment instead of creating a duplicate.
 
 The response includes a `statusId` that you can pass to [Get deployment status](/api/update/status) to track the deployment progress.
+
+## Branch requirements
+
+The `branch` must exist in the repository connected to your Mintlify project and you must have the Mintlify GitHub App installed. Branches on forks are not supported. See [Fork pull requests](/deploy/preview-deployments#fork-pull-requests) for how to preview changes from a fork.
 
 ## Use cases
 

@@ -370,6 +370,10 @@ mint automations delete <id> [flags]
 
 从终端查询文档分析数据。需要使用 `mint login` 进行身份验证。
 
+<Info>
+  分析功能需要 [Pro 或 Enterprise 计划](https://mintlify.com/pricing?ref=analytics)。
+</Info>
+
 ```bash
 mint analytics <subcommand> [flags]
 ```
@@ -532,7 +536,9 @@ mint config <subcommand> <key> [value]
 
 | 键 | 描述 | 使用者 |
 | --- | --- | --- |
-| `subdomain` | 默认文档子域名。 | `mint automations` |
+| `subdomain` | 默认文档子域名。 | `mint dev`、`mint automations`、`mint analytics`、`mint add-domain`、`mint score` |
+| `dateFrom` | 分析查询的默认开始日期。 | `mint analytics` |
+| `dateTo` | 分析查询的默认结束日期。 | `mint analytics` |
 
 ---
 

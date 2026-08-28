@@ -368,6 +368,10 @@ mint automations delete <id> [flags]
 
 Consulta las analíticas de la documentación desde la terminal. Requiere autenticación con `mint login`.
 
+<Info>
+  Las analíticas requieren un [plan Pro o Enterprise](https://mintlify.com/pricing?ref=analytics).
+</Info>
+
 ```bash
 mint analytics <subcommand> [flags]
 ```
@@ -530,7 +534,9 @@ mint config <subcommand> <key> [value]
 
 | Clave | Descripción | Usado por |
 | --- | --- | --- |
-| `subdomain` | Subdominio predeterminado de la documentación. | `mint automations` |
+| `subdomain` | Subdominio predeterminado de la documentación. | `mint dev`, `mint automations`, `mint analytics`, `mint add-domain`, `mint score` |
+| `dateFrom` | Fecha de inicio predeterminada para las consultas de analíticas. | `mint analytics` |
+| `dateTo` | Fecha de fin predeterminada para las consultas de analíticas. | `mint analytics` |
 
 ---
 
