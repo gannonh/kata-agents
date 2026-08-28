@@ -13,11 +13,8 @@ import {
   type ClaimEvaluator,
   type DispatchRequest,
 } from '@kata-sh/shared/channels'
-import { BotDirectory, toBotPublicDto } from '@kata-sh/shared/bots'
-import type {
-  BotRecord,
-  RouteRecord,
-} from '@kata-sh/core'
+import { BotDirectory, BotContextLedger, ContextAssembler, StaleCompactionError, toBotPublicDto } from '@kata-sh/shared/bots'
+import { BOT_MEMORY_LIMITS, type BotRecord, type RouteRecord } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { sendToBotSession } from './bot-runtime'
@@ -170,6 +167,10 @@ function createStageDispatcher(
     const message = request.isFirstDispatch
       ? `You are ${bot.name} in the Channel "${request.channelName}". Channel members: ${request.memberNames.join(', ') || '(none)'}.\n\n${request.message}`
       : request.message
+    const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: bot.botId, journal: runtime.journal })
+    const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
+    const prepared = assembler.assemble({ conversationId: request.channelId, operationId: request.dispatchIdempotencyKey })
+    await ledger.recordRun(prepared.context)
     const result = await sendToBotSession(
       deps.sessionManager,
       {
@@ -184,6 +185,7 @@ function createStageDispatcher(
         callerClientId,
         waitForReply: true,
         dispatchIdempotencyKey: request.dispatchIdempotencyKey,
+        botTurnContext: prepared.context,
       },
     )
     if (result.reply === null) throw new Error('Bot did not return a reply')
@@ -204,6 +206,35 @@ function routerFor(
     evaluateClaim: createProviderClaimEvaluator(deps, runtime.workspace, runtime.bots),
     dispatch: createStageDispatcher(deps, runtime, callerClientId),
     onRouteCommitted,
+    onReplyCommitted: async ({ userEntry, ownerBotId }) => {
+      const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: ownerBotId, journal: runtime.journal })
+      const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
+      await ledger.completeTurn({ userEntry, operationId: `turn.${userEntry.entryId}.${ownerBotId}` })
+      const journalHead = runtime.journal.getHeadSequence(userEntry.conversationId)
+      if (journalHead >= BOT_MEMORY_LIMITS.recentEntries * 2) {
+        const checkpoint = ledger.getCheckpoint(userEntry.conversationId)
+        try {
+          await assembler.compact({
+            conversationId: userEntry.conversationId,
+            expectedJournalHeadSequence: journalHead,
+            expectedMemoryRevision: ledger.store.getHead().revision,
+            expectedCheckpointRevision: checkpoint?.checkpointRevision ?? 0,
+            operationId: `compact.${userEntry.conversationId}.${journalHead}.${ownerBotId}`,
+          })
+        } catch (error) {
+          if (!(error instanceof StaleCompactionError)) throw error
+          const latestHead = runtime.journal.getHeadSequence(userEntry.conversationId)
+          const latestCheckpoint = ledger.getCheckpoint(userEntry.conversationId)
+          await assembler.compact({
+            conversationId: userEntry.conversationId,
+            expectedJournalHeadSequence: latestHead,
+            expectedMemoryRevision: ledger.store.getHead().revision,
+            expectedCheckpointRevision: latestCheckpoint?.checkpointRevision ?? 0,
+            operationId: `compact.retry.${userEntry.conversationId}.${latestHead}.${ownerBotId}`,
+          })
+        }
+      }
+    },
   })
 }
 

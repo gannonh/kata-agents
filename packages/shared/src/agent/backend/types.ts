@@ -302,6 +302,8 @@ export interface ChatOptions {
   isRetry?: boolean;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
+  /** Untrusted, non-persisted runtime context supplied by a Bot turn. */
+  runtimeContext?: string;
 }
 
 /**

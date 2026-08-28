@@ -26,6 +26,7 @@ export interface DispatchRequest {
   readonly message: string;
   readonly memberNames: readonly string[];
   readonly isFirstDispatch: boolean;
+  readonly sourceEntryId: string;
 }
 
 export type StageDispatcher = (request: DispatchRequest) => Promise<string>;
@@ -38,6 +39,7 @@ export interface ChannelRouterOptions {
   readonly dispatch: StageDispatcher;
   /** Called after a route is durably committed and before any stage dispatch. */
   readonly onRouteCommitted?: (route: RouteRecord) => void;
+  readonly onReplyCommitted?: (input: { userEntry: JournalEntry; replyEntry: JournalEntry; ownerBotId: string }) => Promise<void>;
   readonly clock?: () => string;
   readonly claimWindowMs?: number;
 }
@@ -132,6 +134,7 @@ export class ChannelRouter {
   private readonly evaluateClaim: ClaimEvaluator;
   private readonly dispatch: StageDispatcher;
   private readonly onRouteCommitted: ((route: RouteRecord) => void) | undefined;
+  private readonly onReplyCommitted: ((input: { userEntry: JournalEntry; replyEntry: JournalEntry; ownerBotId: string }) => Promise<void>) | undefined;
   private readonly clock: () => string;
   private readonly claimWindowMs: number;
 
@@ -142,6 +145,7 @@ export class ChannelRouter {
     this.evaluateClaim = options.evaluateClaim;
     this.dispatch = options.dispatch;
     this.onRouteCommitted = options.onRouteCommitted;
+    this.onReplyCommitted = options.onReplyCommitted;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.claimWindowMs = options.claimWindowMs ?? CHANNEL_LIMITS.claimWindowMs;
     if (!Number.isSafeInteger(this.claimWindowMs) || this.claimWindowMs < 0) throw new Error('claimWindowMs must be a non-negative safe integer');
@@ -376,13 +380,14 @@ export class ChannelRouter {
         idempotencyKey: `route.error.${current.routeId}`,
       });
     } else {
-      current = await this.settle(current, userEntry.body);
+      current = await this.settle(current, userEntry);
     }
     return { userEntry, route: current, replies: this.repliesFor(current) };
   }
 
-  private async settle(route: RouteRecord, message: string): Promise<RouteRecord> {
+  private async settle(route: RouteRecord, userEntry: JournalEntry): Promise<RouteRecord> {
     let current = route;
+    const message = userEntry.body;
     const channel = this.directory.getChannel(route.channelId);
     for (const stage of current.stages) {
       const latest = current.stages.find((candidate) => candidate.stageId === stage.stageId);
@@ -442,14 +447,16 @@ export class ChannelRouter {
             return bot ? [bot.name] : [];
           }) ?? [],
           isFirstDispatch: !this.routes.list(current.channelId).some((candidate) => candidate.routeId !== current.routeId && candidate.stages.some((candidateStage) => candidateStage.ownerBotId === latest.ownerBotId && (candidateStage.state === 'completed' || candidateStage.state === 'dispatched'))),
+          sourceEntryId: current.messageEntryId,
         });
-        this.journal.append({
+        const replyEntry = this.journal.append({
           conversationId: current.channelId,
           authorBotId: latest.ownerBotId,
           kind: 'bot',
           body: reply,
           idempotencyKey: latest.dispatchIdempotencyKey,
         });
+        await this.onReplyCommitted?.({ userEntry, replyEntry, ownerBotId: latest.ownerBotId });
         current = this.updateStage(current, latest.stageId, {
           state: 'completed',
           settledAt: safeDate(this.clock),

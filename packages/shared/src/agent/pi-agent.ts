@@ -2113,6 +2113,7 @@ export class PiAgent extends BaseAgent {
       // (skill read directive is already prepended to message by BaseAgent.chat())
       const userParts = [
         ...volatileParts,
+        ...(options?.runtimeContext ? [options.runtimeContext] : []),
         ...attachmentParts,
         message,
       ].filter(Boolean);

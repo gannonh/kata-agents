@@ -6,8 +6,11 @@ import {
   convertSessionToBot,
   createDirectChatJournal,
   toBotPublicDto,
+  BotContextLedger,
+  ContextAssembler,
+  StaleCompactionError,
 } from '@kata-sh/shared/bots'
-import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
+import { BOT_MEMORY_LIMITS, type BotPermissionMode, type BotProviderConfig } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { sendToBotSession } from './bot-runtime'
@@ -22,18 +25,22 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.bots.ARCHIVE,
   RPC_CHANNELS.bots.REOPEN,
   RPC_CHANNELS.bots.GET_JOURNAL,
+  RPC_CHANNELS.bots.GET_MEMORY,
+  RPC_CHANNELS.bots.GET_CONTEXT,
+  RPC_CHANNELS.bots.MUTATE_MEMORY,
   RPC_CHANNELS.bots.SEND_MESSAGE,
   RPC_CHANNELS.bots.CONVERT_SESSION,
 ] as const
 
-function requireWorkspace(workspaceId: string) {
+function requireWorkspace(ctx: { workspaceId: string | null }, workspaceId: string) {
   const workspace = getWorkspaceByNameOrId(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
+  if (ctx.workspaceId && ctx.workspaceId !== workspace.id) throw new Error('Workspace access denied')
   return workspace
 }
 
-function openStores(workspaceId: string) {
-  const workspace = requireWorkspace(workspaceId)
+function openStores(ctx: { workspaceId: string | null }, workspaceId: string) {
+  const workspace = requireWorkspace(ctx, workspaceId)
   const directory = new BotDirectory({
     workspaceRoot: workspace.rootPath,
     workspaceId: workspace.id,
@@ -46,16 +53,47 @@ function openStores(workspaceId: string) {
   return { workspace, directory, journal }
 }
 
+function memoryFor(workspaceRoot: string, workspaceId: string, botId: string, journal: ReturnType<typeof createDirectChatJournal>) {
+  const ledger = new BotContextLedger({ workspaceRoot, workspaceId, botId, journal })
+  return { ledger, assembler: new ContextAssembler({ ledger, journal }) }
+}
+
+async function compactIfNeeded(ledger: BotContextLedger, assembler: ContextAssembler, conversationId: string): Promise<void> {
+  const journalHead = ledger.journal.getHeadSequence(conversationId)
+  if (journalHead < BOT_MEMORY_LIMITS.recentEntries * 2) return
+  const checkpoint = ledger.getCheckpoint(conversationId)
+  try {
+    await assembler.compact({
+      conversationId,
+      expectedJournalHeadSequence: journalHead,
+      expectedMemoryRevision: ledger.store.getHead().revision,
+      expectedCheckpointRevision: checkpoint?.checkpointRevision ?? 0,
+      operationId: `compact.${conversationId}.${journalHead}`,
+    })
+  } catch (error) {
+    if (!(error instanceof StaleCompactionError)) throw error
+    const latestHead = ledger.journal.getHeadSequence(conversationId)
+    const latestCheckpoint = ledger.getCheckpoint(conversationId)
+    await assembler.compact({
+      conversationId,
+      expectedJournalHeadSequence: latestHead,
+      expectedMemoryRevision: ledger.store.getHead().revision,
+      expectedCheckpointRevision: latestCheckpoint?.checkpointRevision ?? 0,
+      operationId: `compact.retry.${conversationId}.${latestHead}`,
+    })
+  }
+}
+
 export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { sessionManager } = deps
 
-  server.handle(RPC_CHANNELS.bots.LIST, async (_ctx, workspaceId: string, filter?: { lifecycle?: 'active' | 'hidden' | 'archived' | 'all' }) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.LIST, async (ctx, workspaceId: string, filter?: { lifecycle?: 'active' | 'hidden' | 'archived' | 'all' }) => {
+    const { directory } = openStores(ctx, workspaceId)
     return directory.listBots(filter).map(toBotPublicDto)
   })
 
-  server.handle(RPC_CHANNELS.bots.GET, async (_ctx, workspaceId: string, botId: string) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.GET, async (ctx, workspaceId: string, botId: string) => {
+    const { directory } = openStores(ctx, workspaceId)
     const bot = directory.getBot(botId)
     if (!bot) throw new Error('Bot not found')
     return toBotPublicDto(bot)
@@ -64,7 +102,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
   server.handle(
     RPC_CHANNELS.bots.CREATE,
     async (
-      _ctx,
+      ctx,
       workspaceId: string,
       input: {
         name: string
@@ -74,7 +112,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         idempotencyKey?: string
       },
     ) => {
-      const { directory } = openStores(workspaceId)
+      const { directory } = openStores(ctx, workspaceId)
       const bot = directory.createBot({
         name: input.name,
         permissionMode: input.permissionMode,
@@ -90,15 +128,15 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     },
   )
 
-  server.handle(RPC_CHANNELS.bots.RENAME, async (_ctx, workspaceId: string, botId: string, name: string) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.RENAME, async (ctx, workspaceId: string, botId: string, name: string) => {
+    const { directory } = openStores(ctx, workspaceId)
     return toBotPublicDto(directory.renameBot(botId, name))
   })
 
   server.handle(
     RPC_CHANNELS.bots.UPDATE,
     async (
-      _ctx,
+      ctx,
       workspaceId: string,
       botId: string,
       patch: {
@@ -108,30 +146,30 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         providerConfig?: BotProviderConfig
       },
     ) => {
-      const { directory } = openStores(workspaceId)
+      const { directory } = openStores(ctx, workspaceId)
       return toBotPublicDto(directory.updateBot(botId, patch))
     },
   )
 
-  server.handle(RPC_CHANNELS.bots.HIDE, async (_ctx, workspaceId: string, botId: string) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.HIDE, async (ctx, workspaceId: string, botId: string) => {
+    const { directory } = openStores(ctx, workspaceId)
     return toBotPublicDto(directory.hideBot(botId))
   })
 
-  server.handle(RPC_CHANNELS.bots.ARCHIVE, async (_ctx, workspaceId: string, botId: string) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.ARCHIVE, async (ctx, workspaceId: string, botId: string) => {
+    const { directory } = openStores(ctx, workspaceId)
     return toBotPublicDto(directory.archiveBot(botId))
   })
 
-  server.handle(RPC_CHANNELS.bots.REOPEN, async (_ctx, workspaceId: string, botId: string) => {
-    const { directory } = openStores(workspaceId)
+  server.handle(RPC_CHANNELS.bots.REOPEN, async (ctx, workspaceId: string, botId: string) => {
+    const { directory } = openStores(ctx, workspaceId)
     return toBotPublicDto(directory.reopenBot(botId))
   })
 
   server.handle(
     RPC_CHANNELS.bots.GET_JOURNAL,
-    async (_ctx, workspaceId: string, botId: string, opts?: { afterSeq?: number; limit?: number }) => {
-      const { directory, journal } = openStores(workspaceId)
+    async (ctx, workspaceId: string, botId: string, opts?: { afterSeq?: number; limit?: number }) => {
+      const { directory, journal } = openStores(ctx, workspaceId)
       const bot = directory.getBot(botId)
       if (!bot) throw new Error('Bot not found')
       return {
@@ -142,6 +180,32 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     },
   )
 
+  server.handle(RPC_CHANNELS.bots.GET_MEMORY, async (ctx, workspaceId: string, botId: string) => {
+    const { workspace, directory, journal } = openStores(ctx, workspaceId)
+    const bot = directory.getBot(botId)
+    if (!bot) throw new Error('Bot not found')
+    const { ledger } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    return ledger.store.getHead()
+  })
+
+  server.handle(RPC_CHANNELS.bots.GET_CONTEXT, async (ctx, workspaceId: string, botId: string) => {
+    const { workspace, directory, journal } = openStores(ctx, workspaceId)
+    const bot = directory.getBot(botId)
+    if (!bot) throw new Error('Bot not found')
+    const { assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    return assembler.assemble({ conversationId: bot.directChatId, operationId: `inspect.${randomUUID()}` })
+  })
+
+  server.handle(RPC_CHANNELS.bots.MUTATE_MEMORY, async (ctx, workspaceId: string, botId: string, mutation: import('@kata-sh/core').BotMemoryMutation) => {
+    const { workspace, directory, journal } = openStores(ctx, workspaceId)
+    const bot = directory.getBot(botId)
+    if (!bot) throw new Error('Bot not found')
+    const { ledger } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
+    const head = await ledger.store.mutate(mutation)
+    pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, { type: 'memory-updated', botId: bot.botId })
+    return head
+  })
+
   server.handle(
     RPC_CHANNELS.bots.SEND_MESSAGE,
     async (
@@ -151,9 +215,10 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
       message: string,
       options?: { idempotencyKey?: string; waitForReply?: boolean },
     ) => {
-      const { directory, journal } = openStores(workspaceId)
+      const { workspace, directory, journal } = openStores(ctx, workspaceId)
       const bot = directory.getBot(botId)
       if (!bot) throw new Error('Bot not found')
+      const { ledger, assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
 
       const idempotencyKey = options?.idempotencyKey ?? `send.${randomUUID()}`
       const userEntry = journal.append({
@@ -162,6 +227,9 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         body: message,
         idempotencyKey,
       })
+      const operationId = `turn.${userEntry.entryId}`
+      const prepared = assembler.assemble({ conversationId: bot.directChatId, operationId })
+      await ledger.recordRun(prepared.context)
 
       await sessionManager.waitForInit()
       const runtime = await sendToBotSession(
@@ -174,7 +242,12 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
           sessionPointerPath: `${directory.rootPath}/bots/${bot.botId}/provider-session`,
         },
         message,
-        { callerClientId: ctx.clientId, waitForReply: options?.waitForReply !== false },
+        {
+          callerClientId: ctx.clientId,
+          waitForReply: options?.waitForReply !== false,
+          dispatchIdempotencyKey: operationId,
+          botTurnContext: prepared.context,
+        },
       )
 
       const botEntry = runtime.reply
@@ -185,11 +258,19 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
           idempotencyKey: `reply.${userEntry.entryId}`,
         })
         : undefined
+      if (botEntry) {
+        await ledger.completeTurn({ userEntry, operationId })
+        await compactIfNeeded(ledger, assembler, bot.directChatId)
+      }
 
       pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, {
         type: 'journal-updated',
         botId: bot.botId,
         chatId: bot.directChatId,
+      })
+      pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, {
+        type: 'memory-updated',
+        botId: bot.botId,
       })
 
       return {
@@ -204,7 +285,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
   server.handle(
     RPC_CHANNELS.bots.CONVERT_SESSION,
     async (
-      _ctx,
+      ctx,
       workspaceId: string,
       input: {
         sessionId: string
@@ -215,7 +296,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         profile?: string
       },
     ) => {
-      const { directory, journal } = openStores(workspaceId)
+      const { directory, journal } = openStores(ctx, workspaceId)
       await sessionManager.waitForInit()
       const session = await sessionManager.getSession(input.sessionId)
       if (!session) throw new Error('Session not found')

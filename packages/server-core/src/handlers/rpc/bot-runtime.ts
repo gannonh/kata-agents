@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
+import type { BotTurnContext } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
 import { ensureDurableDirectory, syncDirectory, writeDurableFile, writeDurableFileIfAbsent } from '@kata-sh/shared/spawn-tasks/durable-fs'
 
@@ -113,6 +114,7 @@ export async function sendToBotSession(
     callerClientId?: string
     waitForReply: boolean
     dispatchIdempotencyKey?: string
+    botTurnContext?: BotTurnContext
   },
 ): Promise<{ sessionId: string; reply: string | null }> {
   return withSessionQueue(target.sessionPointerPath, async () => {
@@ -155,7 +157,9 @@ export async function sendToBotSession(
         undefined,
         undefined,
         onAck,
-        options.callerClientId ? { callerClientId: options.callerClientId } : undefined,
+        options.callerClientId || options.botTurnContext
+          ? { callerClientId: options.callerClientId, botTurnContext: options.botTurnContext }
+          : undefined,
       ).then(() => {
         if (!settled) {
           settled = true

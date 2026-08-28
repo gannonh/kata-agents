@@ -256,6 +256,12 @@ export class ConversationJournal {
     return this.buildCursor(conversation.conversationId, this.readLastReadSeq(conversation.conversationId));
   }
 
+  /** The authoritative highest sequence, independent of the UI read cursor. */
+  getHeadSequence(conversationId: string): number {
+    const conversation = this.require(conversationId);
+    return this.readIndex(conversation.conversationId).nextSeq - 1;
+  }
+
   markRead(conversationId: string, seq: number): JournalCursor {
     const conversation = this.require(conversationId);
     if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('seq must be a non-negative safe integer');

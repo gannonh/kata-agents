@@ -318,6 +318,7 @@ describe('ChannelRouter', () => {
       'message',
       'memberNames',
       'isFirstDispatch',
+      'sourceEntryId',
     ] as const;
     for (const [index, message] of (['first', 'second'] as const).entries()) {
       const request = requests[index];

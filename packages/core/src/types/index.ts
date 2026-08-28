@@ -128,6 +128,28 @@ export {
   BOT_LIMITS,
 } from './bot.ts';
 
+// Bot-owned memory and bounded context
+export type {
+  BotMemoryState,
+  BotMemoryMutationKind,
+  BotMemoryProvenance,
+  BotMemoryRecord,
+  BotMemoryExclusion,
+  BotMemoryHead,
+  BotMemoryMutation,
+  BotMemoryCandidate,
+  BotCompactionCheckpoint,
+  BotContextRun,
+  BotTurnContext,
+  BotContextSnapshot,
+} from './bot-memory.ts';
+export {
+  BOT_MEMORY_SCHEMA_VERSION,
+  BOT_MEMORY_STATES,
+  BOT_MEMORY_MUTATION_KINDS,
+  BOT_MEMORY_LIMITS,
+} from './bot-memory.ts';
+
 // Channel membership and autonomous routing contracts
 export type {
   ChannelId,

@@ -807,6 +807,7 @@ export class ClaudeAgent extends BaseAgent {
   ): AsyncGenerator<AgentEvent> {
     // Extract options (ChatOptions interface from AgentBackend)
     const _isRetry = options?.isRetry ?? false;
+    const runtimeContext = options?.runtimeContext;
 
     // Clear any leftover steer from a previous turn (safety net — should already be null)
     this.pendingSteerMessage = null;
@@ -1422,14 +1423,14 @@ This is a branched conversation. All prior messages in this conversation are par
         debug(`[chat] Detected SDK slash command: ${trimmedMessage}`);
         this.currentQuery = query({ prompt: trimmedMessage, options: optionsWithAbort });
       } else if (hasBinaryAttachments) {
-        const sdkMessage = this.buildSDKUserMessage(effectiveUserMessage, attachments);
+        const sdkMessage = this.buildSDKUserMessage(effectiveUserMessage, attachments, runtimeContext);
         async function* singleMessage(): AsyncIterable<SDKUserMessage> {
           yield sdkMessage;
         }
         this.currentQuery = query({ prompt: singleMessage(), options: optionsWithAbort });
       } else {
         // Simple string prompt for text-only messages (may include text file contents)
-        const prompt = this.buildTextPrompt(effectiveUserMessage, attachments);
+        const prompt = this.buildTextPrompt(effectiveUserMessage, attachments, runtimeContext);
         this.currentQuery = query({ prompt, options: optionsWithAbort });
       }
 
@@ -1658,7 +1659,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> DETECTED MISSING-UUID BRANCH CUTOFF ERROR - retrying on child session without cutoff');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chat(userMessage, attachments);
+          yield* this.chat(userMessage, attachments, { runtimeContext });
           return;
         }
 
@@ -1689,7 +1690,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Restoring conversation context...' };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chat(retryMessage, attachments, { isRetry: true, runtimeContext });
           return;
         }
 
@@ -1819,7 +1820,7 @@ This is a branched conversation. All prior messages in this conversation are par
           // on the retry — it will repair the file before the next subprocess spawn
           resetClaudeConfigCheck();
           yield { type: 'info', message: 'Repairing configuration file...' };
-          yield* this.chat(userMessage, attachments, { isRetry: true });
+          yield* this.chat(userMessage, attachments, { isRetry: true, runtimeContext });
           return;
         }
 
@@ -1861,7 +1862,7 @@ This is a branched conversation. All prior messages in this conversation are par
         if (suppressedBranchCutoffError && wasResuming && !_isRetry && this.sessionId) {
           debug('[SESSION_DEBUG] >>> TAKING PATH: missing-UUID branch-cutoff fallback from catch');
           yield { type: 'info', message: 'Branch point was compacted on server, retrying with nearest available context...' };
-          yield* this.chat(userMessage, attachments);
+          yield* this.chat(userMessage, attachments, { runtimeContext });
           return;
         }
 
@@ -1891,7 +1892,7 @@ This is a branched conversation. All prior messages in this conversation are par
           if (recoveryContext) retryMessage = recoveryContext + userMessage;
 
           yield { type: 'info', message: 'Session expired, restoring context...' };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chat(retryMessage, attachments, { isRetry: true, runtimeContext });
           return;
         }
 
@@ -1945,7 +1946,7 @@ This is a branched conversation. All prior messages in this conversation are par
             });
             yield { type: 'info', message: 'Reconnecting after update...' };
             await new Promise(r => setTimeout(r, 2000));
-            yield* this.chat(userMessage, attachments, { isRetry: true });
+            yield* this.chat(userMessage, attachments, { isRetry: true, runtimeContext });
             return;
           }
 
@@ -2098,7 +2099,7 @@ This is a branched conversation. All prior messages in this conversation are par
             : 'Request failed, retrying with context...';
 
           yield { type: 'info', message: statusMessage };
-          yield* this.chat(retryMessage, attachments, { isRetry: true });
+          yield* this.chat(retryMessage, attachments, { isRetry: true, runtimeContext });
           return;
         }
 
@@ -2154,7 +2155,7 @@ This is a branched conversation. All prior messages in this conversation are par
    * Prepends date/time context for prompt caching optimization (keeps system prompt static)
    * Injects session state (including mode state) for every message
    */
-  private buildTextPrompt(text: string, attachments?: FileAttachment[]): string {
+  private buildTextPrompt(text: string, attachments?: FileAttachment[], runtimeContext?: string): string {
     const parts: string[] = [];
 
     // Add context parts using centralized PromptBuilder
@@ -2171,6 +2172,7 @@ This is a branched conversation. All prior messages in this conversation are par
     );
 
     parts.push(...contextParts);
+    if (runtimeContext) parts.push(runtimeContext);
 
     // Add file attachments with stored path info (agent uses Read tool to access content)
     // Text files are NOT embedded inline to prevent context overflow from large files
@@ -2200,7 +2202,7 @@ This is a branched conversation. All prior messages in this conversation are par
    * Prepends date/time context for prompt caching optimization (keeps system prompt static)
    * Injects session state (including mode state) for every message
    */
-  private buildSDKUserMessage(text: string, attachments?: FileAttachment[]): SDKUserMessage {
+  private buildSDKUserMessage(text: string, attachments?: FileAttachment[], runtimeContext?: string): SDKUserMessage {
     const contentBlocks: ContentBlockParam[] = [];
 
     // Add context parts using centralized PromptBuilder
@@ -2219,6 +2221,7 @@ This is a branched conversation. All prior messages in this conversation are par
     for (const part of contextParts) {
       contentBlocks.push({ type: 'text', text: part });
     }
+    if (runtimeContext) contentBlocks.push({ type: 'text', text: runtimeContext });
 
     // Add attachments - images/PDFs are uploaded inline, text files are path-only
     // Text files are NOT embedded to prevent context overflow; agent uses Read tool

@@ -317,6 +317,9 @@ export interface ElectronAPI {
   hideBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
   archiveBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
   reopenBot(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotPublicDto>
+  getBotMemory(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotMemoryHead>
+  getBotContext(workspaceId: string, botId: string): Promise<import('@kata-sh/core').BotContextSnapshot>
+  mutateBotMemory(workspaceId: string, botId: string, mutation: import('@kata-sh/core').BotMemoryMutation): Promise<import('@kata-sh/core').BotMemoryHead>
   getBotJournal(
     workspaceId: string,
     botId: string,
