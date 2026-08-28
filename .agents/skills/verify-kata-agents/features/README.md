@@ -28,4 +28,5 @@ This directory is the maintained user-facing verification map for the Kata Agent
 - [Embedded browser panel](./browser-panel.md) covers creating, showing, detaching, reattaching, hiding, and enabling Annotate on a fixture page.
 - [Agent session](./agent-session.md) covers a real provider-backed session, model selection, a deterministic prompt, and the assistant reply.
 - [Channel routing](./channels.md) covers durable Channel creation, Bot membership, autonomous and explicit routing, fan-out, restart, and persisted route evidence.
+- [Bot memory and compaction](./memory.md) covers explicit preference extraction, provenance, edit and forget controls, bounded context, compaction, and restart recovery.
 - [Git workspaces](./git-workspaces.md) covers current checkout versus managed worktree selection, branch identity, configured roots, and cleanup.
