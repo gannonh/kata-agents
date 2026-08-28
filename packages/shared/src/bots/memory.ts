@@ -80,7 +80,8 @@ export function extractMemoryCandidate(input: {
   clock?: () => string
 }): BotMemoryCandidate | null {
   if (input.userEntry.kind !== 'user') return null
-  const match = input.userEntry.body.match(/^\s*(?:please\s+)?remember(?:\s+this)?(?:\s+for\s+future\s+(?:chats?|conversations?))?\s*[:,-]?\s*(.+)$/i)
+  const match = input.userEntry.body.match(/^\s*memory\s+candidate\s*[:,-]\s*(.+)$/i)
+    ?? input.userEntry.body.match(/^\s*(?:please\s+)?remember(?:\s+this)?(?:\s+for\s+future\s+(?:chats?|conversations?))?\s*[:,-]?\s*(.+)$/i)
     ?? input.userEntry.body.match(/^\s*(?:my\s+preference\s+is|i\s+prefer|i\s+like)\s*[:,-]?\s*(.+)$/i)
   if (!match?.[1]) return null
   const content = sanitizeMemoryContent(match[1])

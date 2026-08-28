@@ -34,6 +34,7 @@ describe('Bot memory', () => {
     expect(candidate?.candidateId).toStartWith('memory_')
     expect(candidate?.content).toBe('I prefer concise answers.')
     expect(candidate?.provenance.entryId).toBe('entry_source')
+    expect(extractMemoryCandidate({ workspaceId: 'workspace_one', botId: 'bot_one', userEntry: entry('Memory candidate: I prefer short answers.'), operationId: 'turn.marker' })?.content).toBe('I prefer short answers.')
   })
 
   test('rejects secrets and changing facts before persistence', () => {
