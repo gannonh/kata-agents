@@ -7,7 +7,7 @@ export { EVERYONE_MENTION, parseChannelMentions } from './mentions.ts';
 export type { ChannelMentionTarget, ParsedChannelMentions } from './mentions.ts';
 export { buildClaimPrompt, parseClaimResponse } from './claims.ts';
 export type { ClaimEvaluator, ClaimRequest } from './claims.ts';
-export { ChannelMentionError, ChannelRouter, CLAIM_SCHEMA } from './router.ts';
+export { ChannelMentionError, ChannelRouter, CLAIM_SCHEMA, RetryableStageDispatchError } from './router.ts';
 export type { ChannelRouterOptions, DispatchRequest, SendChannelMessageResult, StageDispatcher } from './router.ts';
 export { RouteStore } from './routes.ts';
 export type { RouteStoreOptions } from './routes.ts';

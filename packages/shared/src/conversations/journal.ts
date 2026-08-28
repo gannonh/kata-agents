@@ -256,6 +256,14 @@ export class ConversationJournal {
     return this.buildCursor(conversation.conversationId, this.readLastReadSeq(conversation.conversationId));
   }
 
+  /** The authoritative highest sequence, independent of the UI read cursor. */
+  getHeadSequence(conversationId: string): number {
+    const conversation = this.require(conversationId);
+    // Reconcile orphans before reporting the head so a crash between entry write
+    // and index commit cannot leave recovered entries invisible to assemblers.
+    return this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId)).nextSeq - 1;
+  }
+
   markRead(conversationId: string, seq: number): JournalCursor {
     const conversation = this.require(conversationId);
     if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('seq must be a non-negative safe integer');
@@ -423,7 +431,24 @@ export class ConversationJournal {
     if (entry.conversationId !== conversationId || entry.seq !== seq || entry.entryId !== entryId) {
       throw new Error(`Journal entry identity mismatch for ${entryId}`);
     }
+    const conversation = this.require(conversationId);
+    this.assertPersistedAuthor(conversation, entry);
     return entry;
+  }
+
+  private assertPersistedAuthor(conversation: ConversationRef, entry: JournalEntry): void {
+    if (entry.kind === 'user') {
+      if (entry.authorBotId !== undefined) throw new Error(`Persisted user entry ${entry.entryId} has a Bot author`);
+      return;
+    }
+    const authorBotId = entry.authorBotId;
+    if ((entry.kind === 'bot' || entry.kind === 'tool') && authorBotId === undefined) {
+      throw new Error(`Persisted ${entry.kind} entry ${entry.entryId} has no Bot author`);
+    }
+    if (authorBotId === undefined) return;
+    if (conversation.soleAuthorBotId !== undefined && conversation.soleAuthorBotId !== authorBotId) {
+      throw new Error(`Persisted entry ${entry.entryId} is authored by the wrong Bot`);
+    }
   }
 
   private migrateLegacyIndex(

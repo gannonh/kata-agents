@@ -24,6 +24,7 @@ export function ChannelsListPanel({
   const [isCreating, setIsCreating] = React.useState(false)
   const [name, setName] = React.useState('')
   const [busy, setBusy] = React.useState(false)
+  const pendingCreate = React.useRef<{ name: string; idempotencyKey: string } | null>(null)
 
   const refresh = React.useCallback(async () => {
     const loaded = await window.electronAPI.listChannels(workspaceId, { lifecycle: 'active' })
@@ -42,12 +43,18 @@ export function ChannelsListPanel({
     const trimmed = name.trim()
     if (!trimmed || busy) return
 
+    const idempotencyKey = pendingCreate.current?.name === trimmed
+      ? pendingCreate.current.idempotencyKey
+      : crypto.randomUUID()
+    pendingCreate.current = { name: trimmed, idempotencyKey }
+
     setBusy(true)
     try {
       const channel = await window.electronAPI.createChannel(workspaceId, {
         name: trimmed,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey,
       })
+      pendingCreate.current = null
       setName('')
       setIsCreating(false)
       await refresh()

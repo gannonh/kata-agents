@@ -6,7 +6,7 @@
  * satisfy it at runtime.
  */
 
-import type { Workspace, WorkspaceInfo, ActiveSessionInfo } from '@kata-sh/core/types'
+import type { Workspace, WorkspaceInfo, ActiveSessionInfo, BotTurnContext } from '@kata-sh/core/types'
 import type { StoredAttachment, AnnotationV1 } from '@kata-sh/core/types'
 import type { PermissionMode } from '@kata-sh/shared/agent/mode-types'
 import type { ThinkingLevel } from '@kata-sh/shared/agent/thinking-levels'
@@ -152,7 +152,7 @@ export interface ISessionManager {
     existingMessageId?: string,
     _isAuthRetry?: boolean,
     onAck?: (messageId: string) => void,
-    rpcContext?: { callerClientId?: string },
+    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>

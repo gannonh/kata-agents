@@ -30,7 +30,16 @@ export type {
 export { toBotPublicDto } from './dto.ts';
 export { idempotencyPointerName, reserveBotIds } from './ids.ts';
 export type { BotReservedIds } from './ids.ts';
-export { botsRootPath } from './layout.ts';
+export { botProviderSessionPath, botsRootPath } from './layout.ts';
+export {
+  BotContextLedger,
+  ContextAssembler,
+  MemoryStore,
+  StaleCompactionError,
+  createBotContextLedger,
+  extractMemoryCandidate,
+  sanitizeMemoryContent,
+} from './memory.ts';
 export {
   assertBotId,
   assertBotRecord,

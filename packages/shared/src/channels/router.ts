@@ -26,6 +26,7 @@ export interface DispatchRequest {
   readonly message: string;
   readonly memberNames: readonly string[];
   readonly isFirstDispatch: boolean;
+  readonly sourceEntryId: string;
 }
 
 export type StageDispatcher = (request: DispatchRequest) => Promise<string>;
@@ -38,6 +39,7 @@ export interface ChannelRouterOptions {
   readonly dispatch: StageDispatcher;
   /** Called after a route is durably committed and before any stage dispatch. */
   readonly onRouteCommitted?: (route: RouteRecord) => void;
+  readonly onReplyCommitted?: (input: { userEntry: JournalEntry; replyEntry: JournalEntry; ownerBotId: string }) => Promise<void>;
   readonly clock?: () => string;
   readonly claimWindowMs?: number;
 }
@@ -55,6 +57,13 @@ export class ChannelMentionError extends Error {
     super(`Unknown Channel mention: ${unresolved.map((token) => `@${token}`).join(', ')}`);
     this.name = 'ChannelMentionError';
     this.unresolved = [...unresolved];
+  }
+}
+
+export class RetryableStageDispatchError extends Error {
+  constructor(message = 'Bot reply is still pending') {
+    super(message);
+    this.name = 'RetryableStageDispatchError';
   }
 }
 
@@ -132,6 +141,7 @@ export class ChannelRouter {
   private readonly evaluateClaim: ClaimEvaluator;
   private readonly dispatch: StageDispatcher;
   private readonly onRouteCommitted: ((route: RouteRecord) => void) | undefined;
+  private readonly onReplyCommitted: ((input: { userEntry: JournalEntry; replyEntry: JournalEntry; ownerBotId: string }) => Promise<void>) | undefined;
   private readonly clock: () => string;
   private readonly claimWindowMs: number;
 
@@ -142,6 +152,7 @@ export class ChannelRouter {
     this.evaluateClaim = options.evaluateClaim;
     this.dispatch = options.dispatch;
     this.onRouteCommitted = options.onRouteCommitted;
+    this.onReplyCommitted = options.onReplyCommitted;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.claimWindowMs = options.claimWindowMs ?? CHANNEL_LIMITS.claimWindowMs;
     if (!Number.isSafeInteger(this.claimWindowMs) || this.claimWindowMs < 0) throw new Error('claimWindowMs must be a non-negative safe integer');
@@ -150,6 +161,21 @@ export class ChannelRouter {
   async send(input: { channelId: string; message: string; idempotencyKey: string }): Promise<SendChannelMessageResult> {
     const channel = this.directory.getChannel(input.channelId);
     if (!channel) throw new Error(`Channel not found: ${input.channelId}`);
+
+    const existingUserEntry = this.journal.list(input.channelId).find(
+      (entry) => entry.kind === 'user' && entry.idempotencyKey === input.idempotencyKey,
+    );
+    if (existingUserEntry) {
+      const existingRouteId = deriveRouteId(channel.channelId, existingUserEntry.entryId);
+      const existingRoute = this.routes.get(channel.channelId, existingRouteId);
+      if (existingRoute) {
+        return withRouteQueue(`${this.routes.rootPath}/${channel.channelId}/${existingRouteId}`, async () => {
+          const current = this.routes.get(channel.channelId, existingRouteId);
+          if (!current) return this.finish(existingRoute, existingUserEntry);
+          return this.finish(current, existingUserEntry);
+        });
+      }
+    }
     if (channel.lifecycle !== 'active') throw new Error(`Channel is archived: ${input.channelId}`);
 
     const snapshot = channel.members.map((member) => ({ member, bot: this.directory.resolveBot(member.botId) }));
@@ -376,13 +402,14 @@ export class ChannelRouter {
         idempotencyKey: `route.error.${current.routeId}`,
       });
     } else {
-      current = await this.settle(current, userEntry.body);
+      current = await this.settle(current, userEntry);
     }
     return { userEntry, route: current, replies: this.repliesFor(current) };
   }
 
-  private async settle(route: RouteRecord, message: string): Promise<RouteRecord> {
+  private async settle(route: RouteRecord, userEntry: JournalEntry): Promise<RouteRecord> {
     let current = route;
+    const message = userEntry.body;
     const channel = this.directory.getChannel(route.channelId);
     for (const stage of current.stages) {
       const latest = current.stages.find((candidate) => candidate.stageId === stage.stageId);
@@ -416,6 +443,11 @@ export class ChannelRouter {
         (entry) => entry.kind === 'bot' && entry.idempotencyKey === latest.dispatchIdempotencyKey,
       );
       if (existingReply) {
+        try {
+          await this.onReplyCommitted?.({ userEntry, replyEntry: existingReply, ownerBotId: latest.ownerBotId });
+        } catch (error) {
+          console.error('[ChannelRouter] reply post-processing failed after durable commit', error);
+        }
         current = this.updateStage(current, latest.stageId, {
           state: 'completed',
           settledAt: safeDate(this.clock),
@@ -442,21 +474,31 @@ export class ChannelRouter {
             return bot ? [bot.name] : [];
           }) ?? [],
           isFirstDispatch: !this.routes.list(current.channelId).some((candidate) => candidate.routeId !== current.routeId && candidate.stages.some((candidateStage) => candidateStage.ownerBotId === latest.ownerBotId && (candidateStage.state === 'completed' || candidateStage.state === 'dispatched'))),
+          sourceEntryId: current.messageEntryId,
         });
-        this.journal.append({
+        const replyEntry = this.journal.append({
           conversationId: current.channelId,
           authorBotId: latest.ownerBotId,
           kind: 'bot',
           body: reply,
           idempotencyKey: latest.dispatchIdempotencyKey,
         });
+        try {
+          await this.onReplyCommitted?.({ userEntry, replyEntry, ownerBotId: latest.ownerBotId });
+        } catch (error) {
+          console.error('[ChannelRouter] reply post-processing failed after durable commit', error);
+        }
         current = this.updateStage(current, latest.stageId, {
           state: 'completed',
           settledAt: safeDate(this.clock),
         });
       } catch (error) {
         const reason = trimReason(error instanceof Error ? error.message : String(error));
-        current = await this.failStage(current, latest, reason);
+        if (error instanceof RetryableStageDispatchError) {
+          current = this.updateStage(current, latest.stageId, { state: 'dispatched', reason });
+        } else {
+          current = await this.failStage(current, latest, reason);
+        }
       }
     }
     return current;

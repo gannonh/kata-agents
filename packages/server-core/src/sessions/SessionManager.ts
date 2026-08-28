@@ -51,7 +51,7 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
-import type { SpawnTask, SpawnTaskJsonValue } from '@kata-sh/core'
+import type { BotTurnContext, SpawnTask, SpawnTaskJsonValue } from '@kata-sh/core'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -8060,7 +8060,7 @@ export class SessionManager implements ISessionManager {
      * that should host this session's browser tools. Pass undefined when calling
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
-    rpcContext?: { callerClientId?: string },
+    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext },
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -8499,7 +8499,11 @@ export class SessionManager implements ISessionManager {
 
       sendSpan.mark('chat.starting')
       const chatIterator = this.releasePreChatBarrierOnStart(
-        agent.chat(effectiveMessage, modelInputAttachments.attachments),
+        agent.chat(
+          effectiveMessage,
+          modelInputAttachments.attachments,
+          rpcContext?.botTurnContext ? { runtimeContext: rpcContext.botTurnContext.text } : undefined,
+        ),
         releasePreChat,
       )
       sessionLog.info('Got chat iterator, starting iteration...')
