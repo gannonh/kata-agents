@@ -128,6 +128,10 @@ export {
   type SpawnSessionRequest,
   type SpawnSessionResult,
   type SpawnSessionHelpResult,
+  // Bot-handoff contracts share the same session-tool pipeline.
+  type SendHandoffRequest,
+  type SendHandoffResult,
+  type SendHandoffHelpResult,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
   MINI_AGENT_TOOLS,

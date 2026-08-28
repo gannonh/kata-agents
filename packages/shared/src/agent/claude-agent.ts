@@ -649,6 +649,7 @@ export class ClaudeAgent extends BaseAgent {
       },
       queryFn: (request) => this.queryLlm(request),
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
+      sendHandoffFn: (input) => this.preExecuteSendHandoff(input),
     });
 
     // Start config watcher for hot-reloading source changes
@@ -1223,6 +1224,7 @@ export class ClaudeAgent extends BaseAgent {
 
                 case 'call_llm_intercept':
                 case 'spawn_session_intercept':
+                case 'send_handoff_intercept':
                   // Claude's session tools run in-process via SDK — just allow
                   return { continue: true };
 

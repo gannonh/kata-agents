@@ -881,100 +881,114 @@ export class SpawnTaskCoordinator {
       )
     }
 
-    const reservedCancellation = await this.preDispatchCancellation(task)
+    return this.dispatchReserved(task, input.attachments)
+  }
+
+  /**
+   * Drives an already-reserved task through child creation, prompt append, and
+   * provider dispatch. Shared by spawn() and the handoff service so both paths
+   * keep one set of pre-dispatch cancellation checks and failure boundaries.
+   */
+  async dispatchReserved(
+    task: SpawnTask,
+    attachments?: readonly FileAttachment[],
+  ): Promise<SpawnSessionResult> {
+    let current = task
+
+    const reservedCancellation = await this.preDispatchCancellation(current)
     if (reservedCancellation) return reservedCancellation
 
     try {
-      await this.createChild({ task })
+      await this.createChild({ task: current })
     } catch (error) {
-      throw await this.creationFailure(task, error, 'child')
+      throw await this.creationFailure(current, error, 'child')
     }
 
-    const childCancellation = await this.preDispatchCancellation(task)
+    const childCancellation = await this.preDispatchCancellation(current)
     if (childCancellation) return childCancellation
 
     try {
-      task = this.store.updateDispatch(task.taskId, 'ready', this.clock())
+      current = this.store.updateDispatch(current.taskId, 'ready', this.clock())
     } catch (error) {
-      const deletionCancellation = await this.preDispatchCancellation(task)
+      const deletionCancellation = await this.preDispatchCancellation(current)
       if (deletionCancellation) return deletionCancellation
-      throw await this.creationFailure(task, error, 'ready')
+      throw await this.creationFailure(current, error, 'ready')
     }
 
-    const readyCancellation = await this.preDispatchCancellation(task)
+    const readyCancellation = await this.preDispatchCancellation(current)
     if (readyCancellation) return readyCancellation
 
     try {
-      task = this.store.updateDispatch(task.taskId, 'claimed', this.clock())
-      this.markDispatchActive(task.taskId)
+      current = this.store.updateDispatch(current.taskId, 'claimed', this.clock())
+      this.markDispatchActive(current.taskId)
     } catch (error) {
-      const deletionCancellation = await this.preDispatchCancellation(task)
+      const deletionCancellation = await this.preDispatchCancellation(current)
       if (deletionCancellation) return deletionCancellation
-      throw await this.creationFailure(task, error, 'claim')
+      throw await this.creationFailure(current, error, 'claim')
     }
 
-    const claimedCancellation = await this.preDispatchCancellation(task)
+    const claimedCancellation = await this.preDispatchCancellation(current)
     if (claimedCancellation) return claimedCancellation
 
     try {
       await this.appendDelegatedPrompt({
-        task,
-        prompt: input.delegatedPrompt,
-        attachments: input.attachments,
+        task: current,
+        prompt: current.delegatedPrompt,
+        attachments,
       })
     } catch (error) {
-      throw await this.creationFailure(task, error, 'message_append')
+      throw await this.creationFailure(current, error, 'message_append')
     }
 
-    const appendedCancellation = await this.preDispatchCancellation(task)
+    const appendedCancellation = await this.preDispatchCancellation(current)
     if (appendedCancellation) return appendedCancellation
 
     try {
-      task = this.store.updateDispatch(task.taskId, 'sent', this.clock())
+      current = this.store.updateDispatch(current.taskId, 'sent', this.clock())
     } catch (error) {
-      const deletionCancellation = await this.preDispatchCancellation(task)
+      const deletionCancellation = await this.preDispatchCancellation(current)
       if (deletionCancellation) return deletionCancellation
-      throw await this.creationFailure(task, error, 'sent')
+      throw await this.creationFailure(current, error, 'sent')
     }
 
     try {
       // Persist processing before crossing the provider boundary. A provider
       // call can be in flight as soon as dispatchProvider returns, so the
       // returned version must describe that durable state.
-      task = this.store.transition(task.taskId, {
+      current = this.store.transition(current.taskId, {
         runtimeState: 'processing',
         at: this.clock(),
       })
     } catch (error) {
-      throw await this.creationFailure(task, error, 'processing')
+      throw await this.creationFailure(current, error, 'processing')
     }
 
     try {
       // The provider turn remains fire-and-forget for spawn(). C2 consumes its
       // eventual rejection through the same durable lifecycle finalizer.
       const providerTurn = this.dispatchProvider({
-        task,
-        prompt: input.delegatedPrompt,
-        attachments: input.attachments,
+        task: current,
+        prompt: current.delegatedPrompt,
+        attachments,
       })
-      this.markDispatchActive(task.taskId)
+      this.markDispatchActive(current.taskId)
       if (providerTurn) {
         void providerTurn.catch((error: unknown) => {
-          void this.finalizeProviderFailureForChildSession(task.childSessionId, error).catch(() => {})
+          void this.finalizeProviderFailureForChildSession(current!.childSessionId, error).catch(() => {})
         })
       }
     } catch (error) {
       // A truly synchronous callback throw is an invocation/provider failure,
       // not a spawn-persistence failure. Async turn rejection is handled by
       // the same durable lifecycle finalizer above.
-      throw await this.creationFailure(task, error, 'provider', 'provider_error')
+      throw await this.creationFailure(current, error, 'provider', 'provider_error')
     }
 
     return {
-      taskId: task.taskId,
-      childSessionId: task.childSessionId,
-      runtimeState: task.runtimeState,
-      version: task.version,
+      taskId: current.taskId,
+      childSessionId: current.childSessionId,
+      runtimeState: current.runtimeState,
+      version: current.version,
     }
   }
 

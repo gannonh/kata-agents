@@ -131,6 +131,30 @@ export interface SpawnSessionHelpResult {
   };
 }
 
+// ============================================================
+// Send Handoff Types
+// ============================================================
+
+export interface SendHandoffRequest {
+  targetBot: string;
+  request: string;
+}
+
+export interface SendHandoffResult {
+  handoffId: string;
+  deliveryId: string;
+  taskId: string;
+  runtimeState: import('@kata-sh/core').SpawnTaskRuntimeState;
+  version: number;
+  targetBotId: string;
+}
+
+export interface SendHandoffHelpResult {
+  tool: 'send_handoff';
+  targetBot: string;
+  request: string;
+}
+
 /** Tool list for mini agents - quick config edits only */
 export const MINI_AGENT_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'] as const;
 
@@ -267,6 +291,7 @@ export abstract class BaseAgent implements AgentBackend {
   onUsageUpdate: ((update: UsageUpdate) => void) | null = null;
   onBackendAuthRequired: ((reason: string) => void) | null = null;
   onSpawnSession: ((request: SpawnSessionRequest) => Promise<SpawnSessionResult>) | null = null;
+  onSendHandoff: ((request: SendHandoffRequest) => Promise<SendHandoffResult>) | null = null;
 
   // ============================================================
   // Constructor
@@ -1235,6 +1260,37 @@ ${formattedMessages}
     };
 
     return this.onSpawnSession(request);
+  }
+
+  /**
+   * Pre-execute a send_handoff request: handle help mode or delegate to onSendHandoff.
+   * Shared across all backends. Identity fields are not accepted from the model.
+   */
+  protected async preExecuteSendHandoff(
+    input: Record<string, unknown>
+  ): Promise<SendHandoffResult | SendHandoffHelpResult> {
+    if (input.help) {
+      return {
+        tool: 'send_handoff',
+        targetBot: 'Name or ID of the Bot that should take over',
+        request: 'Self-contained request for the receiving Bot (max 16KB)',
+      };
+    }
+
+    const targetBot = typeof input.targetBot === 'string' ? input.targetBot.trim() : '';
+    if (!targetBot) {
+      throw new Error('targetBot is required. Call with help=true to see usage.');
+    }
+    const request = typeof input.request === 'string' ? input.request : '';
+    if (!request.trim()) {
+      throw new Error('request is required. Call with help=true to see usage.');
+    }
+
+    if (!this.onSendHandoff) {
+      throw new Error('send_handoff is not available in this context.');
+    }
+
+    return this.onSendHandoff({ targetBot, request });
   }
 
   /**

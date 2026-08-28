@@ -776,6 +776,12 @@ export interface AgentBackend {
 
   /** Called when agent requests spawning a new session */
   onSpawnSession: ((request: import('../base-agent.ts').SpawnSessionRequest) => Promise<import('../base-agent.ts').SpawnSessionResult>) | null;
+
+  /**
+   * Called when agent requests handing a task to another Bot (send_handoff).
+   * Optional: backends that never execute send_handoff leave it unset.
+   */
+  onSendHandoff?: ((request: import('../base-agent.ts').SendHandoffRequest) => Promise<import('../base-agent.ts').SendHandoffResult>) | null;
 }
 
 /**

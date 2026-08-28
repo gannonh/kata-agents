@@ -12,6 +12,7 @@
 
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
+import type { SendHandoffFn } from './handoff-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
 import type { AuthRequest } from '@kata-sh/session-tools-core';
 import { debug } from '../utils/debug.ts';
@@ -43,6 +44,12 @@ export interface SessionScopedToolCallbacks {
    * Each agent backend delegates to its onSpawnSession callback.
    */
   spawnSessionFn?: SpawnSessionFn;
+
+  /**
+   * Callback for send_handoff tool — hands the task to another Bot.
+   * Each agent backend delegates to its onSendHandoff callback.
+   */
+  sendHandoffFn?: SendHandoffFn;
 
   /**
    * Browser pane functions for browser_* tools.

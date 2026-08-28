@@ -281,6 +281,28 @@ export class HandoffDeliveryStore {
       .map(clone);
   }
 
+  listAll(): HandoffDeliveryRecord[] {
+    return [...this.deliveries.values()]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.deliveryId.localeCompare(right.deliveryId))
+      .map(clone);
+  }
+
+  /**
+   * Startup repair for the Slice 1 pointer gap: a delivery whose `by-handoff`
+   * pointer is missing or stale gets its pointer rewritten. A pointer that
+   * resolves to a different live delivery wins; the record is left untouched.
+   */
+  repairByHandoffPointer(deliveryId: string): 'ok' | 'repaired' | 'conflict' {
+    const record = this.require(deliveryId);
+    const pointerPath = handoffByHandoffPath(this.rootPath, record.handoffId);
+    const owner = this.readByHandoffPointer(record.handoffId);
+    if (owner === record.deliveryId) return 'ok';
+    if (owner && this.deliveries.has(owner)) return 'conflict';
+    if (writeJsonIfAbsent(pointerPath, { deliveryId })) return 'repaired';
+    const winner = this.readByHandoffPointer(record.handoffId);
+    return winner === record.deliveryId ? 'ok' : 'conflict';
+  }
+
   claimDelivery(deliveryId: string, input: ClaimHandoffDeliveryInput): HandoffDeliveryRecord {
     const current = this.require(deliveryId);
     const claimId = assertHandoffPathId(input.claimId, 'claim.claimId');

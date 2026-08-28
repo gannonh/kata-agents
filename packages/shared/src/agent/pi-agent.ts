@@ -113,6 +113,7 @@ import { saveBinaryResponse } from '../utils/binary-detection.ts';
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
+  'send_handoff',
   'browser_tool',
 ]);
 
@@ -1337,6 +1338,7 @@ export class PiAgent extends BaseAgent {
 
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
+      case 'send_handoff_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
@@ -1538,6 +1540,23 @@ export class PiAgent extends BaseAgent {
           }
           const msg = error instanceof Error ? error.message : String(error);
           return { content: `spawn_session failed: ${msg}`, isError: true };
+        }
+      }
+
+      // send_handoff uses the shared pre-execution pipeline from BaseAgent
+      if (toolName === 'send_handoff') {
+        try {
+          const result = await this.preExecuteSendHandoff(args);
+          return { content: JSON.stringify(result, null, 2), isError: false };
+        } catch (error) {
+          const failure = (error && typeof error === 'object' && 'failure' in error)
+            ? (error as { failure?: unknown }).failure
+            : undefined
+          if (failure && typeof failure === 'object') {
+            return { content: JSON.stringify(failure, null, 2), isError: true }
+          }
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: `send_handoff failed: ${msg}`, isError: true };
         }
       }
 
