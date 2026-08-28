@@ -1,0 +1,34 @@
+---
+title: "Get assistant conversations"
+openapi: /analytics.openapi.json GET /v1/analytics/{projectId}/assistant
+keywords: ["analytics", "assistant", "conversations", "export", "AI"]
+
+---
+
+## Usage
+
+Use this endpoint to export AI assistant conversation history from your documentation. Each conversation includes the user query, assistant response, sources cited, resolution status, and query category.
+
+Paginate through results using the `cursor` parameter returned in the response. Continue fetching while `hasMore` is `true`.
+
+## Filtering
+
+Filter conversations by date range using `dateFrom` and `dateTo` parameters.
+
+## Conversation data
+
+Each row represents one user turn in a conversation. A conversation with multiple back-and-forth messages produces multiple rows that share a `conversationId`.
+
+Each row includes:
+- **query**: The user's question.
+- **response**: The assistant's answer. For clarifying-question turns, this is the follow-up question the assistant asked the user.
+- **responseType**: Either `answer` or `clarifying_question`. `clarifying_question` means the assistant asked the user a follow-up question instead of answering. Defaults to `answer` when not present.
+- **sources**: Pages referenced in the response, with title and URL.
+- **resolutionStatus**: Whether the assistant successfully answered this turn. Either `answered` or `unanswered`. Computed per row, so a single conversation can contain both statuses. Use this field to track and analyze documentation gaps surfaced by user questions the assistant could not resolve.
+- **timestamp**: When the user sent the message that started this turn. Rows in the same conversation have different timestamps.
+- **queryCategory**: Classification of the query type, if available.
+- **pageUrl**: Full URL of the documentation page where the conversation started, or `null` if no page path is available. Use this field to attribute conversations to a specific page.
+
+## Rate limits
+
+This endpoint allows 100 requests per organization per hour. All analytics endpoints share this limit.

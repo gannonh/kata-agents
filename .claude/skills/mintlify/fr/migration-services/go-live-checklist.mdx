@@ -1,0 +1,70 @@
+---
+title: "Liste de contrôle de mise en ligne"
+description: "Une liste de contrôle avant lancement pour vérifier les redirections, le domaine personnalisé, l'authentification, les analyses et les paramètres SEO avant la mise en ligne de votre site de documentation Mintlify."
+noindex: true
+---
+
+Cette liste récapitule les configurations à mettre en place et les paramètres à valider avant la mise en ligne. Certaines étapes peuvent ne pas s'appliquer à votre déploiement. Vous pouvez alors les ignorer.
+
+<div id="core-setup">
+  ## Configuration de base
+</div>
+
+- **Connectez votre dépôt de documentation à Mintlify.** Installez l'[application GitHub](/fr/deploy/github) ou connectez votre [dépôt GitLab](/fr/deploy/gitlab), ou connectez votre [dépôt Bitbucket Cloud](/fr/deploy/bitbucket).
+  - Si vous stockez votre documentation dans plusieurs dépôts, configurez une [structure multi-dépôts](/fr/deploy/multi-repo) pour créer votre site à partir de plusieurs dépôts. Si tout votre contenu se trouve dans un seul dépôt, ignorez cette étape.
+- **Invitez les membres de votre équipe.** Invitez toute personne qui a besoin d'un accès depuis la page [Membres](https://app.mintlify.com/settings/organization/members) de votre tableau de bord. Consultez [Rôles](/fr/dashboard/roles) pour plus d'informations.
+
+<div id="security">
+  ## Sécurité
+</div>
+
+- Vérifiez qui peut accéder à votre tableau de bord.
+  - Configurez le [SSO du tableau de bord](/fr/dashboard/sso) pour permettre à votre équipe d'accéder à votre tableau de bord et à votre éditeur.
+  - Configurez les [politiques d'accès au tableau de bord](/fr/dashboard/network-access).
+  - Configurez le [provisionnement SCIM](/fr/dashboard/scim).
+- Vérifiez l'accès à votre site Mintlify.
+  - Si vous limitez l'accès à votre site à certains utilisateurs, configurez l'[authentification](/fr/deploy/authentication-setup).
+  - Vérifiez quels groupes peuvent accéder aux pages et quelles pages sont publiques.
+
+<div id="content-validation">
+  ## Validation du contenu
+</div>
+
+- **Vérifiez votre architecture de l'information.** La structure de navigation est-elle adaptée ? Certaines sections manquent-elles ? Consultez les [types de contenu](/fr/guides/content-types) pour référence.
+- **Vérifiez que vos informations sont à jour.** Toutes les modifications récentes du contenu apparaissent-elles sur votre site ?
+- Si nécessaire, configurez les [redirections](/fr/create/redirects).
+- **Configurez les paramètres SEO.** Définissez la description de votre site, les balises meta et les préférences d'indexation dans `docs.json`. Consultez les [paramètres SEO et de recherche](/fr/organize/settings-seo).
+- **Vérifiez le SEO au niveau des pages.** Configurez les balises meta, les propriétés Open Graph et les URL canoniques si nécessaire. Consultez la page [SEO](/fr/optimize/seo).
+
+<div id="dashboard-features">
+  ## Fonctionnalités du tableau de bord
+</div>
+
+- **Activez et configurez l'assistant.** Consultez la page [Configurer l'assistant](/fr/assistant/configure).
+  - Configurez vos [e-mails de redirection du support et des ventes](/fr/assistant/configure#set-deflection-emails).
+  - Configurez vos [domaines de recherche](/fr/assistant/configure#search-domains).
+  - Personnalisez les [modèles de réponse de l'assistant](/fr/assistant/customize) et [ajoutez des compétences à l'assistant](/fr/assistant/skills).
+- **Intégrez le widget de l'assistant.** Activez le [widget de l'assistant](/fr/assistant/widget) pour ajouter l'assistant au tableau de bord de votre produit, à votre site marketing ou à votre portail d'assistance.
+- **Activez les modules complémentaires.** Accédez à la page [Modules complémentaires](https://app.mintlify.com/settings/deployment/addons) de votre tableau de bord. Activez les modules pertinents, comme les commentaires de l'agent, les [vérifications CI](/fr/deploy/ci), les sujets associés, etc.
+- **Configurez l'agent Slack.** Vous pouvez ainsi modifier votre contenu directement dans Slack. Consultez [Ajouter l'agent à Slack](/fr/agent/slack#add-the-agent-to-slack).
+- **Configurez les automatisations.** Consultez [comment activer une automatisation](/fr/automations/manage#enable-an-automation).
+- **Installez les modules d'analyse pertinents.** Consultez la [liste des intégrations d'analyse](/fr/integrations/analytics/overview).
+
+<div id="go-live">
+  ## Mise en ligne
+</div>
+
+- **Configurez votre domaine personnalisé.** Consultez le [guide des domaines personnalisés](/fr/customize/custom-domain).
+
+<div id="post-launch-verification">
+  ## Vérification après le lancement
+</div>
+
+Une fois que votre domaine personnalisé est résolu, vérifiez le lancement avant de mettre hors service votre ancien site.
+
+- Chargez la documentation via HTTPS et confirmez que le certificat est valide.
+- Vérifiez par sondage des pages de chaque section de navigation de premier niveau sur ordinateur et sur mobile.
+- Testez quelques redirections connues depuis vos anciennes URL et confirmez qu'elles pointent vers les nouvelles pages correspondantes.
+- Si votre site utilise l'authentification, connectez-vous avec un compte de test et confirmez que les pages protégées se chargent comme prévu.
+- Confirmez que vos intégrations d'analyses reçoivent bien des pages vues.
+- Surveillez les erreurs 404, les échecs de redirection et les échecs de build pendant au moins la première journée.

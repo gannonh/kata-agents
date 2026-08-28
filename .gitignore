@@ -103,26 +103,6 @@ e2e/.auth/
 e2e/test-results/
 e2e/playwright-report/
 
-# Skills copied by scripts/install-skills.sh (install locally; do not vendor)
-skills-lock.json
-.agents/skills/address-pr-comments/
-.agents/skills/mintlify/
-.agents/skills/plan-build-verify/
-.agents/skills/readme/
-.agents/skills/thermo-nuclear-code-quality-review/
-.agents/skills/thermo-nuclear-review/
-.agents/skills/thermo-run/
-.agents/skills/unslop/
-.claude/skills/address-pr-comments/
-.claude/skills/mintlify/
-.claude/skills/plan-build-verify/
-.claude/skills/readme/
-.claude/skills/thermo-nuclear-code-quality-review/
-.claude/skills/thermo-nuclear-review/
-.claude/skills/thermo-run/
-.claude/skills/unslop/
-
-
 kata-agents.code-workspace
 .pi-subagents
 .pi/subagents

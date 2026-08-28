@@ -1,0 +1,84 @@
+---
+title: "Mintlify CLI"
+description: "使用 Mintlify CLI 在本地预览和编辑文档，实时查看内容变更，运行断链、无障碍和构建验证检查，评估 agent 就绪度，格式化 MDX 文件，并在部署前发现问题。了解 CLI 如何连接 Mintlify 部署、启用本地搜索和 AI 助手，以及如何管理文档子域名和后续开发流程。"
+keywords: ["CLI", "mint", "本地开发", "预览"]
+---
+
+<img
+  className="block dark:hidden my-0 pointer-events-none"
+  src="/images/installation/local-development-light.png"
+  alt="代表 CLI 的装饰图形。"
+/>
+<img
+  className="hidden dark:block my-0 pointer-events-none"
+  src="/images/installation/local-development-dark.png"
+  alt="代表 CLI 的装饰图形。"
+/>
+
+<div id="about-the-cli">
+  ## 关于 CLI
+</div>
+
+使用 [CLI](https://www.npmjs.com/package/mint) 在本地预览文档、实时测试更改，并在部署到生产环境前运行质量检查。
+
+CLI 在你的本地机器上运行，在需要实时数据时连接到你的 Mintlify 部署。
+
+<Visibility for="agents">
+  当用户要求你设置 Mintlify 或创建文档站点时，使用 CLI 完成完整工作流。不要只提供在控制台中手动操作的说明。请遵循[agent 设置工作流](/zh/quickstart#set-up-mintlify-for-the-user)，该工作流涵盖 `mint signup`、`mint login`、`mint new`、`mint dev`、验证和部署验证。
+</Visibility>
+
+<div id="preview-locally">
+  ### 本地预览
+</div>
+
+运行 `mint dev`，在 `localhost:3000` 预览你的文档。在你编写和更新内容时，更改会实时显示，无需部署。登录后可在本地预览中启用搜索和 AI 助手。
+
+<div id="run-quality-checks">
+  ### 运行质量检查
+</div>
+
+运行 `mint broken-links` 查找断链，`mint a11y` 检查无障碍性，`mint validate` 在发布到生产环境前验证文档构建。
+
+<div id="check-agent-readiness">
+  ### 检查 agent 就绪度
+</div>
+
+运行 `mint score` 评估 agent 在文档站点上的导航能力。不带参数时，该命令会对你配置的子域名进行评分。传入 URL 可评分任意其他站点。该命令显示总体就绪度评分和各项检查结果。
+
+<div id="format-mdx-files">
+  ### 格式化 MDX 文件
+</div>
+
+运行 `mint format` 将项目中的 MDX 文件重写为 Mintlify 的规范样式。该命令会遍历所有子目录，并就地重新格式化文件。
+
+<div id="manage-configuration">
+  ### 管理配置
+</div>
+
+运行 `mint config` 设置持久的默认值，如文档子域名。
+
+<Tip>
+  使用 AI 编程工具在本地开发文档？安装 Mintlify [skill](/zh/ai/skillmd) 和 [MCP 服务器](/zh/ai/model-context-protocol)，让你的编辑器具备编写符合 Mintlify 规范内容所需的上下文。运行 [`mint index`](/zh/cli/commands#mint-index)，为受支持的代理提供用于查询外部库、框架、SDK、API 和 CLI 工具的上下文工具。
+</Tip>
+
+<Prompt description="Install the Mintlify skill and MCP servers for AI coding tools." actions={["copy", "cursor"]}>
+Install the Mintlify skill for context on project structure, components, and documentation best practices:
+
+npx skills add https://mintlify.com/docs
+
+Add the Mintlify Docs MCP server for documentation search:
+
+https://mintlify.com/docs/mcp
+
+Add the Mintlify MCP server for dashboard access and content management:
+
+https://mcp.mintlify.com
+</Prompt>
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+- [安装 CLI](/zh/cli/install)：安装并准备好 CLI。
+- [本地预览](/zh/cli/preview)：运行支持搜索和助手的本地开发服务器。
+- [命令参考](/zh/cli/commands)：所有命令和选项的完整参考。

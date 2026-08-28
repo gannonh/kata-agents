@@ -1,0 +1,152 @@
+---
+title: "Mintlify REST API introduction"
+description: "Use the Mintlify REST API to trigger deployments, embed an AI assistant, export analytics data, and manage documentation programmatically."
+keywords: ["REST API", "endpoints", "API keys"]
+boost: 3
+---
+
+<Info>
+  The platform REST API requires a [Pro or Enterprise plan](https://mintlify.com/pricing?ref=api).
+  
+  The [Mintlify Index REST API](/api/search-index/introduction) uses a separate API key and base URL.
+</Info>
+
+The Mintlify REST (Representational State Transfer) API enables you to programmatically interact with your documentation, trigger updates, embed AI-powered chat experiences, and export analytics data.
+
+## Endpoints
+
+- [Trigger update](/api/update/trigger): Trigger an update of your site when desired.
+- [Get update status](/api/update/status): Get the status of an update and other details about your docs.
+- [Trigger preview deployment](/api/preview/trigger): Create or update a preview deployment for a specific branch.
+- [Trigger automation](/api/automations/trigger): Run a scheduled automation on demand.
+- [Create agent job](/api/agent/v2/create-agent-job): Create an agent job to automatically edit your documentation.
+- [Get agent job](/api/agent/v2/get-agent-job): Retrieve the details and status of a specific agent job.
+- [Send follow-up message](/api/agent/v2/send-message): Send a follow-up message to an existing agent job.
+- [Create assistant message](/api/assistant/create-assistant-message-v2): Embed the assistant, trained on your docs, into any application of your choosing.
+- [Search documentation](/api/assistant/search): Search through your documentation.
+- [Get page content](/api/assistant/get-page-content): Retrieve the full text content of a documentation page.
+- [Get user feedback](/api/analytics/feedback): Export user feedback from your documentation.
+- [Get feedback by page](/api/analytics/feedback-by-page): Export feedback counts aggregated by page.
+- [Get assistant conversations](/api/analytics/assistant-conversations): Export AI assistant conversation history.
+- [Get assistant caller stats](/api/analytics/assistant-caller-stats): Retrieve a breakdown of assistant query counts by caller type.
+- [Get search queries](/api/analytics/searches): Export documentation search terms and analytics.
+- [Get page views](/api/analytics/views): Export per-page and site-wide content view counts.
+- [Get unique visitors](/api/analytics/visitors): Export per-page and site-wide unique visitor counts.
+
+### Common use cases
+
+- **Automated deployments**: Trigger site updates at set intervals or when events occur with [Trigger update](/api/update/trigger) and [Get update status](/api/update/status).
+- **Continuous integration and continuous delivery (CI/CD)**: Update documentation as part of your deployment pipeline when code changes with [Trigger update](/api/update/trigger).
+- **Preview deployments**: Create or update preview deployments programmatically in your CI/CD pipeline with [Trigger preview deployment](/api/preview/trigger).
+- **On-demand automations**: Run scheduled automations from your CI/CD pipeline or release tooling with [Trigger automation](/api/automations/trigger).
+- **Assistant integrations**: Embed the AI assistant into your product, support portal, or internal tools with [Create assistant message](/api/assistant/create-assistant-message-v2).
+- **Documentation retrieval**: Find and retrieve documentation for custom search experiences with [Search documentation](/api/assistant/search) and [Get page content](/api/assistant/get-page-content).
+- **Automated editing**: Use agent jobs to programmatically update documentation at scale with [Create agent job](/api/agent/v2/create-agent-job), [Get agent job](/api/agent/v2/get-agent-job), and [Send follow-up message](/api/agent/v2/send-message).
+- **Analytics export**: Export feedback, assistant conversations, search analytics, page views, and visitor data for external analysis with [Get user feedback](/api/analytics/feedback), [Get feedback by page](/api/analytics/feedback-by-page), [Get assistant conversations](/api/analytics/assistant-conversations), [Get assistant caller stats](/api/analytics/assistant-caller-stats), [Get search queries](/api/analytics/searches), [Get page views](/api/analytics/views), and [Get unique visitors](/api/analytics/visitors).
+
+## Authentication
+
+Generate API keys on the [API keys page](https://app.mintlify.com/settings/organization/api-keys) in your dashboard. Admin and Index API keys belong to an organization. You can use the same keys across multiple deployments within the same organization. Assistant API keys belong to the deployment where you create them.
+
+You can create up to 10 API keys per hour per organization.
+
+When you create a key, you can set it to expire in 7, 30, 60, or 90 days, or select **No expiration**. New keys default to 90 days. The API keys page shows an **Expires in …** badge for keys that expire within 7 days and an **Expired** badge for keys that have already expired. Expired keys stop working, so rotate or replace them before the expiration date.
+
+Mintlify uses three types of API keys, each scoped to a different set of endpoints:
+
+| Key type          | Prefix      | Use for                                                                          |
+| ----------------- | ----------- | -------------------------------------------------------------------------------- |
+| Admin API key     | `mint_`     | Updates, agent jobs, and analytics exports. Server-side only.                    |
+| Assistant API key | `mint_dsc_` | Assistant messages, documentation search, and page content. Proxy in production. |
+| Index API key     | `mint_us_`  | Index search, context assembly, and content retrieval. Server-side only.         |
+
+### Admin API key
+
+Use the admin API key for deployment, triggering the agent, and analytics endpoints.
+
+- [Trigger update](/api/update/trigger)
+- [Get update status](/api/update/status)
+- [Trigger preview deployment](/api/preview/trigger)
+- [Trigger automation](/api/automations/trigger)
+- [Create agent job](/api/agent/v2/create-agent-job)
+- [Get agent job](/api/agent/v2/get-agent-job)
+- [Send follow-up message](/api/agent/v2/send-message)
+- [Get user feedback](/api/analytics/feedback)
+- [Get feedback by page](/api/analytics/feedback-by-page)
+- [Get assistant conversations](/api/analytics/assistant-conversations)
+- [Get assistant caller stats](/api/analytics/assistant-caller-stats)
+- [Get search queries](/api/analytics/searches)
+- [Get page views](/api/analytics/views)
+- [Get unique visitors](/api/analytics/visitors)
+
+Admin API keys begin with the `mint_` prefix.
+
+The admin API key is a server-side secret. Do not expose it in client-side code.
+
+### Assistant API key
+
+<Warning>
+  Do not directly embed the assistant API key in client-side code. Any visitor who extracts the key can call the assistant message endpoint on your behalf, consuming credits and potentially triggering overage charges.
+
+  For production deployments, proxy requests that use an assistant API key through your own backend and store the key as a server-side environment variable. Routing requests through a proxy also lets you add rate limiting, authentication, and bot protection to prevent abuse.
+</Warning>
+
+Use the assistant API key to authenticate requests to the assistant, search, and page content endpoints.
+
+- [Create assistant message](/api/assistant/create-assistant-message-v2)
+- [Search documentation](/api/assistant/search)
+- [Get page content](/api/assistant/get-page-content)
+
+Assistant API keys begin with the `mint_dsc_` prefix.
+
+<Note>
+  Search documentation and page content requests do not consume credits. Assistant message requests use credits and can incur overages.
+</Note>
+
+### Index API key
+
+Use an Index API key to authenticate requests to the [Mintlify Index](/search-index) REST API. Index API keys begin with the `mint_us_` prefix.
+
+The Index API key is a server-side secret. Do not expose it in client-side code.
+
+### Restrict keys by IP address
+
+Optionally restrict an API key to a list of allowed IP addresses or Classless Inter-Domain Routing (CIDR) ranges. When a key has an allowlist, requests from any other IP address return a `403` response. Admin, assistant, and Index API keys support allowlists.
+
+Set the allowlist when you create a key on the [API keys page](https://app.mintlify.com/settings/organization/api-keys) in your dashboard. You set the allowlist for the lifetime of the key when you create it. To change the allowlist, you must create a new key. If you don't set an allowlist, the key accepts requests from any IP address.
+
+Allowlist entries support:
+
+- IPv4 and IPv6 addresses, for example `203.0.113.5` or `2001:db8::1`.
+- CIDR ranges, for example `198.51.100.0/24` or `2001:db8::/48`.
+
+You cannot use catch-all entries like `0.0.0.0/0` and `::/0`.
+
+Use IP allowlists when a stable set of egress IPs call your API key. For example, a CI/CD runner, a static network address translation (NAT) gateway, or your backend server. Avoid allowlists for keys used from developer laptops or other environments with changing IPs.
+
+### Restrict admin keys by scope
+
+Optionally restrict an admin API key to `read` or `write` scopes. Scopes apply only to admin API keys.
+
+Set scopes when you create a key on the [API keys page](https://app.mintlify.com/settings/organization/api-keys) in your dashboard. You set the scopes for the lifetime of the key when you create it. To change the scopes, you must create a new key. If you don't set any scopes, the key can call every admin endpoint.
+
+Mintlify derives the required scope from the HTTP method of the request.
+
+| HTTP method    | Required scope |
+| -------------- | -------------- |
+| `GET`, `HEAD`  | `read`         |
+| All others     | `write`        |
+
+A key with `write` also satisfies `read`, so `["read", "write"]` and `["write"]` both allow every endpoint. Requests that require a scope the key does not have return a `403` response.
+
+The scope only accepts `read` and `write`. Any other value returns a `400` response at key creation.
+
+### Set an expiration date
+
+Optionally set an expiration date on any API key at creation. After the expiration timestamp passes, requests using the key return a `401` response. All API keys support expiration.
+
+Set the expiration on the [API keys page](https://app.mintlify.com/settings/organization/api-keys) in your dashboard. You set the expiration for the lifetime of the key. To change it, you must create a new key. If you don't set an expiration, the key never expires.
+
+The expiration must be a future ISO 8601 timestamp. Past or invalid timestamps return a `400` response at key creation. The expiration returns as `expiresAt` when you list keys, or `null` for keys with no expiration.
+
+Use expirations for short-lived credentials, such as CI/CD tokens, external contractors, or one-off scripts. Rotate long-lived keys by creating a replacement, updating your integrations, and deleting the old key.

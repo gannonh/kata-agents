@@ -1,0 +1,226 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Mintlify Static Export API",
+    "description": "Programmatically generate a self-contained static export of your documentation and download it as a single bundle. Available on Enterprise plans.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.mintlify.com/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/static-export/{projectId}/jobs": {
+      "post": {
+        "summary": "Start static export job",
+        "description": "Start a static export job for a deployment. The job pre-renders your documentation into a self-contained set of static HTML, RSC, and asset files, then packages the result as a single downloadable archive.\n\nA deployment can have only one active static export job at a time. Starting a job while another is `queued` or `running` returns `409`. Rate-limited to 10 job starts per organization per hour.\n\nStatic export is available on Enterprise plans.\n\nAuthenticate with an admin API key.",
+        "operationId": "startStaticExportJob",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The export job was accepted and queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaticExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Static export is not enabled for this deployment. Contact sales@mintlify.com to upgrade.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A static export job is already in progress for this deployment. Wait for the active job to complete before starting a new one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The static export API allows up to 10 job starts per organization per hour.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/static-export/{projectId}/jobs/{jobId}": {
+      "get": {
+        "summary": "Get static export job status",
+        "description": "Retrieve the current status of a static export job. Poll this endpoint after starting a job until `status` is `completed` (or `failed`).\n\nOnce the job completes, the response includes a `bundleUrl`, `sizeBytes`, and `expiresAt`. The `bundleUrl` is a time-limited presigned S3 link. Download the bundle before the `expiresAt` timestamp. Call this endpoint again to get a fresh link. The underlying export files remain reusable.\n\nStatic export is available on Enterprise plans.\n\nAuthenticate with an admin API key.",
+        "operationId": "getStaticExportJob",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "description": "The ID of the static export job returned by `Start static export job`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current state of the export job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaticExportJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Static export is not enabled for this deployment. Contact sales@mintlify.com to upgrade.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No job exists with the provided ID for this deployment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The Authorization header expects a Bearer token. Use an admin API key. This is a server-side secret key. Generate one on the [API keys page](https://app.mintlify.com/settings/organization/api-keys) in your dashboard."
+      }
+    },
+    "parameters": {
+      "projectId": {
+        "schema": {
+          "type": "string",
+          "description": "Your project ID. Can be copied from the [API keys](https://app.mintlify.com/settings/organization/api-keys) page in your dashboard."
+        },
+        "required": true,
+        "name": "projectId",
+        "in": "path"
+      }
+    },
+    "schemas": {
+      "StaticExportJob": {
+        "type": "object",
+        "required": ["jobId", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Unique identifier for the static export job.",
+            "example": "6520f3a1c9b1a20012ab34cd"
+          },
+          "status": {
+            "type": "string",
+            "description": "The current state of the job.",
+            "enum": ["queued", "running", "completed", "failed"],
+            "example": "completed"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was created."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job last transitioned state."
+          },
+          "error": {
+            "type": "string",
+            "description": "A human-readable error message. Present only when `status` is `failed`, otherwise `null`.",
+            "nullable": true
+          },
+          "bundleUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "A time-limited presigned S3 link to the static export bundle archive. Present only when `status` is `completed`. Download the bundle before `expiresAt`. Call this endpoint again to get a fresh link.",
+            "example": "https://mintlify-static-export-outputs-prod.s3.amazonaws.com/6520f3a1c9b1a20012ab34cd/export.zip?X-Amz-Signature=..."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "description": "The size of the bundle in bytes. Present only when `status` is `completed`.",
+            "example": 18432000
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the current `bundleUrl` expires. Present only when `status` is `completed`."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A human-readable description of the error."
+          }
+        }
+      }
+    }
+  }
+}

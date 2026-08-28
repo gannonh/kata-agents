@@ -1,0 +1,70 @@
+---
+title: "上线检查清单"
+description: "上线前检查清单，用于在 Mintlify 文档网站上线前验证重定向、自定义域名、身份验证、分析和 SEO 设置。"
+noindex: true
+---
+
+这是上线前需要设置的配置和验证的设置的完整清单。某些步骤可能不适用于你的部署，你可以跳过这些步骤。
+
+<div id="core-setup">
+  ## 核心设置
+</div>
+
+- **将文档代码库连接到 Mintlify。** 安装 [GitHub 应用](/zh/deploy/github)，或连接你的 [GitLab 代码库](/zh/deploy/gitlab)，或连接你的 [Bitbucket Cloud 代码库](/zh/deploy/bitbucket)。
+  - 如果你将文档存储在多个代码库中，请配置[多代码库结构](/zh/deploy/multi-repo)，以便从多个代码库构建网站。如果所有内容都在一个代码库中，请跳过此步骤。
+- **邀请团队成员。** 在控制面板的[成员](https://app.mintlify.com/settings/organization/members)页面邀请需要访问权限的人员。有关更多信息，请参阅[角色](/zh/dashboard/roles)。
+
+<div id="security">
+  ## 安全性
+</div>
+
+- 查看谁可以访问你的控制面板。
+  - 设置[控制面板 SSO](/zh/dashboard/sso)，让团队访问控制面板和编辑器。
+  - 设置[控制面板访问策略](/zh/dashboard/network-access)。
+  - 设置 [SCIM 配置](/zh/dashboard/scim)。
+- 查看 Mintlify 网站的访问权限。
+  - 如果将网站限制为特定用户，请设置[身份验证](/zh/deploy/authentication-setup)。
+  - 查看哪些群组可以访问页面，以及哪些页面是公开的。
+
+<div id="content-validation">
+  ## 内容验证
+</div>
+
+- **验证信息架构。** 这是合适的导航结构吗？是否缺少某些部分？请参阅[内容类型](/zh/guides/content-types)作为参考。
+- **验证信息是否为最新。** 网站是否反映了所有近期的内容更改？
+- 如有需要，请设置[重定向](/zh/create/redirects)。
+- **配置 SEO 设置。** 在 `docs.json` 中设置网站描述、元标签和索引偏好设置。请参阅 [SEO 和搜索设置](/zh/organize/settings-seo)。
+- **检查页面级 SEO。** 根据需要配置元标签、Open Graph 属性和规范 URL。请参阅 [SEO](/zh/optimize/seo)。
+
+<div id="dashboard-features">
+  ## 控制面板功能
+</div>
+
+- **启用并配置助手。** 请参阅[配置助手](/zh/assistant/configure)。
+  - 配置[支持和销售转接电子邮件](/zh/assistant/configure#set-deflection-emails)。
+  - 配置[搜索域名](/zh/assistant/configure#search-domains)。
+  - 自定义[助手的响应模式](/zh/assistant/customize)，并[添加助手技能](/zh/assistant/skills)。
+- **嵌入助手组件。** 启用[助手组件](/zh/assistant/widget)，将助手添加到产品控制面板、营销网站或支持门户。
+- **启用附加功能。** 前往控制面板中的[附加功能](https://app.mintlify.com/settings/deployment/addons)页面。启用相关附加功能，例如代理反馈、[CI 检查](/zh/deploy/ci)、相关主题等。
+- **设置 Slack 代理。** 这样你就可以直接在 Slack 中更改内容。请参阅[将代理添加到 Slack](/zh/agent/slack#add-the-agent-to-slack)。
+- **设置自动化。** 请参阅[如何启用自动化](/zh/automations/manage#enable-an-automation)。
+- **安装相关分析插件。** 请参阅[分析集成列表](/zh/integrations/analytics/overview)。
+
+<div id="go-live">
+  ## 上线
+</div>
+
+- **设置自定义域名。** 请参阅[自定义域名指南](/zh/customize/custom-domain)。
+
+<div id="post-launch-verification">
+  ## 上线后验证
+</div>
+
+在你的自定义域名解析完成后，请先验证上线情况，再停用你的旧站点。
+
+- 通过 HTTPS 加载文档，确认证书有效。
+- 在桌面端和移动端抽查每个顶级导航区块中的页面。
+- 测试若干来自旧 URL 的已知重定向，确认它们能解析到正确的新页面。
+- 如果你的站点使用了身份验证，请使用测试账号登录，确认受限页面能按预期加载。
+- 确认你的分析集成正在接收页面浏览数据。
+- 至少在上线后的第一天内，持续监控 404、重定向失败和构建失败。

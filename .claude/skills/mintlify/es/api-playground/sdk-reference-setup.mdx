@@ -1,0 +1,226 @@
+---
+title: "Configuración de referencias de SDK"
+description: "Genera páginas de referencia de SDK a partir de tus herramientas de documentación existentes: TypeDoc, DocFX, Javadoc, Sphinx o phpDocumentor."
+keywords: ["sdk", "typedoc", "docfx", "javadoc", "sphinx", "phpdocumentor", "reference"]
+---
+
+Usa la propiedad de navegación `sdk` para generar páginas de referencia para tus bibliotecas de SDK a partir de las herramientas de documentación que ya utilizas. Mintlify lee el artefacto de compilación de cada herramienta. Después, crea una página para cada clase, interfaz, módulo y función, con grupos de navegación, enlaces entre páginas e indexación de búsqueda incluidos.
+
+<div id="supported-formats">
+  ## Formatos compatibles
+</div>
+
+| `format` | Herramienta | Artefacto |
+| --- | --- | --- |
+| `typedoc` | [TypeDoc](https://typedoc.org) (TypeScript/JavaScript) | Archivo de exportación JSON |
+| `docfx` | [DocFX](https://dotnet.github.io/docfx/) (.NET) | Directorio de salida de `docfx metadata` (YAML de ManagedReference) |
+| `javadoc` | [Javadoc](https://docs.oracle.com/en/java/javase/17/javadoc/javadoc.html) (Java) | Directorio HTML del doclet estándar |
+| `sphinx` | [Sphinx](https://www.sphinx-doc.org) (Python) | Directorio de salida del builder JSON |
+| `phpdoc` | [phpDocumentor](https://phpdoc.org) (PHP) | Archivo `structure.xml` |
+
+<div id="generate-an-artifact">
+  ## Generar un artefacto
+</div>
+
+Ejecuta tu herramienta de documentación con un formato de salida legible por máquina. Si ya publicas documentación generada desde CI, normalmente basta con cambiar un solo flag en el mismo comando.
+
+<CodeGroup>
+
+```bash TypeDoc
+npx typedoc --json typedoc.json src/index.ts
+```
+
+```bash DocFX
+docfx metadata docfx.json
+```
+
+```bash Javadoc
+javadoc -d javadoc-output -sourcepath src/main/java -subpackages com.example
+# O descarga el jar de javadoc publicado desde Maven Central
+```
+
+```bash Sphinx
+python -m sphinx -b json docs/source artifacts/json
+```
+
+```bash phpDocumentor
+phpdoc -d src -t artifacts --template=xml
+```
+
+</CodeGroup>
+
+<div id="auto-populate-sdk-pages">
+  ## Generar automáticamente páginas de SDK
+</div>
+
+Agrega una propiedad `sdk` a una pestaña o grupo en tu `docs.json`. Mintlify analiza el artefacto y crea grupos de navegación y páginas para la biblioteca.
+
+```json
+"navigation": {
+  "tabs": [
+    {
+      "tab": "SDK Reference",
+      "sdk": {
+        "format": "typedoc",
+        "source": "sdk-artifacts/typedoc.json",
+        "directory": "sdk/typescript"
+      }
+    }
+  ]
+}
+```
+
+Agrega `sdk` a un grupo para generar páginas dentro de una sección de una pestaña en lugar de en toda la pestaña. Los grupos y páginas heredan la configuración de `sdk` de la pestaña o grupo superior. Si un grupo anidado define su propio `sdk`, Mintlify usa esa configuración en lugar de la heredada.
+
+```json
+{
+  "group": "TypeScript SDK",
+  "sdk": {
+    "format": "typedoc",
+    "source": "sdk-artifacts/typedoc.json",
+    "directory": "sdk/typescript"
+  },
+  "pages": ["sdk/typescript/overview"]
+}
+```
+
+Un grupo con `sdk` también puede incluir `pages` que escribas tú mismo. Tus páginas aparecen primero, seguidas de los grupos de referencia generados.
+
+<Note>
+  Puedes declarar `sdk` en una [pestaña](/es/organize/navigation#tabs) o en un [grupo](/es/organize/navigation#groups).
+
+  - Una pestaña con `sdk` puede incluir `groups`, pero no otras estructuras de navegación, como `pages`, `versions` o `languages`. Tampoco puede incluir una propiedad `openapi`, `asyncapi` o `graphql`.
+  - Un grupo con `sdk` puede incluir `pages` y grupos anidados, pero no puede incluir una propiedad `graphql`.
+</Note>
+
+<ParamField path="format" type="string" required>
+  La herramienta de documentación que produjo el artefacto: `typedoc`, `docfx`, `javadoc`, `sphinx` o `phpdoc`.
+</ParamField>
+
+<ParamField path="source" type="string" required>
+  Ruta relativa al archivo o directorio del artefacto en tu repositorio de documentación, o una URL HTTPS. No admite URLs HTTP.
+</ParamField>
+
+<ParamField path="directory" type="string">
+  El prefijo de la ruta URL para las páginas generadas. El valor predeterminado es `sdk-reference`.
+</ParamField>
+
+Agrega varias pestañas o grupos para documentar varias bibliotecas. Por ejemplo, usa dos grupos en la misma pestaña para las versiones estable y beta de un SDK. Usa un `directory` único para cada biblioteca para evitar colisiones de rutas.
+
+<Tip>
+  Agrega tu directorio de artefactos a [`.mintignore`](/es/organize/mintignore) para que Mintlify trate los artefactos como entradas de compilación en lugar de publicarlos como activos estáticos.
+</Tip>
+
+<div id="generated-pages">
+  ## Páginas generadas
+</div>
+
+Mintlify agrega los grupos de navegación generados después de cualquier `groups` en la pestaña. Si agregas `sdk` a un grupo, los grupos generados aparecen después de las `pages` de ese grupo. Los grupos varían según el formato y pueden representar módulos, paquetes, espacios de nombres o tipos de símbolos.
+
+Cada página generada documenta una clase, interfaz, función, tipo u otro símbolo del artefacto y enlaza con las páginas generadas relacionadas. Si un convertidor produce páginas que no pertenecen a ningún grupo, Mintlify las recopila en un grupo `Reference`.
+
+<div id="customize-a-page-for-a-single-symbol">
+  ## Personalizar una página para un símbolo individual
+</div>
+
+Usa el frontmatter `sdk` en una página MDX para apuntar a un símbolo del artefacto. Mintlify renderiza el contenido del cuerpo que escribas y, a continuación, añade debajo la referencia generada para ese símbolo. Utiliza esta opción cuando quieras agregar ejemplos, notas de migración o contexto sobre una clase, interfaz o método específicos.
+
+Agrega la página a la navegación de tu `docs.json` como cualquier otra página. Mintlify solo genera contenido de SDK para las páginas que aparecen en tu navegación.
+
+Cuando una pestaña o grupo con `sdk` contiene una página con frontmatter `sdk`, Mintlify deja de rellenar automáticamente esa pestaña o grupo y muestra solo las páginas que escribiste. Mueve la página fuera de la pestaña o grupo si quieres que el resto de la biblioteca se genere automáticamente.
+
+Apunta `sdk` a un símbolo:
+
+```mdx
+---
+title: "Client"
+sdk: "class Client"
+---
+
+Crea un `Client` para llamar a la API.
+```
+
+La forma de cadena sigue el patrón `[source] kind name`. Si omites `source`, la página lo hereda de la configuración `sdk` de la pestaña o del grupo. La forma de cadena siempre hereda `format`, por lo que solo funciona en páginas bajo una pestaña o grupo con `sdk`. En cualquier otro caso, establece `sdk` como un objeto con los campos que se indican a continuación. Para métodos y propiedades, incluye el nombre del elemento superior, por ejemplo `method Client.getUser`.
+
+Si omites `title` o `description`, Mintlify usa el título y la descripción generados para el símbolo.
+
+<ParamField path="kind" type="string" required>
+  El tipo de símbolo: `class`, `interface`, `enum`, `function`, `type`, `variable`, `method` o `property`.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  El nombre del símbolo tal como aparece en el artefacto.
+</ParamField>
+
+<ParamField path="parent" type="string">
+  Requerido para símbolos de tipo `method` y `property`. La clase, interfaz o tipo que lo contiene.
+</ParamField>
+
+<ParamField path="format" type="string">
+  Sobrescribe el `format` heredado. Obligatorio cuando la página no está bajo una pestaña o grupo con `sdk`. Solo disponible en la forma de objeto.
+</ParamField>
+
+<ParamField path="source" type="string">
+  Sobrescribe el `source` heredado. Obligatorio cuando la página no está bajo una pestaña o grupo con `sdk`.
+</ParamField>
+
+<div id="use-remote-sources">
+  ## Usar fuentes remotas
+</div>
+
+Establece `source` como una URL HTTPS para obtener el artefacto en tiempo de compilación en lugar de incluirlo en tu repositorio de documentación.
+
+Los formatos de archivo único (`typedoc`, `phpdoc`) aceptan una URL directa al archivo. Los formatos de directorio (`docfx`, `javadoc`, `sphinx`) aceptan un archivo zip. Los jars de Javadoc publicados en Maven Central funcionan sin necesidad de reempaquetarlos:
+
+```json
+{
+  "tab": "Java SDK",
+  "sdk": {
+    "format": "javadoc",
+    "source": "https://repo1.maven.org/maven2/com/example/my-library/1.0.0/my-library-1.0.0-javadoc.jar",
+    "directory": "sdk/java"
+  }
+}
+```
+
+Los artefactos remotos tienen un límite de descarga de 50 MB y un límite de tamaño extraído de 200 MB.
+
+<div id="keep-references-up-to-date">
+  ## Mantener las referencias actualizadas
+</div>
+
+Regenera el artefacto siempre que tu SDK cambie. Un patrón común es un trabajo de CI en cada repositorio de SDK. Este trabajo ejecuta la herramienta de documentación al publicar una nueva versión. Después, confirma el artefacto en tu repositorio de documentación o súbelo a una URL estable a la que apunta `source`.
+
+<div id="repository-setup">
+  ## Configuración del repositorio
+</div>
+
+Almacena el código de tu SDK y la documentación en el mismo repositorio o en repositorios separados. Elige el patrón que se adapte a tu configuración. Ambas opciones admiten las mismas capacidades.
+
+<div id="sdk-and-documentation-in-the-same-repository">
+  ### SDK y documentación en el mismo repositorio
+</div>
+
+Genera el artefacto de tu SDK en el mismo repositorio que tu documentación y apunta `source` a su ruta relativa. Cualquier flujo de trabajo que ya produzca el artefacto al hacer push o durante una publicación puede confirmarlo en el repositorio. Después, publica las actualizaciones como parte del siguiente despliegue del sitio de documentación.
+
+```txt
+docs-repo/
+  docs.json
+  content/
+  sdk-artifacts/
+    typedoc.json
+```
+
+<div id="sdk-in-a-separate-repository">
+  ### SDK en un repositorio separado
+</div>
+
+Cuando el SDK está en su propio repositorio, tienes dos opciones.
+
+1. **Confirma el artefacto en tu repositorio de documentación.** En el repositorio del SDK, ejecuta un trabajo de CI al publicar una nueva versión. El trabajo debe generar el artefacto y abrir una solicitud de extracción (o hacer push de una confirmación) a tu repositorio de documentación con el archivo actualizado. Fusiona ese cambio en tu rama de despliegue para activar un despliegue del sitio. Apunta `source` a la ruta confirmada, igual que en la configuración de un único repositorio.
+
+2. **Aloja el artefacto y obténlo durante la compilación.** Sube el artefacto a una URL HTTPS estable. Por ejemplo, un bucket de S3, un activo de GitHub Releases o Maven Central para jars de Javadoc. Establece `source` en la URL. Activa un despliegue del sitio de documentación para obtener el nuevo artefacto cada vez que lo actualices. Llama al endpoint [Activar despliegue](/es/api/update/trigger) desde el flujo de publicación de tu SDK después de publicar el artefacto.
+
+<Tip>
+  Si publicas con poca frecuencia o quieres que el repositorio de documentación sea la fuente de verdad, confirma el artefacto en tu repositorio de documentación. Si publicas con frecuencia, los artefactos son grandes o ya los publicas (por ejemplo, jars de Javadoc en Maven Central), aloja el artefacto y obténlo durante la compilación.
+</Tip>

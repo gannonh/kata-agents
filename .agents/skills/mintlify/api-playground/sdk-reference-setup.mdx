@@ -1,0 +1,207 @@
+---
+title: "Generate SDK reference pages from doc-tool output"
+sidebarTitle: "SDK reference setup"
+description: "Publish SDK reference documentation in Mintlify from TypeDoc, DocFX, Javadoc, Sphinx, or phpDocumentor artifacts using the sdk navigation property."
+keywords: ["sdk", "typedoc", "docfx", "javadoc", "sphinx", "phpdocumentor", "reference"]
+---
+
+Use the `sdk` navigation property to generate reference pages for your SDK libraries from the documentation tools you already run. Mintlify reads each tool's build artifact. It creates a page for every class, interface, module, and function. It also includes navigation groups, cross-page links, and search indexing.
+
+## Supported formats
+
+| `format` | Tool | Artifact |
+| --- | --- | --- |
+| `typedoc` | [TypeDoc](https://typedoc.org) (TypeScript/JavaScript) | JSON export file |
+| `docfx` | [DocFX](https://dotnet.github.io/docfx/) (.NET) | `docfx metadata` output directory (ManagedReference YAML) |
+| `javadoc` | [Javadoc](https://docs.oracle.com/en/java/javase/17/javadoc/javadoc.html) (Java) | Standard doclet HTML directory |
+| `sphinx` | [Sphinx](https://www.sphinx-doc.org) (Python) | JSON builder output directory |
+| `phpdoc` | [phpDocumentor](https://phpdoc.org) (PHP) | `structure.xml` file |
+
+## Generate an artifact
+
+Run your documentation tool with a machine-readable output format. If you already publish generated docs from CI, this is usually a one-flag change to the same command.
+
+<CodeGroup>
+
+```bash TypeDoc
+npx typedoc --json typedoc.json src/index.ts
+```
+
+```bash DocFX
+docfx metadata docfx.json
+```
+
+```bash Javadoc
+javadoc -d javadoc-output -sourcepath src/main/java -subpackages com.example
+# Or download the published javadoc jar from Maven Central
+```
+
+```bash Sphinx
+python -m sphinx -b json docs/source artifacts/json
+```
+
+```bash phpDocumentor
+phpdoc -d src -t artifacts --template=xml
+```
+
+</CodeGroup>
+
+## Auto-populate SDK pages
+
+Add an `sdk` property to a tab or group in your `docs.json`. Mintlify parses the artifact. It creates navigation groups and pages for the library.
+
+```json
+"navigation": {
+  "tabs": [
+    {
+      "tab": "SDK Reference",
+      "sdk": {
+        "format": "typedoc",
+        "source": "sdk-artifacts/typedoc.json",
+        "directory": "sdk/typescript"
+      }
+    }
+  ]
+}
+```
+
+Add `sdk` to a [group](/organize/navigation#groups) to generate pages inside one section of a tab instead of an entire tab. Groups and pages inherit the `sdk` settings of the parent tab or group. If a nested group sets its own `sdk`, Mintlify uses those settings instead of the inherited ones.
+
+```json
+{
+  "group": "TypeScript SDK",
+  "sdk": {
+    "format": "typedoc",
+    "source": "sdk-artifacts/typedoc.json",
+    "directory": "sdk/typescript"
+  },
+  "pages": ["sdk/typescript/overview"]
+}
+```
+
+A group with `sdk` can also list `pages` that you write yourself. Your pages appear first, followed by the generated reference groups.
+
+<Note>
+  You can declare `sdk` on a [tab](/organize/navigation#tabs) or a [group](/organize/navigation#groups).
+
+  - A tab with `sdk` can include `groups`, but no other navigation structures, such as `pages`, `versions`, or `languages`. It also cannot include an `openapi`, `asyncapi`, or `graphql` property.
+  - A group with `sdk` can include `pages` and nested groups, but cannot include a `graphql` property.
+</Note>
+
+<ParamField path="format" type="string" required>
+  The documentation tool that produced the artifact: `typedoc`, `docfx`, `javadoc`, `sphinx`, or `phpdoc`.
+</ParamField>
+
+<ParamField path="source" type="string" required>
+  Relative path to the artifact file or directory in your docs repository, or an HTTPS URL. The `source` field does not accept HTTP URLs.
+</ParamField>
+
+<ParamField path="directory" type="string">
+  The URL path prefix for generated pages. Defaults to `sdk-reference`.
+</ParamField>
+
+Add multiple tabs or groups to document multiple libraries. For example, use two groups in the same tab for the stable and beta versions of an SDK. Use a unique `directory` for each library to avoid route collisions.
+
+<Tip>
+  Add your artifact directory to [`.mintignore`](/organize/mintignore) so Mintlify treats artifacts as build inputs rather than publishing them as static assets.
+</Tip>
+
+## Generated pages
+
+Mintlify adds the generated navigation groups after any `groups` on the tab. If you add `sdk` to a group, the generated groups appear after that group's `pages`. The groups vary by format and may represent modules, packages, namespaces, or symbol types.
+
+Each generated page documents a class, interface, function, type, or other symbol from the artifact and links to related generated pages. If a converter produces pages that do not belong to a group, Mintlify collects them under a `Reference` group.
+
+## Customize a page for a single symbol
+
+Use the `sdk` frontmatter on an MDX page to target one symbol from the artifact. Mintlify renders any body content you write, then appends the generated reference for that symbol below it. Use this when you want to add examples, migration notes, or context above a specific class, interface, or method.
+
+Add the page to your `docs.json` navigation like any other page. Mintlify only builds SDK content for pages that appear in your navigation.
+
+Once a tab or group with `sdk` contains a page with `sdk` frontmatter, Mintlify stops auto-populating that tab or group and shows only the pages you wrote. Move the page out of the tab or group if you want the rest of the library to auto-populate.
+
+Point `sdk` at a symbol:
+
+```mdx
+---
+title: "Client"
+sdk: "class Client"
+---
+
+Create a `Client` to call the API.
+```
+
+The string form follows the pattern `[source] kind name`. If you leave out `source`, the page inherits it from the tab or group `sdk` config. The string form always inherits `format`, so it only works on pages under a tab or group with `sdk`. Everywhere else, set `sdk` to an object with the fields below. For methods and properties, include the parent name, such as `method Client.getUser`.
+
+If you leave out `title` or `description`, Mintlify uses the title and description generated for the symbol.
+
+<ParamField path="kind" type="string" required>
+  The symbol kind: `class`, `interface`, `enum`, `function`, `type`, `variable`, `method`, or `property`.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  The symbol name as it appears in the artifact.
+</ParamField>
+
+<ParamField path="parent" type="string">
+  Required for `method` and `property` targets. The enclosing class, interface, or type.
+</ParamField>
+
+<ParamField path="format" type="string">
+  Overrides the inherited `format`. Required when the page is not under a tab or group with `sdk`. Only available in the object form.
+</ParamField>
+
+<ParamField path="source" type="string">
+  Overrides the inherited `source`. Required when the page is not under a tab or group with `sdk`.
+</ParamField>
+
+## Use remote sources
+
+Set `source` to an HTTPS URL to fetch the artifact at build time instead of committing it to your docs repository.
+
+Single-file formats (`typedoc`, `phpdoc`) accept a direct file URL. Directory formats (`docfx`, `javadoc`, `sphinx`) accept a zip archive. Javadoc jars published to Maven Central work without repackaging:
+
+```json
+{
+  "tab": "Java SDK",
+  "sdk": {
+    "format": "javadoc",
+    "source": "https://repo1.maven.org/maven2/com/example/my-library/1.0.0/my-library-1.0.0-javadoc.jar",
+    "directory": "sdk/java"
+  }
+}
+```
+
+Remote artifacts have a 50 MB download limit and a 200 MB extracted size limit.
+
+## Keep references up to date
+
+Regenerate the artifact whenever your SDK changes. A common pattern is a CI job in each SDK repository that runs the documentation tool on release. The job either commits the artifact to your docs repository or uploads it to a stable URL that `source` points to.
+
+## Repository setup
+
+Store your SDK code and documentation in the same repository or separate repositories. Pick the pattern that matches your setup. Both options support the same capabilities.
+
+### SDK and documentation in the same repository
+
+Generate your SDK artifact in the same repository as your documentation and point `source` at its relative path. An existing workflow that produces the artifact on push or release can commit it back to the repository. The next documentation site deployment publishes the update.
+
+```txt
+docs-repo/
+  docs.json
+  content/
+  sdk-artifacts/
+    typedoc.json
+```
+
+### SDK in a separate repository
+
+When the SDK is in its own repository, you have two options.
+
+1. **Commit the artifact to your documentation repository.** In the SDK repository, run a CI job at release time. The job generates the artifact and opens a pull request or pushes a commit with the updated file to your documentation repository. Merge the change into your deployment branch to trigger a site deployment. Point `source` at the committed path, as in the single-repository setup.
+
+2. **Host the artifact and fetch it at build time.** Upload the artifact to a stable HTTPS URL. For example, an S3 bucket, GitHub Releases asset, or Maven Central for Javadoc jars. Set `source` to the URL. Trigger a documentation site deployment to fetch the new artifact whenever you update it. Call the [Trigger deployment](/api/update/trigger) endpoint from your SDK release pipeline after you publish the artifact.
+
+<Tip>
+  If your release cadence is low or you want the documentation repository to be the source of truth, commit the artifact to your documentation repository. If your releases are frequent, artifacts are large, or you already publish them (for example, Javadoc jars on Maven Central), host the artifact and fetch it at build time.
+</Tip>

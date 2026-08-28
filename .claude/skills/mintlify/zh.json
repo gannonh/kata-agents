@@ -1,0 +1,557 @@
+{
+  "tabs": [
+    {
+      "tab": "文档",
+      "groups": [
+        {
+          "group": "快速入门",
+          "boost": 2,
+          "pages": [
+            "zh/index",
+            "zh/quickstart",
+            "zh/ai-native",
+            {
+              "group": "CLI",
+              "root": "zh/cli/index",
+              "pages": [
+                "zh/cli/install",
+                "zh/cli/preview",
+                "zh/cli/commands"
+              ]
+            },
+            {
+              "group": "迁移到 Mintlify",
+              "root": "zh/migration/index",
+              "pages": [
+                "zh/migration/docusaurus",
+                "zh/migration/readme",
+                "zh/migration/gitbook",
+                "zh/migration/fern",
+                "zh/migration/document360",
+                "zh/migration/manual"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "创建内容",
+          "pages": [
+            {
+              "group": "页面",
+              "pages": [
+                "zh/organize/pages",
+                "zh/organize/hidden-pages",
+                "zh/organize/related-pages"
+              ]
+            },
+            {
+              "group": "格式设置",
+              "pages": [
+                "zh/create/text",
+                "zh/create/code",
+                "zh/create/list-table"
+              ]
+            },
+            {
+              "group": "组件",
+              "root": "zh/components/index",
+              "pages": [
+                "zh/components/accordions",
+                "zh/components/badge",
+                "zh/components/banner",
+                "zh/components/callouts",
+                "zh/components/cards",
+                "zh/components/code-groups",
+                "zh/components/color",
+                "zh/components/columns",
+                "zh/components/examples",
+                "zh/components/expandables",
+                "zh/components/fields",
+                "zh/components/frames",
+                "zh/components/github",
+                "zh/components/icons",
+                "zh/components/mermaid-diagrams",
+                "zh/components/panel",
+                "zh/components/prompt",
+                "zh/components/responses",
+                "zh/components/steps",
+                "zh/components/tabs",
+                "zh/components/tiles",
+                "zh/components/tooltips",
+                "zh/components/tree",
+                "zh/components/update",
+                "zh/components/view",
+                "zh/components/visibility",
+                "zh/customize/react-components"
+              ]
+            },
+            {
+              "group": "媒体",
+              "pages": [
+                "zh/create/image-embeds",
+                "zh/create/files"
+              ]
+            },
+            "zh/create/reusable-snippets",
+            "zh/create/personalization",
+            {
+              "group": "Web 编辑器",
+              "root": "zh/editor/index",
+              "pages": [
+                "zh/editor/tutorial",
+                "zh/editor/git-essentials",
+                "zh/editor/pages",
+                "zh/editor/navigation",
+                "zh/editor/live-preview",
+                "zh/editor/branching-and-publishing",
+                "zh/editor/comments",
+                "zh/editor/suggestions",
+                "zh/editor/agent",
+                "zh/editor/configurations",
+                "zh/editor/settings",
+                "zh/editor/keyboard-shortcuts"
+              ]
+            },
+            "zh/deploy/ci"
+          ]
+        },
+        {
+          "group": "管理站点",
+          "pages": [
+            {
+              "group": "全局设置",
+              "root": "zh/organize/settings",
+              "pages": [
+                "zh/organize/settings-appearance",
+                "zh/organize/settings-structure",
+                "zh/organize/settings-api",
+                "zh/organize/settings-integrations",
+                "zh/organize/settings-seo",
+                "zh/organize/settings-reference"
+              ]
+            },
+            "zh/organize/navigation",
+            "zh/ai/contextual-menu",
+            "zh/create/redirects",
+            "zh/organize/mintignore",
+            {
+              "group": "存储库设置",
+              "pages": [
+                "zh/deploy/monorepo",
+                "zh/deploy/multi-repo"
+              ]
+            },
+            {
+              "group": "视觉自定义",
+              "pages": [
+                "zh/customize/themes",
+                "zh/customize/fonts",
+                "zh/customize/custom-scripts",
+                "zh/customize/custom-404-page"
+              ]
+            },
+            {
+              "group": "分析",
+              "root": "zh/analytics/index",
+              "pages": [
+                "zh/analytics/traffic",
+                "zh/analytics/assistant",
+                "zh/analytics/search",
+                "zh/analytics/user-engagements",
+                "zh/optimize/feedback",
+                "zh/analytics/export",
+                "zh/analytics/streaming"
+              ]
+            },
+            {
+              "group": "部署",
+              "root": "zh/deploy/deployments",
+              "pages": [
+                "zh/deploy/preview-deployments",
+                "zh/deploy/github",
+                "zh/deploy/ghes",
+                "zh/deploy/gitlab",
+                "zh/deploy/bitbucket",
+                "zh/deploy/rollbacks"
+              ]
+            },
+            {
+              "group": "托管",
+              "root": "zh/customize/custom-domain",
+              "pages": [
+                {
+                  "group": "子路径托管",
+                  "root": "zh/deploy/docs-subpath",
+                  "pages": [
+                    "zh/deploy/cloudflare",
+                    "zh/deploy/route53-cloudfront",
+                    "zh/deploy/vercel",
+                    "zh/deploy/vercel-external-proxies",
+                    "zh/deploy/reverse-proxy"
+                  ]
+                },
+                "zh/deploy/csp-configuration",
+                "zh/deploy/self-host",
+                "zh/deploy/custom-portal"
+              ]
+            },
+            {
+              "group": "导出站点",
+              "pages": [
+                "zh/deploy/export",
+                "zh/optimize/pdf-exports"
+              ]
+            },
+            {
+              "group": "身份验证",
+              "root": "zh/deploy/authentication-setup",
+              "pages": [
+                "zh/dashboard/sso",
+                "zh/dashboard/scim",
+                "zh/dashboard/session-security"
+              ]
+            },
+            {
+              "group": "安全",
+              "pages": [
+                "zh/dashboard/network-access",
+                "zh/dashboard/roles",
+                "zh/dashboard/audit-logs",
+                "zh/dashboard/security-contact"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "Agent",
+          "pages": [
+            "zh/agent/index",
+            "zh/agent/slack",
+            {
+              "group": "自动化",
+              "root": "zh/automations/index",
+              "pages": [
+                "zh/automations/create",
+                "zh/automations/manage",
+                "zh/automations/integrations",
+                "zh/automations/reference",
+                "zh/deploy/gitlab-self-hosted"
+              ]
+            },
+            "zh/agent/customize",
+            "zh/agent/effective-prompts",
+            "zh/agent/use-cases"
+          ]
+        },
+        {
+          "group": "Assistant",
+          "pages": [
+            "zh/assistant/index",
+            "zh/assistant/configure",
+            "zh/assistant/customize",
+            "zh/assistant/widget",
+            "zh/assistant/skills",
+            "zh/assistant/use"
+          ]
+        },
+        {
+          "group": "面向 Agent 的内容",
+          "pages": [
+            "zh/ai/mintlify-mcp",
+            {
+              "group": "Mintlify Index",
+              "root": "zh/search-index/index",
+              "pages": [
+                "zh/search-index/connect",
+                "zh/search-index/mcp"
+              ]
+            },
+            "zh/ai/model-context-protocol",
+            "zh/ai/llmstxt",
+            "zh/ai/skillmd",
+            "zh/ai/markdown-export"
+          ]
+        },
+        {
+          "group": "搜索与 SEO",
+          "pages": [
+            "zh/optimize/search",
+            "zh/optimize/seo"
+          ]
+        },
+        {
+          "group": "编写 API 文档",
+          "pages": [
+            "zh/api-playground/overview",
+            {
+              "group": "API 规范",
+              "pages": [
+                "zh/api-playground/openapi-setup",
+                "zh/api-playground/asyncapi-setup",
+                "zh/api-playground/graphql-setup",
+                {
+                  "group": "SDK 参考设置",
+                  "root": "zh/api-playground/sdk-reference-setup",
+                  "pages": [
+                    "zh/api-playground/adding-sdk-examples"
+                  ]
+                }
+              ]
+            },
+            {
+              "group": "端点页面",
+              "pages": [
+                "zh/api-playground/complex-data-types",
+                "zh/api-playground/multiple-responses",
+                "zh/api-playground/managing-page-visibility",
+                "zh/api-playground/mdx-setup"
+              ]
+            },
+            "zh/api-playground/troubleshooting"
+          ]
+        },
+        {
+          "group": "集成",
+          "pages": [
+            {
+              "group": "Analytics",
+              "root": "zh/integrations/analytics/overview",
+              "pages": [
+                "zh/integrations/analytics/adobe",
+                "zh/integrations/analytics/amplitude",
+                "zh/integrations/analytics/clarity",
+                "zh/integrations/analytics/clearbit",
+                "zh/integrations/analytics/fathom",
+                "zh/integrations/analytics/google-analytics",
+                "zh/integrations/analytics/google-tag-manager",
+                "zh/integrations/analytics/heap",
+                "zh/integrations/analytics/hightouch",
+                "zh/integrations/analytics/hotjar",
+                "zh/integrations/analytics/logrocket",
+                "zh/integrations/analytics/mixpanel",
+                "zh/integrations/analytics/pirsch",
+                "zh/integrations/analytics/plausible",
+                "zh/integrations/analytics/posthog",
+                "zh/integrations/analytics/segment"
+              ]
+            },
+            {
+              "group": "SDK",
+              "pages": [
+                "zh/integrations/sdks/speakeasy",
+                "zh/integrations/sdks/stainless"
+              ]
+            },
+            {
+              "group": "支持",
+              "root": "zh/integrations/support/overview",
+              "pages": [
+                "zh/integrations/support/intercom",
+                "zh/integrations/support/front"
+              ]
+            },
+            {
+              "group": "隐私",
+              "root": "zh/integrations/privacy/overview",
+              "pages": [
+                "zh/integrations/privacy/osano",
+                "zh/integrations/privacy/transcend"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "参考",
+          "pages": [
+            "zh/reference/concepts",
+            "zh/reference/glossary",
+            "zh/credits"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "API 参考文档",
+      "groups": [
+        {
+          "group": "API 参考",
+          "pages": [
+            "zh/api/introduction"
+          ]
+        },
+        {
+          "group": "管理",
+          "pages": [
+            "zh/api/update/trigger",
+            "zh/api/update/status",
+            "zh/api/preview/trigger",
+            "zh/api/automations/trigger"
+          ]
+        },
+        {
+          "group": "Agent",
+          "pages": [
+            "zh/api/agent/v2/create-agent-job",
+            "zh/api/agent/v2/get-agent-job",
+            "zh/api/agent/v2/send-message"
+          ]
+        },
+        {
+          "group": "Assistant",
+          "pages": [
+            "zh/api/assistant/create-assistant-message-v2"
+          ]
+        },
+        {
+          "group": "搜索",
+          "pages": [
+            "zh/api/assistant/search",
+            "zh/api/assistant/get-page-content"
+          ]
+        },
+        {
+          "group": "Mintlify Index",
+          "pages": [
+            "zh/api/search-index/introduction",
+            "zh/api/search-index/context",
+            "zh/api/search-index/search",
+            "zh/api/search-index/contents"
+          ]
+        },
+        {
+          "group": "数据分析",
+          "pages": [
+            "zh/api/analytics/feedback",
+            "zh/api/analytics/feedback-by-page",
+            "zh/api/analytics/assistant-conversations",
+            "zh/api/analytics/assistant-thread",
+            "zh/api/analytics/assistant-caller-stats",
+            "zh/api/analytics/searches",
+            "zh/api/analytics/views",
+            "zh/api/analytics/visitors"
+          ]
+        },
+        {
+          "group": "静态导出",
+          "pages": [
+            "zh/api/static-export/start-job",
+            "zh/api/static-export/get-job-status"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "更新日志",
+      "groups": [
+        {
+          "group": "更新日志",
+          "boost": 0.5,
+          "pages": [
+            "zh/changelog"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "帮助中心",
+      "hidden": true,
+      "searchable": true,
+      "groups": [
+        {
+          "group": "帮助中心",
+          "pages": [
+            "zh/help-center/openapi-url-fetch-fails-during-build",
+            "zh/help-center/domain-already-claimed-by-another-organization",
+            "zh/help-center/configure-oauth-with-auth0",
+            "zh/help-center/private-repo-missing-when-creating-second-deployment",
+            "zh/help-center/static-file-not-served"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "学习",
+      "menu": [
+        {
+          "item": "学习",
+          "href": "https://learn.mintlify.com/",
+          "description": "自定进度的课程，帮助你充分利用 Mintlify。"
+        },
+        {
+          "item": "指南",
+          "description": "常见任务和最佳实践的操作指南。",
+          "groups": [
+            {
+              "group": "概览",
+              "icon": "book-open",
+              "pages": [
+                "zh/guides/index"
+              ]
+            },
+            {
+              "group": "AI",
+              "icon": "bot",
+              "pages": [
+                "zh/guides/assistant-embed",
+                "zh/guides/configure-automerge",
+                "zh/guides/use-automations",
+                "zh/guides/claude-code",
+                "zh/guides/codex",
+                "zh/guides/cursor",
+                "zh/guides/devin-desktop",
+                "zh/guides/geo"
+              ]
+            },
+            {
+              "group": "API 文档",
+              "icon": "file-braces",
+              "pages": [
+                "zh/guides/migrating-from-mdx"
+              ]
+            },
+            {
+              "group": "最佳实践",
+              "icon": "trophy",
+              "pages": [
+                "zh/guides/accessibility",
+                "zh/create/changelogs",
+                "zh/guides/content-types",
+                "zh/guides/content-templates",
+                "zh/guides/custom-layouts",
+                "zh/guides/improving-docs",
+                "zh/guides/internationalization",
+                "zh/guides/linking",
+                "zh/guides/maintenance",
+                "zh/guides/media",
+                "zh/guides/navigation",
+                "zh/guides/seo",
+                "zh/guides/style-and-tone",
+                "zh/guides/understand-your-audience"
+              ]
+            },
+            {
+              "group": "Git",
+              "icon": "git-merge",
+              "pages": [
+                "zh/guides/git-concepts",
+                "zh/guides/branches"
+              ]
+            },
+            {
+              "group": "使用场景",
+              "icon": "blocks",
+              "pages": [
+                "zh/guides/developer-documentation",
+                "zh/guides/knowledge-base",
+                "zh/guides/help-center",
+                "zh/guides/custom-frontend",
+                "zh/api/static-export/overview"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "language": "zh"
+}
