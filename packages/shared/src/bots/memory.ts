@@ -422,10 +422,18 @@ export class BotContextLedger {
           || turn.replyEntry.kind !== 'bot'
           || turn.replyEntry.authorBotId !== this.store.botId
         ) throw new Error('Bot context recovery identity mismatch')
+        // Skip turns already covered by the ledger cursor so reconcile does not
+        // re-run extractMemoryCandidate / completeTurn under a different
+        // recover.* operation ID than the live turn.* path.
+        const cursor = this.getCursor(id)
+        if (turn.replyEntry.seq <= cursor.lastProcessedSeq) {
+          if (turn.throughSeq > cursor.lastProcessedSeq) await this.advanceCursor(id, turn.throughSeq)
+          continue
+        }
         await this.completeTurn({
           userEntry: turn.userEntry,
           replyEntry: turn.replyEntry,
-          operationId: `recover.${this.store.botId}.${turn.userEntry.entryId}`,
+          operationId: `turn.${turn.userEntry.entryId}.${this.store.botId}`,
         })
         if (turn.throughSeq > turn.replyEntry.seq) await this.advanceCursor(id, turn.throughSeq)
       }

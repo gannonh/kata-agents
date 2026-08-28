@@ -150,6 +150,35 @@ describe('ConversationJournal ordering', () => {
     expect(journal.list(bot.directChatId)).toHaveLength(2);
   });
 
+  it('reconciles orphaned entries before reporting the head sequence', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const orphanId = 'entry_orphanhead123456789abcdef01234';
+    const orphanPath = journalEntryPath(botsRoot, bot.directChatId, 1, orphanId);
+
+    writeJsonRecord(orphanPath, {
+      schemaVersion: 1,
+      entryId: orphanId,
+      conversationId: bot.directChatId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'crash-orphan-head',
+      body: 'survived on disk',
+      createdAt: at,
+    });
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 1,
+      byIdempotencyKey: {},
+      entries: [],
+    });
+
+    expect(journal.getHeadSequence(bot.directChatId)).toBe(1);
+    expect(journal.list(bot.directChatId)).toHaveLength(1);
+    expect(journal.list(bot.directChatId)[0]?.entryId).toBe(orphanId);
+  });
+
   it('preserves imported authorship timestamps', () => {
     const { journal, bot } = setup();
 

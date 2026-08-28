@@ -27,60 +27,64 @@ test.describe(`Bot memory and compaction ${E2E_TAGS.memory}`, () => {
     if (!prerequisite.ok) throw new Error(formatMissingPrerequisiteError("Bot memory", prerequisite.missing));
     let page = appWindow;
     let app = electronApp;
-    await runWithAgentProviderFallback(page, "Bot memory", async candidate => {
-      await configureAgentConnection(page, candidate);
-      await waitForAppReady(page);
-      await page.getByTestId("bots-nav").click();
-      await page.getByTestId("bots-create-button").click();
-      const botName = `Memory Bot ${Date.now()}`;
-      await page.getByTestId("bots-name-input").fill(botName);
-      await page.getByTestId("bots-create-submit").click();
-      await expect(page.getByTestId("bot-chat")).toBeVisible();
+    try {
+      await runWithAgentProviderFallback(page, "Bot memory", async candidate => {
+        await configureAgentConnection(page, candidate);
+        await waitForAppReady(page);
+        await page.getByTestId("bots-nav").click();
+        await page.getByTestId("bots-create-button").click();
+        const botName = `Memory Bot ${Date.now()}`;
+        await page.getByTestId("bots-name-input").fill(botName);
+        await page.getByTestId("bots-create-submit").click();
+        await expect(page.getByTestId("bot-chat")).toBeVisible();
 
-      const preference = "Memory candidate: I prefer violet replies.";
-      await page.getByTestId("bot-chat-input").fill(preference);
-      await page.getByTestId("bot-chat-send").click();
-      await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: preference })).toBeVisible();
-      const memory = page.locator('[data-testid^="bot-memory-"][data-memory-state="active"]').first();
-      await expect(memory).toBeVisible();
-      await expect(memory).toHaveAttribute("data-memory-provenance", /chat_|entry_/);
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", /memory_/);
-      await page.screenshot({ path: test.info().outputPath("memory-before-edit.png") });
-
-      const memoryId = (await memory.getAttribute("data-testid"))!.replace("bot-memory-", "");
-      const input = page.getByTestId(`bot-memory-input-${memoryId}`);
-      await input.fill("I prefer short violet replies.");
-      await page.getByTestId(`bot-memory-save-${memoryId}`).click();
-      await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "edited");
-      await page.getByTestId(`bot-memory-forget-${memoryId}`).click();
-      await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "forgotten");
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", "");
-      await page.screenshot({ path: test.info().outputPath("memory-forgotten.png") });
-
-      for (let index = 0; index < 12; index += 1) {
-        await page.getByTestId("bot-chat-input").fill(`Compaction continuity turn ${index}`);
+        const preference = "Memory candidate: I prefer violet replies.";
+        await page.getByTestId("bot-chat-input").fill(preference);
         await page.getByTestId("bot-chat-send").click();
-        await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: `Compaction continuity turn ${index}` })).toBeVisible();
-      }
-      await expect(page.getByTestId("bot-memory-context")).toContainText(/checkpoint/i);
-      const contextBeforeRestart = page.getByTestId("bot-memory-context");
-      const journalCursor = await contextBeforeRestart.getAttribute("data-journal-cursor");
-      const conversationCursor = await contextBeforeRestart.getAttribute("data-conversation-cursor");
-      const checkpointRevision = await contextBeforeRestart.getAttribute("data-checkpoint-revision");
-      const beforeRestart = await page.locator('[data-testid^="bot-journal-entry-"]').count();
-      const restarted = await restart(app, runContext);
-      app = restarted.app;
-      page = restarted.page;
-      await page.getByTestId("bots-nav").click();
-      await page.locator("[data-testid^='bot-row-']").filter({ hasText: botName }).click();
-      await expect(page.getByTestId("bot-chat")).toBeVisible();
-      await expect(page.locator('[data-testid^="bot-journal-entry-"]')).toHaveCount(beforeRestart);
-      await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "forgotten");
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", "");
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-journal-cursor", journalCursor!);
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-conversation-cursor", conversationCursor!);
-      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-checkpoint-revision", checkpointRevision!);
-      await page.screenshot({ path: test.info().outputPath("memory-forgotten-after-restart.png") });
-    });
+        await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: preference })).toBeVisible();
+        const memory = page.locator('[data-testid^="bot-memory-"][data-memory-state="active"]').first();
+        await expect(memory).toBeVisible();
+        await expect(memory).toHaveAttribute("data-memory-provenance", /chat_|entry_/);
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", /memory_/);
+        await page.screenshot({ path: test.info().outputPath("memory-before-edit.png") });
+
+        const memoryId = (await memory.getAttribute("data-testid"))!.replace("bot-memory-", "");
+        const input = page.getByTestId(`bot-memory-input-${memoryId}`);
+        await input.fill("I prefer short violet replies.");
+        await page.getByTestId(`bot-memory-save-${memoryId}`).click();
+        await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "edited");
+        await page.getByTestId(`bot-memory-forget-${memoryId}`).click();
+        await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "forgotten");
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", "");
+        await page.screenshot({ path: test.info().outputPath("memory-forgotten.png") });
+
+        for (let index = 0; index < 12; index += 1) {
+          await page.getByTestId("bot-chat-input").fill(`Compaction continuity turn ${index}`);
+          await page.getByTestId("bot-chat-send").click();
+          await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: `Compaction continuity turn ${index}` })).toBeVisible();
+        }
+        await expect(page.getByTestId("bot-memory-context")).toContainText(/checkpoint/i);
+        const contextBeforeRestart = page.getByTestId("bot-memory-context");
+        const journalCursor = await contextBeforeRestart.getAttribute("data-journal-cursor");
+        const conversationCursor = await contextBeforeRestart.getAttribute("data-conversation-cursor");
+        const checkpointRevision = await contextBeforeRestart.getAttribute("data-checkpoint-revision");
+        const beforeRestart = await page.locator('[data-testid^="bot-journal-entry-"]').count();
+        const restarted = await restart(app, runContext);
+        app = restarted.app;
+        page = restarted.page;
+        await page.getByTestId("bots-nav").click();
+        await page.locator("[data-testid^='bot-row-']").filter({ hasText: botName }).click();
+        await expect(page.getByTestId("bot-chat")).toBeVisible();
+        await expect(page.locator('[data-testid^="bot-journal-entry-"]')).toHaveCount(beforeRestart);
+        await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "forgotten");
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", "");
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-journal-cursor", journalCursor!);
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-conversation-cursor", conversationCursor!);
+        await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-checkpoint-revision", checkpointRevision!);
+        await page.screenshot({ path: test.info().outputPath("memory-forgotten-after-restart.png") });
+      });
+    } finally {
+      if (app !== electronApp) await app.close();
+    }
   });
 });

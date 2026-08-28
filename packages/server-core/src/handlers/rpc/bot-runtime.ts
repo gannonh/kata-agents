@@ -164,7 +164,15 @@ export async function resetBotProviderSessions(
           !(session as { hidden?: boolean }).hidden
           || session.workspaceId !== workspaceId
         )) return
-        if (session) await sessionManager.deleteSession(sessionId)
+        try {
+          if (session) await sessionManager.deleteSession(sessionId)
+        } catch {
+          // Leave an orphaned hidden session rather than keeping a reusable
+          // pointer after edit/forget. Next send creates a fresh session.
+        } finally {
+          rmSync(pointer, { force: true })
+        }
+        return
       }
       rmSync(pointer, { force: true })
     })
@@ -194,6 +202,9 @@ export async function sendToBotSession(
       if (cached?.state === 'pending' && isUsableBotSession(cachedSession, target)) {
         const recovered = await recoverPending(sessionManager, target.sessionPointerPath, cached, target)
         if (recovered) return recovered
+        // Unsuccessful recovery must not leave the stale pending record: a later
+        // read would retry its userMessageId and a restart could revive the old turn.
+        clearDispatchRecord(target.sessionPointerPath, key)
       }
       if (cached && !isUsableBotSession(cachedSession, target)) clearDispatchRecord(target.sessionPointerPath, key)
     }

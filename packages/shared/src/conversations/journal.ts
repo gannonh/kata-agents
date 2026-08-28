@@ -259,7 +259,9 @@ export class ConversationJournal {
   /** The authoritative highest sequence, independent of the UI read cursor. */
   getHeadSequence(conversationId: string): number {
     const conversation = this.require(conversationId);
-    return this.readIndex(conversation.conversationId).nextSeq - 1;
+    // Reconcile orphans before reporting the head so a crash between entry write
+    // and index commit cannot leave recovered entries invisible to assemblers.
+    return this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId)).nextSeq - 1;
   }
 
   markRead(conversationId: string, seq: number): JournalCursor {

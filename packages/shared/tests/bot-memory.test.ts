@@ -257,6 +257,36 @@ describe('Bot memory', () => {
     expect(ledger.store.getHead().memories[0]?.provenance[0]?.entryId).not.toBe(firstUser.entryId)
   })
 
+  test('skips completed Channel turns already covered by the ledger cursor', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-reconcile-skip-'))
+    const journal = new ConversationJournal({
+      journalRoot: workspaceRoot,
+      workspaceId: 'workspace_one',
+      resolveConversation: conversationId => conversationId === 'channel_one'
+        ? { conversationId, workspaceId: 'workspace_one', mayAuthor: botId => botId === 'bot_one' || botId === 'bot_two' }
+        : null,
+    })
+    const userEntry = journal.append({ conversationId: 'channel_one', kind: 'user', body: 'Remember: keep replies brief.', idempotencyKey: 'skip.user' })
+    const replyEntry = journal.append({ conversationId: 'channel_one', kind: 'bot', authorBotId: 'bot_one', body: 'Understood.', idempotencyKey: 'skip.reply' })
+    const trailingReply = journal.append({ conversationId: 'channel_one', kind: 'bot', authorBotId: 'bot_two', body: 'Trailing.', idempotencyKey: 'skip.trailing' })
+    const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    await ledger.completeTurn({
+      userEntry,
+      replyEntry,
+      operationId: `turn.${userEntry.entryId}.bot_one`,
+    })
+    const headAfterLive = ledger.store.getHead()
+    expect(headAfterLive.memories).toHaveLength(1)
+    expect(headAfterLive.operationIds[`turn.${userEntry.entryId}.bot_one`]).toBeDefined()
+
+    await ledger.reconcile('channel_one', () => [{ userEntry, replyEntry, throughSeq: trailingReply.seq }])
+    const headAfterReconcile = ledger.store.getHead()
+    expect(headAfterReconcile.revision).toBe(headAfterLive.revision)
+    expect(headAfterReconcile.operationIds).toEqual(headAfterLive.operationIds)
+    expect(Object.keys(headAfterReconcile.operationIds).some(key => key.startsWith('recover.'))).toBe(false)
+    expect(ledger.getCursor('channel_one').lastProcessedSeq).toBe(trailingReply.seq)
+  })
+
   test('keeps memory isolated by workspace and Bot', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-isolation-'))
     const first = new MemoryStore({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one' })
@@ -279,7 +309,7 @@ describe('Bot memory', () => {
     const replay = await memoryStore.applyCandidate(candidate, 'turn.replay')
     expect(replay.memories).toHaveLength(1)
     expect(replay.memories[0]?.state).toBe('forgotten')
-    const restarted = new MemoryStore({ workspaceRoot: memoryStore.rootPath.replace(/\/bots\/bot_one\/memory$/, ''), workspaceId: 'workspace_one', botId: 'bot_one' })
+    const restarted = new MemoryStore({ workspaceRoot: memoryStore.rootPath.replace(/[\\/]bots[\\/]bot_one[\\/]memory$/, ''), workspaceId: 'workspace_one', botId: 'bot_one' })
     expect(restarted.getHead().memories[0]?.state).toBe('forgotten')
   })
 })
