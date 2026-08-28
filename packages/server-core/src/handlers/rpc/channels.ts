@@ -169,7 +169,7 @@ function createStageDispatcher(
       : request.message
     const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: bot.botId, journal: runtime.journal })
     const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
-    const prepared = assembler.assemble({ conversationId: request.channelId, operationId: request.dispatchIdempotencyKey })
+    const prepared = assembler.assemble({ conversationId: request.channelId, operationId: request.dispatchIdempotencyKey, currentEntryId: request.sourceEntryId, conversationKind: 'channel' })
     await ledger.recordRun(prepared.context)
     const result = await sendToBotSession(
       deps.sessionManager,
@@ -178,7 +178,7 @@ function createStageDispatcher(
         name: bot.name,
         permissionMode: bot.permissionMode,
         providerConfig: bot.providerConfig,
-        sessionPointerPath: channelProviderSessionPath(runtime.directory.rootPath, request.channelId, bot.botId),
+        sessionPointerPath: channelProviderSessionPath(runtime.workspace.rootPath, request.channelId, bot.botId),
       },
       message,
       {
@@ -206,33 +206,39 @@ function routerFor(
     evaluateClaim: createProviderClaimEvaluator(deps, runtime.workspace, runtime.bots),
     dispatch: createStageDispatcher(deps, runtime, callerClientId),
     onRouteCommitted,
-    onReplyCommitted: async ({ userEntry, ownerBotId }) => {
-      const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: ownerBotId, journal: runtime.journal })
-      const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
-      await ledger.completeTurn({ userEntry, operationId: `turn.${userEntry.entryId}.${ownerBotId}` })
-      const journalHead = runtime.journal.getHeadSequence(userEntry.conversationId)
-      if (journalHead >= BOT_MEMORY_LIMITS.recentEntries * 2) {
-        const checkpoint = ledger.getCheckpoint(userEntry.conversationId)
-        try {
-          await assembler.compact({
-            conversationId: userEntry.conversationId,
-            expectedJournalHeadSequence: journalHead,
-            expectedMemoryRevision: ledger.store.getHead().revision,
-            expectedCheckpointRevision: checkpoint?.checkpointRevision ?? 0,
-            operationId: `compact.${userEntry.conversationId}.${journalHead}.${ownerBotId}`,
-          })
-        } catch (error) {
-          if (!(error instanceof StaleCompactionError)) throw error
-          const latestHead = runtime.journal.getHeadSequence(userEntry.conversationId)
-          const latestCheckpoint = ledger.getCheckpoint(userEntry.conversationId)
-          await assembler.compact({
-            conversationId: userEntry.conversationId,
-            expectedJournalHeadSequence: latestHead,
-            expectedMemoryRevision: ledger.store.getHead().revision,
-            expectedCheckpointRevision: latestCheckpoint?.checkpointRevision ?? 0,
-            operationId: `compact.retry.${userEntry.conversationId}.${latestHead}.${ownerBotId}`,
-          })
+    onReplyCommitted: async ({ userEntry, replyEntry, ownerBotId }) => {
+      try {
+        const ledger = new BotContextLedger({ workspaceRoot: runtime.workspace.rootPath, workspaceId: runtime.workspace.id, botId: ownerBotId, journal: runtime.journal })
+        const assembler = new ContextAssembler({ ledger, journal: runtime.journal })
+        await ledger.completeTurn({ userEntry, replyEntry, operationId: `turn.${userEntry.entryId}.${ownerBotId}` })
+        const journalHead = runtime.journal.getHeadSequence(userEntry.conversationId)
+        if (journalHead >= BOT_MEMORY_LIMITS.recentEntries * 2) {
+          const checkpoint = ledger.getCheckpoint(userEntry.conversationId)
+          try {
+            await assembler.compact({
+              botId: ownerBotId,
+              conversationId: userEntry.conversationId,
+              expectedJournalHeadSequence: journalHead,
+              expectedMemoryRevision: ledger.store.getHead().revision,
+              expectedCheckpointRevision: checkpoint?.checkpointRevision ?? 0,
+              operationId: `compact.${userEntry.conversationId}.${journalHead}.${ownerBotId}`,
+            })
+          } catch (error) {
+            if (!(error instanceof StaleCompactionError)) throw error
+            const latestHead = runtime.journal.getHeadSequence(userEntry.conversationId)
+            const latestCheckpoint = ledger.getCheckpoint(userEntry.conversationId)
+            await assembler.compact({
+              botId: ownerBotId,
+              conversationId: userEntry.conversationId,
+              expectedJournalHeadSequence: latestHead,
+              expectedMemoryRevision: ledger.store.getHead().revision,
+              expectedCheckpointRevision: latestCheckpoint?.checkpointRevision ?? 0,
+              operationId: `compact.retry.${userEntry.conversationId}.${latestHead}.${ownerBotId}`,
+            })
+          }
         }
+      } catch (error) {
+        console.error('[Channels] Durable memory post-processing failed after reply commit', error)
       }
     },
   })

@@ -128,7 +128,6 @@ export {
   BOT_LIMITS,
 } from './bot.ts';
 
-// Bot-owned memory and bounded context
 export type {
   BotMemoryState,
   BotMemoryMutationKind,
@@ -139,6 +138,7 @@ export type {
   BotMemoryMutation,
   BotMemoryCandidate,
   BotCompactionCheckpoint,
+  BotContextCursor,
   BotContextRun,
   BotTurnContext,
   BotContextSnapshot,

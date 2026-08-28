@@ -9,6 +9,7 @@ export function botsRootPath(workspaceRoot: string): string {
 export const botsPath = (root: string): string => join(root, 'bots');
 export const intentsPath = (root: string): string => join(root, 'intents');
 export const botRecordPath = (root: string, botId: string): string => join(botsPath(root), botId, 'record.json');
+export const botProviderSessionPath = (workspaceRoot: string, botId: string): string => join(botsRootPath(workspaceRoot), botId, 'provider-session');
 export const chatRecordPath = (root: string, chatId: string): string => join(root, 'chats', chatId, 'record.json');
 export const intentRecordPath = (root: string, intentId: string): string => join(intentsPath(root), intentId, 'record.json');
 export const idempotencyPointerPath = (root: string, key: string): string => join(root, 'by-idempotency', idempotencyPointerName(key));

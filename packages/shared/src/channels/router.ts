@@ -421,6 +421,11 @@ export class ChannelRouter {
         (entry) => entry.kind === 'bot' && entry.idempotencyKey === latest.dispatchIdempotencyKey,
       );
       if (existingReply) {
+        try {
+          await this.onReplyCommitted?.({ userEntry, replyEntry: existingReply, ownerBotId: latest.ownerBotId });
+        } catch (error) {
+          console.error('[ChannelRouter] reply post-processing failed after durable commit', error);
+        }
         current = this.updateStage(current, latest.stageId, {
           state: 'completed',
           settledAt: safeDate(this.clock),
@@ -456,7 +461,11 @@ export class ChannelRouter {
           body: reply,
           idempotencyKey: latest.dispatchIdempotencyKey,
         });
-        await this.onReplyCommitted?.({ userEntry, replyEntry, ownerBotId: latest.ownerBotId });
+        try {
+          await this.onReplyCommitted?.({ userEntry, replyEntry, ownerBotId: latest.ownerBotId });
+        } catch (error) {
+          console.error('[ChannelRouter] reply post-processing failed after durable commit', error);
+        }
         current = this.updateStage(current, latest.stageId, {
           state: 'completed',
           settledAt: safeDate(this.clock),

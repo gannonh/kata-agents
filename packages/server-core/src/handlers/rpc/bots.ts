@@ -9,11 +9,12 @@ import {
   BotContextLedger,
   ContextAssembler,
   StaleCompactionError,
+  botProviderSessionPath,
 } from '@kata-sh/shared/bots'
-import { BOT_MEMORY_LIMITS, type BotPermissionMode, type BotProviderConfig } from '@kata-sh/core'
+import { BOT_MEMORY_LIMITS, type BotPermissionMode, type BotProviderConfig, type BotRecord, type JournalEntry } from '@kata-sh/core'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { sendToBotSession } from './bot-runtime'
+import { resetBotProviderSessions, sendToBotSession } from './bot-runtime'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.bots.LIST,
@@ -64,6 +65,7 @@ async function compactIfNeeded(ledger: BotContextLedger, assembler: ContextAssem
   const checkpoint = ledger.getCheckpoint(conversationId)
   try {
     await assembler.compact({
+      botId: ledger.store.botId,
       conversationId,
       expectedJournalHeadSequence: journalHead,
       expectedMemoryRevision: ledger.store.getHead().revision,
@@ -75,6 +77,7 @@ async function compactIfNeeded(ledger: BotContextLedger, assembler: ContextAssem
     const latestHead = ledger.journal.getHeadSequence(conversationId)
     const latestCheckpoint = ledger.getCheckpoint(conversationId)
     await assembler.compact({
+      botId: ledger.store.botId,
       conversationId,
       expectedJournalHeadSequence: latestHead,
       expectedMemoryRevision: ledger.store.getHead().revision,
@@ -82,6 +85,34 @@ async function compactIfNeeded(ledger: BotContextLedger, assembler: ContextAssem
       operationId: `compact.retry.${conversationId}.${latestHead}`,
     })
   }
+}
+
+function publishDirectEvents(server: RpcServer, workspaceId: string, botId: string, chatId: string): void {
+  pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, { type: 'journal-updated', botId, chatId })
+  pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, { type: 'memory-updated', botId })
+}
+
+async function finishDirectReply(
+  server: RpcServer,
+  workspaceId: string,
+  botId: string,
+  bot: BotRecord,
+  userEntry: JournalEntry,
+  runtime: { reply: string | null },
+  ledger: BotContextLedger,
+  assembler: ContextAssembler,
+  journal: ReturnType<typeof createDirectChatJournal>,
+): Promise<JournalEntry | null> {
+  if (!runtime.reply) return null
+  const botEntry = journal.append({ conversationId: bot.directChatId, kind: 'bot', body: runtime.reply, idempotencyKey: `reply.${userEntry.entryId}` })
+  try {
+    await ledger.completeTurn({ userEntry, replyEntry: botEntry, operationId: `turn.${userEntry.entryId}` })
+    await compactIfNeeded(ledger, assembler, bot.directChatId)
+  } catch (error) {
+    console.error('[Bots] Durable memory post-processing failed after reply commit', error)
+  }
+  publishDirectEvents(server, workspaceId, botId, bot.directChatId)
+  return botEntry
 }
 
 export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -193,7 +224,7 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     const bot = directory.getBot(botId)
     if (!bot) throw new Error('Bot not found')
     const { assembler } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
-    return assembler.assemble({ conversationId: bot.directChatId, operationId: `inspect.${randomUUID()}` })
+    return assembler.assemble({ conversationId: bot.directChatId, operationId: `inspect.${randomUUID()}`, conversationKind: 'direct' })
   })
 
   server.handle(RPC_CHANNELS.bots.MUTATE_MEMORY, async (ctx, workspaceId: string, botId: string, mutation: import('@kata-sh/core').BotMemoryMutation) => {
@@ -202,6 +233,11 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
     if (!bot) throw new Error('Bot not found')
     const { ledger } = memoryFor(workspace.rootPath, workspaceId, bot.botId, journal)
     const head = await ledger.store.mutate(mutation)
+    try {
+      await resetBotProviderSessions(sessionManager, workspace.rootPath, bot.botId)
+    } catch (error) {
+      console.error('[Bots] Failed to reset hidden provider sessions after memory mutation', error)
+    }
     pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, { type: 'memory-updated', botId: bot.botId })
     return head
   })
@@ -228,57 +264,38 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         idempotencyKey,
       })
       const operationId = `turn.${userEntry.entryId}`
-      const prepared = assembler.assemble({ conversationId: bot.directChatId, operationId })
+      const prepared = assembler.assemble({ conversationId: bot.directChatId, operationId, currentEntryId: userEntry.entryId, conversationKind: 'direct' })
       await ledger.recordRun(prepared.context)
 
       await sessionManager.waitForInit()
-      const runtime = await sendToBotSession(
+      const dispatch = sendToBotSession(
         sessionManager,
         {
           workspaceId,
           name: bot.name,
           permissionMode: bot.permissionMode,
           providerConfig: bot.providerConfig,
-          sessionPointerPath: `${directory.rootPath}/bots/${bot.botId}/provider-session`,
+          sessionPointerPath: botProviderSessionPath(workspace.rootPath, bot.botId),
         },
         message,
         {
           callerClientId: ctx.clientId,
-          waitForReply: options?.waitForReply !== false,
+          waitForReply: true,
           dispatchIdempotencyKey: operationId,
           botTurnContext: prepared.context,
         },
       )
-
-      const botEntry = runtime.reply
-        ? journal.append({
-          conversationId: bot.directChatId,
-          kind: 'bot',
-          body: runtime.reply,
-          idempotencyKey: `reply.${userEntry.entryId}`,
+      if (options?.waitForReply === false) {
+        void dispatch.then(runtime => finishDirectReply(server, workspaceId, bot.botId, bot, userEntry, runtime, ledger, assembler, journal)).catch(error => {
+          console.error('[Bots] Background Bot reply failed after accepted send', error)
         })
-        : undefined
-      if (botEntry) {
-        await ledger.completeTurn({ userEntry, operationId })
-        await compactIfNeeded(ledger, assembler, bot.directChatId)
+        publishDirectEvents(server, workspaceId, bot.botId, bot.directChatId)
+        return { accepted: true as const, userEntry, botEntry: null, bot: toBotPublicDto(bot) }
       }
-
-      pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, {
-        type: 'journal-updated',
-        botId: bot.botId,
-        chatId: bot.directChatId,
-      })
-      pushTyped(server, RPC_CHANNELS.bots.EVENT, { to: 'workspace', workspaceId }, {
-        type: 'memory-updated',
-        botId: bot.botId,
-      })
-
-      return {
-        accepted: true as const,
-        userEntry,
-        botEntry: botEntry ?? null,
-        bot: toBotPublicDto(bot),
-      }
+      const runtime = await dispatch
+      const botEntry = await finishDirectReply(server, workspaceId, bot.botId, bot, userEntry, runtime, ledger, assembler, journal)
+      if (!botEntry) publishDirectEvents(server, workspaceId, bot.botId, bot.directChatId)
+      return { accepted: true as const, userEntry, botEntry, bot: toBotPublicDto(bot) }
     },
   )
 

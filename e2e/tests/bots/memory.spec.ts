@@ -6,11 +6,12 @@ import { configureAgentConnection, resumeAfterAppRestart } from "../../src/flows
 import { waitForAppReady } from "../../src/flows/shell.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 import { buildElectronLaunchEnv } from "../../src/harness/launchEnv.ts";
+import type { E2ERunContext } from "../../src/harness/isolatedRun.ts";
 import { formatMissingPrerequisiteError, readAgentProviderPrerequisite } from "../../src/harness/env.ts";
 
 test.describe.configure({ mode: "serial", timeout: agentSuiteTimeoutMs() });
 
-async function restart(current: ElectronApplication, context: { repoRoot: string }): Promise<{ app: ElectronApplication; page: Page }> {
+async function restart(current: ElectronApplication, context: E2ERunContext): Promise<{ app: ElectronApplication; page: Page }> {
   await current.close();
   const env = Object.fromEntries(Object.entries(buildElectronLaunchEnv(context)).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   const app = await electron.launch({ args: [join(context.repoRoot, "apps/electron")], cwd: context.repoRoot, env });
@@ -62,6 +63,10 @@ test.describe(`Bot memory and compaction ${E2E_TAGS.memory}`, () => {
         await expect(page.locator('[data-testid^="bot-journal-entry-"][data-entry-kind="user"]').filter({ hasText: `Compaction continuity turn ${index}` })).toBeVisible();
       }
       await expect(page.getByTestId("bot-memory-context")).toContainText(/checkpoint/i);
+      const contextBeforeRestart = page.getByTestId("bot-memory-context");
+      const journalCursor = await contextBeforeRestart.getAttribute("data-journal-cursor");
+      const conversationCursor = await contextBeforeRestart.getAttribute("data-conversation-cursor");
+      const checkpointRevision = await contextBeforeRestart.getAttribute("data-checkpoint-revision");
       const beforeRestart = await page.locator('[data-testid^="bot-journal-entry-"]').count();
       const restarted = await restart(app, runContext);
       app = restarted.app;
@@ -72,6 +77,9 @@ test.describe(`Bot memory and compaction ${E2E_TAGS.memory}`, () => {
       await expect(page.locator('[data-testid^="bot-journal-entry-"]')).toHaveCount(beforeRestart);
       await expect(page.getByTestId(`bot-memory-${memoryId}`)).toHaveAttribute("data-memory-state", "forgotten");
       await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-memory-ids", "");
+      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-journal-cursor", journalCursor!);
+      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-conversation-cursor", conversationCursor!);
+      await expect(page.getByTestId("bot-memory-context")).toHaveAttribute("data-checkpoint-revision", checkpointRevision!);
       await page.screenshot({ path: test.info().outputPath("memory-forgotten-after-restart.png") });
     });
   });

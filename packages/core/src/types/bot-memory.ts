@@ -1,5 +1,3 @@
-/** Durable Bot-owned memory and bounded-context contracts. */
-
 export const BOT_MEMORY_SCHEMA_VERSION = 1 as const
 
 export const BOT_MEMORY_STATES = ['active', 'edited', 'forgotten'] as const
@@ -42,6 +40,8 @@ export interface BotMemoryRecord {
 export interface BotMemoryExclusion {
   readonly candidateId: string
   readonly sourceEntryId: string
+  readonly workspaceId: string
+  readonly botId: string
   readonly forgottenAt: string
   readonly revision: number
 }
@@ -56,13 +56,20 @@ export interface BotMemoryHead {
   readonly operationIds: Readonly<Record<string, number>>
 }
 
-export interface BotMemoryMutation {
-  readonly kind: BotMemoryMutationKind
-  readonly memoryId: string
-  readonly content?: string
-  readonly expectedRevision: number
-  readonly idempotencyKey: string
-}
+export type BotMemoryMutation =
+  | {
+      readonly kind: 'edit'
+      readonly memoryId: string
+      readonly content: string
+      readonly expectedRevision: number
+      readonly idempotencyKey: string
+    }
+  | {
+      readonly kind: 'forget' | 'restore'
+      readonly memoryId: string
+      readonly expectedRevision: number
+      readonly idempotencyKey: string
+    }
 
 export interface BotMemoryCandidate {
   readonly candidateId: string
@@ -77,13 +84,23 @@ export interface BotCompactionCheckpoint {
   readonly workspaceId: string
   readonly botId: string
   readonly conversationId: string
+  readonly coveredFromSeq: number
   readonly coveredThroughSeq: number
+  readonly journalHeadSequence: number
   readonly sourceDigest: string
   readonly memoryRevision: number
   readonly checkpointRevision: number
   readonly operationId: string
   readonly summary: string
   readonly createdAt: string
+}
+
+export interface BotContextCursor {
+  readonly workspaceId: string
+  readonly botId: string
+  readonly conversationId: string
+  readonly lastProcessedSeq: number
+  readonly updatedAt: string
 }
 
 export interface BotContextRun {
@@ -93,6 +110,7 @@ export interface BotContextRun {
   readonly botId: string
   readonly conversationId: string
   readonly journalCursor: number
+  readonly conversationCursor: number
   readonly memoryRevision: number
   readonly checkpointRevision: number
   readonly createdAt: string
@@ -105,6 +123,7 @@ export interface BotTurnContext {
   readonly botId: string
   readonly conversationId: string
   readonly journalCursor: number
+  readonly conversationCursor: number
   readonly memoryRevision: number
   readonly checkpointRevision: number
   readonly text: string

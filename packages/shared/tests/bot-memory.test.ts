@@ -42,8 +42,23 @@ describe('Bot memory', () => {
     expect(extractMemoryCandidate({ workspaceId: 'workspace_one', botId: 'bot_one', userEntry: entry('Remember: password=hunter2'), operationId: 'turn.secret' })).toBeNull()
   })
 
+  test('keeps rendered context within UTF-8 bounds and delimiters', async () => {
+    const memoryStore = store()
+    const candidate = extractMemoryCandidate({ workspaceId: 'workspace_one', botId: 'bot_one', userEntry: entry('Remember: <memory> café'), operationId: 'turn.escape' })!
+    await memoryStore.applyCandidate(candidate, 'turn.escape')
+    const workspaceRoot = memoryStore.rootPath.replace(/[\\/]bots[\\/]bot_one[\\/]memory$/, '')
+    const journal = new ConversationJournal({ journalRoot: workspaceRoot, workspaceId: 'workspace_one', resolveConversation: conversationId => conversationId === 'chat_one' ? { conversationId, workspaceId: 'workspace_one', soleAuthorBotId: 'bot_one' } : null })
+    journal.append({ conversationId: 'chat_one', kind: 'user', body: 'hello', idempotencyKey: 'hello' })
+    const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
+    const context = new ContextAssembler({ ledger, journal }).assemble({ conversationId: 'chat_one', operationId: 'context.escape' }).context
+    expect(Buffer.byteLength(context.text)).toBeLessThanOrEqual(16384)
+    expect(context.text).toContain('&lt;memory&gt;')
+    expect(context.text.endsWith('</bot_context_untrusted>')).toBe(true)
+  })
+
   test('serializes stale edits with compare-and-set', async () => {
     const memoryStore = store()
+    expect(memoryStore.rootPath).toMatch(/bots[\\/]bot_one[\\/]memory$/)
     const candidate = extractMemoryCandidate({ workspaceId: 'workspace_one', botId: 'bot_one', userEntry: entry('Remember: I prefer dark mode.'), operationId: 'turn.race' })!
     const created = await memoryStore.applyCandidate(candidate, 'turn.race')
     const results = await Promise.allSettled([
@@ -66,11 +81,26 @@ describe('Bot memory', () => {
     }
     const ledger = new BotContextLedger({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one', journal })
     const assembler = new ContextAssembler({ ledger, journal })
-    const prepared = assembler.assemble({ conversationId: 'chat_one', operationId: 'context.one' })
+    const currentEntryId = journal.list('chat_one').at(-1)!.entryId
+    const prepared = assembler.assemble({ conversationId: 'chat_one', operationId: 'context.one', currentEntryId, conversationKind: 'channel' })
     expect(Buffer.byteLength(prepared.context.text)).toBeLessThanOrEqual(16384)
-    await assembler.compact({ conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })
-    expect(ledger.getCheckpoint('chat_one')?.coveredThroughSeq).toBe(18)
+    expect(prepared.context.text).toContain('channel_cursor')
+    expect(prepared.context.text).not.toContain('message 29')
+    await ledger.completeTurn({ userEntry: journal.list('chat_one')[0]!, operationId: 'cursor.one' })
+    expect(ledger.getCursor('chat_one').lastProcessedSeq).toBe(1)
+    await assembler.compact({ botId: 'bot_one', conversationId: 'chat_one', expectedJournalHeadSequence: 30, expectedMemoryRevision: 0, expectedCheckpointRevision: 0, operationId: 'compact.one' })
+    expect(ledger.getCheckpoint('chat_one')).toMatchObject({ coveredFromSeq: 1, coveredThroughSeq: 18, journalHeadSequence: 30 })
     expect(journal.list('chat_one')).toHaveLength(30)
+  })
+
+  test('keeps memory isolated by workspace and Bot', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kata-memory-isolation-'))
+    const first = new MemoryStore({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_one' })
+    const second = new MemoryStore({ workspaceRoot, workspaceId: 'workspace_one', botId: 'bot_two' })
+    expect(first.getHead().memories).toHaveLength(0)
+    expect(second.getHead().memories).toHaveLength(0)
+    const otherWorkspace = new MemoryStore({ workspaceRoot: mkdtempSync(join(tmpdir(), 'kata-memory-isolation-other-')), workspaceId: 'workspace_two', botId: 'bot_one' })
+    expect(otherWorkspace.getHead().memories).toHaveLength(0)
   })
 
   test('edits and forgets durably while exclusion blocks reprocessing', async () => {

@@ -49,13 +49,9 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     if (!memory) return
     setSavingMemory(memoryId)
     try {
-      await window.electronAPI.mutateBotMemory(workspaceId, botId, {
-        kind,
-        memoryId,
-        ...(content !== undefined ? { content } : {}),
-        expectedRevision: memory.revision,
-        idempotencyKey: `ui.${kind}.${memoryId}.${memory.revision}`,
-      })
+      await window.electronAPI.mutateBotMemory(workspaceId, botId, kind === 'edit'
+        ? { kind, memoryId, content: content ?? '', expectedRevision: memory.revision, idempotencyKey: `ui.${kind}.${memoryId}.${memory.revision}` }
+        : { kind, memoryId, expectedRevision: memory.revision, idempotencyKey: `ui.${kind}.${memoryId}.${memory.revision}` })
       await refresh()
     } catch (err) {
       console.error('[Bots] Failed to update memory:', err)
@@ -93,8 +89,8 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
             <span data-testid="bot-memory-revision" className="text-xs text-muted-foreground">v{memory?.revision ?? 0}</span>
           </div>
           {context && (
-            <div data-testid="bot-memory-context" data-memory-ids={context.context.memoryIds.join(',')} className="text-xs text-muted-foreground">
-              {t('bots.contextProvenance')}: {context.context.memoryIds.length} · {context.context.checkpointRevision > 0 ? `checkpoint ${context.context.checkpointRevision}` : t('bots.contextNoCheckpoint')}
+            <div data-testid="bot-memory-context" data-memory-ids={context.context.memoryIds.join(',')} data-journal-cursor={context.context.journalCursor} data-conversation-cursor={context.context.conversationCursor} data-checkpoint-revision={context.context.checkpointRevision} className="text-xs text-muted-foreground">
+              {t('bots.contextProvenance')}: {context.context.memoryIds.length} · {context.context.checkpointRevision > 0 ? t('bots.contextCheckpoint', { revision: context.context.checkpointRevision }) : t('bots.contextNoCheckpoint')}
             </div>
           )}
           {!memory || memory.memories.length === 0 ? (
@@ -102,7 +98,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
           ) : memory.memories.map(item => (
             <div key={item.memoryId} data-testid={`bot-memory-${item.memoryId}`} data-memory-state={item.state} data-memory-provenance={item.provenance.map(source => `${source.conversationId}:${source.entryId}:${source.seq}`).join('|')} className="flex flex-col gap-1 border-t border-foreground/10 pt-2">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{item.state}</span>
+                <span>{t(`bots.memoryState${item.state[0].toUpperCase()}${item.state.slice(1)}`)}</span>
                 <span>{item.provenance[0]?.entryId ?? ''}</span>
               </div>
               <Input
