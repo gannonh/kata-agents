@@ -1,6 +1,6 @@
 ---
 name: verify-kata-agents
-description: "Verify the Kata Agents macOS Electron desktop app with its isolated Playwright harness; use when proving launch, onboarding, settings, browser-panel, agent, or Git behavior."
+description: "Verify the Kata Agents macOS Electron desktop app with its isolated Playwright harness; use when proving launch, onboarding, settings, browser-panel, agent, channels, memory, handoffs, or Git behavior."
 ---
 
 # Verify Kata Agents
@@ -31,13 +31,16 @@ For an existing mapped feature, use the repository's real-Electron runner. It st
 
 ```bash
 bun run e2e --grep @smoke --trace on
-bun run e2e --grep @settings --trace on
-bun run e2e --grep @browser --trace on
+bun run e2e --grep "persists dark theme mode after reload" --trace on
+bun run e2e --grep "Embedded browser panel" --trace on
+bun run e2e --grep "@worktree-v2 name root" --trace on
 bun run e2e --grep @agent --trace on
-bun run e2e --grep @git --trace on
+bun run e2e --grep @channels --trace on
+bun run e2e --grep @memory --trace on
+bun run e2e --grep @handoffs --trace on
 ```
 
-The dev run is ready when the output includes `Vite dev server is ready`, `Electron renderer window is ready`, and `renderer #root to mount`. A fresh run normally exposes `#onboarding-wizard`; the provider-free setup path clicks `[data-testid="onboarding-setup-later"]`, handles `#workspace-picker` if it appears, and waits for `#app-ready`. The `@smoke`, `@settings`, and structural `@browser` tiers do not require an AI credential. `@agent` and browser annotation-send use the configured real provider chain described in `e2e/README.md`.
+The dev run is ready when the output includes `Vite dev server is ready`, `Electron renderer window is ready`, and `renderer #root to mount`. A fresh run normally exposes `#onboarding-wizard`; the provider-free setup path clicks `[data-testid="onboarding-setup-later"]` and waits for `#app-ready`. `#workspace-picker` is the thin-client / missing-`wsId` gate, not the usual desktop path after Setup later. The `@smoke`, appearance, structural browser (`Embedded browser panel`), and `@worktree-v2 name root` tiers do not require an AI credential. `--grep @browser` also runs provider-backed annotation-send. `--grep @settings` also runs Chrome cookie import. `@agent`, `@channels`, `@memory`, `@handoffs`, and browser annotation-send use the configured real provider chain described in `e2e/README.md`. Authenticated GitHub UAT is a separate `--grep "commits, pushes, creates a PR"` run, not bare `@git`.
 
 For a packaged app, set the explicit app path and use the release project:
 
@@ -68,7 +71,10 @@ Read [`features/README.md`](features/README.md) first, then the feature file for
 - `[data-testid="onboarding-setup-later"]`, `[data-testid="workspace-create-input"]`, and `[data-testid="workspace-create-button"]` for credential-free setup.
 - `[data-tutorial="new-chat-button"]`, `[data-tutorial="chat-input"]`, `[data-tutorial="model-picker-trigger"]`, and `[data-tutorial="send-button"]` for a real agent turn.
 - `#browser-panel`, `#browser-annotate-toggle`, and `#browser-annotation-tray` for the integrated browser.
-- `[data-testid="git-workspace-control"]`, `[data-testid="git-workspace-new-worktree"]`, `[data-testid="git-workspace-name"]`, `[data-testid="git-workspace-create"]`, and `[data-testid="git-workspace-identity"]` for managed workspaces.
+- `[data-testid="git-workspace-control"]` (click the inner `button`), `[data-testid="git-workspace-new-worktree"]`, `[data-testid="git-workspace-name"]`, `[data-testid="git-workspace-create"]`, and `[data-testid="git-workspace-identity"]` for managed workspaces.
+- `[data-testid="channels-nav"]`, `[data-testid="channel-chat"]`, `[data-testid^="channel-route-"]`, and `[data-testid^="channel-journal-entry-"]` for Channel routing.
+- `[data-testid="bots-nav"]`, `[data-testid="bot-chat"]`, `[data-testid^="bot-memory-"]`, and `[data-testid="bot-memory-context"]` for Bot memory.
+- `[data-testid^="handoff-card-"]`, `[data-testid^="handoff-rail-"]`, and `[data-testid="handoff-rail-result"]` for Bot handoffs.
 
 Prefer ARIA roles and these markers over coordinates, tab order, generated class names, or DOM position. Drive the user action first and assert the resulting UI and side effect second. The checked-in browser flow uses the Electron `webContents` adapter only for clicks inside a native BrowserView, which Playwright cannot treat as a normal page; it still exercises the guest page's visible target.
 
@@ -89,6 +95,9 @@ The Playwright runner writes its JSON report and any `--trace on` trace under `e
 - browser: the visible panel retains the same `data-browser-instance-id` through detach/attach; annotation state is visible in `#browser-annotation-tray` when exercised.
 - agent: the user turn and assistant turn both exist, and the assistant response matches the unique prompt token.
 - Git: the UI identity, branch, checkout path, and actual `git branch --show-current` agree; created remote/managed resources are removed by the test cleanup.
+- channels: route rows expose `data-route-mode` and `data-owner-bot-id`; journal entries survive restart.
+- memory: memory row `data-memory-state` / `data-memory-provenance` and context `data-memory-ids` / cursors / checkpoint revision survive restart.
+- handoffs: one `[data-testid^="handoff-card-"]` with `data-handoff-id`, rail result text, and the same card after restart.
 
 Do not use renderer setters, direct local-storage writes, test-only endpoints, or a final screenshot alone as proof. For external providers, use the existing credential boundary and real provider fallback; do not add a fake production adapter. If a safe path is called a dry run, inspect its files, network, and Git refs before treating it as non-mutating.
 
