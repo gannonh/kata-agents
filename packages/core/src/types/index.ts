@@ -214,3 +214,41 @@ export type {
   SessionProcessingStatus,
   ActiveSessionInfo,
 } from './server.ts';
+
+// Tool approval policy (ToolBroker / ApprovalStore)
+export type {
+  ApprovalId,
+  StandingRuleId,
+  ExecutionAttempt,
+  ToolConsequenceClass,
+  ToolSideEffect,
+  ApprovalStatus,
+  StandingRuleEffect,
+  StandingRuleState,
+  PolicyBlockReason,
+  PolicyAllowReason,
+  PolicyVerdict,
+  ToolTarget,
+  ToolInvocation,
+  SanitizedOperation,
+  ApprovalRecord,
+  ApprovalPending,
+  ApprovalDenied,
+  ApprovalAllowedOnce,
+  ApprovalConsumed,
+  ApprovalExpired,
+  ApprovalStale,
+  ApprovalRequest,
+  StandingRule,
+} from './tool-approval.ts';
+export {
+  APPROVAL_SCHEMA_VERSION,
+  APPROVAL_LIMITS,
+  TOOL_CONSEQUENCE_CLASSES,
+  TOOL_SIDE_EFFECTS,
+  APPROVAL_STATUSES,
+  STANDING_RULE_EFFECTS,
+  STANDING_RULE_STATES,
+  POLICY_BLOCK_REASONS,
+  POLICY_ALLOW_REASONS,
+} from './tool-approval.ts';

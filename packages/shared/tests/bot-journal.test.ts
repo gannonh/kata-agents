@@ -366,6 +366,49 @@ describe('ConversationJournal handoff entries', () => {
   });
 });
 
+describe('ConversationJournal approval entries', () => {
+  it('accepts an approval entry carrying an approvalId and its authoring Bot', () => {
+    const { journal, bot } = setup();
+
+    const entry = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'approval',
+      authorBotId: bot.botId,
+      approvalId: 'approval_0123456789abcdef0123456789abcdef',
+      body: 'Write /tmp/bounded.txt',
+      idempotencyKey: 'approval-accepted',
+    });
+
+    expect(entry.kind).toBe('approval');
+    expect(entry.approvalId).toBe('approval_0123456789abcdef0123456789abcdef');
+    expect(journal.list(bot.directChatId)[0]).toEqual(entry);
+  });
+
+  it('rejects an approval entry without an approvalId', () => {
+    const { journal, bot } = setup();
+
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      kind: 'approval',
+      authorBotId: bot.botId,
+      body: 'missing approval id',
+      idempotencyKey: 'approval-missing-id',
+    })).toThrow('approval entries require approvalId');
+  });
+
+  it('rejects approvalId on non-approval entries', () => {
+    const { journal, bot } = setup();
+
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      kind: 'bot',
+      approvalId: 'approval_0123456789abcdef0123456789abcdef',
+      body: 'stray approval id',
+      idempotencyKey: 'approval-stray',
+    })).toThrow('only approval entries may carry approvalId');
+  });
+});
+
 describe('ConversationJournal legacy Bot schema migration', () => {
   it('reads and rewrites old chatId/botId index, entry, and cursor records', () => {
     const { journal, bot } = setup();

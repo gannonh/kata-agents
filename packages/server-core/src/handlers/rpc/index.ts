@@ -29,6 +29,7 @@ import { registerTransferHandlers } from './transfer'
 import { registerWorkspaceCoreHandlers } from './workspace'
 import { registerMessagingHandlers } from './messaging'
 import { registerHandoffsHandlers } from './handoffs'
+import { registerApprovalsHandlers } from './approvals'
 
 export function registerCoreRpcHandlers(
   server: RpcServer,
@@ -57,4 +58,5 @@ export function registerCoreRpcHandlers(
   registerWorkspaceCoreHandlers(server, deps)
   registerMessagingHandlers(server, deps)
   registerHandoffsHandlers(server, deps)
+  registerApprovalsHandlers(server, deps)
 }

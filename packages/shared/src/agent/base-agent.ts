@@ -305,6 +305,14 @@ export abstract class BaseAgent implements AgentBackend {
   onSpawnSession: ((request: SpawnSessionRequest) => Promise<SpawnSessionResult>) | null = null;
   onSendHandoff: ((request: SendHandoffRequest) => Promise<SendHandoffResult>) | null = null;
   onInspectHandoff: ((request: InspectHandoffRequest, signal?: AbortSignal) => Promise<InspectHandoffResult>) | null = null;
+  evaluateToolPolicy: ((toolName: string, input: Record<string, unknown>) => {
+    kind: 'allow' | 'block' | 'ask';
+    message?: string;
+    description?: string;
+    command?: string;
+    approvalId?: string;
+    promptType?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+  }) | null = null;
 
   // ============================================================
   // Constructor

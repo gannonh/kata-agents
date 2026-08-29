@@ -38,9 +38,10 @@ bun run e2e --grep @agent --trace on
 bun run e2e --grep @channels --trace on
 bun run e2e --grep @memory --trace on
 bun run e2e --grep @handoffs --trace on
+bun run e2e --grep @approvals --trace on
 ```
 
-The dev run is ready when the output includes `Vite dev server is ready`, `Electron renderer window is ready`, and `renderer #root to mount`. A fresh run normally exposes `#onboarding-wizard`; the provider-free setup path clicks `[data-testid="onboarding-setup-later"]` and waits for `#app-ready`. `#workspace-picker` is the thin-client / missing-`wsId` gate, not the usual desktop path after Setup later. The `@smoke`, appearance, structural browser (`Embedded browser panel`), and `@worktree-v2 name root` tiers do not require an AI credential. `--grep @browser` also runs provider-backed annotation-send. `--grep @settings` also runs Chrome cookie import. `@agent`, `@channels`, `@memory`, `@handoffs`, and browser annotation-send use the configured real provider chain described in `e2e/README.md`. Authenticated GitHub UAT is a separate `--grep "commits, pushes, creates a PR"` run, not bare `@git`.
+The dev run is ready when the output includes `Vite dev server is ready`, `Electron renderer window is ready`, and `renderer #root to mount`. A fresh run normally exposes `#onboarding-wizard`; the provider-free setup path clicks `[data-testid="onboarding-setup-later"]` and waits for `#app-ready`. `#workspace-picker` is the thin-client / missing-`wsId` gate, not the usual desktop path after Setup later. The `@smoke`, appearance, structural browser (`Embedded browser panel`), and `@worktree-v2 name root` tiers do not require an AI credential. `--grep @browser` also runs provider-backed annotation-send. `--grep @settings` also runs Chrome cookie import. `@agent`, `@channels`, `@memory`, `@handoffs`, `@approvals`, and browser annotation-send use the configured real provider chain described in `e2e/README.md`. Authenticated GitHub UAT is a separate `--grep "commits, pushes, creates a PR"` run, not bare `@git`.
 
 For a packaged app, set the explicit app path and use the release project:
 
@@ -75,6 +76,7 @@ Read [`features/README.md`](features/README.md) first, then the feature file for
 - `[data-testid="channels-nav"]`, `[data-testid="channel-chat"]`, `[data-testid^="channel-route-"]`, and `[data-testid^="channel-journal-entry-"]` for Channel routing.
 - `[data-testid="bots-nav"]`, `[data-testid="bot-chat"]`, `[data-testid^="bot-memory-"]`, and `[data-testid="bot-memory-context"]` for Bot memory.
 - `[data-testid^="handoff-card-"]`, `[data-testid^="handoff-rail-"]`, and `[data-testid="handoff-rail-result"]` for Bot handoffs.
+- `[data-testid="bot-permission-mode"]`, `[data-testid^="approval-card-"]`, `[data-testid^="approval-deny-"]`, `[data-testid^="approval-allow-once-"]`, `[data-testid^="approval-always-"]`, and `[data-testid^="standing-rule-"]` for Bot tool approvals.
 
 Prefer ARIA roles and these markers over coordinates, tab order, generated class names, or DOM position. Drive the user action first and assert the resulting UI and side effect second. The checked-in browser flow uses the Electron `webContents` adapter only for clicks inside a native BrowserView, which Playwright cannot treat as a normal page; it still exercises the guest page's visible target.
 
@@ -98,6 +100,7 @@ The Playwright runner writes its JSON report and any `--trace on` trace under `e
 - channels: route rows expose `data-route-mode` and `data-owner-bot-id`; journal entries survive restart.
 - memory: memory row `data-memory-state` / `data-memory-provenance` and context `data-memory-ids` / cursors / checkpoint revision survive restart.
 - handoffs: one `[data-testid^="handoff-card-"]` with `data-handoff-id`, rail result text, and the same card after restart.
+- approvals: a pending `[data-testid^="approval-card-"]`, deny leaves the unique file absent, allow-once writes it, Explore blocks a later Write, and a standing rule matches only its exact target.
 
 Do not use renderer setters, direct local-storage writes, test-only endpoints, or a final screenshot alone as proof. For external providers, use the existing credential boundary and real provider fallback; do not add a fake production adapter. If a safe path is called a dry run, inspect its files, network, and Git refs before treating it as non-mutating.
 

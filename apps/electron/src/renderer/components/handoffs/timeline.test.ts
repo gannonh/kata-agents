@@ -64,4 +64,39 @@ describe('mergeHandoffTimeline', () => {
       { kind: 'entry', entry: missing },
     ])
   })
+
+  it('renders loaded approval cards in place of their journal entries', () => {
+    const approvalEntry: JournalEntry = {
+      schemaVersion: 1,
+      entryId: 'entry_approval',
+      conversationId: 'chat_1',
+      seq: 2,
+      kind: 'approval',
+      approvalId: 'approval_1',
+      authorBotId: 'bot_source',
+      idempotencyKey: 'approval_1',
+      body: 'Write /tmp/a.txt',
+      createdAt: '2026-08-28T00:00:00.000Z',
+    }
+    const card = {
+      approvalId: 'approval_1',
+      conversationId: 'chat_1',
+      botId: 'bot_source',
+      status: 'pending' as const,
+      version: 1,
+      toolName: 'Write',
+      target: '/tmp/a.txt',
+      preview: '{"file_path":"/tmp/a.txt"}',
+      sideEffect: 'write' as const,
+      expiresAt: '2026-08-28T00:02:00.000Z',
+      createdAt: '2026-08-28T00:00:00.000Z',
+    }
+    expect(mergeHandoffTimeline([
+      entry('entry_before', 1),
+      approvalEntry,
+    ], [], [card])).toEqual([
+      { kind: 'entry', entry: entry('entry_before', 1) },
+      { kind: 'approval', card },
+    ])
+  })
 })

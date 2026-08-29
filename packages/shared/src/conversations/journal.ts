@@ -53,6 +53,8 @@ export interface AppendJournalEntryInput {
   readonly authorBotId?: string;
   /** Required for handoff entries; rejected on every other kind. */
   readonly handoffId?: string;
+  /** Required for approval entries; rejected on every other kind. */
+  readonly approvalId?: string;
   readonly kind: JournalEntryKind;
   readonly body: string;
   readonly idempotencyKey: string;
@@ -151,6 +153,7 @@ export function assertJournalEntry(value: unknown): JournalEntry {
     'conversationId',
     'authorBotId',
     'handoffId',
+    'approvalId',
     'seq',
     'kind',
     'idempotencyKey',
@@ -180,8 +183,16 @@ export function assertJournalEntry(value: unknown): JournalEntry {
     if (entry.handoffId === undefined) fail('handoff entries require handoffId');
     assertConversationId(entry.handoffId, 'handoffId');
     if (entry.authorBotId === undefined) fail('handoff entries require an author Bot');
+    if (entry.approvalId !== undefined) fail('only approval entries may carry approvalId');
+  } else if (entry.kind === 'approval') {
+    if (entry.approvalId === undefined) fail('approval entries require approvalId');
+    assertConversationId(entry.approvalId, 'approvalId');
+    if (entry.authorBotId === undefined) fail('approval entries require an author Bot');
+    if (entry.handoffId !== undefined) fail('only handoff entries may carry handoffId');
   } else if (entry.handoffId !== undefined) {
     fail('only handoff entries may carry handoffId');
+  } else if (entry.approvalId !== undefined) {
+    fail('only approval entries may carry approvalId');
   }
   return entry as unknown as JournalEntry;
 }
@@ -228,6 +239,7 @@ export class ConversationJournal {
       conversationId: conversation.conversationId,
       ...(authorBotId !== undefined ? { authorBotId } : {}),
       ...(input.handoffId !== undefined ? { handoffId: input.handoffId } : {}),
+      ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
       seq,
       kind: input.kind,
       idempotencyKey,
@@ -294,7 +306,7 @@ export class ConversationJournal {
     }
     const authorBotId = input.authorBotId ?? conversation.soleAuthorBotId;
     if (authorBotId === undefined) {
-      if (input.kind === 'bot' || input.kind === 'tool' || input.kind === 'handoff') {
+      if (input.kind === 'bot' || input.kind === 'tool' || input.kind === 'handoff' || input.kind === 'approval') {
         throw new Error(`A ${input.kind} entry requires an author Bot`);
       }
       return undefined;

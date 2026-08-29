@@ -9,6 +9,7 @@ export const E2E_TAGS = {
   handoffs: "@handoffs",
   channels: "@channels",
   oauth: "@oauth",
+  approvals: "@approvals",
   /** Serial Git/GitHub V1 flows, including the authenticated UAT repository path. */
   git: "@git",
   /** Offline Worktree V2 identity/root parity flows. */

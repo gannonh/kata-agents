@@ -184,12 +184,13 @@ export function registerBotsHandlers(server: RpcServer, deps: HandlerDeps): void
         patch.providerConfig.providerId !== current.providerConfig.providerId
         || patch.providerConfig.modelId !== current.providerConfig.modelId
       )
+      const modeChanged = patch.permissionMode !== undefined && patch.permissionMode !== current.permissionMode
       const updated = directory.updateBot(botId, patch)
-      if (providerChanged) {
+      if (providerChanged || modeChanged) {
         try {
           await resetBotProviderSessions(sessionManager, workspace.rootPath, workspace.id, updated.botId)
         } catch (error) {
-          console.error('[Bots] Failed to reset hidden provider sessions after provider change', error)
+          console.error('[Bots] Failed to reset hidden provider sessions after Bot policy change', error)
         }
       }
       return toBotPublicDto(updated)

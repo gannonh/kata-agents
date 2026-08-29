@@ -28,6 +28,8 @@ bun run e2e --grep @smoke                       # one tier
 bun run e2e --grep @browser                     # integrated browser panel
 bun run e2e --grep @channels                    # real Channel routing and restart
 bun run e2e --grep @memory                      # Bot memory, compaction, and restart
+bun run e2e --grep @handoffs                    # Bot send_handoff card and rail
+bun run e2e --grep @approvals                   # Bot tool approval cards and standing rules
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
@@ -78,8 +80,10 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@settings` | `authenticatedAppWindow`               | Settings UI: deferred-setup → ready shell → change appearance Mode → reload → assert persisted. Cookie import lives here.                                                                              |
 | `@browser`  | `authenticatedAppWindow` or in-test    | Integrated browser panel: open/detach/attach, Annotate a guest page, send notes to a session. The annotation send path uses a real provider the same way `@agent` does.                                |
 | `@channels` | (in-test)                              | Real provider Channel flow: create two profiled Bots, route autonomous and mentioned messages, fan out, restart, and compare durable evidence.                                                                  |
-| `@memory`   | (in-test)                              | Real provider Bot flow: establish, edit, forget, compact, restart, and compare durable memory and journal evidence.                                                                                   |
-| `@agent`    | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
+| `@memory`    | (in-test)                              | Real provider Bot flow: establish, edit, forget, compact, restart, and compare durable memory and journal evidence.                                                                                   |
+| `@handoffs`  | (in-test)                              | Real provider Bot flow: `send_handoff` from DirectChat, inline card, result rail, restart recovery.                                                                                                    |
+| `@approvals` | (in-test)                              | Real provider Bot flow: deny and allow-once a Write, Explore-mode block, exact standing allow.                                                                                                         |
+| `@agent`     | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
 | `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
 

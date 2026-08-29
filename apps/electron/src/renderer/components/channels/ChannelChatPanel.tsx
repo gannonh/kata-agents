@@ -7,10 +7,11 @@ import type {
   JournalEntry,
   RouteRecord,
 } from '@kata-sh/core'
-import type { HandoffRailView } from '@kata-sh/shared/protocol'
+import type { ApprovalCardView, HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
+import { ApprovalCard } from '../approvals/ApprovalCard'
 import { HandoffCard } from '../handoffs/HandoffCard'
 import { mergeHandoffTimeline } from '../handoffs/timeline'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -33,6 +34,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [members, setMembers] = React.useState<BotPublicDto[]>([])
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
   const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
+  const [approvals, setApprovals] = React.useState<ApprovalCardView[]>([])
   const [routes, setRoutes] = React.useState<RouteRecord[]>([])
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
@@ -63,6 +65,13 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     setEntries(journal.entries)
     setHandoffs(loadedHandoffs)
     setRoutes([...loadedRoutes].sort((a, b) => a.routeSeq - b.routeSeq))
+    try {
+      const loadedApprovals = await window.electronAPI.listConversationApprovals(channelId)
+      if (generation !== refreshGeneration.current) return
+      setApprovals(loadedApprovals)
+    } catch (err) {
+      console.error('[Channels] Failed to load approvals:', err)
+    }
   }, [workspaceId, channelId])
 
   React.useEffect(() => {
@@ -74,10 +83,15 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       if (event.conversationId !== channelId) return
       refresh().catch(err => console.error('[Channels] Failed to refresh handoffs:', err))
     })
+    const unsubscribeApprovals = window.electronAPI.onApprovalEvent(event => {
+      if (event.conversationId !== channelId) return
+      refresh().catch(err => console.error('[Channels] Failed to refresh approvals:', err))
+    })
     return () => {
       refreshGeneration.current += 1
       unsubscribe()
       unsubscribeHandoffs()
+      unsubscribeApprovals()
     }
   }, [refresh])
 
@@ -86,8 +100,18 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   }, [updateRightSidebar])
 
   const timeline = React.useMemo(() => {
-    return mergeHandoffTimeline(entries, handoffs)
-  }, [entries, handoffs])
+    return mergeHandoffTimeline(entries, handoffs, approvals)
+  }, [entries, handoffs, approvals])
+
+  const resolveApproval = React.useCallback(async (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => {
+    await window.electronAPI.resolveApproval({
+      approvalId: card.approvalId,
+      expectedVersion: card.version,
+      choice,
+      ...(createStandingAllow ? { createStandingAllow: true } : {}),
+    })
+    await refresh()
+  }, [refresh])
 
   const memberNameById = React.useMemo(
     () => new Map(members.map(member => [member.botId, member.name])),
@@ -233,6 +257,8 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
         ) : (
           timeline.map(item => item.kind === 'handoff' ? (
             <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : item.kind === 'approval' ? (
+            <ApprovalCard key={item.card.approvalId} card={item.card} onResolve={resolveApproval} />
           ) : (
             <div
               key={item.entry.entryId}

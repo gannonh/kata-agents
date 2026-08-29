@@ -325,6 +325,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.handoffs.MARK_RESULT_READ,
   RPC_CHANNELS.handoffs.EVENT,
 
+  RPC_CHANNELS.approvals.LIST,
+  RPC_CHANNELS.approvals.RESOLVE,
+  RPC_CHANNELS.approvals.LIST_STANDING_RULES,
+  RPC_CHANNELS.approvals.DISABLE_STANDING_RULE,
+  RPC_CHANNELS.approvals.DELETE_STANDING_RULE,
+  RPC_CHANNELS.approvals.EVENT,
+
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,

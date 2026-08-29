@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Bot tool approvals at Grok-style boundaries.** In Ask mode a Bot pauses on a consequential tool until you deny or allow once. Explore mode blocks the same mutation without a prompt. A standing allow matches only that exact tool and target ([#81](https://github.com/gannonh/kata-agents/issues/81)).
 - **Channels route messages among Bots** — Create a Channel, add several Bots, and send. An ordinary message is offered to every eligible member and the Bot with the highest claim confidence owns the reply; `@Bot` assigns it outright and several mentions fan out to separately owned replies. Every decision is persisted as an inspectable route record ([#78](https://github.com/gannonh/kata-agents/issues/78)).
 - **Named Bots with durable direct chat** — Create a named Bot that keeps one DirectChat and ConversationJournal across restart; provider Sessions stay internal execution records ([#77](https://github.com/gannonh/kata-agents/issues/77)).
 - **Editable Bot memory and bounded context** — Bots retain safe, inspectable preferences with provenance, editing, forgetting, and restart-safe conversation compaction ([#79](https://github.com/gannonh/kata-agents/issues/79)).

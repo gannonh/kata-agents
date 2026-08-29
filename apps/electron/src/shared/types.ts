@@ -194,6 +194,11 @@ import type {
   ReadHandoffResultChunkInput,
   CancelHandoffInput,
   MarkHandoffResultReadInput,
+  ApprovalCardView,
+  ApprovalInvalidatedEvent,
+  ResolveApprovalInput,
+  DisableStandingRuleInput,
+  DeleteStandingRuleInput,
   PermissionResponseOptions,
   CredentialResponse,
   SessionCommand,
@@ -415,6 +420,13 @@ export interface ElectronAPI {
   cancelHandoff(input: CancelHandoffInput): Promise<HandoffRailView>
   markHandoffResultRead(input: MarkHandoffResultReadInput): Promise<HandoffRailView>
   onHandoffEvent(callback: (event: HandoffInvalidatedEvent) => void): () => void
+
+  listConversationApprovals(conversationId: string): Promise<ApprovalCardView[]>
+  resolveApproval(input: ResolveApprovalInput): Promise<ApprovalCardView>
+  listStandingRules(botId?: string): Promise<import('@kata-sh/core').StandingRule[]>
+  disableStandingRule(input: DisableStandingRuleInput): Promise<import('@kata-sh/core').StandingRule>
+  deleteStandingRule(input: DeleteStandingRuleInput): Promise<{ deleted: true }>
+  onApprovalEvent(callback: (event: ApprovalInvalidatedEvent) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
