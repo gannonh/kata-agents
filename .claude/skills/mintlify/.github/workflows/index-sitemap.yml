@@ -1,28 +1,24 @@
 name: Index docs
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "0 */3 * * *"  
 
-permissions:
-  contents: read
-
 jobs:
-  index-sitemap:
-    name: Index sitemap
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v2
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '18'
 
       - name: Install CLI
         run: npm install -g @team-plain/cli@latest
         
-      - name: Index docs
+      - name: Index Docs
         run: plain index-sitemap https://mintlify.com/docs/sitemap.xml
         env:
           PLAIN_API_KEY: ${{ secrets.PLAIN_API_KEY }}

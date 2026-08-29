@@ -19,6 +19,4 @@ bun install
 bun run ensure:electron
 bun run electron:build
 ln -sf $PROJECT_ROOT/.env $WORKTREE_ROOT/.env 
-
-# comment out because skills are git tracked for this project
-# $WORKTREE_ROOT/scripts/install-skills.sh
+$WORKTREE_ROOT/scripts/install-skills.sh

@@ -32,13 +32,13 @@ Atlassian
 (?i)auth
 Auth0
 authed
-autocommit(s|ed|ing)?
+autocommit
 autofocuses
 (?i)autogenerat(e|ed|ing)?
 (?i)automations?
 (?i)automerge
 (?i)autoplay
-autosav(e|es|ed|ing)
+autosave(s|d)?
 AVIF
 AWS
 axios
@@ -148,7 +148,6 @@ DORA
 (?i)drilldown
 DRY
 DynamoDB
-dotfile(s)?
 EasyList
 ECS
 EdDSA
@@ -209,7 +208,7 @@ IAM
 ICO
 IDE
 IdP
-IDs?
+IDs
 Imgix
 indexable
 ingestible
@@ -340,7 +339,6 @@ PKCE
 Playfair
 PNG
 pnpm
-POC
 popover
 Porkbun
 PostgreSQL
@@ -348,7 +346,7 @@ PostgreSQL
 Postman
 PowerShell
 PR
-(?i)prefetch(es|ed|ing)?
+prefetching
 prefill(s|ing|ed)?
 preloaded
 prepend(ed|ing)?

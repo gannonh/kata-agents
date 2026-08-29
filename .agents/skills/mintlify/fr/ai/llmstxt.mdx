@@ -57,36 +57,11 @@ Les fichiers `llms.txt` et `llms-full.txt` répertorient les pages de votre lang
 
 Cette approche structurée permet aux LLMs de traiter efficacement votre documentation à un niveau global et de repérer le contenu pertinent pour les requêtes des utilisateurs, améliorant ainsi la précision et la rapidité des recherches documentaires assistées par l'IA.
 
-<div id="split-indexes-under-_llms">
-  ## Index scindés sous `/_llms`
-</div>
+<Note>
+  Les fichiers d'index `llms.txt` générés automatiquement ne peuvent pas dépasser 100 000 caractères. Pour les sites de documentation volumineux, Mintlify scinde l'index en fichiers liés sous `/_llms/` afin que les agents puissent découvrir chaque page sans charger un seul fichier trop volumineux. Cette limite ne s'applique pas à `llms-full.txt`.
+</Note>
 
-Les fichiers d'index `llms.txt` générés automatiquement ne peuvent pas dépasser 100 000 caractères. Lorsqu'un index dépasse cette limite, Mintlify conserve le fichier `llms.txt` principal comme répertoire et déplace des groupes de liens de pages vers des fichiers Markdown générés sous `/_llms/`. Chaque page reste découvrable : la scission n'omet jamais de pages de l'index. Cette limite ne s'applique pas à `llms-full.txt`.
-
-Les liens vers les index générés apparaissent dans une section `Indexes`. Chaque lien inclut le fil d'Ariane du groupe, son nombre de pages et une description :
-
-```mdx
-> The links below point to documentation indexes. Follow each `/_llms/` index recursively until you reach documentation pages.
-
-## Indexes
-
-- [API reference (250 pages)](https://docs.example.com/_llms/api-reference.md): Endpoint documentation for the example API
-```
-
-Un index généré peut pointer vers d'autres index. Par exemple, `/_llms/api-reference.md` peut pointer vers `/_llms/api-reference/admin.md` lorsqu'un groupe est trop volumineux pour un seul fichier. Les agents doivent suivre ces liens d'index de manière récursive jusqu'à atteindre les liens des pages de documentation. Mintlify peut raccourcir les descriptions de pages dans un index scindé pour maintenir chaque fichier sous la limite de caractères.
-
-Les fichiers générés font partie de `llms.txt` et n'ont pas besoin d'exister dans votre référentiel. Ils sont distincts de `llms-full.txt`.
-
-La route `/_llms/` utilise le même chemin de base que votre documentation :
-
-- Un site hébergé à la racine sert un index à l'adresse `https://docs.example.com/_llms/api-reference.md`.
-- Un site hébergé sous `/docs` le sert à l'adresse `https://example.com/docs/_llms/api-reference.md`.
-
-Si vous utilisez un reverse proxy ou une liste d'autorisation de chemins, transférez la route générée en plus de `llms.txt`. Une règle large `<base-path>/*` inclut déjà `<base-path>/_llms/*`. Avec des règles granulaires, ajoutez explicitement `<base-path>/_llms/*`. Consultez [Reverse proxy](/fr/deploy/reverse-proxy#routing-configuration) pour des conseils de routage.
-
-<Warning>
-  Un répertoire tel que `/docs` dans votre référentiel ne définit pas le chemin de base public de votre site. Configurez le chemin de base dans votre Dashboard Mintlify et utilisez le même préfixe dans votre reverse proxy. Sinon, `llms.txt` peut être accessible au préfixe public alors que ses liens `/_llms/` générés pointent ailleurs.
-</Warning>
+Si vous utilisez un reverse proxy ou maintenez une liste d'autorisation de chemins, transférez `/_llms/*` en plus de `/llms.txt` pour que les agents puissent suivre les liens de l'index généré. Pour une documentation hébergée sous un chemin de base, transférez `<base-path>/_llms/*` à la place. Les domaines personnalisés gérés par Mintlify ne nécessitent aucune configuration supplémentaire. Consultez [Reverse proxy](/fr/deploy/reverse-proxy#routing-configuration) pour des conseils de routage.
 
 ```mdx Example llms.txt
 # Titre du site
@@ -129,9 +104,3 @@ Mintlify héberge automatiquement un fichier `llms-full.txt` à la racine de vot
 Pour ajouter un fichier `llms.txt` ou `llms-full.txt` personnalisé, créez un fichier `llms.txt` ou `llms-full.txt` à la racine de votre projet. L'ajout d'un fichier personnalisé remplace le fichier généré automatiquement portant le même nom. Si vous supprimez un fichier personnalisé, Mintlify restaure le fichier généré automatiquement.
 
 Votre fichier `llms.txt` ou `llms-full.txt` personnalisé doit comporter le titre du site en tant que niveau de titre H1. Le reste du contenu est facultatif. Consultez [Format](https://llmstxt.org/#format) dans la spécification `llms.txt` pour plus d'informations sur les sections facultatives et les bonnes pratiques.
-
-<Note>
-Sur les sites qui utilisent l'[authentification](/fr/deploy/authentication-setup), les fichiers `llms.txt` et `llms-full.txt` personnalisés respectent l'authentification.
-
-Si un fichier personnalisé contient un lien vers une page qui n'est pas publique, seuls les utilisateurs authentifiés peuvent accéder au fichier. Les visiteurs anonymes reçoivent le `llms.txt` ou `llms-full.txt` généré automatiquement, qui n'inclut que des liens accessibles publiquement.
-</Note>
