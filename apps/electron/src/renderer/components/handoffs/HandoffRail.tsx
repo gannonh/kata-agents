@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { readCompleteHandoffResult } from './result-reader'
 import { handoffStateLabel } from './state-label'
 
 export interface HandoffRailProps {
@@ -29,6 +30,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<'cancel' | 'read' | null>(null)
   const [cancelReason, setCancelReason] = React.useState('')
+  const [resultText, setResultText] = React.useState<string | null>(null)
   const railRef = React.useRef<HandoffRailView | null>(null)
 
   const applyRail = React.useCallback((next: HandoffRailView): boolean => {
@@ -83,6 +85,30 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
       void window.electronAPI.cancelHandoffWait({ waitId }).catch(onError)
     }
   }, [conversationId, handoffId, refresh, applyRail])
+
+  React.useEffect(() => {
+    const result = rail?.task?.result
+    if (!result) {
+      setResultText(null)
+      return
+    }
+    let disposed = false
+    setResultText(result.preview)
+    void readCompleteHandoffResult(
+      (offset, limit) => window.electronAPI.readHandoffResultChunk({
+        conversationId,
+        handoffId,
+        offset,
+        limit,
+      }),
+      result,
+    ).then((text) => {
+      if (!disposed) setResultText(text)
+    }).catch((err: unknown) => {
+      if (!disposed) setError(err instanceof Error ? err.message : String(err))
+    })
+    return () => { disposed = true }
+  }, [conversationId, handoffId, rail?.task?.result?.sha256])
 
   const handleRead = React.useCallback(async () => {
     if (!rail?.task || !rail.unread || busy) return
@@ -198,7 +224,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
         {rail.task?.result && (
           <section data-testid="handoff-rail-result" className="mt-4 rounded border border-primary/30 bg-primary/[0.05] p-2">
             <div className="text-[11px] uppercase tracking-wider text-primary">{t('handoffs.result')}</div>
-            <div className="mt-1 whitespace-pre-wrap break-words text-sm">{rail.task.result.preview}</div>
+            <div className="mt-1 whitespace-pre-wrap break-words text-sm">{resultText ?? rail.task.result.preview}</div>
             {evidence && <div data-testid="handoff-rail-evidence" className="mt-2 break-all text-xs text-muted-foreground">{evidence}</div>}
           </section>
         )}
