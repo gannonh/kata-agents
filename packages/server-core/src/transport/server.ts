@@ -740,7 +740,13 @@ export class WsRpcServer implements RpcServer {
       }
 
       this.rejectPendingInvokesForClient(client.id)
-      for (const handler of this.clientDisconnectHandlers) handler(client.id)
+      for (const handler of this.clientDisconnectHandlers) {
+        try {
+          handler(client.id)
+        } catch (error) {
+          transportLog.error('Client disconnect handler failed', { clientId: client.id, error })
+        }
+      }
       this.onClientDisconnected?.(client.id)
     })
 

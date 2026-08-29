@@ -1430,7 +1430,7 @@ export class PiAgent extends BaseAgent {
       this.send({
         type: 'tool_execute_response',
         requestId: request.requestId,
-        result: { content: 'Rejected stale or unauthenticated tool request.', isError: true },
+        result: { content: i18n.t('handoffs.staleToolRequest'), isError: true },
       });
       return;
     }

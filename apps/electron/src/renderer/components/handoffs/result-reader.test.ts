@@ -2,11 +2,18 @@ import { describe, expect, it } from 'bun:test'
 import type { SpawnTaskIntegrityView, SpawnTaskResultChunkView } from '@kata-sh/core'
 import { readCompleteHandoffResult } from './result-reader'
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const input = new Uint8Array(bytes.byteLength)
+  input.set(bytes)
+  const digest = await crypto.subtle.digest('SHA-256', input)
+  return Buffer.from(digest).toString('hex')
+}
+
 describe('readCompleteHandoffResult', () => {
   it('joins bounded byte chunks into the complete UTF-8 result', async () => {
     const text = `${'reviewed '.repeat(700)}✓`
     const bytes = Buffer.from(text, 'utf8')
-    const sha256 = 'digest'
+    const sha256 = await sha256Hex(bytes)
     const read = async (offset: number, limit: number): Promise<SpawnTaskResultChunkView> => {
       const end = Math.min(offset + Math.min(limit, 997), bytes.byteLength)
       const chunk = bytes.subarray(offset, end)
@@ -44,7 +51,26 @@ describe('readCompleteHandoffResult', () => {
     })
 
     await expect(readCompleteHandoffResult(read, { byteLength: 10, sha256: 'digest' }))
-      .rejects.toThrow('Result integrity check failed.')
+      .rejects.toMatchObject({ code: 'integrity_failed' })
+  })
+
+  it('rejects corrupt assembled bytes even when chunk metadata matches', async () => {
+    const expected = Buffer.from('expected', 'utf8')
+    const corrupt = Buffer.from('corrupt!', 'utf8')
+    const sha256 = await sha256Hex(expected)
+    const read = async (): Promise<SpawnTaskResultChunkView> => ({
+      taskId: 'task_1',
+      offset: 0,
+      nextOffset: corrupt.byteLength,
+      byteLength: corrupt.byteLength,
+      totalByteLength: expected.byteLength,
+      sha256,
+      dataBase64: corrupt.toString('base64'),
+      truncated: false,
+    })
+
+    await expect(readCompleteHandoffResult(read, { byteLength: expected.byteLength, sha256 }))
+      .rejects.toMatchObject({ code: 'integrity_failed' })
   })
 
   it('stops before requesting another chunk after cancellation', async () => {

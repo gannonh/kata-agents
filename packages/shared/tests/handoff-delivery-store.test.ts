@@ -518,7 +518,11 @@ describe('HandoffDeliveryStore mail transition table', () => {
         claim(store, deliveryId, claimId);
         if (attempt.state === 'acknowledged') acknowledge(store, deliveryId, claimId, 1);
         if (attempt.state === 'delivery-failed') {
-          store.failDelivery(deliveryId, { code: 'provider_error', message: 'boom' });
+          store.failDelivery(deliveryId, {
+            code: 'provider_error',
+            message: 'boom',
+            claim: { claimId, recipientBotId: 'bot_target', ownerEpoch: 1 },
+          });
         }
       }
       const before = diskRecord(root, deliveryId);

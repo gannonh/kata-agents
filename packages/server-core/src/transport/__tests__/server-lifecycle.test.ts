@@ -16,6 +16,7 @@ function createServer(opts?: {
   maxClients?: number
   requireAuth?: boolean
   validateToken?: (token: string) => Promise<boolean>
+  onClientDisconnected?: (clientId: string) => void
 }) {
   return new WsRpcServer({
     host: '127.0.0.1',
@@ -24,6 +25,7 @@ function createServer(opts?: {
     validateToken: opts?.validateToken ?? (async (t) => t === TEST_TOKEN),
     maxClients: opts?.maxClients,
     serverId: 'test',
+    onClientDisconnected: opts?.onClientDisconnected,
   })
 }
 
@@ -166,6 +168,30 @@ describe('WsRpcServer lifecycle', () => {
     const { ws: ws2 } = await handshake(url, TEST_TOKEN)
     openSockets.push(ws2)
     expect(server!.getConnectedClientCount()).toBe(1)
+  })
+
+  it('runs every disconnect callback when one registered handler throws', async () => {
+    const calls: string[] = []
+    let finishDisconnect: (() => void) | undefined
+    const disconnected = new Promise<void>((resolve) => { finishDisconnect = resolve })
+    server = createServer({
+      onClientDisconnected: () => {
+        calls.push('configured')
+        finishDisconnect?.()
+      },
+    })
+    server.registerClientDisconnectHandler(() => {
+      calls.push('throwing')
+      throw new Error('disconnect fixture failure')
+    })
+    server.registerClientDisconnectHandler(() => { calls.push('remaining') })
+    await server.listen()
+
+    const { ws } = await handshake(`ws://127.0.0.1:${server.port}`, TEST_TOKEN)
+    ws.close()
+    await disconnected
+
+    expect(calls).toEqual(['throwing', 'remaining', 'configured'])
   })
 
   // -- Handler timeout test --

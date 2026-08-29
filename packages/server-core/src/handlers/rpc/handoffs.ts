@@ -158,8 +158,8 @@ export function registerHandoffsHandlers(
       },
     ) => {
       const runtime = runtimeFor(ctx, deps)
-      const controller = waits.begin(ctx.clientId, input.waitId)
       const timeoutMs = boundedWaitMs(input.timeoutMs)
+      const controller = waits.begin(ctx.clientId, input.waitId)
       const deadline = Date.now() + timeoutMs
       try {
         while (!controller.signal.aborted) {

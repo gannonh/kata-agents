@@ -982,7 +982,11 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(current, error, 'sent')
     }
 
-    this.assertHandoffFence(current, handoffFence)
+    try {
+      this.assertHandoffFence(current, handoffFence)
+    } catch (error) {
+      throw await this.creationFailure(current, error, 'handoff_fence')
+    }
 
     try {
       // Persist processing before crossing the provider boundary. A provider
@@ -996,7 +1000,11 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(current, error, 'processing')
     }
 
-    this.assertHandoffFence(current, handoffFence)
+    try {
+      this.assertHandoffFence(current, handoffFence)
+    } catch (error) {
+      throw await this.creationFailure(current, error, 'handoff_fence')
+    }
 
     try {
       // The provider turn remains fire-and-forget for spawn(). C2 consumes its

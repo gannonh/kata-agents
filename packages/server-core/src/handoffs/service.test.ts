@@ -7,6 +7,7 @@ import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
 import { channelProviderSessionPath } from '@kata-sh/shared/channels'
+import { deriveJournalEntryId } from '@kata-sh/shared/conversations'
 import { SpawnTaskCoordinator } from '../sessions/spawn-task-coordinator'
 import {
   HandoffService,
@@ -80,7 +81,7 @@ function makeService(
     append: (input) => {
       const entry: JournalEntry = {
         schemaVersion: 1,
-        entryId: `entry_${entries.length + 1}`,
+        entryId: deriveJournalEntryId(input.conversationId, input.idempotencyKey),
         seq: entries.length + 1,
         createdAt: at,
         ...input,
@@ -89,6 +90,7 @@ function makeService(
       return entry
     },
     list: () => entries,
+    getEntry: (conversationId, entryId) => journal.list(conversationId).find(entry => entry.entryId === entryId) ?? null,
     getHeadSequence: () => entries.length,
     ...journalOverride,
   }
@@ -211,7 +213,7 @@ describe('HandoffService creation boundary', () => {
           entries.push(entry)
           return {
             schemaVersion: 1,
-            entryId: `entry_${entries.length}`,
+            entryId: deriveJournalEntryId(entry.conversationId, entry.idempotencyKey),
             seq: entries.length,
             createdAt: at,
             ...entry,
@@ -219,7 +221,7 @@ describe('HandoffService creation boundary', () => {
         },
         list: () => entries.map((entry, index) => ({
           schemaVersion: 1,
-          entryId: `entry_${index + 1}`,
+          entryId: deriveJournalEntryId(entry.conversationId, entry.idempotencyKey),
           seq: index + 1,
           createdAt: at,
           ...entry,
@@ -307,7 +309,7 @@ describe('HandoffService creation boundary', () => {
           }
           const entry: JournalEntry = {
             schemaVersion: 1,
-            entryId: `entry_${entries.length + 1}`,
+            entryId: deriveJournalEntryId(input.conversationId, input.idempotencyKey),
             seq: entries.length + 1,
             createdAt: at,
             ...input,
@@ -351,7 +353,7 @@ describe('HandoffService creation boundary', () => {
         append: (input: Parameters<TestJournal['append']>[0]) => {
           const entry: JournalEntry = {
             schemaVersion: 1,
-            entryId: `entry_${entries.length + 1}`,
+            entryId: deriveJournalEntryId(input.conversationId, input.idempotencyKey),
             seq: entries.length + 1,
             createdAt: at,
             ...input,
@@ -687,7 +689,7 @@ describe('HandoffService creation boundary', () => {
         append: (input) => {
           const entry: JournalEntry = {
             schemaVersion: 1,
-            entryId: `entry_${entries.length + 1}`,
+            entryId: deriveJournalEntryId(input.conversationId, input.idempotencyKey),
             seq: entries.length + 1,
             createdAt: at,
             ...input,
@@ -696,6 +698,7 @@ describe('HandoffService creation boundary', () => {
           return entry
         },
         list: () => entries,
+        getEntry: (_conversationId, entryId) => entries.find(entry => entry.entryId === entryId) ?? null,
         getHeadSequence: () => entries.length,
       }
       const service = makeService(deliveryStore, taskStore, undefined, journal)
@@ -757,7 +760,7 @@ describe('HandoffService creation boundary', () => {
         append: () => { throw new Error('journal disk is full') },
         list: () => [{
           schemaVersion: 1,
-          entryId: 'entry_requested',
+          entryId: deriveJournalEntryId('chat_source', 'handoff.handoff_terminal_failure.requested'),
           conversationId: 'chat_source',
           seq: 1,
           kind: 'handoff',
@@ -767,6 +770,21 @@ describe('HandoffService creation boundary', () => {
           body: JSON.stringify({ type: 'handoff-requested' }),
           createdAt: at,
         }],
+        getEntry: (_conversationId, entryId) => entryId === deriveJournalEntryId(
+          'chat_source',
+          'handoff.handoff_terminal_failure.requested',
+        ) ? {
+          schemaVersion: 1,
+          entryId,
+          conversationId: 'chat_source',
+          seq: 1,
+          kind: 'handoff',
+          authorBotId: 'bot_source',
+          handoffId: 'handoff_terminal_failure',
+          idempotencyKey: 'handoff.handoff_terminal_failure.requested',
+          body: JSON.stringify({ type: 'handoff-requested' }),
+          createdAt: at,
+        } : null,
         getHeadSequence: () => 1,
       }
       const service = makeService(deliveryStore, taskStore, undefined, journal)

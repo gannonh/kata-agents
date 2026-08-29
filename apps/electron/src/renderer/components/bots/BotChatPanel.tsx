@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
 import { HandoffCard } from '../handoffs/HandoffCard'
+import { mergeHandoffTimeline } from '../handoffs/timeline'
 import { useNavigation } from '@/contexts/NavigationContext'
 
 export interface BotChatPanelProps {
@@ -74,24 +75,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   }, [updateRightSidebar])
 
   const timeline = React.useMemo(() => {
-    const handoffEntries = new Set(entries.filter(entry => entry.kind === 'handoff').map(entry => entry.entryId))
-    const ordered = handoffs
-      .map(rail => ({ rail, seq: rail.exchange[0]?.seq ?? Number.MAX_SAFE_INTEGER }))
-      .sort((left, right) => left.seq - right.seq || left.rail.handoffId.localeCompare(right.rail.handoffId))
-    const items: Array<{ kind: 'handoff'; rail: HandoffRailView } | { kind: 'entry'; entry: JournalEntry }> = []
-    let handoffIndex = 0
-    for (const entry of entries) {
-      while (handoffIndex < ordered.length && ordered[handoffIndex].seq <= entry.seq) {
-        items.push({ kind: 'handoff', rail: ordered[handoffIndex].rail })
-        handoffIndex += 1
-      }
-      if (!handoffEntries.has(entry.entryId)) items.push({ kind: 'entry', entry })
-    }
-    while (handoffIndex < ordered.length) {
-      items.push({ kind: 'handoff', rail: ordered[handoffIndex].rail })
-      handoffIndex += 1
-    }
-    return items
+    return mergeHandoffTimeline(entries, handoffs)
   }, [entries, handoffs])
 
   const updateMemory = React.useCallback(async (memoryId: string, kind: 'edit' | 'forget' | 'restore', content?: string) => {

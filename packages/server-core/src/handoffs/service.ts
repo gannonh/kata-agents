@@ -24,7 +24,7 @@ import {
   type BotContextJournal,
 } from '@kata-sh/shared/bots'
 import { ChannelDirectory, channelProviderSessionPath } from '@kata-sh/shared/channels'
-import type { ConversationJournal } from '@kata-sh/shared/conversations'
+import { deriveJournalEntryId, type ConversationJournal } from '@kata-sh/shared/conversations'
 import type {
   InspectHandoffRequest,
   InspectHandoffResult,
@@ -72,7 +72,7 @@ export interface HandoffServiceOptions {
   readonly workspaceId: string
   readonly workspaceRoot: string
   readonly deliveryStore: HandoffDeliveryStore
-  readonly resolveJournal: (conversationId: string) => BotContextJournal & Pick<ConversationJournal, 'append'>
+  readonly resolveJournal: (conversationId: string) => BotContextJournal & Pick<ConversationJournal, 'append' | 'getEntry'>
   readonly botDirectory: Pick<BotDirectory, 'getBotByLegacySession' | 'getBot' | 'listBots'>
   readonly channelDirectory: Pick<ChannelDirectory, 'getChannel' | 'listChannels' | 'isMember'>
   readonly sessionManager: HandoffSessionLookup
@@ -867,9 +867,8 @@ export class HandoffService {
   }
 
   private hasJournalEntry(conversationId: string, idempotencyKey: string): boolean {
-    return this.resolveJournal(conversationId)
-      .list(conversationId)
-      .some((entry) => entry.idempotencyKey === idempotencyKey)
+    const entryId = deriveJournalEntryId(conversationId, idempotencyKey)
+    return this.resolveJournal(conversationId).getEntry(conversationId, entryId) !== null
   }
 
   private async resolveSourceIdentity(callerSessionId: string): Promise<SourceIdentity> {

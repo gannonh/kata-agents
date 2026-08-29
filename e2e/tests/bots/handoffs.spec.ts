@@ -104,9 +104,11 @@ test.describe(`Bot handoffs ${E2E_TAGS.handoffs}`, () => {
         await expect(cards.first()).toContainText(sourceName);
         await expect(cards.first()).toContainText(targetName);
         await page.screenshot({ path: testInfo.outputPath("handoff-card.png"), fullPage: true });
+        const handoffId = await cards.first().getAttribute("data-handoff-id");
+        if (!handoffId) throw new Error("Handoff card is missing its handoff ID");
         await cards.first().click();
 
-        await expect(page.getByTestId(/handoff-rail-/)).toBeVisible({ timeout: 15_000 });
+        await expect(page.getByTestId(`handoff-rail-${handoffId}`)).toBeVisible({ timeout: 15_000 });
         await expect(page.getByTestId("handoff-rail-result")).toContainText(
           targetTurn.expected,
           { timeout: E2E_TIMEOUTS.agentReplyMs },

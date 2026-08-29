@@ -66,6 +66,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { loadAllSkills } from '../skills/storage.ts';
+import { i18n } from '../i18n/index.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -1280,22 +1281,22 @@ ${formattedMessages}
     if (input.help) {
       return {
         tool: 'send_handoff',
-        targetBot: 'Name or ID of the Bot that should take over',
-        request: 'Self-contained request for the receiving Bot (max 16KB)',
+        targetBot: i18n.t('handoffs.sendToolHelpTargetBot'),
+        request: i18n.t('handoffs.sendToolHelpRequest'),
       };
     }
 
     const targetBot = typeof input.targetBot === 'string' ? input.targetBot.trim() : '';
     if (!targetBot) {
-      throw new Error('targetBot is required. Call with help=true to see usage.');
+      throw new Error(i18n.t('handoffs.sendToolTargetRequired'));
     }
     const request = typeof input.request === 'string' ? input.request : '';
     if (!request.trim()) {
-      throw new Error('request is required. Call with help=true to see usage.');
+      throw new Error(i18n.t('handoffs.sendToolRequestRequired'));
     }
 
     if (!this.onSendHandoff) {
-      throw new Error('send_handoff is not available in this context.');
+      throw new Error(i18n.t('handoffs.sendToolUnavailable'));
     }
 
     return this.onSendHandoff({ targetBot, request });

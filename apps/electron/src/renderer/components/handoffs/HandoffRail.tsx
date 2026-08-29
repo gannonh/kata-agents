@@ -1,9 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { readCompleteHandoffResult } from './result-reader'
+import { HandoffResultReadError, readCompleteHandoffResult } from './result-reader'
 import { handoffStateLabel } from './state-label'
 
 export interface HandoffRailProps {
@@ -22,6 +23,17 @@ function isAtLeastFresh(next: HandoffRailView, current: HandoffRailView | null):
   return next.freshness.deliveryVersion >= current.freshness.deliveryVersion
     && next.freshness.taskVersion >= current.freshness.taskVersion
     && next.freshness.journalSequence >= current.freshness.journalSequence
+}
+
+function resultReadErrorMessage(t: TFunction, error: unknown): string {
+  if (!(error instanceof HandoffResultReadError)) return t('handoffs.resultErrorGeneric')
+  switch (error.code) {
+    case 'changed': return t('handoffs.resultErrorChanged')
+    case 'chunk_inconsistent': return t('handoffs.resultErrorChunk')
+    case 'integrity_failed': return t('handoffs.resultErrorIntegrity')
+    case 'no_progress': return t('handoffs.resultErrorNoProgress')
+    case 'too_large': return t('handoffs.resultErrorTooLarge')
+  }
 }
 
 export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
@@ -50,7 +62,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
     let disposed = false
     const waitId = crypto.randomUUID()
     const onError = (err: unknown) => {
-      if (!disposed) setError(err instanceof Error ? err.message : String(err))
+      if (!disposed) setError(resultReadErrorMessage(t, err))
     }
 
     const unsubscribe = window.electronAPI.onHandoffEvent(event => {
@@ -84,7 +96,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
       unsubscribe()
       void window.electronAPI.cancelHandoffWait({ waitId }).catch(onError)
     }
-  }, [conversationId, handoffId, refresh, applyRail])
+  }, [conversationId, handoffId, refresh, applyRail, t])
 
   React.useEffect(() => {
     const result = rail?.task?.result
@@ -106,10 +118,10 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
     ).then((text) => {
       if (!controller.signal.aborted) setResultText(text)
     }).catch((err: unknown) => {
-      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err))
+      if (!controller.signal.aborted) setError(resultReadErrorMessage(t, err))
     })
     return () => { controller.abort() }
-  }, [conversationId, handoffId, rail?.task?.result?.sha256])
+  }, [conversationId, handoffId, rail?.task?.result?.sha256, t])
 
   const handleRead = React.useCallback(async () => {
     if (!rail?.task || !rail.unread || busy) return
@@ -123,11 +135,11 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
       applyRail(next)
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(resultReadErrorMessage(t, err))
     } finally {
       setBusy(null)
     }
-  }, [rail, busy, conversationId, handoffId, applyRail])
+  }, [rail, busy, conversationId, handoffId, applyRail, t])
 
   const handleCancel = React.useCallback(async () => {
     if (!rail || !rail.actions.includes('cancel') || busy) return
@@ -143,7 +155,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
       setCancelReason('')
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(resultReadErrorMessage(t, err))
     } finally {
       setBusy(null)
     }

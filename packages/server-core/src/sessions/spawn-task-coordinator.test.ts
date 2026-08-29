@@ -27,6 +27,50 @@ afterEach(() => {
 })
 
 describe('SpawnTaskCoordinator', () => {
+  it('fails the task when its handoff fence changes after processing is committed', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserveForHandoff('handoff_fence', {
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'dispatch with a fenced claim',
+      childConfig: {},
+    })
+    const fence = {
+      deliveryId: 'delivery_fence',
+      claimId: 'claim_1',
+      recipientBotId: 'bot_target',
+      ownerEpoch: 1,
+    }
+    const fenced = store.setHandoffDispatchFence(reserved.taskId, fence, '2026-08-16T16:00:01.000Z')
+    const transition = store.transition.bind(store)
+    store.transition = (taskId, input) => {
+      const next = transition(taskId, input)
+      if (input.runtimeState === 'processing') {
+        store.setHandoffDispatchFence(taskId, {
+          ...fence,
+          claimId: 'claim_2',
+          ownerEpoch: 2,
+        }, '2026-08-16T16:00:02.000Z')
+      }
+      return next
+    }
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => { providerCalls += 1 },
+    })
+
+    await expect(coordinator.dispatchReserved(fenced, undefined, fence)).rejects.toMatchObject({
+      failure: { details: { boundary: 'handoff_fence' } },
+      task: { runtimeState: 'failed' },
+    })
+    expect(providerCalls).toBe(0)
+    expect(store.get(reserved.taskId)?.runtimeState).toBe('failed')
+  })
+
   it('recovers a reserved task by creating the reserved child before dispatch', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)

@@ -64,6 +64,7 @@ describe('session tool filtering helpers', () => {
     expect(blocked.has('source_oauth_trigger')).toBe(true);
     expect(blocked.has('source_credential_prompt')).toBe(true);
     expect(blocked.has('spawn_session')).toBe(true);
+    expect(blocked.has('send_handoff')).toBe(true);
   });
 
   it('safe-mode helpers support MCP prefixing', () => {
