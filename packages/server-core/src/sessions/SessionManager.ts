@@ -1256,6 +1256,7 @@ interface ForkChildCreateOptions {
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private sessionsInitialized = false
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
   private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
@@ -2296,9 +2297,24 @@ export class SessionManager implements ISessionManager {
               error,
             )
           }
+          if (this.spawnTaskCoordinators.get(workspaceRootPath) === startupCoordinator) {
+            try {
+              const report = await this.handoffDelegateFor(workspace.id)?.reconcileStartup()
+              if (report?.recoveryFailures.length) {
+                sessionLog.warn(
+                  `Handoff startup reconciliation reported ${report.recoveryFailures.length} failure(s)`
+                    + ` for workspace ${workspace.id}:`,
+                  report.recoveryFailures,
+                )
+              }
+            } catch (error) {
+              sessionLog.warn(`Handoff startup reconciliation failed for workspace ${workspace.id}:`, error)
+            }
+          }
         }
       }
 
+      this.sessionsInitialized = true
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
@@ -3033,6 +3049,7 @@ export class SessionManager implements ISessionManager {
             name: typeof config.name === 'string' ? config.name : undefined,
             llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
             model: typeof config.model === 'string' ? config.model : undefined,
+            hidden: task.origin?.kind === 'handoff',
             enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
             permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
             thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
@@ -3041,12 +3058,14 @@ export class SessionManager implements ISessionManager {
           })
 
           // Publish the child only after its reserved ID/back-reference is durable.
-          this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+          if (task.origin?.kind !== 'handoff') {
+            this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+          }
         },
         appendDelegatedPrompt: async ({ task, prompt }) => {
           await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
         },
-        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
+        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments, botTurnContext }) => {
           // sendMessage reuses the already flushed stable message instead of
           // appending a second user turn. SpawnTaskCoordinator consumes the
           // eventual rejection through the durable provider-error finalizer.
@@ -3057,6 +3076,9 @@ export class SessionManager implements ISessionManager {
             undefined,
             undefined,
             task.dispatch.messageId,
+            undefined,
+            undefined,
+            botTurnContext ? { botTurnContext } : undefined,
           )
         }),
         onTaskUpdated: async (change) => {
@@ -3079,8 +3101,16 @@ export class SessionManager implements ISessionManager {
       void coordinator.waitForStartupNotification()
         .then(async () => {
           if (retryRecovery) await coordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspaceId, workspaceRootPath))
+          if (!this.sessionsInitialized) return
           try {
-            await this.handoffDelegateFor(workspaceId)?.reconcileStartup()
+            const report = await this.handoffDelegateFor(workspaceId)?.reconcileStartup()
+            if (report?.recoveryFailures.length) {
+              sessionLog.warn(
+                `Handoff startup reconciliation reported ${report.recoveryFailures.length} failure(s)`
+                  + ` for workspace ${workspaceId}:`,
+                report.recoveryFailures,
+              )
+            }
           } catch (error) {
             sessionLog.warn(`Handoff startup reconciliation failed for workspace ${workspaceId}:`, error)
           }
@@ -4927,8 +4957,6 @@ export class SessionManager implements ISessionManager {
         return result
       }
 
-      // Wire up onSendHandoff: bot-to-bot handoffs derive identity server-side
-      // from the calling session, so only the target and request travel here.
       managed.agent.onSendHandoff = async (request) => {
         const delegate = this.handoffDelegateFor(managed.workspace.id)
         if (!delegate) throw new Error('send_handoff is not available in this context.')
@@ -4937,6 +4965,12 @@ export class SessionManager implements ISessionManager {
           targetBot: request.targetBot,
           request: request.request,
         })
+      }
+
+      managed.agent.onInspectHandoff = async (request, signal) => {
+        const delegate = this.handoffDelegateFor(managed.workspace.id)
+        if (!delegate) throw new Error('inspect_handoff is not available in this context.')
+        return delegate.inspectHandoff(managed.id, request, signal)
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)

@@ -149,6 +149,7 @@ import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
 import { FEATURE_FLAGS } from "@kata-sh/shared/feature-flags"
 import { ChangesPanel } from "@/components/right-sidebar/git-changes/ChangesPanel"
+import { HandoffRail } from "@/components/handoffs/HandoffRail"
 
 /** Fixed width of the Changes right-sidebar on regular (non-compact) layouts. */
 const RIGHT_SIDEBAR_WIDTH = 380
@@ -610,6 +611,9 @@ function AppShellContent({
   // focused session panel. Uses the dedicated right-side chrome on regular
   // layouts and an overlay drawer at narrow widths.
   const showChangesPanel = FEATURE_FLAGS.gitWorkspaceV1 && navState.rightSidebar?.type === 'changes'
+  const handoffPanel = navState.rightSidebar?.type === 'handoff' ? navState.rightSidebar : null
+  const showHandoffPanel = handoffPanel !== null
+  const showRightSidebarPanel = showChangesPanel || showHandoffPanel
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -3345,7 +3349,7 @@ function AppShellContent({
           }
           navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
-          isRightSidebarVisible={showChangesPanel && !isAutoCompact}
+          isRightSidebarVisible={showRightSidebarPanel && !isAutoCompact}
           isCompact={isAutoCompact}
           isResizing={!!isResizing}
         />
@@ -3354,7 +3358,7 @@ function AppShellContent({
          * Regular layouts: a fixed-width right-side panel that participates in
          * the flex row. Narrow layouts: an overlay drawer above the stack. Binds
          * to the focused session so status/feedback never leak between panels. */}
-        {showChangesPanel && !isAutoCompact && (
+        {showRightSidebarPanel && !isAutoCompact && (
           <div
             data-panel-role="right-sidebar"
             className="h-full shrink-0 overflow-hidden bg-background shadow-middle"
@@ -3366,17 +3370,23 @@ function AppShellContent({
               borderBottomRightRadius: RADIUS_EDGE,
             }}
           >
-            <ChangesPanel sessionId={focusedSessionId ?? session.selected} />
+            {showChangesPanel && <ChangesPanel sessionId={focusedSessionId ?? session.selected} />}
+            {showHandoffPanel && handoffPanel && (
+              <HandoffRail conversationId={handoffPanel.conversationId} handoffId={handoffPanel.handoffId} />
+            )}
           </div>
         )}
-        {showChangesPanel && isAutoCompact && (
+        {showRightSidebarPanel && isAutoCompact && (
           <div className="absolute inset-0 z-panel flex" role="dialog" aria-modal="true">
             <div
               className="flex-1 bg-black/30"
               onClick={() => updateRightSidebar({ type: 'none' })}
             />
             <div className="h-full w-[88%] max-w-[420px] overflow-hidden bg-background shadow-modal">
-              <ChangesPanel sessionId={focusedSessionId ?? session.selected} />
+              {showChangesPanel && <ChangesPanel sessionId={focusedSessionId ?? session.selected} />}
+              {showHandoffPanel && handoffPanel && (
+                <HandoffRail conversationId={handoffPanel.conversationId} handoffId={handoffPanel.handoffId} />
+              )}
             </div>
           </div>
         )}

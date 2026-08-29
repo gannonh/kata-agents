@@ -37,4 +37,16 @@ describe('route-parser: changes right-sidebar param', () => {
     expect(state).not.toBeNull()
     expect(state!.rightSidebar).toEqual({ type: 'changes' })
   })
+
+  it('round-trips a handoff rail panel without adding a navigator item', () => {
+    const panel: RightSidebarPanel = {
+      type: 'handoff',
+      conversationId: 'chat_source',
+      handoffId: 'handoff_123',
+    }
+    const param = buildRightSidebarParam(panel)
+    expect(param).toBe('handoff/chat_source/handoff_123')
+    expect(parseRightSidebarParam(param)).toEqual(panel)
+    expect(parseRouteToNavigationState('allSessions/session/session_1', param)?.rightSidebar).toEqual(panel)
+  })
 })

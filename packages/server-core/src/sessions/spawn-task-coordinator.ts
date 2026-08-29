@@ -1,5 +1,7 @@
 import type {
+  BotTurnContext,
   SpawnTask,
+  SpawnTaskDispatchFence,
   SpawnTaskFailure,
   SpawnTaskFailureCode,
   SpawnTaskJsonValue,
@@ -9,6 +11,7 @@ import {
   createSpawnTaskAwaitingInput,
   createSpawnTaskFailure,
   isSpawnTaskTerminal,
+  matchesSpawnTaskDispatchFence,
   type CreateSpawnTaskAwaitingInputInput,
   type SpawnTaskStartupReport,
   type SpawnTaskStore,
@@ -29,6 +32,8 @@ export interface SpawnTaskDispatchInput {
   readonly task: SpawnTask
   readonly prompt: string
   readonly attachments?: readonly FileAttachment[]
+  /** Runtime context assembled for the execution owner, when one exists. */
+  readonly botTurnContext?: BotTurnContext
 }
 
 export interface SpawnTaskUpdated {
@@ -892,8 +897,12 @@ export class SpawnTaskCoordinator {
   async dispatchReserved(
     task: SpawnTask,
     attachments?: readonly FileAttachment[],
+    handoffFence?: SpawnTaskDispatchFence,
+    botTurnContext?: BotTurnContext,
   ): Promise<SpawnSessionResult> {
     let current = task
+
+    this.assertHandoffFence(current, handoffFence)
 
     const reservedCancellation = await this.preDispatchCancellation(current)
     if (reservedCancellation) return reservedCancellation
@@ -903,6 +912,8 @@ export class SpawnTaskCoordinator {
     } catch (error) {
       throw await this.creationFailure(current, error, 'child')
     }
+
+    this.assertHandoffFence(current, handoffFence)
 
     const childCancellation = await this.preDispatchCancellation(current)
     if (childCancellation) return childCancellation
@@ -915,6 +926,8 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(current, error, 'ready')
     }
 
+    this.assertHandoffFence(current, handoffFence)
+
     const readyCancellation = await this.preDispatchCancellation(current)
     if (readyCancellation) return readyCancellation
 
@@ -926,6 +939,8 @@ export class SpawnTaskCoordinator {
       if (deletionCancellation) return deletionCancellation
       throw await this.creationFailure(current, error, 'claim')
     }
+
+    this.assertHandoffFence(current, handoffFence)
 
     const claimedCancellation = await this.preDispatchCancellation(current)
     if (claimedCancellation) return claimedCancellation
@@ -940,6 +955,8 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(current, error, 'message_append')
     }
 
+    this.assertHandoffFence(current, handoffFence)
+
     const appendedCancellation = await this.preDispatchCancellation(current)
     if (appendedCancellation) return appendedCancellation
 
@@ -950,6 +967,8 @@ export class SpawnTaskCoordinator {
       if (deletionCancellation) return deletionCancellation
       throw await this.creationFailure(current, error, 'sent')
     }
+
+    this.assertHandoffFence(current, handoffFence)
 
     try {
       // Persist processing before crossing the provider boundary. A provider
@@ -963,6 +982,8 @@ export class SpawnTaskCoordinator {
       throw await this.creationFailure(current, error, 'processing')
     }
 
+    this.assertHandoffFence(current, handoffFence)
+
     try {
       // The provider turn remains fire-and-forget for spawn(). C2 consumes its
       // eventual rejection through the same durable lifecycle finalizer.
@@ -970,6 +991,7 @@ export class SpawnTaskCoordinator {
         task: current,
         prompt: current.delegatedPrompt,
         attachments,
+        ...(botTurnContext ? { botTurnContext } : {}),
       })
       this.markDispatchActive(current.taskId)
       if (providerTurn) {
@@ -989,6 +1011,14 @@ export class SpawnTaskCoordinator {
       childSessionId: current.childSessionId,
       runtimeState: current.runtimeState,
       version: current.version,
+    }
+  }
+
+  private assertHandoffFence(task: SpawnTask, expected?: SpawnTaskDispatchFence): void {
+    if (!expected) return
+    const current = this.store.get(task.taskId)
+    if (!current || !matchesSpawnTaskDispatchFence(current.dispatch.handoffFence, expected)) {
+      throw new Error(`Spawned task ${task.taskId} handoff dispatch fence is stale`)
     }
   }
 

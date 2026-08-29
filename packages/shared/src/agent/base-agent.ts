@@ -131,10 +131,6 @@ export interface SpawnSessionHelpResult {
   };
 }
 
-// ============================================================
-// Send Handoff Types
-// ============================================================
-
 export interface SendHandoffRequest {
   targetBot: string;
   request: string;
@@ -153,6 +149,21 @@ export interface SendHandoffHelpResult {
   tool: 'send_handoff';
   targetBot: string;
   request: string;
+}
+
+export type InspectHandoffRequest =
+  | { action: 'get'; taskId: string }
+  | { action: 'wait'; taskId: string; afterVersion: number; timeoutMs?: number }
+  | { action: 'read-result'; taskId: string; offset: number; limit: number };
+
+export type InspectHandoffResult =
+  | import('@kata-sh/core').HandoffTaskView
+  | import('@kata-sh/core').SpawnTaskResultChunkView
+  | import('@kata-sh/core').SpawnTaskIntegrityView;
+
+export interface InspectHandoffHelpResult {
+  tool: 'inspect_handoff';
+  actions: readonly ['get', 'wait', 'read-result'];
 }
 
 /** Tool list for mini agents - quick config edits only */
@@ -292,6 +303,7 @@ export abstract class BaseAgent implements AgentBackend {
   onBackendAuthRequired: ((reason: string) => void) | null = null;
   onSpawnSession: ((request: SpawnSessionRequest) => Promise<SpawnSessionResult>) | null = null;
   onSendHandoff: ((request: SendHandoffRequest) => Promise<SendHandoffResult>) | null = null;
+  onInspectHandoff: ((request: InspectHandoffRequest, signal?: AbortSignal) => Promise<InspectHandoffResult>) | null = null;
 
   // ============================================================
   // Constructor
@@ -1262,10 +1274,6 @@ ${formattedMessages}
     return this.onSpawnSession(request);
   }
 
-  /**
-   * Pre-execute a send_handoff request: handle help mode or delegate to onSendHandoff.
-   * Shared across all backends. Identity fields are not accepted from the model.
-   */
   protected async preExecuteSendHandoff(
     input: Record<string, unknown>
   ): Promise<SendHandoffResult | SendHandoffHelpResult> {
@@ -1291,6 +1299,49 @@ ${formattedMessages}
     }
 
     return this.onSendHandoff({ targetBot, request });
+  }
+
+  protected async preExecuteInspectHandoff(
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<InspectHandoffResult | InspectHandoffHelpResult> {
+    if (input.help) {
+      return { tool: 'inspect_handoff', actions: ['get', 'wait', 'read-result'] };
+    }
+    const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : '';
+    if (!taskId) throw new Error('taskId is required. Call with help=true to see usage.');
+    if (!this.onInspectHandoff) throw new Error('inspect_handoff is not available in this context.');
+
+    if (input.action === 'get') return this.onInspectHandoff({ action: 'get', taskId }, signal);
+    if (input.action === 'wait') {
+      if (!Number.isSafeInteger(input.afterVersion) || Number(input.afterVersion) < 0) {
+        throw new Error('afterVersion must be a non-negative integer.');
+      }
+      if (input.timeoutMs !== undefined && (!Number.isFinite(input.timeoutMs) || Number(input.timeoutMs) < 0)) {
+        throw new Error('timeoutMs must be a non-negative finite number.');
+      }
+      return this.onInspectHandoff({
+        action: 'wait',
+        taskId,
+        afterVersion: Number(input.afterVersion),
+        ...(input.timeoutMs !== undefined ? { timeoutMs: Number(input.timeoutMs) } : {}),
+      }, signal);
+    }
+    if (input.action === 'read-result') {
+      if (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0) {
+        throw new Error('offset must be a non-negative integer.');
+      }
+      if (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1) {
+        throw new Error('limit must be a positive integer.');
+      }
+      return this.onInspectHandoff({
+        action: 'read-result',
+        taskId,
+        offset: Number(input.offset),
+        limit: Number(input.limit),
+      }, signal);
+    }
+    throw new Error('action must be get, wait, or read-result.');
   }
 
   /**

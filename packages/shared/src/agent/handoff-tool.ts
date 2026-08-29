@@ -1,25 +1,11 @@
-/**
- * Send Handoff Tool (send_handoff)
- *
- * Session-scoped tool that hands the current task to another Bot. Identity is
- * derived server-side from the calling session: the model supplies only the
- * target Bot and the request text. The workspace, source Bot, conversation,
- * and child session are resolved by the server coordinator.
- */
-
 import { tool } from '@anthropic-ai/claude-agent-sdk';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { SendHandoffResult, SendHandoffHelpResult } from './base-agent.ts';
 
 export type SendHandoffFn = (input: Record<string, unknown>) => Promise<SendHandoffResult | SendHandoffHelpResult>;
 
-// Tool result type - matches what the SDK expects
-type ToolResult = {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: boolean;
-};
-
-function errorResponse(message: string): ToolResult {
+function errorResponse(message: string): CallToolResult {
   return {
     content: [{ type: 'text', text: `Error: ${message}` }],
     isError: true,
@@ -50,6 +36,12 @@ A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeS
         .describe('Target Bot name or ID (required when not in help mode)'),
       request: z.string().optional()
         .describe('Self-contained request for the receiving Bot (required when not in help mode, max 16KB)'),
+      workspaceId: z.never().optional(),
+      sourceBotId: z.never().optional(),
+      conversationId: z.never().optional(),
+      runtimeId: z.never().optional(),
+      sessionId: z.never().optional(),
+      callback: z.never().optional(),
     },
     async (args) => {
       const sendHandoffFn = options.getSendHandoffFn();

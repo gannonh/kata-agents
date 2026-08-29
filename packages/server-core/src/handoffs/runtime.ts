@@ -8,7 +8,14 @@ import {
   createChannelJournal,
 } from '@kata-sh/shared/channels'
 import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
-import { HandoffService, type HandoffDelegate, type HandoffSessionLookup, type HandoffSpawnCoordinator, type HandoffTaskStore } from './service.ts'
+import {
+  HandoffService,
+  type HandoffDelegate,
+  type HandoffServiceEvent,
+  type HandoffSessionLookup,
+  type HandoffSpawnCoordinator,
+  type HandoffTaskStore,
+} from './service.ts'
 
 export interface HandoffRuntime {
   readonly workspaceId: string
@@ -28,6 +35,24 @@ export interface HandoffRuntimeSessionManager extends HandoffSessionLookup {
 }
 
 const runtimes = new Map<string, HandoffRuntime>()
+const eventListeners = new Set<(workspaceId: string, event: HandoffServiceEvent) => void>()
+
+function notifyHandoffListeners(workspaceId: string, event: HandoffServiceEvent): void {
+  for (const listener of eventListeners) {
+    try {
+      listener(workspaceId, event)
+    } catch (error) {
+      console.error('[Handoffs] Event listener failed after durable commit', error)
+    }
+  }
+}
+
+export function subscribeHandoffEvents(
+  listener: (workspaceId: string, event: HandoffServiceEvent) => void,
+): () => void {
+  eventListeners.add(listener)
+  return () => eventListeners.delete(listener)
+}
 
 function refreshRuntime(runtime: HandoffRuntime): HandoffRuntime {
   runtime.bots.recover()
@@ -37,12 +62,6 @@ function refreshRuntime(runtime: HandoffRuntime): HandoffRuntime {
   return runtime
 }
 
-/**
- * Per-workspace handoff runtime cache, mirroring the Channel handler runtime
- * pattern: constructed once per workspace root, refreshed on reuse. The RPC
- * slice resolves services through this factory; SessionManager reaches the
- * same service instance through the delegate factory installed below.
- */
 export function getHandoffRuntime(sessionManager: HandoffRuntimeSessionManager, workspaceId: string): HandoffRuntime {
   const workspace = getWorkspaceByNameOrId(workspaceId)
   if (!workspace) throw new Error('Workspace not found')
@@ -83,6 +102,7 @@ export function getHandoffRuntime(sessionManager: HandoffRuntimeSessionManager, 
     sessionManager,
     taskStore,
     coordinator,
+    onHandoffEvent: (event) => notifyHandoffListeners(workspace.id, event),
   })
 
   const runtime: HandoffRuntime = {

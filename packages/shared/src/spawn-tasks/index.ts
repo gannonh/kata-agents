@@ -10,6 +10,7 @@ export type { CreateSpawnTaskAwaitingInputInput } from './awaiting-input.ts';
 export { createSpawnTaskFailure } from './failures.ts';
 export type { CreateSpawnTaskFailureInput } from './failures.ts';
 export { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
+export { matchesSpawnTaskDispatchFence } from './handoff-fence.ts';
 export type { SpawnTaskMetadataUpdate } from './metadata.ts';
 export { reserveSpawnTaskIds } from './ids.ts';
 export type { SpawnTaskReservedIds } from './ids.ts';
@@ -18,6 +19,7 @@ export type {
   SpawnTaskStoreOptions,
   SpawnTaskStoreFaultPoint,
   ReserveSpawnTaskInput,
+  ReserveHandoffSpawnTaskInput,
   ReconstructSpawnTaskInput,
   SpawnTaskStartupChange,
   SpawnTaskFinalizedStartupChange,

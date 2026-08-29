@@ -992,7 +992,12 @@ export function NavigationProvider({
     if (isPopstateSwitchRef.current) {
       // Popstate-triggered: URL is already correct, just reconcile from it
       isPopstateSwitchRef.current = false
-      reconcileFromUrlParamsRef.current(new URLSearchParams(window.location.search))
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('sidebar')?.startsWith('handoff/')) {
+        params.delete('sidebar')
+        setRightSidebar(undefined)
+      }
+      reconcileFromUrlParamsRef.current(params)
       lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
     } else {
       // UI-triggered: load stored URL for the new workspace, push history entry
@@ -1009,6 +1014,11 @@ export function NavigationProvider({
         }
         url.searchParams.set('ws', workspaceSlug)
         url.searchParams.set('route', 'allSessions')
+      }
+
+      if (url.searchParams.get('sidebar')?.startsWith('handoff/')) {
+        url.searchParams.delete('sidebar')
+        setRightSidebar(undefined)
       }
 
       // Push a new history entry for the workspace switch

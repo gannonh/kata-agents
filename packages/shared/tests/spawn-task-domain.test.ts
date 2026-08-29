@@ -328,6 +328,37 @@ describe('spawn-task validation and terminal metadata', () => {
 });
 
 describe('spawn-task reservation store', () => {
+  it('reserves one canonical task per handoff and recovers the correlation after reload', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({
+      workspaceRoot: root,
+      workspaceId: 'ws_handoff_reservation',
+      clock: () => at,
+      randomId: (() => {
+        let sequence = 0;
+        return () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`;
+      })(),
+    });
+    const input = {
+      parentSessionId: 'session_source',
+      delegatedPrompt: 'Review the release diff.',
+      childConfig: { model: 'target-model' },
+    } as const;
+
+    const first = store.reserveForHandoff('handoff_a', input);
+    const retry = store.reserveForHandoff('handoff_a', {
+      ...input,
+      delegatedPrompt: 'a conflicting retry must not replace the task',
+    });
+
+    expect(retry).toEqual(first);
+    expect(first.origin).toEqual({ kind: 'handoff', handoffId: 'handoff_a' });
+
+    const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_handoff_reservation', clock: () => at });
+    expect(reloaded.getByHandoff('handoff_a')).toEqual(first);
+    expect(reloaded.reserveForHandoff('handoff_a', input)).toEqual(first);
+  });
+
   it('rejects traversal in caller IDs and generated path segments', () => {
     const root = tempWorkspace();
     const generated = [
@@ -605,6 +636,38 @@ describe('spawn-task reservation store', () => {
     expect(sent.dispatch).toMatchObject({ state: 'sent', readyAt: at, claimedAt: at, sentAt: at });
     expect(() => store.updateDispatch(cancelled.taskId, 'sent', at)).toThrow('after terminal');
     expect(new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_dispatch' }).get(cancelled.taskId)).toEqual(cancelled);
+  });
+
+  it('persists an idempotent handoff dispatch fence and rejects a stale owner', () => {
+    const root = tempWorkspace();
+    const store = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_handoff_fence', clock: () => at });
+    const task = store.reserveForHandoff('handoff_fence', {
+      parentSessionId: 'session_source',
+      delegatedPrompt: 'fenced work',
+      childConfig: {},
+    });
+    const fence = {
+      deliveryId: 'delivery_fence',
+      claimId: 'claim_fence',
+      recipientBotId: 'bot_target',
+      ownerEpoch: 1,
+    } as const;
+
+    const fenced = store.setHandoffDispatchFence(task.taskId, fence, at);
+    expect(fenced.dispatch.handoffFence).toEqual(fence);
+    expect(store.setHandoffDispatchFence(task.taskId, {
+      ownerEpoch: fence.ownerEpoch,
+      recipientBotId: fence.recipientBotId,
+      claimId: fence.claimId,
+      deliveryId: fence.deliveryId,
+    }, at)).toEqual(fenced);
+    expect(() => store.setHandoffDispatchFence(task.taskId, {
+      ...fence,
+      claimId: 'claim_stale',
+    }, at)).toThrow('different handoff dispatch fence');
+
+    const reloaded = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_handoff_fence', clock: () => at });
+    expect(reloaded.get(task.taskId)?.dispatch.handoffFence).toEqual(fence);
   });
 
   it('rejects stale writers instead of replacing a newer committed version', () => {

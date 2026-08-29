@@ -186,6 +186,14 @@ import type {
   SendMessageOptions,
   SessionEvent,
   ChannelEvent,
+  HandoffRailView,
+  HandoffInvalidatedEvent,
+  GetHandoffRailInput,
+  WaitForHandoffInput,
+  CancelHandoffWaitInput,
+  ReadHandoffResultChunkInput,
+  CancelHandoffInput,
+  MarkHandoffResultReadInput,
   PermissionResponseOptions,
   CredentialResponse,
   SessionCommand,
@@ -398,6 +406,17 @@ export interface ElectronAPI {
     opts?: { limit?: number },
   ): Promise<import('@kata-sh/core').RouteRecord[]>
   onChannelEvent(callback: (event: ChannelEvent) => void): () => void
+
+  // Bot handoffs. The server derives workspace and Bot authority from the
+  // authenticated transport and returns one aggregate rail per handoff.
+  listConversationHandoffs(conversationId: string): Promise<HandoffRailView[]>
+  getHandoffRail(input: GetHandoffRailInput): Promise<HandoffRailView>
+  waitForHandoff(input: WaitForHandoffInput): Promise<HandoffRailView>
+  cancelHandoffWait(input: CancelHandoffWaitInput): Promise<{ cancelled: boolean }>
+  readHandoffResultChunk(input: ReadHandoffResultChunkInput): Promise<import('@kata-sh/core').SpawnTaskResultChunkView | import('@kata-sh/core').SpawnTaskIntegrityView>
+  cancelHandoff(input: CancelHandoffInput): Promise<HandoffRailView>
+  markHandoffResultRead(input: MarkHandoffResultReadInput): Promise<HandoffRailView>
+  onHandoffEvent(callback: (event: HandoffInvalidatedEvent) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
@@ -1028,6 +1047,7 @@ export type RightSidebarPanel =
   | { type: 'files'; path?: string }
   | { type: 'history' }
   | { type: 'changes'; path?: string }
+  | { type: 'handoff'; conversationId: string; handoffId: string }
   | { type: 'none' }
 
 /**

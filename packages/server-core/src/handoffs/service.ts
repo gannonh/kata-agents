@@ -1,18 +1,21 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import {
-  BOT_LIMITS,
   HANDOFF_LIMITS,
   SPAWN_TASK_LIMITS,
   type BotRecord,
+  type BotTurnContext,
   type HandoffDeliveryClaim,
   type HandoffDeliveryRecord,
   type HandoffTaskView,
   type SpawnTask,
+  type SpawnTaskDispatchFence,
+  type SpawnTaskIntegrityView,
   type SpawnTaskJsonValue,
+  type SpawnTaskResultChunkView,
 } from '@kata-sh/core'
-import { isSpawnTaskTerminal } from '@kata-sh/shared/spawn-tasks'
-import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
+import { isSpawnTaskTerminal, matchesSpawnTaskDispatchFence } from '@kata-sh/shared/spawn-tasks'
+import { HandoffDeliveryClaimConflictError, HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import {
   BotContextLedger,
   BotDirectory,
@@ -21,7 +24,14 @@ import {
 } from '@kata-sh/shared/bots'
 import { ChannelDirectory, channelProviderSessionPath } from '@kata-sh/shared/channels'
 import type { ConversationJournal } from '@kata-sh/shared/conversations'
-import type { SendHandoffResult, SpawnSessionResult } from '@kata-sh/shared/agent'
+import type {
+  InspectHandoffRequest,
+  InspectHandoffResult,
+  SendHandoffResult,
+  SpawnSessionResult,
+} from '@kata-sh/shared/agent'
+import type { FileAttachment } from '@kata-sh/shared/utils/files'
+import type { HandoffAction, HandoffDeliveryView, HandoffExchangeEntry, HandoffRailView } from '@kata-sh/shared/protocol'
 import type { SpawnTaskCancellationResult } from '../sessions/spawn-task-coordinator.ts'
 
 export interface HandoffReserveInput {
@@ -32,12 +42,24 @@ export interface HandoffReserveInput {
 
 /** The workspace SpawnTaskStore owned by SessionManager's spawn coordinator. */
 export interface HandoffTaskStore {
-  readonly reserve: (input: HandoffReserveInput) => SpawnTask
+  readonly reserveForHandoff: (handoffId: string, input: HandoffReserveInput) => SpawnTask
+  readonly getByHandoff: (handoffId: string) => SpawnTask | null
   readonly get: (taskId: string) => SpawnTask | null
+  readonly setHandoffDispatchFence: (taskId: string, fence: SpawnTaskDispatchFence, at: string) => SpawnTask
+  readonly readResultChunk: (
+    taskId: string,
+    offset: number,
+    limit: number,
+  ) => SpawnTaskResultChunkView | SpawnTaskIntegrityView
 }
 
 export interface HandoffSpawnCoordinator {
-  readonly dispatchReserved: (task: SpawnTask) => Promise<SpawnSessionResult>
+  readonly dispatchReserved: (
+    task: SpawnTask,
+    attachments?: readonly FileAttachment[],
+    fence?: SpawnTaskDispatchFence,
+    botTurnContext?: BotTurnContext,
+  ) => Promise<SpawnSessionResult>
   readonly cancelTask: (taskId: string, reason: string) => Promise<SpawnTaskCancellationResult>
 }
 
@@ -61,10 +83,11 @@ export interface HandoffServiceOptions {
 }
 
 export type HandoffServiceEvent =
-  | { readonly type: 'handoff-created'; readonly handoffId: string; readonly deliveryId: string; readonly taskId: string }
-  | { readonly type: 'handoff-delivery-failed'; readonly handoffId: string; readonly deliveryId: string }
-  | { readonly type: 'handoff-result-unread'; readonly handoffId: string; readonly deliveryId: string }
-  | { readonly type: 'handoff-terminal'; readonly handoffId: string; readonly deliveryId: string }
+  | { readonly type: 'handoff-created'; readonly handoffId: string; readonly deliveryId: string; readonly taskId: string; readonly conversationId: string }
+  | { readonly type: 'handoff-delivery-failed'; readonly handoffId: string; readonly deliveryId: string; readonly conversationId: string }
+  | { readonly type: 'handoff-result-unread'; readonly handoffId: string; readonly deliveryId: string; readonly conversationId: string }
+  | { readonly type: 'handoff-updated'; readonly handoffId: string; readonly deliveryId: string; readonly conversationId: string }
+  | { readonly type: 'handoff-terminal'; readonly handoffId: string; readonly deliveryId: string; readonly conversationId: string }
 
 export interface CreateHandoffInput {
   /** Managed session ID of the caller; source Bot identity is derived from it. */
@@ -85,17 +108,24 @@ export interface HandoffReconcileReport {
   readonly acknowledged: number
   readonly failed: number
   readonly terminalAppended: number
+  readonly terminalAppendFailures: number
+  readonly recoveryFailures: readonly {
+    readonly deliveryId: string
+    readonly message: string
+  }[]
 }
 
-/** Server-side seam consumed by SessionManager; HandoffService implements it. */
 export interface HandoffDelegate {
   createHandoff(input: CreateHandoffInput): Promise<SendHandoffResult>
+  inspectHandoff(callerSessionId: string, input: InspectHandoffRequest, signal?: AbortSignal): Promise<InspectHandoffResult>
   onTaskUpdated(taskId: string): void | Promise<void>
-  reconcileStartup(): Promise<HandoffReconcileReport> | HandoffReconcileReport | void
+  reconcileStartup(): Promise<HandoffReconcileReport> | HandoffReconcileReport
 }
 
 const REQUESTED_KEY_SUFFIX = '.requested'
 const TERMINAL_KEY_SUFFIX = '.terminal'
+const MAX_INSPECT_WAIT_MS = 25_000
+const INSPECT_WAIT_POLL_MS = 50
 
 function requestedKey(handoffId: string): string {
   return `handoff.${handoffId}${REQUESTED_KEY_SUFFIX}`
@@ -117,6 +147,10 @@ function truncateUtf8(value: string, limit: number): string {
     result += character
   }
   return result
+}
+
+function escapeUntrustedText(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
 /**
@@ -157,6 +191,29 @@ export class HandoffRejectedError extends Error {
   }
 }
 
+class HandoffTerminalAppendError extends Error {
+  constructor(handoffId: string, cause: unknown) {
+    super(`Handoff ${handoffId} terminal journal entry could not be persisted: ${errorMessage(cause)}`)
+    this.name = 'HandoffTerminalAppendError'
+  }
+}
+
+class HandoffDispatchError extends Error {
+  readonly claim?: {
+    readonly claimId: string
+    readonly recipientBotId: string
+    readonly ownerEpoch: number
+  }
+
+  constructor(cause: unknown, claim?: HandoffDeliveryClaim, recipientBotId?: string) {
+    super(errorMessage(cause))
+    this.name = 'HandoffDispatchError'
+    this.claim = claim && recipientBotId
+      ? { claimId: claim.claimId, recipientBotId, ownerEpoch: claim.ownerEpoch }
+      : undefined
+  }
+}
+
 interface SourceIdentity {
   readonly sourceBotId: string
   readonly conversationId: string
@@ -173,6 +230,41 @@ function readPointerSessionId(path: string): string | null {
   return value || null
 }
 
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve()
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function parseExchangePhase(
+  body: string,
+  delivery: HandoffDeliveryRecord,
+): HandoffExchangeEntry['phase'] | null {
+  try {
+    const value = JSON.parse(body) as unknown
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+    const record = value as Record<string, unknown>
+    if (record.handoffId !== delivery.handoffId || record.deliveryId !== delivery.deliveryId) return null
+    if (record.type === 'handoff-requested') return 'requested'
+    if (record.type === 'handoff-terminal') return 'terminal'
+    return null
+  } catch {
+    return null
+  }
+}
+
 export class HandoffService {
   readonly workspaceId: string
   readonly workspaceRoot: string
@@ -187,8 +279,7 @@ export class HandoffService {
   private readonly clock: () => string
   private readonly randomId: () => string
   private readonly onHandoffEvent?: HandoffServiceOptions['onHandoffEvent']
-  /** taskId -> deliveryId; the delivery mail references the task, never copies it. */
-  private readonly byTaskId = new Map<string, string>()
+  private readonly deliveryIdByTaskId = new Map<string, string>()
 
   constructor(options: HandoffServiceOptions) {
     this.workspaceId = options.workspaceId
@@ -214,22 +305,6 @@ export class HandoffService {
     const handoffId = `handoff_${this.randomId()}`
     const deliveryId = `delivery_${this.randomId()}`
 
-    let task: SpawnTask
-    try {
-      task = this.taskStore.reserve({
-        parentSessionId: input.callerSessionId,
-        delegatedPrompt: input.request,
-        childConfig: this.buildChildConfig(identity, target, handoffId, deliveryId),
-      })
-    } catch {
-      throw new HandoffRejectedError(
-        'handoff_reserve_failed',
-        'Handoff could not reserve the delegated task.',
-        this.clock(),
-      )
-    }
-    this.byTaskId.set(task.taskId, deliveryId)
-
     const delivery = this.deliveryStore.create({
       deliveryId,
       handoffId,
@@ -239,59 +314,66 @@ export class HandoffService {
       targetBotId: target.botId,
       request: input.request,
     })
+
+    let task: SpawnTask
+    try {
+      task = this.taskStore.reserveForHandoff(handoffId, {
+        parentSessionId: input.callerSessionId,
+        delegatedPrompt: input.request,
+        childConfig: this.buildChildConfig(target),
+      })
+    } catch {
+      throw new HandoffRejectedError(
+        'handoff_reserve_failed',
+        'Handoff could not reserve the delegated task.',
+        this.clock(),
+      )
+    }
+    this.deliveryIdByTaskId.set(task.taskId, deliveryId)
     this.deliveryStore.attachSpawnTask(delivery.deliveryId, task.taskId)
 
-    const journal = this.resolveJournal(delivery.conversationId)
-    journal.append({
-      conversationId: delivery.conversationId,
-      kind: 'handoff',
-      authorBotId: delivery.sourceBotId,
-      handoffId: delivery.handoffId,
-      idempotencyKey: requestedKey(delivery.handoffId),
-      body: JSON.stringify({
-        type: 'handoff-requested',
-        handoffId: delivery.handoffId,
-        deliveryId: delivery.deliveryId,
-        targetBotId: delivery.targetBotId,
-        sourceBotId: delivery.sourceBotId,
-        request: delivery.request,
-        taskId: task.taskId,
-        at: this.clock(),
-      }),
-    })
-    this.emit({ type: 'handoff-created', handoffId, deliveryId, taskId: task.taskId })
+    this.appendRequestedEntry(delivery)
+    this.emit({ type: 'handoff-created', handoffId, deliveryId, taskId: task.taskId, conversationId: delivery.conversationId })
 
-    const claim = this.deliveryStore.claimDelivery(deliveryId, {
-      claimId: `claim_${this.randomId()}`,
-      recipientBotId: target.botId,
-      expectedOwnerEpoch: 0,
-    })
-
-    const settled = requireClaim(deliveryId, claim.claim)
     try {
-      const dispatched = await this.coordinator.dispatchReserved(task)
-      this.deliveryStore.acknowledgeDelivery(deliveryId, {
-        claimId: settled.claimId,
-        ownerEpoch: settled.ownerEpoch,
-      })
+      const acknowledged = await this.dispatchAndAcknowledge(delivery, task)
+      const latest = this.taskStore.get(task.taskId)
+      if (latest) await this.publishTerminalIfNeeded(acknowledged, latest)
       return {
         handoffId,
         deliveryId,
-        taskId: dispatched.taskId,
-        runtimeState: dispatched.runtimeState,
-        version: dispatched.version,
+        taskId: task.taskId,
+        runtimeState: latest?.runtimeState ?? task.runtimeState,
+        version: latest?.version ?? task.version,
         targetBotId: target.botId,
       }
     } catch (error) {
       const terminalTask = this.taskStore.get(task.taskId)
-      const failed = this.deliveryStore.failDelivery(deliveryId, {
-        code: 'handoff_dispatch_failed',
-        message: truncateUtf8(errorMessage(error), HANDOFF_LIMITS.deliveryFailureMessageBytes),
-        claim: { claimId: settled.claimId, ownerEpoch: settled.ownerEpoch },
-      })
-      this.emit({ type: 'handoff-delivery-failed', handoffId, deliveryId })
-      this.appendTerminalEntry(failed, terminalTask)
+      const current = this.deliveryStore.get(deliveryId)
+      const failedClaim = error instanceof HandoffDispatchError ? error.claim : undefined
+      const ownsCurrentClaim = failedClaim !== undefined
+        && current?.mailState === 'claimed'
+        && current.targetBotId === failedClaim.recipientBotId
+        && current.claim?.claimId === failedClaim.claimId
+        && current.claim.ownerEpoch === failedClaim.ownerEpoch
+      if (current && (current.mailState === 'pending' || ownsCurrentClaim)) {
+        let failed: HandoffDeliveryRecord | null = null
+        try {
+          failed = this.deliveryStore.failDelivery(deliveryId, {
+            code: 'handoff_dispatch_failed',
+            message: truncateUtf8(errorMessage(error), HANDOFF_LIMITS.deliveryFailureMessageBytes),
+            ...(failedClaim ? { claim: failedClaim } : {}),
+          })
+        } catch (failureError) {
+          if (!(failureError instanceof HandoffDeliveryClaimConflictError)) throw failureError
+        }
+        if (failed) {
+          this.emit({ type: 'handoff-delivery-failed', handoffId, deliveryId, conversationId: delivery.conversationId })
+          this.appendTerminalEntry(failed, terminalTask)
+        }
+      }
       if (error instanceof HandoffRejectedError) throw error
+      if (error instanceof HandoffTerminalAppendError) throw error
       throw new HandoffRejectedError(
         'handoff_dispatch_failed',
         'Handoff delivery failed before the receiving Bot could run the request.',
@@ -301,28 +383,43 @@ export class HandoffService {
   }
 
   async onTaskUpdated(taskId: string): Promise<void> {
-    const deliveryId = this.byTaskId.get(taskId)
+    const deliveryId = this.deliveryIdByTaskId.get(taskId)
     if (!deliveryId) return
     const delivery = this.deliveryStore.get(deliveryId)
-    if (!delivery || delivery.mailState !== 'acknowledged') return
     const task = this.taskStore.get(taskId)
-    if (!task || !isSpawnTaskTerminal(task.runtimeState)) return
+    if (!delivery || !task) return
+    if (delivery.mailState !== 'delivery-failed') {
+      this.emit({
+        type: 'handoff-updated',
+        handoffId: delivery.handoffId,
+        deliveryId: delivery.deliveryId,
+        conversationId: delivery.conversationId,
+      })
+    }
+    if (delivery.mailState !== 'acknowledged' || !isSpawnTaskTerminal(task.runtimeState)) return
 
-    this.deliveryStore.markResultUnread(deliveryId, { taskVersion: task.version, at: this.clock() })
-    this.emit({ type: 'handoff-result-unread', handoffId: delivery.handoffId, deliveryId })
-    this.appendTerminalEntry(delivery, task)
+    await this.publishTerminalIfNeeded(delivery, task)
   }
 
   async reconcileStartup(): Promise<HandoffReconcileReport> {
-    const report: { repairedPointers: number; acknowledged: number; failed: number; terminalAppended: number } = {
+    const report: {
+      repairedPointers: number
+      acknowledged: number
+      failed: number
+      terminalAppended: number
+      terminalAppendFailures: number
+      recoveryFailures: Array<{ deliveryId: string; message: string }>
+    } = {
       repairedPointers: 0,
       acknowledged: 0,
       failed: 0,
       terminalAppended: 0,
+      terminalAppendFailures: 0,
+      recoveryFailures: [],
     }
 
     for (const delivery of this.deliveryStore.listAll()) {
-      if (this.deliveryStore.repairByHandoffPointer(delivery.deliveryId) === 'repaired') {
+      if (this.deliveryStore.repairHandoffPointerIfMissing(delivery.deliveryId) === 'repaired') {
         report.repairedPointers += 1
       }
     }
@@ -331,22 +428,51 @@ export class HandoffService {
     for (const snapshot of this.deliveryStore.listAll()) {
       try {
         if (snapshot.mailState === 'delivery-failed') {
-          if (this.appendTerminalEntry(snapshot, null)) report.terminalAppended += 1
+          try {
+            if (this.appendTerminalEntry(snapshot, null)) report.terminalAppended += 1
+          } catch (error) {
+            if (error instanceof HandoffTerminalAppendError) report.terminalAppendFailures += 1
+            else throw error
+          }
           continue
         }
         if (snapshot.mailState === 'acknowledged') {
           const task = snapshot.spawnTaskId ? this.taskStore.get(snapshot.spawnTaskId) : null
           if (!task || !isSpawnTaskTerminal(task.runtimeState)) continue
-          this.deliveryStore.markResultUnread(snapshot.deliveryId, { taskVersion: task.version, at: this.clock() })
-          this.emit({ type: 'handoff-result-unread', handoffId: snapshot.handoffId, deliveryId: snapshot.deliveryId })
-          if (this.appendTerminalEntry(snapshot, task)) report.terminalAppended += 1
+          try {
+            await this.publishTerminalIfNeeded(snapshot, task)
+          } catch (error) {
+            if (error instanceof HandoffTerminalAppendError) {
+              report.terminalAppendFailures += 1
+              continue
+            }
+            throw error
+          }
+          if (this.hasJournalEntry(snapshot.conversationId, terminalKey(snapshot.handoffId))) {
+            report.terminalAppended += 1
+          }
           continue
         }
 
-        const task = snapshot.spawnTaskId ? this.taskStore.get(snapshot.spawnTaskId) : null
+        let task = snapshot.spawnTaskId ? this.taskStore.get(snapshot.spawnTaskId) : null
+        if (!task) {
+          task = this.taskStore.getByHandoff(snapshot.handoffId)
+          if (task) this.deliveryStore.attachSpawnTask(snapshot.deliveryId, task.taskId)
+        }
         if (!snapshot.spawnTaskId || !task) {
+          task = task ?? this.reserveMissingTask(snapshot)
+          if (task) {
+            this.deliveryIdByTaskId.set(task.taskId, snapshot.deliveryId)
+            this.deliveryStore.attachSpawnTask(snapshot.deliveryId, task.taskId)
+          }
+        }
+        if (!task) {
           const claim = snapshot.mailState === 'claimed' && snapshot.claim
-            ? { claimId: snapshot.claim.claimId, ownerEpoch: snapshot.claim.ownerEpoch }
+            ? {
+                claimId: snapshot.claim.claimId,
+                recipientBotId: snapshot.targetBotId,
+                ownerEpoch: snapshot.claim.ownerEpoch,
+              }
             : undefined
           const failed = this.deliveryStore.failDelivery(snapshot.deliveryId, {
             code: 'handoff_task_missing',
@@ -354,20 +480,43 @@ export class HandoffService {
             ...(claim ? { claim } : {}),
           })
           report.failed += 1
-          this.emit({ type: 'handoff-delivery-failed', handoffId: failed.handoffId, deliveryId: failed.deliveryId })
-          if (this.appendTerminalEntry(failed, null)) report.terminalAppended += 1
+          this.emit({
+            type: 'handoff-delivery-failed',
+            handoffId: failed.handoffId,
+            deliveryId: failed.deliveryId,
+            conversationId: failed.conversationId,
+          })
+          try {
+            if (this.appendTerminalEntry(failed, null)) report.terminalAppended += 1
+          } catch (error) {
+            if (error instanceof HandoffTerminalAppendError) report.terminalAppendFailures += 1
+            else throw error
+          }
           continue
         }
 
-        const acknowledged = this.ensureAcknowledged(snapshot)
+        this.appendRequestedEntry(snapshot)
+        const acknowledged = await this.dispatchAndAcknowledge(snapshot, task)
         report.acknowledged += 1
-        if (!isSpawnTaskTerminal(task.runtimeState)) continue
-        this.deliveryStore.markResultUnread(acknowledged.deliveryId, { taskVersion: task.version, at: this.clock() })
-        this.emit({ type: 'handoff-result-unread', handoffId: acknowledged.handoffId, deliveryId: acknowledged.deliveryId })
-        if (this.appendTerminalEntry(acknowledged, task)) report.terminalAppended += 1
-      } catch {
-        // Startup repair is idempotent and re-runs on the next startup; a fault
-        // on one delivery must not block the remaining deliveries.
+        const latest = this.taskStore.get(task.taskId)
+        if (!latest || !isSpawnTaskTerminal(latest.runtimeState)) continue
+        try {
+          await this.publishTerminalIfNeeded(acknowledged, latest)
+        } catch (error) {
+          if (error instanceof HandoffTerminalAppendError) {
+            report.terminalAppendFailures += 1
+            continue
+          }
+          throw error
+        }
+        if (this.hasJournalEntry(acknowledged.conversationId, terminalKey(acknowledged.handoffId))) {
+          report.terminalAppended += 1
+        }
+      } catch (error) {
+        report.recoveryFailures.push({
+          deliveryId: snapshot.deliveryId,
+          message: truncateUtf8(errorMessage(error), HANDOFF_LIMITS.deliveryFailureMessageBytes),
+        })
       }
     }
 
@@ -378,7 +527,11 @@ export class HandoffService {
     return this.deliveryStore.listByConversation(conversationId).map((delivery) => this.project(delivery))
   }
 
-  /** Reloads deliveries from disk and rebuilds the task index after external changes. */
+  listConversationHandoffRails(conversationId: string): HandoffRailView[] {
+    return this.deliveryStore.listByConversation(conversationId)
+      .map((delivery) => this.getHandoffRail(conversationId, delivery.handoffId))
+  }
+
   reloadDeliveries(): void {
     this.deliveryStore.reload()
     this.rebuildTaskIndex()
@@ -389,31 +542,138 @@ export class HandoffService {
     return delivery ? this.project(delivery) : null
   }
 
-  markResultRead(handoffId: string, expectedTaskVersion: number): HandoffDeliveryRecord {
+  getHandoffRail(conversationId: string, handoffId: string): HandoffRailView {
     const delivery = this.deliveryStore.getByHandoff(handoffId)
-    if (!delivery) throw new TaskAccessError()
-    return this.deliveryStore.markResultRead(delivery.deliveryId, { expectedTaskVersion })
+    if (!delivery || delivery.conversationId !== conversationId) throw new TaskAccessError()
+    const task = delivery.spawnTaskId ? this.taskStore.get(delivery.spawnTaskId) : null
+    const exchange = this.resolveJournal(conversationId)
+      .list(conversationId)
+      .filter((entry) => entry.handoffId === handoffId)
+      .flatMap((entry): HandoffExchangeEntry[] => {
+        const phase = parseExchangePhase(entry.body, delivery)
+        return phase ? [{
+          seq: entry.seq,
+          entryId: entry.entryId,
+          phase,
+          ...(entry.authorBotId ? { authorBotId: entry.authorBotId } : {}),
+          createdAt: entry.createdAt,
+        }] : []
+      })
+    const unread = delivery.resultUnread !== undefined
+    const actions: HandoffAction[] = []
+    if ((delivery.mailState === 'pending' || delivery.mailState === 'claimed')
+      && (!task || !isSpawnTaskTerminal(task.runtimeState))) {
+      actions.push('cancel')
+    }
+    if (unread) actions.push('read')
+    const journalSequence = exchange.reduce((latest, entry) => Math.max(latest, entry.seq), 0)
+    const deliveryView: HandoffDeliveryView = {
+      deliveryId: delivery.deliveryId,
+      handoffId: delivery.handoffId,
+      workspaceId: delivery.workspaceId,
+      conversationId: delivery.conversationId,
+      sourceBotId: delivery.sourceBotId,
+      targetBotId: delivery.targetBotId,
+      request: delivery.request,
+      mailState: delivery.mailState,
+      ...(delivery.spawnTaskId ? { spawnTaskId: delivery.spawnTaskId } : {}),
+      ...(delivery.claim ? { claim: delivery.claim } : {}),
+      ...(delivery.failure ? { failure: delivery.failure } : {}),
+      ...(delivery.resultUnread ? { resultUnread: delivery.resultUnread } : {}),
+      ...(delivery.resultReadTaskVersion !== undefined ? { resultReadTaskVersion: delivery.resultReadTaskVersion } : {}),
+      createdAt: delivery.createdAt,
+      updatedAt: delivery.updatedAt,
+      version: delivery.version,
+    }
+    return {
+      handoffId,
+      conversationId,
+      sourceBotName: this.tryGetBotById(delivery.sourceBotId)?.name ?? delivery.sourceBotId,
+      targetBotName: this.tryGetBotById(delivery.targetBotId)?.name ?? delivery.targetBotId,
+      delivery: deliveryView,
+      exchange,
+      task: task ? toHandoffTaskView(task) : null,
+      unread,
+      freshness: {
+        deliveryVersion: delivery.version,
+        taskVersion: task?.version ?? 0,
+        journalSequence,
+      },
+      actions,
+    }
   }
 
-  async cancelHandoff(handoffId: string, reason: string): Promise<SpawnTaskCancellationResult> {
+  readResultChunk(conversationId: string, handoffId: string, offset: number, limit: number): unknown {
     const delivery = this.deliveryStore.getByHandoff(handoffId)
-    if (!delivery || !delivery.spawnTaskId) throw new TaskAccessError()
-    return this.coordinator.cancelTask(delivery.spawnTaskId, reason)
-  }
-
-  resolveAuthorizedTask(workspaceId: string, taskId: string, botId?: string): {
-    delivery: HandoffDeliveryRecord
-    task: HandoffTaskView | null
-  } {
-    if (workspaceId !== this.workspaceId) throw new TaskAccessError()
-    const deliveryId = this.byTaskId.get(taskId)
-    const delivery = deliveryId ? this.deliveryStore.get(deliveryId) : null
-    if (!delivery) throw new TaskAccessError()
-    if (botId !== undefined && delivery.sourceBotId !== botId && delivery.targetBotId !== botId) {
+    if (!delivery || delivery.conversationId !== conversationId || !delivery.spawnTaskId) {
       throw new TaskAccessError()
     }
-    const task = delivery.spawnTaskId ? this.taskStore.get(delivery.spawnTaskId) : null
-    return { delivery, task: task ? toHandoffTaskView(task) : null }
+    return this.taskStore.readResultChunk(delivery.spawnTaskId, offset, limit)
+  }
+
+  markResultRead(conversationId: string, handoffId: string, expectedTaskVersion: number): HandoffDeliveryRecord {
+    const delivery = this.deliveryStore.getByHandoff(handoffId)
+    if (!delivery || delivery.conversationId !== conversationId) throw new TaskAccessError()
+    const marked = this.deliveryStore.markResultRead(delivery.deliveryId, { expectedTaskVersion })
+    this.emit({
+      type: 'handoff-updated',
+      handoffId: marked.handoffId,
+      deliveryId: marked.deliveryId,
+      conversationId: marked.conversationId,
+    })
+    return marked
+  }
+
+  async cancelHandoff(conversationId: string, handoffId: string, reason: string): Promise<SpawnTaskCancellationResult> {
+    const delivery = this.deliveryStore.getByHandoff(handoffId)
+    if (!delivery || delivery.conversationId !== conversationId || !delivery.spawnTaskId) throw new TaskAccessError()
+    const result = await this.coordinator.cancelTask(delivery.spawnTaskId, reason)
+    this.emit({
+      type: 'handoff-updated',
+      handoffId: delivery.handoffId,
+      deliveryId: delivery.deliveryId,
+      conversationId: delivery.conversationId,
+    })
+    return result
+  }
+
+  async inspectHandoff(
+    callerSessionId: string,
+    input: InspectHandoffRequest,
+    signal?: AbortSignal,
+  ): Promise<InspectHandoffResult> {
+    const identity = await this.resolveSourceIdentity(callerSessionId)
+    if (input.action === 'read-result') {
+      this.resolveTaskForIdentity(identity, input.taskId)
+      return this.taskStore.readResultChunk(input.taskId, input.offset, input.limit)
+    }
+    if (input.action === 'get') return this.resolveTaskForIdentity(identity, input.taskId).task
+
+    const timeoutMs = Math.max(0, Math.min(Math.trunc(input.timeoutMs ?? MAX_INSPECT_WAIT_MS), MAX_INSPECT_WAIT_MS))
+    const deadline = Date.now() + timeoutMs
+    while (true) {
+      const { task } = this.resolveTaskForIdentity(identity, input.taskId)
+      if (task.version > input.afterVersion || signal?.aborted || Date.now() >= deadline) return task
+      await delay(Math.min(INSPECT_WAIT_POLL_MS, Math.max(1, deadline - Date.now())), signal)
+    }
+  }
+
+  private resolveTaskForIdentity(identity: SourceIdentity, taskId: string): {
+    delivery: HandoffDeliveryRecord
+    task: HandoffTaskView
+  } {
+    const deliveryId = this.deliveryIdByTaskId.get(taskId)
+    const delivery = deliveryId ? this.deliveryStore.get(deliveryId) : null
+    if (
+      delivery?.spawnTaskId !== taskId
+      || delivery.sourceBotId !== identity.sourceBotId
+      || delivery.conversationId !== identity.conversationId
+    ) {
+      throw new TaskAccessError()
+    }
+    const task = this.taskStore.get(delivery.spawnTaskId)
+    if (!task) throw new TaskAccessError()
+    return { delivery, task: toHandoffTaskView(task) }
   }
 
   private project(delivery: HandoffDeliveryRecord): HandoffProjection {
@@ -425,52 +685,139 @@ export class HandoffService {
     }
   }
 
-  private ensureAcknowledged(delivery: HandoffDeliveryRecord): HandoffDeliveryRecord {
-    if (delivery.mailState === 'acknowledged') return delivery
-    if (delivery.mailState === 'claimed' && delivery.claim) {
-      return this.deliveryStore.acknowledgeDelivery(delivery.deliveryId, {
-        claimId: delivery.claim.claimId,
-        ownerEpoch: delivery.claim.ownerEpoch,
-      })
-    }
-    const claim = this.deliveryStore.claimDelivery(delivery.deliveryId, {
-      claimId: `claim_${this.randomId()}`,
-      recipientBotId: delivery.targetBotId,
-      expectedOwnerEpoch: 0,
-    })
-    const settled = requireClaim(delivery.deliveryId, claim.claim)
-    return this.deliveryStore.acknowledgeDelivery(delivery.deliveryId, {
-      claimId: settled.claimId,
-      ownerEpoch: settled.ownerEpoch,
+  private appendRequestedEntry(delivery: HandoffDeliveryRecord): void {
+    const key = requestedKey(delivery.handoffId)
+    if (this.hasJournalEntry(delivery.conversationId, key)) return
+    this.resolveJournal(delivery.conversationId).append({
+      conversationId: delivery.conversationId,
+      kind: 'handoff',
+      authorBotId: delivery.sourceBotId,
+      handoffId: delivery.handoffId,
+      idempotencyKey: key,
+      body: JSON.stringify({
+        type: 'handoff-requested',
+        handoffId: delivery.handoffId,
+        deliveryId: delivery.deliveryId,
+      }),
     })
   }
 
-  /**
-   * Appends the terminal journal entry unless the idempotency key already
-   * exists. The journal dedupes by key, so a lost explicit check still cannot
-   * append twice.
-   */
+  private reserveMissingTask(delivery: HandoffDeliveryRecord): SpawnTask | null {
+    const target = this.tryGetBotById(delivery.targetBotId)
+    if (!target || target.lifecycle !== 'active') return null
+    const parentSessionId = readPointerSessionId(botProviderSessionPath(this.workspaceRoot, delivery.sourceBotId))
+      ?? this.findChannelProviderSession(delivery)
+    if (!parentSessionId) return null
+    return this.taskStore.reserveForHandoff(delivery.handoffId, {
+      parentSessionId,
+      delegatedPrompt: delivery.request,
+      childConfig: this.buildChildConfig(target),
+    })
+  }
+
+  private findChannelProviderSession(delivery: HandoffDeliveryRecord): string | null {
+    if (!delivery.conversationId.startsWith('channel_')) return null
+    const channel = this.channelDirectory.getChannel(delivery.conversationId)
+    if (!channel) return null
+    for (const member of channel.members) {
+      if (member.botId !== delivery.sourceBotId) continue
+      const sessionId = readPointerSessionId(
+        channelProviderSessionPath(this.workspaceRoot, channel.channelId, member.botId),
+      )
+      if (sessionId) return sessionId
+    }
+    return null
+  }
+
+  private async dispatchAndAcknowledge(
+    delivery: HandoffDeliveryRecord,
+    task: SpawnTask,
+  ): Promise<HandoffDeliveryRecord> {
+    const current = this.deliveryStore.get(delivery.deliveryId)
+    if (!current || (current.mailState !== 'pending' && current.mailState !== 'claimed')) {
+      if (current?.mailState === 'acknowledged') return current
+      throw new Error(`Handoff delivery ${delivery.deliveryId} is unavailable for dispatch`)
+    }
+
+    let ownedClaim: HandoffDeliveryClaim | undefined
+    try {
+      const claimed = this.deliveryStore.claimDelivery(current.deliveryId, {
+        claimId: `claim_${this.randomId()}`,
+        recipientBotId: current.targetBotId,
+        expectedOwnerEpoch: current.claim?.ownerEpoch ?? 0,
+      })
+      ownedClaim = claimed.claim
+      const claim = requireClaim(current.deliveryId, ownedClaim)
+      const fence: SpawnTaskDispatchFence = {
+        deliveryId: current.deliveryId,
+        claimId: claim.claimId,
+        recipientBotId: current.targetBotId,
+        ownerEpoch: claim.ownerEpoch,
+      }
+      let currentTask = this.taskStore.get(task.taskId) ?? task
+      if (!isSpawnTaskTerminal(currentTask.runtimeState)) {
+        currentTask = this.taskStore.setHandoffDispatchFence(currentTask.taskId, fence, this.clock())
+        if (currentTask.dispatch.state !== 'sent' && currentTask.runtimeState !== 'processing') {
+          const target = this.tryGetBotById(current.targetBotId)
+          const botTurnContext = target ? await this.assembleBotContext(target) : undefined
+          await this.coordinator.dispatchReserved(currentTask, undefined, fence, botTurnContext)
+        } else if (!matchesSpawnTaskDispatchFence(currentTask.dispatch.handoffFence, fence)) {
+          throw new Error(`Spawned task ${currentTask.taskId} has a stale handoff dispatch fence`)
+        }
+      }
+
+      const afterDispatch = this.deliveryStore.get(current.deliveryId)
+      if (!afterDispatch || afterDispatch.mailState !== 'claimed' || !afterDispatch.claim
+        || afterDispatch.claim.claimId !== claim.claimId || afterDispatch.claim.ownerEpoch !== claim.ownerEpoch) {
+        throw new Error('Handoff delivery claim changed before acknowledgement')
+      }
+      const afterTask = this.taskStore.get(currentTask.taskId) ?? currentTask
+      if (!isSpawnTaskTerminal(afterTask.runtimeState)
+        && !matchesSpawnTaskDispatchFence(afterTask.dispatch.handoffFence, fence)) {
+        throw new Error(`Spawned task ${afterTask.taskId} has a stale handoff dispatch fence`)
+      }
+      return this.deliveryStore.acknowledgeDelivery(current.deliveryId, {
+        claimId: claim.claimId,
+        recipientBotId: current.targetBotId,
+        ownerEpoch: claim.ownerEpoch,
+      })
+    } catch (error) {
+      throw new HandoffDispatchError(error, ownedClaim, current.targetBotId)
+    }
+  }
+
+  private async publishTerminalIfNeeded(delivery: HandoffDeliveryRecord, task: SpawnTask): Promise<void> {
+    const current = this.deliveryStore.get(delivery.deliveryId)
+    if (!current || current.mailState !== 'acknowledged') return
+    const latest = this.taskStore.get(task.taskId) ?? task
+    if (!isSpawnTaskTerminal(latest.runtimeState)) return
+
+    if ((!current.resultUnread || latest.version > current.resultUnread.taskVersion)
+      && (current.resultReadTaskVersion === undefined || latest.version > current.resultReadTaskVersion)) {
+      this.deliveryStore.markResultUnread(current.deliveryId, { taskVersion: latest.version, at: this.clock() })
+      this.emit({
+        type: 'handoff-result-unread',
+        handoffId: current.handoffId,
+        deliveryId: current.deliveryId,
+        conversationId: current.conversationId,
+      })
+    }
+    this.appendTerminalEntry(current, latest)
+  }
+
   private appendTerminalEntry(delivery: HandoffDeliveryRecord, task: SpawnTask | null): boolean {
     const key = terminalKey(delivery.handoffId)
-    if (this.hasJournalEntry(delivery.conversationId, key)) return false
-    const failure = task?.failure ?? delivery.failure
-    const body: Record<string, unknown> = {
-      type: 'handoff-terminal',
-      handoffId: delivery.handoffId,
-      deliveryId: delivery.deliveryId,
-      at: this.clock(),
-    }
-    if (task) {
-      body.taskId = task.taskId
-      body.runtimeState = task.runtimeState
-      body.taskVersion = task.version
-    }
-    if (task?.result) body.resultPreview = task.result.preview
-    if (failure) {
-      body.failureCode = failure.code
-      body.failureMessage = truncateUtf8(failure.message, HANDOFF_LIMITS.deliveryFailureMessageBytes)
-    }
     try {
+      if (this.hasJournalEntry(delivery.conversationId, key)) return false
+      const body: Record<string, unknown> = {
+        type: 'handoff-terminal',
+        handoffId: delivery.handoffId,
+        deliveryId: delivery.deliveryId,
+      }
+      if (task) {
+        body.taskId = task.taskId
+        body.taskVersion = task.version
+      }
       this.resolveJournal(delivery.conversationId).append({
         conversationId: delivery.conversationId,
         kind: 'handoff',
@@ -479,21 +826,22 @@ export class HandoffService {
         idempotencyKey: key,
         body: JSON.stringify(body),
       })
-      this.emit({ type: 'handoff-terminal', handoffId: delivery.handoffId, deliveryId: delivery.deliveryId })
+      this.emit({
+        type: 'handoff-terminal',
+        handoffId: delivery.handoffId,
+        deliveryId: delivery.deliveryId,
+        conversationId: delivery.conversationId,
+      })
       return true
-    } catch {
-      return false
+    } catch (error) {
+      throw new HandoffTerminalAppendError(delivery.handoffId, error)
     }
   }
 
   private hasJournalEntry(conversationId: string, idempotencyKey: string): boolean {
-    try {
-      return this.resolveJournal(conversationId)
-        .list(conversationId)
-        .some((entry) => entry.idempotencyKey === idempotencyKey)
-    } catch {
-      return false
-    }
+    return this.resolveJournal(conversationId)
+      .list(conversationId)
+      .some((entry) => entry.idempotencyKey === idempotencyKey)
   }
 
   private async resolveSourceIdentity(callerSessionId: string): Promise<SourceIdentity> {
@@ -584,63 +932,45 @@ export class HandoffService {
     }
   }
 
-  private buildChildConfig(
-    identity: SourceIdentity,
-    target: BotRecord,
-    handoffId: string,
-    deliveryId: string,
-  ): Record<string, SpawnTaskJsonValue> {
-    const botContext = this.assembleBotContext(target)
+  private buildChildConfig(target: BotRecord): Record<string, SpawnTaskJsonValue> {
     const config: Record<string, SpawnTaskJsonValue> = {
       name: target.name,
       llmConnection: target.providerConfig.providerId,
       model: target.providerConfig.modelId,
       permissionMode: target.permissionMode,
-      handoff: {
-        handoffId,
-        deliveryId,
-        sourceBotId: identity.sourceBotId,
-        conversationId: identity.conversationId,
-        ...(target.profile !== undefined
-          ? { profile: truncateUtf8(target.profile, BOT_LIMITS.profileBytes) }
-          : {}),
-        ...(botContext ? { context: botContext } : {}),
-      },
-    }
-    if (Buffer.byteLength(JSON.stringify(config), 'utf8') > SPAWN_TASK_LIMITS.childConfigBytes) {
-      delete (config.handoff as Record<string, SpawnTaskJsonValue>).context
     }
     return config
   }
 
-  /** Bounded profile+memory context for the receiving Bot, from its own ledger. */
-  private assembleBotContext(target: BotRecord): string | undefined {
-    try {
-      const journal = this.resolveJournal(target.directChatId)
-      const ledger = new BotContextLedger({
-        workspaceRoot: this.workspaceRoot,
-        workspaceId: this.workspaceId,
-        botId: target.botId,
-        journal,
-      })
-      const assembler = new ContextAssembler({ ledger, journal })
-      return truncateUtf8(
-        assembler.assemble({
-          conversationId: target.directChatId,
-          operationId: `handoff.${this.randomId()}`,
-          conversationKind: 'direct',
-        }).context.text,
+  private async assembleBotContext(target: BotRecord): Promise<BotTurnContext> {
+    const journal = this.resolveJournal(target.directChatId)
+    const ledger = new BotContextLedger({
+      workspaceRoot: this.workspaceRoot,
+      workspaceId: this.workspaceId,
+      botId: target.botId,
+      journal,
+    })
+    await ledger.reconcile(target.directChatId)
+    const assembler = new ContextAssembler({ ledger, journal })
+    const context = assembler.assemble({
+      conversationId: target.directChatId,
+      operationId: `handoff.${this.randomId()}`,
+      conversationKind: 'direct',
+    }).context
+    if (target.profile === undefined) return context
+    return {
+      ...context,
+      text: truncateUtf8(
+        `<bot_profile_untrusted>\n${escapeUntrustedText(target.profile)}\n</bot_profile_untrusted>\n${context.text}`,
         SPAWN_TASK_LIMITS.childConfigBytes / 2,
-      )
-    } catch {
-      return undefined
+      ),
     }
   }
 
   private rebuildTaskIndex(): void {
-    this.byTaskId.clear()
+    this.deliveryIdByTaskId.clear()
     for (const delivery of this.deliveryStore.listAll()) {
-      if (delivery.spawnTaskId) this.byTaskId.set(delivery.spawnTaskId, delivery.deliveryId)
+      if (delivery.spawnTaskId) this.deliveryIdByTaskId.set(delivery.spawnTaskId, delivery.deliveryId)
     }
   }
 
@@ -648,14 +978,23 @@ export class HandoffService {
     if (!this.onHandoffEvent) return
     try {
       this.onHandoffEvent(event)
-    } catch {
-      // Handoff durability is authoritative; event listeners are best effort.
+    } catch (error) {
+      console.error('[Handoffs] Event notification failed after durable commit', error)
     }
   }
 }
 
 /** Public task view for handoff consumers: internal provider Session IDs omitted. */
 export function toHandoffTaskView(task: SpawnTask): HandoffTaskView {
-  const { parentSessionId: _parentSessionId, childSessionId: _childSessionId, ...view } = task
-  return view
+  return {
+    taskId: task.taskId,
+    version: task.version,
+    runtimeState: task.runtimeState,
+    stateTimestamps: task.stateTimestamps,
+    ...(task.awaitingInput ? { awaitingInput: task.awaitingInput } : {}),
+    ...(task.cancellation ? { cancellation: task.cancellation } : {}),
+    ...(task.result ? { result: task.result } : {}),
+    ...(task.failure ? { failure: task.failure } : {}),
+    ...(task.integrityError ? { integrityError: task.integrityError } : {}),
+  }
 }

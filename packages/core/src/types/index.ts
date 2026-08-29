@@ -60,10 +60,12 @@ export type {
   SpawnTaskDispatchState,
   SpawnTaskFailureCode,
   SpawnTaskAwaitingInputKind,
+  SpawnTaskOrigin,
   SpawnTaskJsonPrimitive,
   SpawnTaskJsonValue,
   SpawnTaskStateTimestamps,
   SpawnTaskDispatchMetadata,
+  SpawnTaskDispatchFence,
   SpawnTaskAwaitingInput,
   SpawnTaskCancellation,
   SpawnTaskResult,
@@ -128,7 +130,6 @@ export {
   BOT_LIMITS,
 } from './bot.ts';
 
-// Bot-to-bot handoff delivery contracts
 export type {
   HandoffId,
   HandoffDeliveryId,
@@ -137,6 +138,10 @@ export type {
   HandoffDeliveryClaim,
   HandoffDeliveryFailure,
   HandoffDeliveryRecord,
+  HandoffDeliveryPending,
+  HandoffDeliveryClaimed,
+  HandoffDeliveryAcknowledged,
+  HandoffDeliveryFailed,
   HandoffTaskView,
 } from './handoff.ts';
 export {
@@ -209,4 +214,3 @@ export type {
   SessionProcessingStatus,
   ActiveSessionInfo,
 } from './server.ts';
-

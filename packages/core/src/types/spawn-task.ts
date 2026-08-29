@@ -43,6 +43,10 @@ export const SPAWN_TASK_FAILURE_CODES = [
 export type SpawnTaskFailureCode = (typeof SPAWN_TASK_FAILURE_CODES)[number];
 export type SpawnTaskAwaitingInputKind = 'permission' | 'authentication';
 
+export type SpawnTaskOrigin =
+  | { readonly kind: 'session' }
+  | { readonly kind: 'handoff'; readonly handoffId: string };
+
 /** Bounds are UTF-8 byte counts, not JavaScript string lengths. */
 export const SPAWN_TASK_LIMITS = Object.freeze({
   childConfigBytes: 64 * 1024,
@@ -79,6 +83,14 @@ export interface SpawnTaskDispatchMetadata {
   readonly readyAt?: string;
   readonly claimedAt?: string;
   readonly sentAt?: string;
+  readonly handoffFence?: SpawnTaskDispatchFence;
+}
+
+export interface SpawnTaskDispatchFence {
+  readonly deliveryId: string;
+  readonly claimId: string;
+  readonly recipientBotId: string;
+  readonly ownerEpoch: number;
 }
 
 export interface SpawnTaskAwaitingInput {
@@ -130,6 +142,7 @@ export interface SpawnTask {
   readonly workspaceId: string;
   readonly parentSessionId: string;
   readonly childSessionId: string;
+  readonly origin?: SpawnTaskOrigin;
   readonly delegatedPrompt: string;
   readonly childConfig: Readonly<Record<string, SpawnTaskJsonValue>>;
   readonly runtimeState: SpawnTaskRuntimeState;

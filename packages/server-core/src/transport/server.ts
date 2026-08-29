@@ -144,6 +144,7 @@ export class WsRpcServer implements RpcServer {
   private readonly maxClients: number
   private readonly onClientConnected: WsRpcServerOptions['onClientConnected']
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
+  private readonly clientDisconnectHandlers = new Set<(clientId: string) => void>()
   private readonly httpHandler: WsRpcServerOptions['httpHandler']
 
   constructor(opts?: WsRpcServerOptions) {
@@ -174,6 +175,11 @@ export class WsRpcServer implements RpcServer {
   /** Number of currently connected (handshake-completed) clients. */
   getConnectedClientCount(): number {
     return this.clients.size
+  }
+
+  registerClientDisconnectHandler(handler: (clientId: string) => void): () => void {
+    this.clientDisconnectHandlers.add(handler)
+    return () => this.clientDisconnectHandlers.delete(handler)
   }
 
   // -------------------------------------------------------------------------
@@ -734,6 +740,7 @@ export class WsRpcServer implements RpcServer {
       }
 
       this.rejectPendingInvokesForClient(client.id)
+      for (const handler of this.clientDisconnectHandlers) handler(client.id)
       this.onClientDisconnected?.(client.id)
     })
 

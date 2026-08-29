@@ -114,6 +114,7 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
   'send_handoff',
+  'inspect_handoff',
   'browser_tool',
 ]);
 
@@ -276,6 +277,7 @@ export class PiAgent extends BaseAgent {
     resolve: (result: { content: string; isError: boolean }) => void;
     reject: (error: Error) => void;
   }> = new Map();
+  private currentToolAbortController: AbortController | null = null;
 
   // Pending mini completions (correlation map for subprocess mini_completion_result)
   private pendingMiniCompletions: Map<string, {
@@ -1339,6 +1341,7 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
       case 'send_handoff_intercept':
+      case 'inspect_handoff_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
@@ -1543,7 +1546,6 @@ export class PiAgent extends BaseAgent {
         }
       }
 
-      // send_handoff uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'send_handoff') {
         try {
           const result = await this.preExecuteSendHandoff(args);
@@ -1557,6 +1559,16 @@ export class PiAgent extends BaseAgent {
           }
           const msg = error instanceof Error ? error.message : String(error);
           return { content: `send_handoff failed: ${msg}`, isError: true };
+        }
+      }
+
+      if (toolName === 'inspect_handoff') {
+        try {
+          const result = await this.preExecuteInspectHandoff(args, this.currentToolAbortController?.signal);
+          return { content: JSON.stringify(result, null, 2), isError: false };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: `inspect_handoff failed: ${msg}`, isError: true };
         }
       }
 
@@ -1996,6 +2008,8 @@ export class PiAgent extends BaseAgent {
     let message = messageParam;
     // Reset state for new turn
     this._isProcessing = true;
+    this.currentToolAbortController?.abort();
+    this.currentToolAbortController = new AbortController();
     this.abortReason = undefined;
     this.eventQueue.reset();
     this.currentUserMessage = message;
@@ -2208,6 +2222,8 @@ export class PiAgent extends BaseAgent {
 
       yield { type: 'complete' };
     } finally {
+      this.currentToolAbortController?.abort();
+      this.currentToolAbortController = null;
       this._isProcessing = false;
     }
   }
@@ -2322,6 +2338,7 @@ export class PiAgent extends BaseAgent {
       pending.resolve(false);
     }
     this.pendingPermissions.clear();
+    this.currentToolAbortController?.abort(reason);
 
     // Send abort to subprocess
     this.send({ type: 'abort' });
@@ -2343,6 +2360,7 @@ export class PiAgent extends BaseAgent {
       pending.resolve(false);
     }
     this.pendingPermissions.clear();
+    this.currentToolAbortController?.abort(reason);
 
     // Reject all pending tool executions
     for (const [, pending] of this.pendingToolExecutions) {

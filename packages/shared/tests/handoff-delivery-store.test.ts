@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { HANDOFF_LIMITS, type HandoffMailState } from '@kata-sh/core';
 import {
   getWorkspaceHandoffsPath,
+  handoffByHandoffPath,
   handoffDeliveryRecordPath,
+  HandoffDeliveryClaimConflictError,
   HandoffDeliveryStore,
   type CreateHandoffDeliveryInput,
 } from '../src/handoffs/index.ts';
@@ -41,11 +43,21 @@ function createInput(overrides: Partial<CreateHandoffDeliveryInput> = {}): Creat
 }
 
 function claim(store: HandoffDeliveryStore, deliveryId: string, claimId: string, expectedOwnerEpoch = 0) {
+  const delivery = store.get(deliveryId);
+  if (delivery?.mailState !== 'delivery-failed' && !delivery?.spawnTaskId) {
+    store.attachSpawnTask(deliveryId, `task_${deliveryId}`);
+  }
   return store.claimDelivery(deliveryId, { claimId, recipientBotId: 'bot_target', expectedOwnerEpoch });
 }
 
-function acknowledge(store: HandoffDeliveryStore, deliveryId: string, claimId: string, ownerEpoch: number) {
-  return store.acknowledgeDelivery(deliveryId, { claimId, ownerEpoch });
+function acknowledge(
+  store: HandoffDeliveryStore,
+  deliveryId: string,
+  claimId: string,
+  ownerEpoch: number,
+  recipientBotId = 'bot_target',
+) {
+  return store.acknowledgeDelivery(deliveryId, { claimId, recipientBotId, ownerEpoch });
 }
 
 function acknowledgeNew(store: HandoffDeliveryStore, deliveryId: string, claimId: string) {
@@ -65,6 +77,7 @@ describe('HandoffDeliveryStore create and reads', () => {
 
     expect(created).toEqual({
       schemaVersion: 1,
+      version: 1,
       deliveryId: 'delivery_a',
       handoffId: 'handoff_a',
       workspaceId: 'ws_1',
@@ -155,7 +168,11 @@ describe('HandoffDeliveryStore claim CAS', () => {
       expectedOwnerEpoch: 1,
     })).toThrow(/addressed to bot_target/);
 
-    store.acknowledgeDelivery('delivery_a', { claimId: 'claim_one', ownerEpoch: 1 });
+    store.acknowledgeDelivery('delivery_a', {
+      claimId: 'claim_one',
+      recipientBotId: 'bot_target',
+      ownerEpoch: 1,
+    });
     expect(() => claim(store, 'delivery_a', 'claim_four', 1)).toThrow('Illegal handoff mail transition: acknowledged -> claimed');
   });
 
@@ -196,6 +213,8 @@ describe('HandoffDeliveryStore acknowledge', () => {
     claim(store, 'delivery_a', 'claim_one');
     expect(() => acknowledge(store, 'delivery_a', 'claim_other', 1)).toThrow('stale');
     expect(() => acknowledge(store, 'delivery_a', 'claim_one', 2)).toThrow('stale');
+    expect(() => acknowledge(store, 'delivery_a', 'claim_one', 1, 'bot_other'))
+      .toThrow(HandoffDeliveryClaimConflictError);
     expect(store.get('delivery_a')?.mailState).toBe('claimed');
   });
 });
@@ -215,7 +234,7 @@ describe('HandoffDeliveryStore fail', () => {
     const failedFromClaimed = store.failDelivery('delivery_b', {
       code: 'provider_error',
       message: 'boom',
-      claim: { claimId: 'claim_b', ownerEpoch: 1 },
+      claim: { claimId: 'claim_b', recipientBotId: 'bot_target', ownerEpoch: 1 },
     });
     expect(failedFromClaimed.mailState).toBe('delivery-failed');
     expect(failedFromClaimed).not.toHaveProperty('claim');
@@ -240,7 +259,12 @@ describe('HandoffDeliveryStore fail', () => {
     expect(() => store.failDelivery('delivery_c', {
       code: 'provider_error',
       message: 'boom',
-      claim: { claimId: 'claim_c', ownerEpoch: 7 },
+      claim: { claimId: 'claim_c', recipientBotId: 'bot_other', ownerEpoch: 1 },
+    })).toThrow('stale');
+    expect(() => store.failDelivery('delivery_c', {
+      code: 'provider_error',
+      message: 'boom',
+      claim: { claimId: 'claim_c', recipientBotId: 'bot_target', ownerEpoch: 7 },
     })).toThrow('stale');
     expect(store.get('delivery_c')?.mailState).toBe('claimed');
   });
@@ -301,6 +325,23 @@ describe('HandoffDeliveryStore result unread tracking', () => {
     expect(() => store.markResultRead('delivery_a', { expectedTaskVersion: 3 })).toThrow('does not match expected 3');
   });
 
+  it('acknowledges one handoff result without clearing another', () => {
+    const store = createStore();
+    store.create(createInput());
+    store.create(createInput({ deliveryId: 'delivery_b', handoffId: 'handoff_b' }));
+    acknowledgeNew(store, 'delivery_a', 'claim_a');
+    acknowledgeNew(store, 'delivery_b', 'claim_b');
+    store.markResultUnread('delivery_a', { taskVersion: 3, at });
+    store.markResultUnread('delivery_b', { taskVersion: 7, at });
+
+    store.markResultRead('delivery_a', { expectedTaskVersion: 3 });
+
+    expect(store.get('delivery_a')?.resultUnread).toBeUndefined();
+    expect(store.get('delivery_a')?.resultReadTaskVersion).toBe(3);
+    expect(store.get('delivery_b')?.resultUnread).toEqual({ taskVersion: 7, at });
+    expect(store.get('delivery_b')?.resultReadTaskVersion).toBeUndefined();
+  });
+
   it('rejects unread marking on non-acknowledged deliveries', () => {
     const store = createStore();
     store.create(createInput());
@@ -347,6 +388,21 @@ describe('HandoffDeliveryStore reload', () => {
       'already exists',
     );
   });
+
+  it('repairs only a missing handoff pointer and preserves a conflicting owner', () => {
+    const root = tempWorkspace();
+    const store = createStore(root);
+    store.create(createInput());
+    const pointerPath = handoffByHandoffPath(getWorkspaceHandoffsPath(root), 'handoff_a');
+
+    rmSync(pointerPath);
+    expect(store.repairHandoffPointerIfMissing('delivery_a')).toBe('repaired');
+    expect(JSON.parse(readFileSync(pointerPath, 'utf8'))).toEqual({ deliveryId: 'delivery_a' });
+
+    writeFileSync(pointerPath, `${JSON.stringify({ deliveryId: 'delivery_other' })}\n`, 'utf8');
+    expect(store.repairHandoffPointerIfMissing('delivery_a')).toBe('conflict');
+    expect(JSON.parse(readFileSync(pointerPath, 'utf8'))).toEqual({ deliveryId: 'delivery_other' });
+  });
 });
 
 describe('HandoffDeliveryStore mail transition table', () => {
@@ -383,7 +439,7 @@ describe('HandoffDeliveryStore mail transition table', () => {
       run: (store, deliveryId, claimId) => store.failDelivery(deliveryId, {
         code: 'provider_error',
         message: 'boom',
-        claim: { claimId, ownerEpoch: 1 },
+        claim: { claimId, recipientBotId: 'bot_target', ownerEpoch: 1 },
       }),
     },
     {
@@ -399,7 +455,7 @@ describe('HandoffDeliveryStore mail transition table', () => {
       run: (store, deliveryId, claimId) => store.failDelivery(deliveryId, {
         code: 'provider_error',
         message: 'boom',
-        claim: { claimId, ownerEpoch: 1 },
+        claim: { claimId, recipientBotId: 'bot_target', ownerEpoch: 1 },
       }),
     },
     {

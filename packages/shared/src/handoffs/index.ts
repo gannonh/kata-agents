@@ -6,7 +6,11 @@ export {
   handoffDeliveryRecordPath,
   handoffDeliveriesPath,
 } from './layout.ts';
-export { assertHandoffDeliveryRecord, HandoffDeliveryStore } from './store.ts';
+export {
+  assertHandoffDeliveryRecord,
+  HandoffDeliveryClaimConflictError,
+  HandoffDeliveryStore,
+} from './store.ts';
 export type {
   AcknowledgeHandoffDeliveryInput,
   ClaimHandoffDeliveryInput,

@@ -48,9 +48,10 @@ export interface HandoffDeliveryFailure {
   readonly at: string;
 }
 
-/** Durable handoff mail record. Identity and delegation-target fields never change. */
-export interface HandoffDeliveryRecord {
+interface HandoffDeliveryBase {
   readonly schemaVersion: typeof HANDOFF_SCHEMA_VERSION;
+  /** Monotonic delivery freshness, independent of SpawnTask.version. */
+  readonly version: number;
   readonly deliveryId: HandoffDeliveryId;
   readonly handoffId: HandoffId;
   readonly workspaceId: string;
@@ -60,12 +61,9 @@ export interface HandoffDeliveryRecord {
   readonly targetBotId: string;
   /** Bounded per HANDOFF_LIMITS.requestBytes (UTF-8 bytes). */
   readonly request: string;
-  readonly mailState: HandoffMailState;
   /** Canonical SpawnTask ID once reserved. Mail references the task; never copies its state. */
   readonly spawnTaskId?: string;
-  /** Required when claimed/acknowledged; absent otherwise. */
   readonly claim?: HandoffDeliveryClaim;
-  /** Required when delivery-failed; absent otherwise. */
   readonly failure?: HandoffDeliveryFailure;
   /** Task-result unread, versioned independently of transcript unread. */
   readonly resultUnread?: { readonly taskVersion: number; readonly at: string };
@@ -74,7 +72,45 @@ export interface HandoffDeliveryRecord {
   readonly updatedAt: string;
 }
 
-/** Legal mail-state transitions. */
+export type HandoffDeliveryPending = HandoffDeliveryBase & {
+  readonly mailState: 'pending';
+  readonly claim?: never;
+  readonly failure?: never;
+  readonly resultUnread?: never;
+  readonly resultReadTaskVersion?: never;
+};
+
+export type HandoffDeliveryClaimed = HandoffDeliveryBase & {
+  readonly mailState: 'claimed';
+  readonly spawnTaskId: string;
+  readonly claim: HandoffDeliveryClaim;
+  readonly failure?: never;
+  readonly resultUnread?: never;
+  readonly resultReadTaskVersion?: never;
+};
+
+export type HandoffDeliveryAcknowledged = HandoffDeliveryBase & {
+  readonly mailState: 'acknowledged';
+  readonly spawnTaskId: string;
+  readonly claim: HandoffDeliveryClaim;
+  readonly failure?: never;
+};
+
+export type HandoffDeliveryFailed = HandoffDeliveryBase & {
+  readonly mailState: 'delivery-failed';
+  readonly claim?: never;
+  readonly failure: HandoffDeliveryFailure;
+  readonly resultUnread?: never;
+  readonly resultReadTaskVersion?: never;
+};
+
+/** Durable handoff mail record. Identity and delegation-target fields never change. */
+export type HandoffDeliveryRecord =
+  | HandoffDeliveryPending
+  | HandoffDeliveryClaimed
+  | HandoffDeliveryAcknowledged
+  | HandoffDeliveryFailed;
+
 export const HANDOFF_MAIL_TRANSITIONS: Readonly<Record<HandoffMailState, readonly HandoffMailState[]>> = Object.freeze({
   pending: ['claimed', 'delivery-failed'],
   claimed: ['acknowledged', 'delivery-failed'],
@@ -83,4 +119,15 @@ export const HANDOFF_MAIL_TRANSITIONS: Readonly<Record<HandoffMailState, readonl
 });
 
 /** Authorized SpawnTaskView for public handoff consumers: internal provider Session IDs omitted. */
-export type HandoffTaskView = Omit<SpawnTaskView, 'parentSessionId' | 'childSessionId'>;
+export type HandoffTaskView = Pick<
+  SpawnTaskView,
+  | 'taskId'
+  | 'version'
+  | 'runtimeState'
+  | 'stateTimestamps'
+  | 'awaitingInput'
+  | 'cancellation'
+  | 'result'
+  | 'failure'
+  | 'integrityError'
+>;

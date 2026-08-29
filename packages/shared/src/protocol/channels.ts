@@ -89,6 +89,16 @@ export const RPC_CHANNELS = {
     LIST_ROUTES: 'channels:listRoutes',
     EVENT: 'channels:event',
   },
+  handoffs: {
+    LIST: 'handoffs:list',
+    GET_RAIL: 'handoffs:getRail',
+    WAIT: 'handoffs:wait',
+    CANCEL_WAIT: 'handoffs:cancelWait',
+    READ_RESULT_CHUNK: 'handoffs:readResultChunk',
+    CANCEL: 'handoffs:cancel',
+    MARK_RESULT_READ: 'handoffs:markResultRead',
+    EVENT: 'handoffs:event',
+  },
   workspaces: {
     GET: 'workspaces:get',
     CREATE: 'workspaces:create',

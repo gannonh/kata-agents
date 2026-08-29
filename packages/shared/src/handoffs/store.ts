@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
@@ -9,8 +9,13 @@ import {
   type HandoffDeliveryRecord,
   type HandoffMailState,
 } from '@kata-sh/core';
-import { readJsonFile, removePointer, writeJsonIfAbsent, writeJsonRecord } from '../conversations/durable-json.ts';
-import { ensureDurableDirectory, syncDirectory } from '../spawn-tasks/durable-fs.ts';
+import { readJsonFile, writeJsonIfAbsent, writeJsonRecord } from '../conversations/durable-json.ts';
+import {
+  assertNotSymlink,
+  assertRegularFile,
+  ensureDurableDirectory,
+  syncDirectory,
+} from '../spawn-tasks/durable-fs.ts';
 import {
   assertHandoffPathId,
   getWorkspaceHandoffsPath,
@@ -44,13 +49,18 @@ export interface ClaimHandoffDeliveryInput {
 
 export interface AcknowledgeHandoffDeliveryInput {
   readonly claimId: string;
+  readonly recipientBotId: string;
   readonly ownerEpoch: number;
 }
 
 export interface FailHandoffDeliveryInput {
   readonly code: string;
   readonly message: string;
-  readonly claim?: { readonly claimId: string; readonly ownerEpoch: number };
+  readonly claim?: {
+    readonly claimId: string;
+    readonly recipientBotId: string;
+    readonly ownerEpoch: number;
+  };
 }
 
 export interface MarkHandoffResultUnreadInput {
@@ -60,6 +70,13 @@ export interface MarkHandoffResultUnreadInput {
 
 export interface MarkHandoffResultReadInput {
   readonly expectedTaskVersion: number;
+}
+
+export class HandoffDeliveryClaimConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HandoffDeliveryClaimConflictError';
+  }
 }
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -99,6 +116,7 @@ export function assertHandoffDeliveryRecord(value: unknown): HandoffDeliveryReco
   const record = object(value, 'record');
   exactKeys(record, 'record', [
     'schemaVersion',
+    'version',
     'deliveryId',
     'handoffId',
     'workspaceId',
@@ -116,6 +134,7 @@ export function assertHandoffDeliveryRecord(value: unknown): HandoffDeliveryReco
     'updatedAt',
   ]);
   if (record.schemaVersion !== HANDOFF_SCHEMA_VERSION) fail('unsupported schemaVersion');
+  positiveInteger(record.version, 'version');
   assertHandoffPathId(record.deliveryId, 'deliveryId');
   assertHandoffPathId(record.handoffId, 'handoffId');
   assertHandoffPathId(record.workspaceId, 'workspaceId');
@@ -165,6 +184,9 @@ export function assertHandoffDeliveryRecord(value: unknown): HandoffDeliveryReco
   const state = mailState as HandoffMailState;
   if ((state === 'claimed' || state === 'acknowledged') !== (record.claim !== undefined)) {
     fail(`claim is inconsistent with mailState ${state}`);
+  }
+  if ((state === 'claimed' || state === 'acknowledged') && record.spawnTaskId === undefined) {
+    fail(`spawnTaskId is inconsistent with mailState ${state}`);
   }
   if ((state === 'delivery-failed') !== (record.failure !== undefined)) {
     fail(`failure is inconsistent with mailState ${state}`);
@@ -229,6 +251,7 @@ export class HandoffDeliveryStore {
     const now = this.clock();
     const record: HandoffDeliveryRecord = {
       schemaVersion: HANDOFF_SCHEMA_VERSION,
+      version: 1,
       deliveryId,
       handoffId,
       workspaceId,
@@ -287,18 +310,12 @@ export class HandoffDeliveryStore {
       .map(clone);
   }
 
-  /**
-   * Startup repair for the Slice 1 pointer gap: a delivery whose `by-handoff`
-   * pointer is missing or stale gets its pointer rewritten. A pointer that
-   * resolves to a different live delivery wins; the record is left untouched.
-   */
-  repairByHandoffPointer(deliveryId: string): 'ok' | 'repaired' | 'conflict' {
+  repairHandoffPointerIfMissing(deliveryId: string): 'ok' | 'repaired' | 'conflict' {
     const record = this.require(deliveryId);
-    const pointerPath = handoffByHandoffPath(this.rootPath, record.handoffId);
     const owner = this.readByHandoffPointer(record.handoffId);
     if (owner === record.deliveryId) return 'ok';
-    if (owner && this.deliveries.has(owner)) return 'conflict';
-    if (writeJsonIfAbsent(pointerPath, { deliveryId })) return 'repaired';
+    if (owner) return 'conflict';
+    if (this.claimHandoffPointer(record.handoffId, deliveryId)) return 'repaired';
     const winner = this.readByHandoffPointer(record.handoffId);
     return winner === record.deliveryId ? 'ok' : 'conflict';
   }
@@ -311,27 +328,42 @@ export class HandoffDeliveryStore {
       throw new Error('expectedOwnerEpoch must be a non-negative safe integer');
     }
     if (recipientBotId !== current.targetBotId) {
-      throw new Error(`Handoff delivery ${deliveryId} is addressed to ${current.targetBotId}, not ${recipientBotId}`);
+      throw new HandoffDeliveryClaimConflictError(
+        `Handoff delivery ${deliveryId} is addressed to ${current.targetBotId}, not ${recipientBotId}`,
+      );
     }
     if (current.mailState !== 'claimed') this.assertMailTransition(current.mailState, 'claimed');
+    if (!current.spawnTaskId) {
+      throw new Error(`Handoff delivery ${deliveryId} cannot be claimed before task attachment`);
+    }
     let ownerEpoch: number;
     if (current.mailState === 'pending') {
       if (input.expectedOwnerEpoch !== 0) {
-        throw new Error(`Handoff delivery ${deliveryId} is unclaimed; expectedOwnerEpoch must be 0`);
+        throw new HandoffDeliveryClaimConflictError(
+          `Handoff delivery ${deliveryId} is unclaimed; expectedOwnerEpoch must be 0`,
+        );
       }
       ownerEpoch = 1;
     } else {
       if (!current.claim || input.expectedOwnerEpoch !== current.claim.ownerEpoch) {
-        throw new Error(
+        throw new HandoffDeliveryClaimConflictError(
           `Handoff delivery ${deliveryId} claim is stale: expectedOwnerEpoch ${input.expectedOwnerEpoch}`
             + ` does not match owner epoch ${current.claim?.ownerEpoch ?? 0}`,
         );
       }
       ownerEpoch = input.expectedOwnerEpoch + 1;
     }
+    const {
+      resultUnread: _previousUnread,
+      resultReadTaskVersion: _previousReadVersion,
+      failure: _previousFailure,
+      ...claimable
+    } = current;
     const next: HandoffDeliveryRecord = {
-      ...current,
+      ...claimable,
+      version: current.version + 1,
       mailState: 'claimed',
+      spawnTaskId: current.spawnTaskId,
       claim: { claimId, ownerEpoch, claimedAt: this.clock() },
       updatedAt: this.clock(),
     };
@@ -340,18 +372,34 @@ export class HandoffDeliveryStore {
 
   acknowledgeDelivery(deliveryId: string, input: AcknowledgeHandoffDeliveryInput): HandoffDeliveryRecord {
     const current = this.require(deliveryId);
-    this.assertMailTransition(current.mailState, 'acknowledged');
+    if (current.mailState !== 'claimed') {
+      throw new HandoffDeliveryClaimConflictError(
+        `Illegal handoff mail transition: ${current.mailState} -> acknowledged`,
+      );
+    }
+    if (!current.spawnTaskId) {
+      throw new Error(`Handoff delivery ${deliveryId} cannot be acknowledged before task attachment`);
+    }
     const claimId = assertHandoffPathId(input.claimId, 'claimId');
+    const recipientBotId = assertHandoffPathId(input.recipientBotId, 'recipientBotId');
     assertPositiveSafeInteger(input.ownerEpoch, 'ownerEpoch');
-    if (!current.claim || current.claim.claimId !== claimId || current.claim.ownerEpoch !== input.ownerEpoch) {
-      throw new Error(
-        `Handoff delivery ${deliveryId} claim is stale: claim ${claimId} epoch ${input.ownerEpoch}`
+    if (
+      recipientBotId !== current.targetBotId
+      || !current.claim
+      || current.claim.claimId !== claimId
+      || current.claim.ownerEpoch !== input.ownerEpoch
+    ) {
+      throw new HandoffDeliveryClaimConflictError(
+        `Handoff delivery ${deliveryId} claim is stale: recipient ${recipientBotId}`
+          + ` claim ${claimId} epoch ${input.ownerEpoch}`
           + ` does not match the current claim`,
       );
     }
     const next: HandoffDeliveryRecord = {
       ...current,
+      version: current.version + 1,
       mailState: 'acknowledged',
+      spawnTaskId: current.spawnTaskId,
       updatedAt: this.clock(),
     };
     return this.commit(next);
@@ -359,29 +407,46 @@ export class HandoffDeliveryStore {
 
   failDelivery(deliveryId: string, input: FailHandoffDeliveryInput): HandoffDeliveryRecord {
     const current = this.require(deliveryId);
-    this.assertMailTransition(current.mailState, 'delivery-failed');
+    if (current.mailState !== 'pending' && current.mailState !== 'claimed') {
+      throw new HandoffDeliveryClaimConflictError(
+        `Illegal handoff mail transition: ${current.mailState} -> delivery-failed`,
+      );
+    }
     if (input.claim !== undefined && current.mailState === 'pending') {
-      throw new Error(`Handoff delivery ${deliveryId} is unclaimed; failDelivery takes no claim`);
+      throw new HandoffDeliveryClaimConflictError(
+        `Handoff delivery ${deliveryId} is unclaimed; failDelivery takes no claim`,
+      );
     }
     if (input.claim !== undefined) {
       assertHandoffPathId(input.claim.claimId, 'claim.claimId');
+      assertHandoffPathId(input.claim.recipientBotId, 'claim.recipientBotId');
       assertPositiveSafeInteger(input.claim.ownerEpoch, 'claim.ownerEpoch');
       if (
+        input.claim.recipientBotId !== current.targetBotId
+        ||
         !current.claim
         || current.claim.claimId !== input.claim.claimId
         || current.claim.ownerEpoch !== input.claim.ownerEpoch
       ) {
-        throw new Error(
-          `Handoff delivery ${deliveryId} claim is stale: claim ${input.claim.claimId}`
+        throw new HandoffDeliveryClaimConflictError(
+          `Handoff delivery ${deliveryId} claim is stale: recipient ${input.claim.recipientBotId}`
+            + ` claim ${input.claim.claimId}`
             + ` epoch ${input.claim.ownerEpoch} does not match the current claim`,
         );
       }
     }
     if (typeof input.code !== 'string' || !input.code.trim()) throw new Error('failure.code must be non-empty');
 
-    const { claim: _droppedClaim, ...rest } = current;
+    const {
+      claim: _droppedClaim,
+      failure: _previousFailure,
+      resultUnread: _previousUnread,
+      resultReadTaskVersion: _previousReadVersion,
+      ...rest
+    } = current;
     const next: HandoffDeliveryRecord = {
       ...rest,
+      version: current.version + 1,
       mailState: 'delivery-failed',
       failure: {
         code: input.code,
@@ -405,6 +470,7 @@ export class HandoffDeliveryStore {
     }
     const next: HandoffDeliveryRecord = {
       ...current,
+      version: current.version + 1,
       spawnTaskId: validatedTaskId,
       updatedAt: this.clock(),
     };
@@ -426,6 +492,7 @@ export class HandoffDeliveryStore {
     }
     const next: HandoffDeliveryRecord = {
       ...current,
+      version: current.version + 1,
       resultUnread: { taskVersion: input.taskVersion, at: input.at },
       updatedAt: this.clock(),
     };
@@ -444,6 +511,7 @@ export class HandoffDeliveryStore {
     const { resultUnread: _cleared, ...rest } = current;
     const next: HandoffDeliveryRecord = {
       ...rest,
+      version: current.version + 1,
       resultReadTaskVersion: input.expectedTaskVersion,
       updatedAt: this.clock(),
     };
@@ -466,6 +534,8 @@ export class HandoffDeliveryStore {
       try {
         assertHandoffPathId(entry.name, 'delivery directory');
         const recordPath = handoffDeliveryRecordPath(this.rootPath, entry.name);
+        assertNotSymlink(recordPath, 'handoff delivery record');
+        assertRegularFile(recordPath, 'handoff delivery record');
         const raw = readJsonFile(recordPath);
         if (!raw) throw new Error('Handoff delivery record is missing');
         const record = assertHandoffDeliveryRecord(raw);
@@ -498,7 +568,9 @@ export class HandoffDeliveryStore {
 
   private commit(next: HandoffDeliveryRecord): HandoffDeliveryRecord {
     const validated = assertHandoffDeliveryRecord(next);
-    writeJsonRecord(handoffDeliveryRecordPath(this.rootPath, validated.deliveryId), validated);
+    const recordPath = handoffDeliveryRecordPath(this.rootPath, validated.deliveryId);
+    assertNotSymlink(recordPath, 'handoff delivery record');
+    writeJsonRecord(recordPath, validated);
     this.index(validated);
     return clone(validated);
   }
@@ -519,29 +591,30 @@ export class HandoffDeliveryStore {
     this.byConversation.set(record.conversationId, conversationDeliveries);
   }
 
-  /**
-   * SessionManager-style single-writer mutations are synchronous, so calls
-   * cannot interleave in-process. The pointer CAS rejects cross-process
-   * handoff-ID takeover; multi-writer locking is intentionally out of scope.
-   */
   private claimHandoffPointer(handoffId: string, deliveryId: string): boolean {
     const pointerPath = handoffByHandoffPath(this.rootPath, handoffId);
-    if (writeJsonIfAbsent(pointerPath, { deliveryId })) return true;
-    const owner = this.readByHandoffPointer(handoffId);
-    if (owner && this.deliveries.has(owner)) return false;
-    removePointer(pointerPath);
+    assertNotSymlink(pointerPath, 'handoff ID pointer');
     return writeJsonIfAbsent(pointerPath, { deliveryId });
   }
 
   private readByHandoffPointer(handoffId: string): string | null {
-    const raw = readJsonFile(handoffByHandoffPath(this.rootPath, handoffId)) as Record<string, unknown> | null;
-    if (!raw) return null;
-    if (typeof raw.deliveryId !== 'string') return null;
-    return raw.deliveryId;
+    const pointerPath = handoffByHandoffPath(this.rootPath, handoffId);
+    assertNotSymlink(pointerPath, 'handoff ID pointer');
+    if (!existsSync(pointerPath)) return null;
+    assertRegularFile(pointerPath, 'handoff ID pointer');
+    const raw = readJsonFile(pointerPath);
+    if (raw === null) return null;
+    if (typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).length !== 1
+      || !Object.hasOwn(raw, 'deliveryId')) {
+      throw new Error(`Handoff ${handoffId} has an invalid delivery pointer`);
+    }
+    return assertHandoffPathId((raw as Record<string, unknown>).deliveryId, 'handoff pointer deliveryId');
   }
 
   private discardDelivery(deliveryId: string): void {
-    rmSync(join(handoffDeliveriesPath(this.rootPath), deliveryId), { recursive: true, force: true });
+    const deliveryPath = join(handoffDeliveriesPath(this.rootPath), deliveryId);
+    assertNotSymlink(deliveryPath, 'handoff delivery directory');
+    if (existsSync(deliveryPath)) rmSync(deliveryPath, { recursive: true, force: true });
     syncDirectory(handoffDeliveriesPath(this.rootPath));
   }
 }

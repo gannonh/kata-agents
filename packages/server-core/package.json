@@ -21,6 +21,7 @@
     "./handlers/rpc/*": "./src/handlers/rpc/*.ts",
     "./handlers/push-sources-changed": "./src/handlers/push-sources-changed.ts",
     "./sessions": "./src/sessions/index.ts",
+    "./handoffs": "./src/handoffs/index.ts",
     "./webui": "./src/webui/index.ts"
   },
   "scripts": {

@@ -930,6 +930,12 @@ export function parseRightSidebarParam(sidebarStr?: string): RightSidebarPanel |
     const path = sidebarStr.substring(8) // Remove 'changes/' prefix
     return { type: 'changes', path: path || undefined }
   }
+  if (sidebarStr.startsWith('handoff/')) {
+    const [, conversationId, handoffId, ...rest] = sidebarStr.split('/')
+    if (conversationId && handoffId && rest.length === 0) {
+      return { type: 'handoff', conversationId, handoffId }
+    }
+  }
   if (sidebarStr.startsWith('files')) {
     const path = sidebarStr.substring(6) // Remove 'files/' prefix
     return { type: 'files', path: path || undefined }
@@ -956,6 +962,8 @@ export function buildRightSidebarParam(panel?: RightSidebarPanel): string | unde
       return panel.path ? `changes/${panel.path}` : 'changes'
     case 'files':
       return panel.path ? `files/${panel.path}` : 'files'
+    case 'handoff':
+      return `handoff/${panel.conversationId}/${panel.handoffId}`
     default:
       return undefined
   }
