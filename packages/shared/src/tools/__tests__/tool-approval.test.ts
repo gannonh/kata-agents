@@ -216,4 +216,18 @@ describe('ApprovalStore and ToolBroker', () => {
     expect(expired?.status).toBe('expired')
     expect(expired && 'expiresAt' in expired ? expired.expiresAt : '').toBe(asked.request.expiresAt)
   })
+
+  it('creates an exact-target standing allow that does not match another path', () => {
+    const owner = broker(tempWorkspace())
+    const asked = owner.authorize(invocation(), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    const allowed = owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
+    owner.createStandingAllow(allowed, 'allow')
+    expect(owner.authorize(invocation(), 'ask')).toEqual({ kind: 'allow', reason: 'standing-allow' })
+    expect(owner.authorize(invocation({
+      target: { kind: 'file', value: '/tmp/other.txt', fingerprint: 'fp_other' },
+      normalizedInput: { file_path: '/tmp/other.txt', content: 'hello' },
+    }), 'ask').kind).toBe('ask')
+  })
 })

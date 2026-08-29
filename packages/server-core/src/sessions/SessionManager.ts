@@ -51,7 +51,8 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
-import type { BotTurnContext, SpawnTask, SpawnTaskJsonValue } from '@kata-sh/core'
+import { APPROVAL_SCHEMA_VERSION, type BotTurnContext, type SpawnTask, type SpawnTaskJsonValue } from '@kata-sh/core'
+import { resolveToolTarget } from '@kata-sh/shared/tools'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -115,6 +116,7 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskRecoveryAdapter, type SpawnTaskRecoveryReference, type SpawnTaskUpdated } from './spawn-task-coordinator'
 import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 import type { HandoffDelegate } from '../handoffs/service'
+import { announceApproval, getApprovalRuntime } from '../approvals/runtime'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
@@ -961,6 +963,11 @@ interface ManagedSession {
   authRetryInProgress?: boolean
   // Whether this session is hidden from session list (e.g., mini edit sessions)
   hidden?: boolean
+  botRuntimeAuthority?: {
+    workspaceId: string
+    botId: string
+    conversationId: string
+  }
   branchFromMessageId?: string
   // Branch context strategy:
   // - sdk-fork: provider-level fork from parent SDK session
@@ -4630,6 +4637,8 @@ export class SessionManager implements ISessionManager {
       // Signal that the agent instance is ready (unblocks title generation)
       managed.agentReadyResolve?.()
 
+      this.bindBotToolPolicy(managed)
+
       // Set up permission handler to forward requests to renderer
       managed.agent.onPermissionRequest = (request: {
         requestId: string;
@@ -4644,6 +4653,7 @@ export class SessionManager implements ISessionManager {
         rememberForMinutes?: number;
         commandHash?: string;
         approvalTtlSeconds?: number;
+        approvalId?: string;
       }) => {
         void (async () => {
           const canAwait = await this.enterSpawnTaskAwaitingInput(managed, {
@@ -4654,6 +4664,20 @@ export class SessionManager implements ISessionManager {
           if (!canAwait) return
 
           sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+          if (request.approvalId && managed.botRuntimeAuthority) {
+            const runtime = getApprovalRuntime(managed.workspace.id)
+            const pending = runtime.store.get(request.approvalId)
+            if (pending?.status === 'pending') {
+              const link = runtime.links.get(request.approvalId)
+              if (link) runtime.links.set(request.approvalId, { ...link, requestId: request.requestId })
+              announceApproval(runtime, pending)
+              this.pendingPermissionRequests.set(request.requestId, {
+                sessionId: managed.id,
+                type: request.type,
+              })
+              return
+            }
+          }
           let brokerMetadata: {
             commandHash?: string
             approvalTtlSeconds?: number
@@ -8185,6 +8209,14 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    if (rpcContext?.botTurnContext) {
+      managed.botRuntimeAuthority = {
+        workspaceId: rpcContext.botTurnContext.workspaceId,
+        botId: rpcContext.botTurnContext.botId,
+        conversationId: rpcContext.botTurnContext.conversationId,
+      }
+      this.bindBotToolPolicy(managed)
+    }
     if (this.sessionTeardownFences.has(sessionId)) {
       throw new Error('Session is being torn down')
     }
@@ -9307,6 +9339,41 @@ export class SessionManager implements ISessionManager {
       sessionLog.error(`Failed to read task output file: ${info.outputFile}`, err)
       // Fall back to SDK-provided summary
       return info.summary || null
+    }
+  }
+
+  private bindBotToolPolicy(managed: ManagedSession): void {
+    if (!managed.agent || !managed.botRuntimeAuthority) return
+    const authority = managed.botRuntimeAuthority
+    managed.agent.evaluateToolPolicy = (toolName, input) => {
+      const runtime = getApprovalRuntime(managed.workspace.id)
+      const mode = managed.permissionMode ?? 'ask'
+      const standingRules = runtime.rules.list(authority.botId)
+      const policyRevision = [mode, ...standingRules.map((rule) => `${rule.ruleId}:${rule.version}:${rule.state}`).sort()].join('|')
+      const invocation = {
+        workspaceId: authority.workspaceId,
+        botId: authority.botId,
+        conversationId: authority.conversationId,
+        runtimeId: managed.id,
+        toolName,
+        toolSchemaVersion: String(APPROVAL_SCHEMA_VERSION),
+        normalizedInput: input,
+        attempt: 1 as const,
+        target: resolveToolTarget(toolName, input),
+        policyRevision,
+      }
+      const result = runtime.broker.authorize(invocation, mode, standingRules)
+      if (result.kind === 'allow') return { kind: 'allow' as const }
+      if (result.kind === 'block') return { kind: 'block' as const, message: result.message }
+      runtime.links.set(result.request.approvalId, { sessionId: managed.id, invocation })
+      const sideEffect = result.request.sanitized.sideEffect
+      return {
+        kind: 'ask' as const,
+        approvalId: result.request.approvalId,
+        description: result.request.sanitized.preview,
+        command: result.request.sanitized.target,
+        promptType: sideEffect === 'shell' || sideEffect === 'git' ? 'bash' as const : sideEffect === 'write' ? 'file_write' as const : 'mcp_mutation' as const,
+      }
     }
   }
 

@@ -1262,6 +1262,7 @@ export class PiAgent extends BaseAgent {
       prerequisiteManager: this.prerequisiteManager,
       rtkContext,
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
+      ...(this.evaluateToolPolicy ? { policyEvaluate: (name, args) => this.evaluateToolPolicy!(name, args) } : {}),
     });
 
     switch (checkResult.type) {
@@ -1335,6 +1336,7 @@ export class PiAgent extends BaseAgent {
           prerequisiteManager: this.prerequisiteManager,
           rtkContext,
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
+          ...(this.evaluateToolPolicy ? { policyEvaluate: (name, args) => this.evaluateToolPolicy!(name, args) } : {}),
         });
 
         if (postResult.type === 'modify') {
@@ -1390,6 +1392,7 @@ export class PiAgent extends BaseAgent {
           rememberForMinutes: checkResult.rememberForMinutes,
           commandHash: checkResult.commandHash,
           approvalTtlSeconds: checkResult.approvalTtlSeconds,
+          approvalId: checkResult.approvalId,
         });
 
         const allowed = await permissionPromise;

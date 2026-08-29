@@ -6,15 +6,13 @@ import type {
   StandingRule,
   ToolInvocation,
 } from '@kata-sh/core'
-import { APPROVAL_SCHEMA_VERSION } from '@kata-sh/core'
+import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION } from '@kata-sh/core'
 import type { PermissionMode } from '../agent/mode-types.ts'
 import { classifyTool } from './classify.ts'
 import { evaluatePolicy } from './evaluate.ts'
 import { computeOperationHash } from './hash.ts'
 import { sanitizeOperation } from './redact.ts'
 import { ApprovalConflictError, ApprovalStore, StandingRuleStore } from './store.ts'
-
-const DEFAULT_TTL_MS = 120_000
 
 export interface ToolBrokerOptions {
   readonly workspaceId: string
@@ -39,7 +37,7 @@ export class ToolBroker {
     private readonly options: ToolBrokerOptions,
   ) {
     this.clock = options.clock ?? options.now ?? (() => new Date().toISOString())
-    this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS
+    this.ttlMs = options.ttlMs ?? APPROVAL_LIMITS.ttlMs
     this.randomId = options.randomId ?? randomUUID
   }
 
@@ -130,6 +128,23 @@ export class ToolBroker {
 
   claimExecution(approvalId: string, invocation: ToolInvocation): ApprovalRecord {
     return this.store.consume(approvalId, invocation, this.clock())
+  }
+
+  createStandingAllow(record: ApprovalRecord, effect: StandingRule['effect'] = 'allow'): StandingRule {
+    const now = this.clock()
+    return this.rules.create({
+      schemaVersion: APPROVAL_SCHEMA_VERSION,
+      version: 1,
+      ruleId: `rule_${this.randomId()}`,
+      workspaceId: record.workspaceId,
+      botId: record.botId,
+      toolName: record.toolName,
+      target: record.sanitized.target,
+      effect,
+      state: 'active',
+      createdAt: now,
+      updatedAt: now,
+    })
   }
 
   private mintApprovalId(): string {

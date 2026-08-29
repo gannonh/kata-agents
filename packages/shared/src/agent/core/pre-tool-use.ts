@@ -447,6 +447,7 @@ export type PreToolUseCheckResult =
       rememberForMinutes?: number;
       commandHash?: string;
       approvalTtlSeconds?: number;
+      approvalId?: string;
     }
   | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean }
   | { type: 'call_llm_intercept'; input: Record<string, unknown> }
@@ -493,6 +494,15 @@ export interface PreToolUseInput {
   rtkContext?: import('./rtk-rewrite.ts').RtkContext;
   /** Debug callback */
   onDebug?: (message: string) => void;
+  /** Bot-scoped ToolBroker. When set, replaces step 1 and step 6. */
+  policyEvaluate?: (toolName: string, input: Record<string, unknown>) => {
+    kind: 'allow' | 'block' | 'ask';
+    message?: string;
+    description?: string;
+    command?: string;
+    approvalId?: string;
+    promptType?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+  };
 }
 
 /**
@@ -550,6 +560,30 @@ function withPermissionModeContext(reason: string, sessionId: string, effectiveM
   ].join('\n');
 }
 
+function applyBotPolicy(
+  ctx: PreToolUseInput,
+  toolName: string,
+  input: Record<string, unknown>,
+  modifiedInput?: Record<string, unknown>,
+): PreToolUseCheckResult | null {
+  if (!ctx.policyEvaluate) return null
+  const verdict = ctx.policyEvaluate(toolName, input)
+  if (verdict.kind === 'block') {
+    return { type: 'block', reason: verdict.message ?? 'This operation is blocked by Bot policy.' }
+  }
+  if (verdict.kind === 'ask') {
+    return {
+      type: 'prompt',
+      promptType: verdict.promptType ?? 'mcp_mutation',
+      description: verdict.description ?? toolName,
+      command: verdict.command,
+      approvalId: verdict.approvalId,
+      modifiedInput,
+    }
+  }
+  return null
+}
+
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
   const {
     toolName,
@@ -591,17 +625,19 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // ============================================================
   // 1. PERMISSION MODE CHECK
   // ============================================================
-  const modeResult = shouldAllowToolInMode(
-    toolName,
-    input,
-    effectivePermissionMode,
-    { plansFolderPath, dataFolderPath, permissionsContext }
-  );
+  if (!ctx.policyEvaluate) {
+    const modeResult = shouldAllowToolInMode(
+      toolName,
+      input,
+      effectivePermissionMode,
+      { plansFolderPath, dataFolderPath, permissionsContext }
+    );
 
-  if (!modeResult.allowed) {
-    const reasonWithContext = withPermissionModeContext(modeResult.reason, sessionId, effectivePermissionMode);
-    onDebug?.(`Permission mode ${effectivePermissionMode}: blocking ${toolName} — ${reasonWithContext}`);
-    return { type: 'block', reason: reasonWithContext };
+    if (!modeResult.allowed) {
+      const reasonWithContext = withPermissionModeContext(modeResult.reason, sessionId, effectivePermissionMode);
+      onDebug?.(`Permission mode ${effectivePermissionMode}: blocking ${toolName} — ${reasonWithContext}`);
+      return { type: 'block', reason: reasonWithContext };
+    }
   }
 
   // ============================================================
@@ -642,17 +678,13 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // ============================================================
   // 4. CALL_LLM / SPAWN_SESSION INTERCEPTION
   // ============================================================
-  if (toolName === 'mcp__session__call_llm') {
-    return { type: 'call_llm_intercept', input };
-  }
-  if (toolName === 'mcp__session__spawn_session') {
-    return { type: 'spawn_session_intercept', input };
-  }
-  if (toolName === 'mcp__session__send_handoff') {
-    return { type: 'send_handoff_intercept', input };
-  }
-  if (toolName === 'mcp__session__inspect_handoff') {
-    return { type: 'inspect_handoff_intercept', input };
+  if (toolName === 'mcp__session__call_llm' || toolName === 'mcp__session__spawn_session' || toolName === 'mcp__session__send_handoff' || toolName === 'mcp__session__inspect_handoff') {
+    const policy = applyBotPolicy(ctx, toolName, input)
+    if (policy) return policy
+    if (toolName === 'mcp__session__call_llm') return { type: 'call_llm_intercept', input }
+    if (toolName === 'mcp__session__spawn_session') return { type: 'spawn_session_intercept', input }
+    if (toolName === 'mcp__session__send_handoff') return { type: 'send_handoff_intercept', input }
+    return { type: 'inspect_handoff_intercept', input }
   }
 
   // ============================================================
@@ -749,7 +781,10 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // ============================================================
   // 6. ASK MODE PROMPT DECISION
   // ============================================================
-  if (effectivePermissionMode === 'ask') {
+  const policy = applyBotPolicy(ctx, toolName, input, wasModified ? currentInput : undefined)
+  if (policy) return policy
+
+  if (!ctx.policyEvaluate && effectivePermissionMode === 'ask') {
     const promptInfo = shouldPromptInAskMode(
       toolName,
       input, // Use original input for permission decisions (before stripping)

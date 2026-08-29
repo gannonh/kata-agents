@@ -3,6 +3,7 @@ export const APPROVAL_LIMITS = Object.freeze({
   previewBytes: 8 * 1024,
   targetBytes: 4 * 1024,
   ruleTargetBytes: 4 * 1024,
+  ttlMs: 120_000,
 })
 
 /** `approval_<uuid>` */

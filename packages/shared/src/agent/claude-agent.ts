@@ -532,6 +532,7 @@ export class ClaudeAgent extends BaseAgent {
     rememberForMinutes?: number;
     commandHash?: string;
     approvalTtlSeconds?: number;
+    approvalId?: string;
   }) => void) | null = null;
 
   // Debug callback for status messages
@@ -1134,6 +1135,7 @@ export class ClaudeAgent extends BaseAgent {
                 prerequisiteManager: this.prerequisiteManager,
                 rtkContext,
                 onDebug: (msg) => this.onDebug?.(msg),
+                ...(this.evaluateToolPolicy ? { policyEvaluate: (name, args) => this.evaluateToolPolicy!(name, args) } : {}),
               });
 
               // Consume pending steer message (if any) — will be injected via additionalContext
@@ -1260,6 +1262,7 @@ export class ClaudeAgent extends BaseAgent {
                       rememberForMinutes: checkResult.rememberForMinutes,
                       commandHash: checkResult.commandHash,
                       approvalTtlSeconds: checkResult.approvalTtlSeconds,
+                      approvalId: checkResult.approvalId,
                     });
                   } else {
                     this.pendingPermissions.delete(requestId);

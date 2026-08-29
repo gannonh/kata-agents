@@ -83,6 +83,7 @@ export type PermissionCallback = (request: {
   rememberForMinutes?: number;
   commandHash?: string;
   approvalTtlSeconds?: number;
+  approvalId?: string;
 }) => void;
 
 /**
@@ -776,6 +777,18 @@ export interface AgentBackend {
 
   /** Called when agent requests spawning a new session */
   onSpawnSession: ((request: import('../base-agent.ts').SpawnSessionRequest) => Promise<import('../base-agent.ts').SpawnSessionResult>) | null;
+
+  /**
+   * Called when a Bot-scoped ToolBroker should evaluate a tool.
+   */
+  evaluateToolPolicy?: ((toolName: string, input: Record<string, unknown>) => {
+    kind: 'allow' | 'block' | 'ask';
+    message?: string;
+    description?: string;
+    command?: string;
+    approvalId?: string;
+    promptType?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' | 'admin_approval';
+  }) | null;
 
   /**
    * Called when agent requests handing a task to another Bot (send_handoff).

@@ -99,6 +99,14 @@ export const RPC_CHANNELS = {
     MARK_RESULT_READ: 'handoffs:markResultRead',
     EVENT: 'handoffs:event',
   },
+  approvals: {
+    LIST: 'approvals:list',
+    RESOLVE: 'approvals:resolve',
+    LIST_STANDING_RULES: 'approvals:listStandingRules',
+    DISABLE_STANDING_RULE: 'approvals:disableStandingRule',
+    DELETE_STANDING_RULE: 'approvals:deleteStandingRule',
+    EVENT: 'approvals:event',
+  },
   workspaces: {
     GET: 'workspaces:get',
     CREATE: 'workspaces:create',
