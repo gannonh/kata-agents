@@ -1,9 +1,11 @@
-/**
- * Tools module - standalone tool implementations.
- *
- * Note: Codex tools were removed as part of the app-server migration.
- * The Codex app-server handles tool execution internally.
- */
-
-// Placeholder for future tool implementations
-export {};
+export { classifyTool } from './classify.ts'
+export type { ToolClassification } from './classify.ts'
+export { computeOperationHash } from './hash.ts'
+export { redactValue, sanitizeOperation } from './redact.ts'
+export { evaluatePolicy } from './evaluate.ts'
+export type { EvaluatePolicyInput } from './evaluate.ts'
+export { resolveToolTarget } from './target.ts'
+export { ApprovalStore, StandingRuleStore, ApprovalConflictError } from './store.ts'
+export type { ApprovalStoreOptions } from './store.ts'
+export { ToolBroker } from './broker.ts'
+export type { ToolBrokerOptions } from './broker.ts'
