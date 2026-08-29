@@ -18,6 +18,7 @@
   "approvals.allowOnce": "允许一次",
   "approvals.alwaysAllowExact": "始终允许此精确请求",
   "approvals.cardTitle": "工具审批",
+  "approvals.deleteRule": "删除",
   "approvals.deny": "拒绝",
   "approvals.disableRule": "停用",
   "approvals.policyHeading": "Bot 策略",

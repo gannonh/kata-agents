@@ -18,6 +18,7 @@
   "approvals.allowOnce": "Zezwól raz",
   "approvals.alwaysAllowExact": "Zawsze zezwalaj na to dokładne żądanie",
   "approvals.cardTitle": "Zatwierdzenie narzędzia",
+  "approvals.deleteRule": "Usuń",
   "approvals.deny": "Odrzuć",
   "approvals.disableRule": "Wyłącz",
   "approvals.policyHeading": "Polityka Bota",

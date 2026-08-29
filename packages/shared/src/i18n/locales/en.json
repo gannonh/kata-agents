@@ -18,6 +18,7 @@
   "approvals.allowOnce": "Allow once",
   "approvals.alwaysAllowExact": "Always allow this exact request",
   "approvals.cardTitle": "Tool approval",
+  "approvals.deleteRule": "Delete",
   "approvals.deny": "Deny",
   "approvals.disableRule": "Disable",
   "approvals.policyHeading": "Bot policy",

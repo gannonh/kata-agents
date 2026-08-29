@@ -230,4 +230,19 @@ describe('ApprovalStore and ToolBroker', () => {
       normalizedInput: { file_path: '/tmp/other.txt', content: 'hello' },
     }), 'ask').kind).toBe('ask')
   })
+
+  it('disables then deletes a standing allow', () => {
+    const owner = broker(tempWorkspace())
+    const asked = owner.authorize(invocation(), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    const allowed = owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
+    owner.claimExecution(allowed.approvalId, invocation())
+    const rule = owner.createStandingAllow(allowed, 'allow')
+    const disabled = owner.rules.disable(rule.ruleId, rule.version)
+    expect(disabled.state).toBe('disabled')
+    expect(owner.authorize(invocation(), 'ask').kind).toBe('ask')
+    owner.rules.delete(rule.ruleId)
+    expect(owner.rules.get(rule.ruleId)).toBeNull()
+  })
 })

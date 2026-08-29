@@ -18,6 +18,7 @@
   "approvals.allowOnce": "一度だけ許可",
   "approvals.alwaysAllowExact": "この正確なリクエストを常に許可",
   "approvals.cardTitle": "ツールの承認",
+  "approvals.deleteRule": "削除",
   "approvals.deny": "拒否",
   "approvals.disableRule": "無効化",
   "approvals.policyHeading": "Bot ポリシー",

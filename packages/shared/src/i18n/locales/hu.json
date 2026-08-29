@@ -18,6 +18,7 @@
   "approvals.allowOnce": "Engedélyezés egyszer",
   "approvals.alwaysAllowExact": "Mindig engedélyezze ezt a pontos kérést",
   "approvals.cardTitle": "Eszközjóváhagyás",
+  "approvals.deleteRule": "Törlés",
   "approvals.deny": "Elutasítás",
   "approvals.disableRule": "Letiltás",
   "approvals.policyHeading": "Bot-szabályzat",

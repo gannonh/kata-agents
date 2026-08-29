@@ -18,6 +18,7 @@
   "approvals.allowOnce": "Permitir una vez",
   "approvals.alwaysAllowExact": "Permitir siempre esta solicitud exacta",
   "approvals.cardTitle": "Aprobación de herramienta",
+  "approvals.deleteRule": "Eliminar",
   "approvals.deny": "Denegar",
   "approvals.disableRule": "Desactivar",
   "approvals.policyHeading": "Política del Bot",

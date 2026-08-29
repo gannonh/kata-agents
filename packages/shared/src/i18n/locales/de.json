@@ -18,6 +18,7 @@
   "approvals.allowOnce": "Einmal erlauben",
   "approvals.alwaysAllowExact": "Diese genaue Anfrage immer erlauben",
   "approvals.cardTitle": "Werkzeugfreigabe",
+  "approvals.deleteRule": "Löschen",
   "approvals.deny": "Ablehnen",
   "approvals.disableRule": "Deaktivieren",
   "approvals.policyHeading": "Bot-Richtlinie",

@@ -171,11 +171,16 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
           ) : standingRules.map(rule => (
             <div key={rule.ruleId} data-testid={`standing-rule-${rule.ruleId}`} data-rule-state={rule.state} className="flex items-center justify-between gap-2 border-t border-foreground/10 pt-2 text-xs">
               <span>{rule.toolName} {rule.target} ({rule.effect})</span>
-              {rule.state === 'active' && (
-                <Button type="button" size="sm" variant="outline" data-testid={`standing-rule-disable-${rule.ruleId}`} onClick={() => window.electronAPI.disableStandingRule({ ruleId: rule.ruleId, expectedVersion: rule.version }).then(() => refresh())}>
-                  {t('approvals.disableRule')}
+              <div className="flex gap-1">
+                {rule.state === 'active' && (
+                  <Button type="button" size="sm" variant="outline" data-testid={`standing-rule-disable-${rule.ruleId}`} onClick={() => window.electronAPI.disableStandingRule({ ruleId: rule.ruleId, expectedVersion: rule.version }).then(() => refresh())}>
+                    {t('approvals.disableRule')}
+                  </Button>
+                )}
+                <Button type="button" size="sm" variant="outline" data-testid={`standing-rule-delete-${rule.ruleId}`} onClick={() => window.electronAPI.deleteStandingRule({ ruleId: rule.ruleId }).then(() => refresh())}>
+                  {t('approvals.deleteRule')}
                 </Button>
-              )}
+              </div>
             </div>
           ))}
         </section>
