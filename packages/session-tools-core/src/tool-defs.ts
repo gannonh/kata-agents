@@ -480,7 +480,7 @@ Only use 'attachments' for existing file paths on disk — the tool reads them a
   send_handoff: `Hand the current task to another Bot in this workspace. The receiving Bot runs the request as an independent delegated task with its own model, permission mode, and memory.
 
 The request must be self-contained: the receiving Bot does not see this conversation.
-Identity is derived from the current session — never pass workspace, Bot, or conversation fields.
+Identity is derived from the current session. Never pass workspace, Bot, or conversation fields.
 A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeState, version, targetBotId }\`.`,
 
   inspect_handoff: `Read a handoff task owned by the current Bot conversation.

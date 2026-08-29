@@ -15,7 +15,7 @@ import type {
   JournalEntry,
 } from '@kata-sh/core'
 import { BOT_MEMORY_LIMITS, BOT_MEMORY_SCHEMA_VERSION } from '@kata-sh/core'
-import { assertConversationId, ConversationJournal } from '../conversations/index.ts'
+import { assertConversationId, type ConversationJournal } from '../conversations/index.ts'
 import { ensureDurableDirectory } from '../spawn-tasks/durable-fs.ts'
 import { readJsonFile, writeJsonIfAbsent, writeJsonRecord } from '../conversations/durable-json.ts'
 import { botsRootPath } from './layout.ts'
@@ -323,12 +323,14 @@ function assertCursor(value: unknown, workspaceId: string, botId: string, conver
   return { workspaceId, botId, conversationId, lastProcessedSeq: cursor.lastProcessedSeq as number, updatedAt: assertTimestamp(cursor.updatedAt, 'cursor updatedAt') }
 }
 
+export type BotContextJournal = Pick<ConversationJournal, 'workspaceId' | 'getHeadSequence' | 'list'>
+
 export class BotContextLedger {
   readonly store: MemoryStore
-  readonly journal: ConversationJournal
+  readonly journal: BotContextJournal
   private readonly clock: () => string
 
-  constructor(options: { workspaceRoot: string; workspaceId: string; botId: string; journal: ConversationJournal; clock?: () => string }) {
+  constructor(options: { workspaceRoot: string; workspaceId: string; botId: string; journal: BotContextJournal; clock?: () => string }) {
     this.store = new MemoryStore(options)
     if (options.journal.workspaceId !== this.store.workspaceId) throw new Error('Bot context journal and memory must share a workspace')
     this.journal = options.journal
@@ -577,9 +579,9 @@ function lineBytes(value: string): number { return Buffer.byteLength(`${value}\n
 
 export class ContextAssembler {
   private readonly ledger: BotContextLedger
-  private readonly journal: ConversationJournal
+  private readonly journal: BotContextJournal
 
-  constructor(options: { ledger: BotContextLedger; journal: ConversationJournal }) {
+  constructor(options: { ledger: BotContextLedger; journal: BotContextJournal }) {
     this.ledger = options.ledger
     this.journal = options.journal
   }
@@ -640,4 +642,4 @@ export class ContextAssembler {
   async compact(input: { botId: string; conversationId: string; expectedJournalHeadSequence: number; expectedMemoryRevision: number; expectedCheckpointRevision: number; operationId: string }): Promise<BotCompactionCheckpoint | null> { return this.ledger.compact(input) }
 }
 
-export function createBotContextLedger(options: { workspaceRoot: string; workspaceId: string; botId: string; journal: ConversationJournal; clock?: () => string }): BotContextLedger { return new BotContextLedger(options) }
+export function createBotContextLedger(options: { workspaceRoot: string; workspaceId: string; botId: string; journal: BotContextJournal; clock?: () => string }): BotContextLedger { return new BotContextLedger(options) }

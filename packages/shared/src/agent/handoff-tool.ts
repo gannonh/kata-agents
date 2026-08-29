@@ -13,7 +13,6 @@ function errorResponse(message: string): CallToolResult {
 }
 
 export interface SendHandoffToolOptions {
-  sessionId: string;
   /**
    * Lazy resolver for the send-handoff callback.
    * Called at execution time to get the current callback from the session registry.
@@ -27,7 +26,7 @@ export function createSendHandoffTool(options: SendHandoffToolOptions) {
     `Hand the current task to another Bot in this workspace. The receiving Bot runs the request as an independent delegated task with its own model, permission mode, and memory.
 
 The request must be self-contained: the receiving Bot does not see this conversation.
-Identity is derived from the current session — never pass workspace, Bot, or conversation fields.
+Identity is derived from the current session. Never pass workspace, Bot, or conversation fields.
 A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeState, version, targetBotId }\`.`,
     {
       help: z.boolean().optional()
@@ -56,7 +55,7 @@ A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeS
         };
       } catch (error) {
         const failure = (error && typeof error === 'object' && 'failure' in error)
-          ? (error as { failure?: unknown }).failure
+          ? error.failure
           : undefined
         if (failure && typeof failure === 'object') {
           return {

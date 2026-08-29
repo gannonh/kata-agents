@@ -802,8 +802,10 @@ export class SpawnTaskCoordinator {
       })
       this.markDispatchActive(current.taskId)
       if (providerTurn) {
+        const dispatchedTask = current
         void providerTurn.catch((error: unknown) => {
-          void this.finalizeProviderFailureForChildSession(current!.childSessionId, error).catch(() => {})
+          void this.finalizeProviderFailureForChildSession(dispatchedTask.childSessionId, error)
+            .catch(() => this.auditLateEvent(dispatchedTask, 'provider_failure_finalizer_error'))
         })
       }
     } catch (error) {
@@ -995,8 +997,10 @@ export class SpawnTaskCoordinator {
       })
       this.markDispatchActive(current.taskId)
       if (providerTurn) {
+        const dispatchedTask = current
         void providerTurn.catch((error: unknown) => {
-          void this.finalizeProviderFailureForChildSession(current!.childSessionId, error).catch(() => {})
+          void this.finalizeProviderFailureForChildSession(dispatchedTask.childSessionId, error)
+            .catch(() => this.auditLateEvent(dispatchedTask, 'provider_failure_finalizer_error'))
         })
       }
     } catch (error) {

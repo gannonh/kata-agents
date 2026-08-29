@@ -41,7 +41,7 @@ describe('handoff RPC authority boundary', () => {
   it('uses the production workspace resolver for every durable handoff operation', () => {
     const root = mkdtempSync(join(tmpdir(), 'handoff-rpc-authority-'))
     try {
-      const fixture = fileURLToPath(new URL('./handoffs-authority.isolated.ts', import.meta.url))
+      const fixture = fileURLToPath(new URL('../../__tests__/fixtures/handoffs-authority.isolated.ts', import.meta.url))
       const result = Bun.spawnSync([process.execPath, fixture], {
         cwd: process.cwd(),
         env: {

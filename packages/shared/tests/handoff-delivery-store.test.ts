@@ -202,10 +202,11 @@ describe('HandoffDeliveryStore claim CAS', () => {
       ownerEpoch: 1,
     })).toThrow(HandoffDeliveryClaimConflictError);
 
+    if (!accepted.claim) throw new Error('Expected the winning delivery claim');
     expect(first.acknowledgeDelivery('delivery_a', {
-      claimId: accepted.claim!.claimId,
+      claimId: accepted.claim.claimId,
       recipientBotId: 'bot_target',
-      ownerEpoch: accepted.claim!.ownerEpoch,
+      ownerEpoch: accepted.claim.ownerEpoch,
     }).mailState).toBe('acknowledged');
   });
 

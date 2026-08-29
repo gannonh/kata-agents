@@ -2307,4 +2307,38 @@ describe('SpawnTaskCoordinator', () => {
       },
     })
   })
+
+  it('reports a rejected provider-failure finalizer through the late-event boundary', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    let rejectProvider: ((error: Error) => void) | undefined
+    const lateEvents: string[] = []
+    let resolveLateEvent: (() => void) | undefined
+    const lateEvent = new Promise<void>((resolve) => { resolveLateEvent = resolve })
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => new Promise<void>((_resolve, reject) => {
+        rejectProvider = reject
+      }),
+      onLateEvent: ({ eventKind }) => {
+        lateEvents.push(eventKind)
+        resolveLateEvent?.()
+      },
+    })
+
+    await coordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'observe finalizer failure',
+      childConfig: {},
+    })
+    store.getByChildSessionId = () => { throw new Error('task index unavailable') }
+    if (!rejectProvider) throw new Error('Expected the provider turn to start')
+    rejectProvider(new Error('provider turn failed'))
+    await lateEvent
+
+    expect(lateEvents).toEqual(['provider_failure_finalizer_error'])
+  })
 })

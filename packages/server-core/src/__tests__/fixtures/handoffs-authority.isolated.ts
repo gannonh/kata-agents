@@ -7,7 +7,7 @@ import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
 import type { HandlerFn, RequestContext, RpcServer } from '../../transport/types'
 import { TaskAccessError } from '../../handoffs/service'
 import { getHandoffRuntime, type HandoffRuntimeSessionManager } from '../../handoffs/runtime'
-import { registerHandoffsHandlers } from './handoffs'
+import { registerHandoffsHandlers } from '../../handlers/rpc/handoffs'
 
 const workspaceRoot = process.env.KATA_HANDOFF_TEST_WORKSPACE
 if (!workspaceRoot) throw new Error('KATA_HANDOFF_TEST_WORKSPACE is required')

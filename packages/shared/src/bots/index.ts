@@ -40,6 +40,7 @@ export {
   extractMemoryCandidate,
   sanitizeMemoryContent,
 } from './memory.ts';
+export type { BotContextJournal } from './memory.ts';
 export {
   assertBotId,
   assertBotRecord,

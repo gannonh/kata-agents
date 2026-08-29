@@ -295,7 +295,6 @@ export function getSessionScopedTools(
 
     tools.push(
       createSendHandoffTool({
-        sessionId,
         getSendHandoffFn: () => {
           const callbacks = getSessionScopedToolCallbacks(sessionId);
           return callbacks?.sendHandoffFn;

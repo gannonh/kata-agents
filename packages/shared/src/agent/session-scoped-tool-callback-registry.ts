@@ -47,7 +47,7 @@ export interface SessionScopedToolCallbacks {
   spawnSessionFn?: SpawnSessionFn;
 
   /**
-   * Callback for send_handoff tool — hands the task to another Bot.
+   * Callback for send_handoff tool. Hands the task to another Bot.
    * Each agent backend delegates to its onSendHandoff callback.
    */
   sendHandoffFn?: SendHandoffFn;

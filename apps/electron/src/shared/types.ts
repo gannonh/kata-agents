@@ -407,8 +407,6 @@ export interface ElectronAPI {
   ): Promise<import('@kata-sh/core').RouteRecord[]>
   onChannelEvent(callback: (event: ChannelEvent) => void): () => void
 
-  // Bot handoffs. The server derives workspace and Bot authority from the
-  // authenticated transport and returns one aggregate rail per handoff.
   listConversationHandoffs(conversationId: string): Promise<HandoffRailView[]>
   getHandoffRail(input: GetHandoffRailInput): Promise<HandoffRailView>
   waitForHandoff(input: WaitForHandoffInput): Promise<HandoffRailView>

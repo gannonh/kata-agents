@@ -21,6 +21,7 @@ import {
   BotDirectory,
   ContextAssembler,
   botProviderSessionPath,
+  type BotContextJournal,
 } from '@kata-sh/shared/bots'
 import { ChannelDirectory, channelProviderSessionPath } from '@kata-sh/shared/channels'
 import type { ConversationJournal } from '@kata-sh/shared/conversations'
@@ -71,8 +72,8 @@ export interface HandoffServiceOptions {
   readonly workspaceId: string
   readonly workspaceRoot: string
   readonly deliveryStore: HandoffDeliveryStore
-  readonly resolveJournal: (conversationId: string) => ConversationJournal
-  readonly botDirectory: BotDirectory
+  readonly resolveJournal: (conversationId: string) => BotContextJournal & Pick<ConversationJournal, 'append'>
+  readonly botDirectory: Pick<BotDirectory, 'getBotByLegacySession' | 'getBot' | 'listBots'>
   readonly channelDirectory: Pick<ChannelDirectory, 'getChannel' | 'listChannels' | 'isMember'>
   readonly sessionManager: HandoffSessionLookup
   readonly taskStore: HandoffTaskStore
@@ -271,7 +272,7 @@ export class HandoffService {
 
   private readonly deliveryStore: HandoffDeliveryStore
   private readonly resolveJournal: HandoffServiceOptions['resolveJournal']
-  private readonly botDirectory: BotDirectory
+  private readonly botDirectory: HandoffServiceOptions['botDirectory']
   private readonly channelDirectory: HandoffServiceOptions['channelDirectory']
   private readonly sessionManager: HandoffSessionLookup
   private readonly taskStore: HandoffTaskStore

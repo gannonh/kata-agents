@@ -2,12 +2,11 @@ import { describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { BotRecord, BotTurnContext, JournalEntry, SpawnTask } from '@kata-sh/core'
+import type { BotRecord, BotTurnContext, HandoffDeliveryClaim, JournalEntry, SpawnTask } from '@kata-sh/core'
 import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
 import { channelProviderSessionPath } from '@kata-sh/shared/channels'
-import type { ConversationJournal } from '@kata-sh/shared/conversations'
 import { SpawnTaskCoordinator } from '../sessions/spawn-task-coordinator'
 import {
   HandoffService,
@@ -18,6 +17,16 @@ import {
 } from './service'
 
 const at = '2026-08-28T00:00:00.000Z'
+type TestJournal = ReturnType<HandoffServiceOptions['resolveJournal']>
+
+function requireValue<T>(value: T | null | undefined, message: string): T {
+  if (value === null || value === undefined) throw new Error(message)
+  return value
+}
+
+function requireClaim(value: { readonly claim?: HandoffDeliveryClaim }): HandoffDeliveryClaim {
+  return requireValue(value.claim, 'Expected a delivery claim')
+}
 
 function bot(botId: string, name: string, directChatId: string, profile?: string): BotRecord {
   return {
@@ -60,18 +69,29 @@ function makeService(
   deliveryStore: HandoffDeliveryStore,
   taskStore: HandoffTaskStore,
   onDispatch?: (task: SpawnTask, botTurnContext?: BotTurnContext) => void,
-  journalOverride?: Pick<ConversationJournal, 'append' | 'list'>,
+  journalOverride?: Partial<TestJournal>,
   overrides?: Partial<Pick<HandoffServiceOptions, 'channelDirectory' | 'sessionManager'>>,
 ): HandoffService {
   const source = bot('bot_source', 'Source', 'chat_source')
   const target = bot('bot_target', 'Reviewer', 'chat_target', 'Review carefully <private>.')
-  const journal = ({
+  const entries: JournalEntry[] = []
+  const journal: TestJournal = {
     workspaceId: 'ws_1',
-    append: () => undefined,
-    list: () => [],
-    getHeadSequence: () => 0,
+    append: (input) => {
+      const entry: JournalEntry = {
+        schemaVersion: 1,
+        entryId: `entry_${entries.length + 1}`,
+        seq: entries.length + 1,
+        createdAt: at,
+        ...input,
+      }
+      entries.push(entry)
+      return entry
+    },
+    list: () => entries,
+    getHeadSequence: () => entries.length,
     ...journalOverride,
-  }) as unknown as ConversationJournal
+  }
   const options: HandoffServiceOptions = {
     workspaceId: 'ws_1',
     workspaceRoot: dirname(deliveryStore.rootPath),
@@ -81,7 +101,7 @@ function makeService(
       getBotByLegacySession: () => source,
       getBot: (botId: string) => [source, target].find((candidate) => candidate.botId === botId) ?? null,
       listBots: () => [source, target],
-    } as never,
+    },
     channelDirectory: overrides?.channelDirectory ?? {
       getChannel: () => null,
       listChannels: () => [],
@@ -129,7 +149,7 @@ describe('HandoffService creation boundary', () => {
       const order: string[] = []
       let reservedInput: HandoffReserveInput | undefined
       let dispatchedContext: BotTurnContext | undefined
-      const taskStore = {
+      const taskStore: HandoffTaskStore = {
         reserveForHandoff: (_handoffId: string, input: HandoffReserveInput) => {
           order.push('reserve')
           reservedInput = input
@@ -138,20 +158,22 @@ describe('HandoffService creation boundary', () => {
           }
           return task()
         },
+        getByHandoff: () => null,
         get: () => null,
-        setHandoffDispatchFence: (taskId: string, fence: SpawnTask['dispatch']['handoffFence']) => ({
+        setHandoffDispatchFence: (taskId, fence) => ({
           ...task(),
           taskId,
           version: 2,
           origin: { kind: 'handoff' as const, handoffId: 'handoff_handoff' },
           dispatch: { ...task().dispatch, handoffFence: fence },
         }),
-      } as unknown as HandoffTaskStore
+        readResultChunk: () => { throw new Error('No result in this fixture') },
+      }
       const originalCreate = deliveryStore.create.bind(deliveryStore)
-      deliveryStore.create = ((input) => {
+      deliveryStore.create = (input) => {
         order.push('delivery')
         return originalCreate(input)
-      }) as HandoffDeliveryStore['create']
+      }
       const service = makeService(deliveryStore, taskStore, (_task, botTurnContext) => {
         dispatchedContext = botTurnContext
       })
@@ -163,12 +185,14 @@ describe('HandoffService creation boundary', () => {
       })).resolves.toMatchObject({ handoffId: 'handoff_handoff' })
 
       expect(order.slice(0, 2)).toEqual(['delivery', 'reserve'])
-      expect(reservedInput!.childConfig.permissionMode).toBe('safe')
-      expect(dispatchedContext?.botId).toBe('bot_target')
-      expect(dispatchedContext?.text).toContain('Review carefully &lt;private&gt;.')
-      expect(dispatchedContext?.text).not.toContain('bot_source')
+      const capturedInput = requireValue(reservedInput, 'Expected a reserved task input')
+      const capturedContext = requireValue(dispatchedContext, 'Expected a dispatched Bot context')
+      expect(capturedInput.childConfig.permissionMode).toBe('safe')
+      expect(capturedContext.botId).toBe('bot_target')
+      expect(capturedContext.text).toContain('Review carefully &lt;private&gt;.')
+      expect(capturedContext.text).not.toContain('bot_source')
       expect(readdirSync(join(workspaceRoot, 'bots', 'bot_target', 'memory', 'runs'))).toEqual([
-        `${dispatchedContext!.runId}.json`,
+        `${capturedContext.runId}.json`,
       ])
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
@@ -181,7 +205,7 @@ describe('HandoffService creation boundary', () => {
       const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
       const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
       taskStore.reserveForHandoff = () => { throw new Error('task storage unavailable') }
-      const entries: Array<Parameters<ConversationJournal['append']>[0]> = []
+      const entries: Array<Parameters<TestJournal['append']>[0]> = []
       const service = makeService(deliveryStore, taskStore, undefined, {
         append: (entry) => {
           entries.push(entry)
@@ -233,7 +257,7 @@ describe('HandoffService creation boundary', () => {
       const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
       const entries: JournalEntry[] = []
       const journal = {
-        append: (input: Parameters<ConversationJournal['append']>[0]) => {
+        append: (input: Parameters<TestJournal['append']>[0]) => {
           const entry: JournalEntry = {
             schemaVersion: 1,
             entryId: `entry_${entries.length + 1}`,
@@ -253,7 +277,7 @@ describe('HandoffService creation boundary', () => {
         targetBot: 'Reviewer',
         request: 'Audit the release diff.',
       })
-      let current = taskStore.get(created.taskId)!
+      let current = requireValue(taskStore.get(created.taskId), 'Expected the created handoff task')
       current = taskStore.updateDispatch(current.taskId, 'ready', at)
       current = taskStore.updateDispatch(current.taskId, 'claimed', at)
       current = taskStore.updateDispatch(current.taskId, 'sent', at)
@@ -266,13 +290,15 @@ describe('HandoffService creation boundary', () => {
       expect(rail.targetBotName).toBe('Reviewer')
       expect(rail.exchange.map((entry) => entry.phase)).toEqual(['requested', 'terminal'])
       expect(rail.task?.result?.preview).toBe('canonical result')
-      const projectedTask = rail.task!
-      expect(JSON.parse(entries[0]!.body)).toEqual({
+      const projectedTask = requireValue(rail.task, 'Expected a projected handoff task')
+      const requestedEntry = requireValue(entries[0], 'Expected the requested journal entry')
+      const terminalEntry = requireValue(entries[1], 'Expected the terminal journal entry')
+      expect(JSON.parse(requestedEntry.body)).toEqual({
         type: 'handoff-requested',
         handoffId: created.handoffId,
         deliveryId: created.deliveryId,
       })
-      expect(JSON.parse(entries[1]!.body)).toEqual({
+      expect(JSON.parse(terminalEntry.body)).toEqual({
         type: 'handoff-terminal',
         handoffId: created.handoffId,
         deliveryId: created.deliveryId,
@@ -548,10 +574,11 @@ describe('HandoffService creation boundary', () => {
         recipientBotId: 'bot_target',
         expectedOwnerEpoch: 0,
       })
+      const claim = requireClaim(claimed)
       deliveryStore.acknowledgeDelivery('delivery_terminal', {
-        claimId: claimed.claim!.claimId,
+        claimId: claim.claimId,
         recipientBotId: 'bot_target',
-        ownerEpoch: claimed.claim!.ownerEpoch,
+        ownerEpoch: claim.ownerEpoch,
       })
       taskStore.setHandoffDispatchFence(task.taskId, {
         deliveryId: 'delivery_terminal',
@@ -563,14 +590,23 @@ describe('HandoffService creation boundary', () => {
       current = taskStore.updateDispatch(current.taskId, 'claimed', at)
       current = taskStore.updateDispatch(current.taskId, 'sent', at)
       current = taskStore.transition(current.taskId, { runtimeState: 'processing', at })
-      const entries: string[] = []
-      const journal = {
-        append: (input: { idempotencyKey: string }) => {
-          entries.push(input.idempotencyKey)
-          return {} as never
+      const entries: JournalEntry[] = []
+      const journal: TestJournal = {
+        workspaceId: 'ws_1',
+        append: (input) => {
+          const entry: JournalEntry = {
+            schemaVersion: 1,
+            entryId: `entry_${entries.length + 1}`,
+            seq: entries.length + 1,
+            createdAt: at,
+            ...input,
+          }
+          entries.push(entry)
+          return entry
         },
-        list: () => entries.map((idempotencyKey, index) => ({ idempotencyKey, seq: index + 1 })) as never,
-      } as unknown as ConversationJournal
+        list: () => entries,
+        getHeadSequence: () => entries.length,
+      }
       const service = makeService(deliveryStore, taskStore, undefined, journal)
       const completed = taskStore.commitResult(current.taskId, 'done', { committedAt: at })
 
@@ -578,7 +614,7 @@ describe('HandoffService creation boundary', () => {
       await service.onTaskUpdated(completed.taskId)
 
       expect(deliveryStore.get('delivery_terminal')?.resultUnread).toEqual({ taskVersion: completed.version, at })
-      expect(entries.filter((key) => key === 'handoff.handoff_terminal.terminal')).toHaveLength(1)
+      expect(entries.filter((entry) => entry.idempotencyKey === 'handoff.handoff_terminal.terminal')).toHaveLength(1)
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
     }
@@ -609,10 +645,11 @@ describe('HandoffService creation boundary', () => {
         recipientBotId: 'bot_target',
         expectedOwnerEpoch: 0,
       })
+      const claim = requireClaim(claimed)
       deliveryStore.acknowledgeDelivery('delivery_terminal_failure', {
-        claimId: claimed.claim!.claimId,
+        claimId: claim.claimId,
         recipientBotId: 'bot_target',
-        ownerEpoch: claimed.claim!.ownerEpoch,
+        ownerEpoch: claim.ownerEpoch,
       })
       taskStore.setHandoffDispatchFence(reserved.taskId, {
         deliveryId: 'delivery_terminal_failure',
@@ -624,10 +661,12 @@ describe('HandoffService creation boundary', () => {
       current = taskStore.updateDispatch(current.taskId, 'claimed', at)
       current = taskStore.updateDispatch(current.taskId, 'sent', at)
       current = taskStore.transition(current.taskId, { runtimeState: 'processing', at })
-      const journal = {
+      const journal: TestJournal = {
+        workspaceId: 'ws_1',
         append: () => { throw new Error('journal disk is full') },
         list: () => [],
-      } as unknown as ConversationJournal
+        getHeadSequence: () => 0,
+      }
       const service = makeService(deliveryStore, taskStore, undefined, journal)
       taskStore.commitResult(current.taskId, 'done', { committedAt: at })
 
@@ -666,10 +705,11 @@ describe('HandoffService creation boundary', () => {
         recipientBotId: 'bot_target',
         expectedOwnerEpoch: 0,
       })
+      const claim = requireClaim(claimed)
       deliveryStore.acknowledgeDelivery('delivery_broken', {
-        claimId: claimed.claim!.claimId,
+        claimId: claim.claimId,
         recipientBotId: 'bot_target',
-        ownerEpoch: claimed.claim!.ownerEpoch,
+        ownerEpoch: claim.ownerEpoch,
       })
       const service = makeService(deliveryStore, taskStore)
       taskStore.get = () => { throw new Error('task storage unavailable') }
