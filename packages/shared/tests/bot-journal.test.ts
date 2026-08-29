@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { BotDirectory, createDirectChatJournal } from '../src/bots/index.ts';
 import {
+  ConversationJournal,
   journalCursorPath,
   journalEntriesPath,
   journalEntryPath,
@@ -286,6 +287,82 @@ describe('ConversationJournal boundaries', () => {
       createdAt: at,
     });
     expect(() => journal.list(bot.directChatId)).toThrow(/wrong Bot/);
+  });
+});
+
+describe('ConversationJournal handoff entries', () => {
+  it('accepts a handoff entry carrying a handoffId and its authoring Bot', () => {
+    const { journal, bot } = setup();
+
+    const entry = journal.append({
+      conversationId: bot.directChatId,
+      kind: 'handoff',
+      authorBotId: bot.botId,
+      handoffId: 'handoff_0123456789abcdef0123456789abcdef',
+      body: 'handoff announced',
+      idempotencyKey: 'handoff-accepted',
+    });
+
+    expect(entry.kind).toBe('handoff');
+    expect(entry.handoffId).toBe('handoff_0123456789abcdef0123456789abcdef');
+    expect(entry.authorBotId).toBe(bot.botId);
+    const listed = journal.list(bot.directChatId);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toEqual(entry);
+  });
+
+  it('rejects a handoff entry without a handoffId', () => {
+    const { journal, bot } = setup();
+
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      kind: 'handoff',
+      authorBotId: bot.botId,
+      body: 'missing handoff id',
+      idempotencyKey: 'handoff-missing-id',
+    })).toThrow('handoff entries require handoffId');
+  });
+
+  it('rejects a handoff entry when no Bot may author the conversation', () => {
+    const root = tempWorkspace();
+    const journal = new ConversationJournal({
+      journalRoot: root,
+      workspaceId: 'ws_1',
+      resolveConversation: (conversationId) => ({ conversationId, workspaceId: 'ws_1' }),
+      clock: () => at,
+    });
+
+    expect(() => journal.append({
+      conversationId: 'channel_open',
+      kind: 'handoff',
+      body: 'no author',
+      idempotencyKey: 'handoff-no-author',
+    })).toThrow('A handoff entry requires an author Bot');
+  });
+
+  it('rejects handoffId on non-handoff entries', () => {
+    const { journal, bot } = setup();
+
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      kind: 'bot',
+      handoffId: 'handoff_0123456789abcdef0123456789abcdef',
+      body: 'stray handoff id',
+      idempotencyKey: 'handoff-stray',
+    })).toThrow('only handoff entries may carry handoffId');
+  });
+
+  it('rejects a handoff entry authored by a non-sole-author Bot in a DirectChat', () => {
+    const { journal, bot } = setup();
+
+    expect(() => journal.append({
+      conversationId: bot.directChatId,
+      kind: 'handoff',
+      authorBotId: 'bot_other',
+      handoffId: 'handoff_0123456789abcdef0123456789abcdef',
+      body: 'foreign author',
+      idempotencyKey: 'handoff-foreign-author',
+    })).toThrow(/not owned by bot/);
   });
 });
 

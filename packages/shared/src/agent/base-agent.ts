@@ -66,6 +66,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { loadAllSkills } from '../skills/storage.ts';
+import { i18n } from '../i18n/index.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -129,6 +130,41 @@ export interface SpawnSessionHelpResult {
     defaultConnection: string | null;
     permissionMode: string;
   };
+}
+
+export interface SendHandoffRequest {
+  targetBot: string;
+  request: string;
+}
+
+export interface SendHandoffResult {
+  handoffId: string;
+  deliveryId: string;
+  taskId: string;
+  runtimeState: import('@kata-sh/core').SpawnTaskRuntimeState;
+  version: number;
+  targetBotId: string;
+}
+
+export interface SendHandoffHelpResult {
+  tool: 'send_handoff';
+  targetBot: string;
+  request: string;
+}
+
+export type InspectHandoffRequest =
+  | { action: 'get'; taskId: string }
+  | { action: 'wait'; taskId: string; afterVersion: number; timeoutMs?: number }
+  | { action: 'read-result'; taskId: string; offset: number; limit: number };
+
+export type InspectHandoffResult =
+  | import('@kata-sh/core').HandoffTaskView
+  | import('@kata-sh/core').SpawnTaskResultChunkView
+  | import('@kata-sh/core').SpawnTaskIntegrityView;
+
+export interface InspectHandoffHelpResult {
+  tool: 'inspect_handoff';
+  actions: readonly ['get', 'wait', 'read-result'];
 }
 
 /** Tool list for mini agents - quick config edits only */
@@ -267,6 +303,8 @@ export abstract class BaseAgent implements AgentBackend {
   onUsageUpdate: ((update: UsageUpdate) => void) | null = null;
   onBackendAuthRequired: ((reason: string) => void) | null = null;
   onSpawnSession: ((request: SpawnSessionRequest) => Promise<SpawnSessionResult>) | null = null;
+  onSendHandoff: ((request: SendHandoffRequest) => Promise<SendHandoffResult>) | null = null;
+  onInspectHandoff: ((request: InspectHandoffRequest, signal?: AbortSignal) => Promise<InspectHandoffResult>) | null = null;
 
   // ============================================================
   // Constructor
@@ -1235,6 +1273,76 @@ ${formattedMessages}
     };
 
     return this.onSpawnSession(request);
+  }
+
+  protected async preExecuteSendHandoff(
+    input: Record<string, unknown>
+  ): Promise<SendHandoffResult | SendHandoffHelpResult> {
+    if (input.help) {
+      return {
+        tool: 'send_handoff',
+        targetBot: i18n.t('handoffs.sendToolHelpTargetBot'),
+        request: i18n.t('handoffs.sendToolHelpRequest'),
+      };
+    }
+
+    const targetBot = typeof input.targetBot === 'string' ? input.targetBot.trim() : '';
+    if (!targetBot) {
+      throw new Error(i18n.t('handoffs.sendToolTargetRequired'));
+    }
+    const request = typeof input.request === 'string' ? input.request : '';
+    if (!request.trim()) {
+      throw new Error(i18n.t('handoffs.sendToolRequestRequired'));
+    }
+
+    if (!this.onSendHandoff) {
+      throw new Error(i18n.t('handoffs.sendToolUnavailable'));
+    }
+
+    return this.onSendHandoff({ targetBot, request });
+  }
+
+  protected async preExecuteInspectHandoff(
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<InspectHandoffResult | InspectHandoffHelpResult> {
+    if (input.help) {
+      return { tool: 'inspect_handoff', actions: ['get', 'wait', 'read-result'] };
+    }
+    const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : '';
+    if (!taskId) throw new Error('taskId is required. Call with help=true to see usage.');
+    if (!this.onInspectHandoff) throw new Error('inspect_handoff is not available in this context.');
+
+    if (input.action === 'get') return this.onInspectHandoff({ action: 'get', taskId }, signal);
+    if (input.action === 'wait') {
+      if (!Number.isSafeInteger(input.afterVersion) || Number(input.afterVersion) < 0) {
+        throw new Error('afterVersion must be a non-negative integer.');
+      }
+      if (input.timeoutMs !== undefined && (!Number.isFinite(input.timeoutMs) || Number(input.timeoutMs) < 0)) {
+        throw new Error('timeoutMs must be a non-negative finite number.');
+      }
+      return this.onInspectHandoff({
+        action: 'wait',
+        taskId,
+        afterVersion: Number(input.afterVersion),
+        ...(input.timeoutMs !== undefined ? { timeoutMs: Number(input.timeoutMs) } : {}),
+      }, signal);
+    }
+    if (input.action === 'read-result') {
+      if (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0) {
+        throw new Error('offset must be a non-negative integer.');
+      }
+      if (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1) {
+        throw new Error('limit must be a positive integer.');
+      }
+      return this.onInspectHandoff({
+        action: 'read-result',
+        taskId,
+        offset: Number(input.offset),
+        limit: Number(input.limit),
+      }, signal);
+    }
+    throw new Error('action must be get, wait, or read-result.');
   }
 
   /**

@@ -11,6 +11,8 @@ import {
   SPAWN_TASK_LIMITS,
   SPAWN_TASK_SCHEMA_VERSION,
   type SpawnTask,
+  type SpawnTaskDispatchFence,
+  type SpawnTaskOrigin,
   type SpawnTaskDispatchState,
   type SpawnTaskIntegrityView,
   type SpawnTaskJsonValue,
@@ -30,6 +32,8 @@ import {
   type SpawnTaskMetadataUpdate,
 } from './metadata.ts';
 import { assertSpawnTask, assertSpawnTaskId } from './validation.ts';
+import { matchesSpawnTaskDispatchFence } from './handoff-fence.ts';
+import { readJsonFile, writeJsonIfAbsent } from '../conversations/durable-json.ts';
 import { createSpawnTaskFailure } from './failures.ts';
 import { finalizeRecoveredSpawnTask } from './recovery.ts';
 import {
@@ -68,6 +72,7 @@ import {
 
 const MAX_RESERVATION_ATTEMPTS = 16;
 const PARENT_DELETIONS_DIRECTORY = 'parents';
+const HANDOFF_INDEX_DIRECTORY = 'by-handoff';
 
 export interface SpawnTaskStoreOptions {
   readonly workspaceRoot: string;
@@ -82,6 +87,8 @@ export interface ReserveSpawnTaskInput {
   readonly delegatedPrompt: string;
   readonly childConfig: Readonly<Record<string, SpawnTaskJsonValue>>;
 }
+
+export interface ReserveHandoffSpawnTaskInput extends ReserveSpawnTaskInput {}
 
 export interface ReconstructSpawnTaskInput {
   readonly taskId: string;
@@ -111,6 +118,11 @@ export interface SpawnTaskStartupReport {
 
 interface CommitOptions {
   readonly artifactFiles?: ReadonlyMap<string, Buffer | string>;
+}
+
+interface HandoffTaskPointer {
+  readonly handoffId: string;
+  readonly taskId: string;
 }
 
 function clone<T>(value: T): T {
@@ -148,6 +160,7 @@ export class SpawnTaskStore {
   private readonly byChild = new Map<string, string>();
   private readonly byMessage = new Map<string, string>();
   private readonly byDispatchAttempt = new Map<string, string>();
+  private readonly byHandoff = new Map<string, string>();
   private readonly deletedParents = new Set<string>();
   private readonly loadErrors = new Map<string, string>();
   private lastStartupReport: SpawnTaskStartupReport = emptyStartupReport();
@@ -163,10 +176,84 @@ export class SpawnTaskStore {
     ensureDurableDirectory(this.rootPath);
     ensureDurableDirectory(this.tasksPath());
     ensureDurableDirectory(this.parentDeletionsPath());
+    ensureDurableDirectory(this.handoffIndexPath());
     this.reload();
   }
 
   reserve(input: ReserveSpawnTaskInput): SpawnTask {
+    return this.reserveInternal(input);
+  }
+
+  reserveForHandoff(handoffId: string, input: ReserveHandoffSpawnTaskInput): SpawnTask {
+    assertSpawnTaskId(handoffId, 'handoffId');
+    const pointerPath = this.handoffIndexPathFor(handoffId);
+    const pointer = this.readHandoffPointer(handoffId);
+    if (pointer !== null) {
+      return this.resolveHandoffPointer(pointer);
+    }
+
+    const existingTaskId = this.byHandoff.get(handoffId);
+    if (existingTaskId) {
+      const existing = this.tasks.get(existingTaskId);
+      if (!existing) {
+        this.byHandoff.delete(handoffId);
+      } else {
+        const committedPointer = writeJsonIfAbsent(pointerPath, {
+          handoffId,
+          taskId: existing.taskId,
+        });
+        if (committedPointer) return clone(existing);
+        const winner = this.readHandoffPointer(handoffId);
+        if (winner) return this.resolveHandoffPointer(winner);
+        throw new Error(`Handoff ${handoffId} task index disappeared during repair`);
+      }
+    }
+
+    const task = this.reserveInternal(input, { kind: 'handoff', handoffId });
+    const committedPointer = writeJsonIfAbsent(pointerPath, { handoffId, taskId: task.taskId });
+    if (committedPointer) return clone(task);
+
+    const winner = this.readHandoffPointer(handoffId);
+    if (!winner) {
+      throw new Error(`Handoff ${handoffId} task index disappeared during reservation`);
+    }
+    return this.resolveHandoffPointer(winner, task);
+  }
+
+  getByHandoff(handoffId: string): SpawnTask | null {
+    assertSpawnTaskId(handoffId, 'handoffId');
+    const taskId = this.byHandoff.get(handoffId);
+    const task = taskId ? this.tasks.get(taskId) : undefined;
+    return task ? clone(task) : null;
+  }
+
+  setHandoffDispatchFence(taskId: string, fence: SpawnTaskDispatchFence, at: string): SpawnTask {
+    const current = this.require(taskId);
+    if (current.origin?.kind !== 'handoff') {
+      throw new Error(`Spawned task ${taskId} is not a handoff task`);
+    }
+    const existing = current.dispatch.handoffFence;
+    if (existing) {
+      if (matchesSpawnTaskDispatchFence(existing, fence)) return clone(current);
+      if (existing.deliveryId !== fence.deliveryId || existing.recipientBotId !== fence.recipientBotId
+        || fence.ownerEpoch <= existing.ownerEpoch) {
+        throw new Error(`Spawned task ${taskId} already has a different handoff dispatch fence`);
+      }
+    }
+    if (isSpawnTaskTerminal(current.runtimeState)) {
+      throw new Error(`Cannot fence terminal spawned task ${taskId}`);
+    }
+    const next: SpawnTask = {
+      ...current,
+      version: current.version + 1,
+      stateTimestamps: { ...current.stateTimestamps, updatedAt: at },
+      dispatch: { ...current.dispatch, handoffFence: clone(fence) },
+    };
+    this.commit(next);
+    return clone(next);
+  }
+
+  private reserveInternal(input: ReserveSpawnTaskInput, origin?: SpawnTaskOrigin): SpawnTask {
     assertSpawnTaskId(input.parentSessionId, 'parentSessionId');
 
     for (let attempt = 0; attempt < MAX_RESERVATION_ATTEMPTS; attempt += 1) {
@@ -181,6 +268,7 @@ export class SpawnTaskStore {
         workspaceId: this.workspaceId,
         parentSessionId: input.parentSessionId,
         childSessionId: ids.childSessionId,
+        ...(origin ? { origin } : {}),
         delegatedPrompt: input.delegatedPrompt,
         childConfig: input.childConfig,
         runtimeState: 'queued',
@@ -529,6 +617,7 @@ export class SpawnTaskStore {
     this.byChild.clear();
     this.byMessage.clear();
     this.byDispatchAttempt.clear();
+    this.byHandoff.clear();
     this.deletedParents.clear();
     this.loadErrors.clear();
     this.lastStartupReport = emptyStartupReport();
@@ -624,6 +713,7 @@ export class SpawnTaskStore {
     this.byChild.clear();
     this.byMessage.clear();
     this.byDispatchAttempt.clear();
+    this.byHandoff.clear();
     this.deletedParents.clear();
     this.loadErrors.clear();
     this.loadParentDeletionMarkers();
@@ -684,6 +774,124 @@ export class SpawnTaskStore {
 
   private tasksPath(): string {
     return join(this.rootPath, 'tasks');
+  }
+
+  private handoffIndexPath(): string {
+    return join(this.rootPath, HANDOFF_INDEX_DIRECTORY);
+  }
+
+  private handoffIndexPathFor(handoffId: string): string {
+    assertSpawnTaskId(handoffId, 'handoffId');
+    return join(this.handoffIndexPath(), `${handoffId}.json`);
+  }
+
+  private readHandoffPointer(handoffId: string): HandoffTaskPointer | null {
+    const pointerPath = this.handoffIndexPathFor(handoffId);
+    assertNotSymlink(pointerPath, 'spawned-task handoff index');
+    const raw = readJsonFile(pointerPath);
+    if (raw === null) return null;
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new Error(`Handoff ${handoffId} has an invalid task index`);
+    }
+    const pointer = raw as Record<string, unknown>;
+    const keys = Object.keys(pointer);
+    if (keys.length !== 2 || !Object.hasOwn(pointer, 'handoffId') || !Object.hasOwn(pointer, 'taskId')) {
+      throw new Error(`Handoff ${handoffId} has an invalid task index`);
+    }
+    const pointerHandoffId = assertSpawnTaskId(pointer.handoffId, 'handoff task index handoffId');
+    const taskId = assertSpawnTaskId(pointer.taskId, 'handoff task index taskId');
+    if (pointerHandoffId !== handoffId) {
+      throw new Error(`Handoff ${handoffId} has an inconsistent task index`);
+    }
+    return { handoffId: pointerHandoffId, taskId };
+  }
+
+  private resolveHandoffPointer(pointer: HandoffTaskPointer, losingTask?: SpawnTask): SpawnTask {
+    const pointedTask = this.tasks.get(pointer.taskId);
+    if (pointedTask) {
+      if (pointedTask.origin?.kind !== 'handoff' || pointedTask.origin.handoffId !== pointer.handoffId) {
+        throw new Error(`Handoff ${pointer.handoffId} has an inconsistent task index`);
+      }
+      this.byHandoff.set(pointer.handoffId, pointedTask.taskId);
+      if (losingTask && losingTask.taskId !== pointedTask.taskId) this.discardReservedHandoffTask(losingTask);
+      return clone(pointedTask);
+    }
+
+    const loaded = this.readTaskFromDisk(pointer.taskId);
+    if (!loaded || loaded.task.origin?.kind !== 'handoff' || loaded.task.origin.handoffId !== pointer.handoffId) {
+      throw new Error(`Handoff ${pointer.handoffId} has an inconsistent task index`);
+    }
+
+    const existingOwnerId = this.byHandoff.get(pointer.handoffId);
+    if (existingOwnerId && existingOwnerId !== pointer.taskId) {
+      const existingOwner = this.tasks.get(existingOwnerId);
+      if (!existingOwner || !this.canDiscardReservedHandoffTask(existingOwner)) {
+        throw new Error(`Handoff ${pointer.handoffId} is already owned by another task`);
+      }
+      this.discardReservedHandoffTask(existingOwner);
+    }
+    if (losingTask && losingTask.taskId !== pointer.taskId && this.canDiscardReservedHandoffTask(losingTask)) {
+      this.discardReservedHandoffTask(losingTask);
+    }
+    this.index(loaded.task, loaded.generation);
+    return clone(loaded.task);
+  }
+
+  private readTaskFromDisk(taskId: string): { readonly task: SpawnTask; readonly generation: string } | null {
+    assertSpawnTaskId(taskId, 'taskId');
+    const taskPath = join(this.tasksPath(), taskId);
+    assertNotSymlink(taskPath, 'spawned-task directory');
+    if (!existsSync(taskPath)) return null;
+    assertDirectory(taskPath, 'spawned-task directory');
+    const currentPath = join(taskPath, CURRENT_FILE);
+    assertNotSymlink(currentPath, 'spawned-task CURRENT');
+    assertRegularFile(currentPath, 'spawned-task CURRENT');
+    const generation = readFileSync(currentPath, 'utf8').trim();
+    assertGenerationName(generation);
+    const generationPath = join(taskPath, 'generations', generation);
+    assertDirectory(generationPath, 'current spawned-task generation');
+    const recordPath = join(generationPath, RECORD_FILE);
+    assertRegularFile(recordPath, 'spawned-task record');
+    const task = assertSpawnTask(JSON.parse(readFileSync(recordPath, 'utf8')));
+    if (task.taskId !== taskId || task.workspaceId !== this.workspaceId) return null;
+    return { task, generation };
+  }
+
+  private canDiscardReservedHandoffTask(task: SpawnTask): boolean {
+    return task.origin?.kind === 'handoff'
+      && task.runtimeState === 'queued'
+      && task.version === 1
+      && task.dispatch.state === 'reserved'
+      && task.dispatch.handoffFence === undefined
+      && task.awaitingInput === undefined
+      && task.cancellation === undefined
+      && task.result === undefined
+      && task.failure === undefined;
+  }
+
+  private discardReservedHandoffTask(task: SpawnTask): void {
+    if (!this.canDiscardReservedHandoffTask(task)) {
+      throw new Error(`Cannot discard non-reserved handoff task ${task.taskId}`);
+    }
+    const taskPath = join(this.tasksPath(), task.taskId);
+    assertNotSymlink(taskPath, 'spawned-task reservation path');
+    if (existsSync(taskPath)) {
+      assertDirectory(taskPath, 'spawned-task reservation path');
+      rmSync(taskPath, { recursive: true, force: true });
+      syncDirectory(this.tasksPath());
+    }
+    this.tasks.delete(task.taskId);
+    this.generations.delete(task.taskId);
+    this.byParent.get(task.parentSessionId)?.delete(task.taskId);
+    if (this.byChild.get(task.childSessionId) === task.taskId) this.byChild.delete(task.childSessionId);
+    if (this.byMessage.get(task.dispatch.messageId) === task.taskId) this.byMessage.delete(task.dispatch.messageId);
+    if (this.byDispatchAttempt.get(task.dispatch.dispatchAttemptId) === task.taskId) {
+      this.byDispatchAttempt.delete(task.dispatch.dispatchAttemptId);
+    }
+    const origin = task.origin;
+    if (origin?.kind === 'handoff' && this.byHandoff.get(origin.handoffId) === task.taskId) {
+      this.byHandoff.delete(origin.handoffId);
+    }
   }
 
   private parentDeletionsPath(): string {
@@ -791,6 +999,12 @@ export class SpawnTaskStore {
         throw new Error(`Duplicate spawned-task ${field}: ${value}`);
       }
     }
+    if (task.origin?.kind === 'handoff') {
+      const owner = this.byHandoff.get(task.origin.handoffId);
+      if (owner && owner !== task.taskId) {
+        throw new Error(`Duplicate spawned-task handoff origin: ${task.origin.handoffId}`);
+      }
+    }
 
     const previous = this.tasks.get(task.taskId);
     if (previous && previous.parentSessionId !== task.parentSessionId) {
@@ -804,5 +1018,8 @@ export class SpawnTaskStore {
     this.byChild.set(task.childSessionId, task.taskId);
     this.byMessage.set(task.dispatch.messageId, task.taskId);
     this.byDispatchAttempt.set(task.dispatch.dispatchAttemptId, task.taskId);
+    if (task.origin?.kind === 'handoff') {
+      this.byHandoff.set(task.origin.handoffId, task.taskId);
+    }
   }
 }

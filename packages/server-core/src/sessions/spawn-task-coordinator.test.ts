@@ -27,6 +27,50 @@ afterEach(() => {
 })
 
 describe('SpawnTaskCoordinator', () => {
+  it('fails the task when its handoff fence changes after processing is committed', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserveForHandoff('handoff_fence', {
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'dispatch with a fenced claim',
+      childConfig: {},
+    })
+    const fence = {
+      deliveryId: 'delivery_fence',
+      claimId: 'claim_1',
+      recipientBotId: 'bot_target',
+      ownerEpoch: 1,
+    }
+    const fenced = store.setHandoffDispatchFence(reserved.taskId, fence, '2026-08-16T16:00:01.000Z')
+    const transition = store.transition.bind(store)
+    store.transition = (taskId, input) => {
+      const next = transition(taskId, input)
+      if (input.runtimeState === 'processing') {
+        store.setHandoffDispatchFence(taskId, {
+          ...fence,
+          claimId: 'claim_2',
+          ownerEpoch: 2,
+        }, '2026-08-16T16:00:02.000Z')
+      }
+      return next
+    }
+    let providerCalls = 0
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => { providerCalls += 1 },
+    })
+
+    await expect(coordinator.dispatchReserved(fenced, undefined, fence)).rejects.toMatchObject({
+      failure: { details: { boundary: 'handoff_fence' } },
+      task: { runtimeState: 'failed' },
+    })
+    expect(providerCalls).toBe(0)
+    expect(store.get(reserved.taskId)?.runtimeState).toBe('failed')
+  })
+
   it('recovers a reserved task by creating the reserved child before dispatch', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
     roots.push(workspaceRoot)
@@ -167,6 +211,48 @@ describe('SpawnTaskCoordinator', () => {
       runtimeState: 'processing',
       dispatch: { state: 'sent' },
     })
+  })
+
+  it('restores Bot context before recovered handoff dispatch', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    const reserved = store.reserveForHandoff('handoff_context', {
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'recover with target Bot context',
+      childConfig: { permissionMode: 'safe' },
+    })
+    store.updateDispatch(reserved.taskId, 'ready', '2026-08-16T16:00:01.000Z')
+    const botTurnContext = {
+      runId: 'run_recovered',
+      operationId: 'handoff.recovered',
+      workspaceId: 'workspace_spawn_test',
+      botId: 'bot_target',
+      conversationId: 'chat_target',
+      journalCursor: 4,
+      conversationCursor: 3,
+      memoryRevision: 2,
+      checkpointRevision: 1,
+      text: '<bot_context_untrusted>target context</bot_context_untrusted>',
+      memoryIds: ['memory_target'],
+    }
+    let dispatchedContext: unknown
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: (input) => {
+        dispatchedContext = input.botTurnContext
+      },
+    })
+
+    await coordinator.reconcileStartup({
+      parentExists: () => true,
+      findChild: () => ({ exists: true, matches: true }),
+      resolveBotTurnContext: () => botTurnContext,
+    })
+
+    expect(dispatchedContext).toEqual(botTurnContext)
   })
 
   it('fails ready recovery when attachments cannot be restored', async () => {
@@ -2306,5 +2392,39 @@ describe('SpawnTaskCoordinator', () => {
         message: 'provider turn failed',
       },
     })
+  })
+
+  it('reports a rejected provider-failure finalizer through the late-event boundary', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'spawn-coordinator-'))
+    roots.push(workspaceRoot)
+    const store = createStore(workspaceRoot)
+    let rejectProvider: ((error: Error) => void) | undefined
+    const lateEvents: string[] = []
+    let resolveLateEvent: (() => void) | undefined
+    const lateEvent = new Promise<void>((resolve) => { resolveLateEvent = resolve })
+    const coordinator = new SpawnTaskCoordinator({
+      store,
+      createChild: async () => {},
+      appendDelegatedPrompt: async () => {},
+      dispatchProvider: () => new Promise<void>((_resolve, reject) => {
+        rejectProvider = reject
+      }),
+      onLateEvent: ({ eventKind }) => {
+        lateEvents.push(eventKind)
+        resolveLateEvent?.()
+      },
+    })
+
+    await coordinator.spawn({
+      parentSessionId: 'session_parent',
+      delegatedPrompt: 'observe finalizer failure',
+      childConfig: {},
+    })
+    store.getByChildSessionId = () => { throw new Error('task index unavailable') }
+    if (!rejectProvider) throw new Error('Expected the provider turn to start')
+    rejectProvider(new Error('provider turn failed'))
+    await lateEvent
+
+    expect(lateEvents).toEqual(['provider_failure_finalizer_error'])
   })
 })

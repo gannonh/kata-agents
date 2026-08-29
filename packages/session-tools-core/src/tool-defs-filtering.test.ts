@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import {
   SESSION_TOOL_DEFS,
+  InspectHandoffSchema,
+  SendHandoffSchema,
   getSessionToolDefs,
   getSessionToolNames,
   getSessionToolRegistry,
@@ -57,10 +59,12 @@ describe('session tool filtering helpers', () => {
     expect(allowed.has('call_llm')).toBe(true);
     expect(allowed.has('browser_tool')).toBe(true);
     expect(allowed.has('script_sandbox')).toBe(true);
+    expect(allowed.has('inspect_handoff')).toBe(true);
 
     expect(blocked.has('source_oauth_trigger')).toBe(true);
     expect(blocked.has('source_credential_prompt')).toBe(true);
     expect(blocked.has('spawn_session')).toBe(true);
+    expect(blocked.has('send_handoff')).toBe(true);
   });
 
   it('safe-mode helpers support MCP prefixing', () => {
@@ -72,5 +76,44 @@ describe('session tool filtering helpers', () => {
     expect(allowedPrefixed.has('mcp__session__script_sandbox')).toBe(true);
     expect(blockedPrefixed.has('mcp__session__source_oauth_trigger')).toBe(true);
     expect(blockedPrefixed.has('mcp__session__spawn_session')).toBe(true);
+  });
+
+  it('exposes send_handoff through the canonical Pi proxy schema', () => {
+    const defs = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' });
+    const handoff = defs.find(def => def.name === 'mcp__session__send_handoff');
+
+    expect(handoff).toBeDefined();
+    expect(handoff?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        help: { type: 'boolean' },
+        targetBot: { type: 'string' },
+        request: { type: 'string' },
+      },
+    });
+  });
+
+  it('exposes read-only handoff inspection and rejects caller identity fields', () => {
+    const defs = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' });
+    const inspect = defs.find(def => def.name === 'mcp__session__inspect_handoff');
+
+    expect(inspect).toBeDefined();
+    expect(inspect?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        action: { enum: ['get', 'wait', 'read-result'] },
+        taskId: { type: 'string' },
+      },
+    });
+    expect(SendHandoffSchema.safeParse({
+      targetBot: 'Reviewer',
+      request: 'Review it.',
+      workspaceId: 'spoofed',
+    }).success).toBe(false);
+    expect(InspectHandoffSchema.safeParse({
+      action: 'get',
+      taskId: 'task_1',
+      botId: 'spoofed',
+    }).success).toBe(false);
   });
 });

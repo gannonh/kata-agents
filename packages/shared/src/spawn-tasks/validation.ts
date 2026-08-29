@@ -134,6 +134,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     'workspaceId',
     'parentSessionId',
     'childSessionId',
+    'origin',
     'delegatedPrompt',
     'childConfig',
     'runtimeState',
@@ -154,6 +155,17 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   assertSpawnTaskId(task.workspaceId, 'workspaceId');
   assertSpawnTaskId(task.parentSessionId, 'parentSessionId');
   assertSpawnTaskId(task.childSessionId, 'childSessionId');
+  if (task.origin !== undefined) {
+    const origin = object(task.origin, 'origin');
+    if (origin.kind === 'session') {
+      exactKeys(origin, 'origin', ['kind']);
+    } else if (origin.kind === 'handoff') {
+      exactKeys(origin, 'origin', ['kind', 'handoffId']);
+      assertSpawnTaskId(origin.handoffId, 'origin.handoffId');
+    } else {
+      fail('unknown origin.kind');
+    }
+  }
   string(task.delegatedPrompt, 'delegatedPrompt');
   const childConfig = object(task.childConfig, 'childConfig');
   assertJsonValue(childConfig, 'childConfig');
@@ -191,6 +203,7 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     'readyAt',
     'claimedAt',
     'sentAt',
+    'handoffFence',
   ]);
   const dispatchState = string(dispatch.state, 'dispatch.state');
   if (!(SPAWN_TASK_DISPATCH_STATES as readonly string[]).includes(dispatchState)) fail('unknown dispatch.state');
@@ -199,6 +212,17 @@ export function assertSpawnTask(value: unknown): SpawnTask {
   timestamp(dispatch.reservedAt, 'dispatch.reservedAt');
   for (const key of ['readyAt', 'claimedAt', 'sentAt']) {
     if (dispatch[key] !== undefined) timestamp(dispatch[key], `dispatch.${key}`);
+  }
+
+  if (dispatch.handoffFence !== undefined) {
+    const origin = task.origin as Record<string, unknown> | undefined;
+    if (origin?.kind !== 'handoff') fail('dispatch.handoffFence requires handoff origin');
+    const fence = object(dispatch.handoffFence, 'dispatch.handoffFence');
+    exactKeys(fence, 'dispatch.handoffFence', ['deliveryId', 'claimId', 'recipientBotId', 'ownerEpoch']);
+    assertSpawnTaskId(fence.deliveryId, 'dispatch.handoffFence.deliveryId');
+    assertSpawnTaskId(fence.claimId, 'dispatch.handoffFence.claimId');
+    assertSpawnTaskId(fence.recipientBotId, 'dispatch.handoffFence.recipientBotId');
+    positiveInteger(fence.ownerEpoch, 'dispatch.handoffFence.ownerEpoch');
   }
   const requiredDispatchTimestamps: Record<string, readonly string[]> = {
     reserved: [],

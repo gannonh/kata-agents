@@ -9,9 +9,13 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, JournalEntry } from '@kata-sh/core'
+import type { HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
+import { HandoffCard } from '../handoffs/HandoffCard'
+import { mergeHandoffTimeline } from '../handoffs/timeline'
+import { useNavigation } from '@/contexts/NavigationContext'
 
 export interface BotChatPanelProps {
   workspaceId: string
@@ -22,6 +26,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const { t } = useTranslation()
   const [bot, setBot] = React.useState<BotPublicDto | null>(null)
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
+  const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
   const [memory, setMemory] = React.useState<BotMemoryHead | null>(null)
   const [context, setContext] = React.useState<BotContextSnapshot | null>(null)
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
@@ -30,6 +35,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [savingMemory, setSavingMemory] = React.useState<string | null>(null)
   const refreshGeneration = React.useRef(0)
   const pendingSend = React.useRef<{ message: string; idempotencyKey: string } | null>(null)
+  const { updateRightSidebar } = useNavigation()
 
   const refresh = React.useCallback(async () => {
     const generation = ++refreshGeneration.current
@@ -38,9 +44,11 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       window.electronAPI.getBotMemory(workspaceId, botId),
       window.electronAPI.getBotContext(workspaceId, botId),
     ])
+    const loadedHandoffs = await window.electronAPI.listConversationHandoffs(journal.bot.directChatId)
     if (generation !== refreshGeneration.current) return
     setBot(journal.bot)
     setEntries(journal.entries)
+    setHandoffs(loadedHandoffs)
     setMemory(loadedMemory)
     setContext(loadedContext)
   }, [workspaceId, botId])
@@ -51,11 +59,24 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       if (event.botId && event.botId !== botId) return
       refresh().catch(err => console.error('[Bots] Failed to refresh journal:', err))
     })
+    const unsubscribeHandoffs = window.electronAPI.onHandoffEvent(event => {
+      if (bot?.directChatId && event.conversationId !== bot.directChatId) return
+      refresh().catch(err => console.error('[Bots] Failed to refresh handoffs:', err))
+    })
     return () => {
       refreshGeneration.current += 1
       unsubscribe()
+      unsubscribeHandoffs()
     }
-  }, [refresh, botId])
+  }, [refresh, botId, bot?.directChatId])
+
+  const openHandoff = React.useCallback((rail: HandoffRailView) => {
+    updateRightSidebar({ type: 'handoff', conversationId: rail.conversationId, handoffId: rail.handoffId })
+  }, [updateRightSidebar])
+
+  const timeline = React.useMemo(() => {
+    return mergeHandoffTimeline(entries, handoffs)
+  }, [entries, handoffs])
 
   const updateMemory = React.useCallback(async (memoryId: string, kind: 'edit' | 'forget' | 'restore', content?: string) => {
     if (!memory) return
@@ -136,20 +157,22 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
             </div>
           ))}
         </section>
-        {entries.length === 0 ? (
+        {timeline.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('bots.journalEmpty')}</p>
         ) : (
-          entries.map(entry => (
+          timeline.map(item => item.kind === 'handoff' ? (
+            <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : (
             <div
-              key={entry.entryId}
-              data-testid={`bot-journal-entry-${entry.entryId}`}
-              data-entry-kind={entry.kind}
+              key={item.entry.entryId}
+              data-testid={`bot-journal-entry-${item.entry.entryId}`}
+              data-entry-kind={item.entry.kind}
               className="text-sm"
             >
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {entry.kind}
+                {item.entry.kind}
               </div>
-              <div className="whitespace-pre-wrap break-words">{entry.body}</div>
+              <div className="whitespace-pre-wrap break-words">{item.entry.body}</div>
             </div>
           ))
         )}

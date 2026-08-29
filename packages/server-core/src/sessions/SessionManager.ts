@@ -114,6 +114,7 @@ import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntr
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskRecoveryAdapter, type SpawnTaskRecoveryReference, type SpawnTaskUpdated } from './spawn-task-coordinator'
 import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
+import type { HandoffDelegate } from '../handoffs/service'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@kata-sh/server-core/domain'
@@ -1229,6 +1230,12 @@ export interface SessionManagerOptions {
   spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
   /** Internal C3 audit seam for ignored late child lifecycle events. */
   spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
+  /**
+   * Resolves the per-workspace bot-handoff delegate. The handoffs runtime
+   * installs one via setHandoffDelegateFactory; when unset, send_handoff is
+   * unavailable and handoff reconciliation is skipped.
+   */
+  handoffDelegateFactory?: (workspaceId: string) => HandoffDelegate | undefined
 }
 
 interface ForkChildCreateOptions {
@@ -1249,10 +1256,12 @@ interface ForkChildCreateOptions {
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private sessionsInitialized = false
   private readonly spawnTaskStoreFactory: (options: SpawnTaskStoreOptions) => SpawnTaskStore
   private readonly spawnTaskDispatchProvider?: (input: SpawnTaskDispatchInput) => void | Promise<void>
   private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
   private readonly spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
+  private handoffDelegateFactory?: (workspaceId: string) => HandoffDelegate | undefined
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   private readonly spawnTaskRecoveryPending = new Set<string>()
@@ -1343,6 +1352,51 @@ export class SessionManager implements ISessionManager {
     this.spawnTaskDispatchProvider = options.spawnTaskDispatchProvider
     this.spawnTaskUpdated = options.spawnTaskUpdated
     this.spawnTaskLateEvent = options.spawnTaskLateEvent
+    this.handoffDelegateFactory = options.handoffDelegateFactory
+  }
+
+  /**
+   * Late-binds the handoff delegate factory. The handoffs runtime installs it
+   * once at bootstrap; passing null detaches handoff handling.
+   */
+  setHandoffDelegateFactory(factory: ((workspaceId: string) => HandoffDelegate | undefined) | null): void {
+    this.handoffDelegateFactory = factory ?? undefined
+  }
+
+  private handoffDelegateFor(workspaceId: string): HandoffDelegate | undefined {
+    return this.handoffDelegateFactory?.(workspaceId)
+  }
+
+  /**
+   * Public accessor for the handoffs runtime: the canonical per-workspace
+   * spawn coordinator and its task store, so handoff reservations and task
+   * reads share one writer with ordinary spawns.
+   */
+  getOrCreateWorkspaceSpawnTaskRuntime(workspaceId: string): {
+    coordinator: SpawnTaskCoordinator
+    taskStore: SpawnTaskStore
+  } {
+    for (const managed of this.sessions.values()) {
+      if (managed.workspace.id === workspaceId) {
+        return {
+          coordinator: this.getOrCreateSpawnTaskCoordinator(managed.workspace.rootPath, workspaceId),
+          taskStore: this.requireSpawnTaskStore(managed.workspace.rootPath, workspaceId),
+        }
+      }
+    }
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    return {
+      coordinator: this.getOrCreateSpawnTaskCoordinator(workspace.rootPath, workspace.id),
+      taskStore: this.requireSpawnTaskStore(workspace.rootPath, workspace.id),
+    }
+  }
+
+  private requireSpawnTaskStore(workspaceRootPath: string, workspaceId: string): SpawnTaskStore {
+    this.getOrCreateSpawnTaskCoordinator(workspaceRootPath, workspaceId)
+    const store = this.spawnTaskStores.get(workspaceRootPath)
+    if (!store) throw new Error(`Spawned-task store is unavailable for workspace ${workspaceId}`)
+    return store
   }
 
   private registerPreChatBarrier(sessionId: string): () => void {
@@ -2243,9 +2297,24 @@ export class SessionManager implements ISessionManager {
               error,
             )
           }
+          if (this.spawnTaskCoordinators.get(workspaceRootPath) === startupCoordinator) {
+            try {
+              const report = await this.handoffDelegateFor(workspace.id)?.reconcileStartup()
+              if (report?.recoveryFailures.length) {
+                sessionLog.warn(
+                  `Handoff startup reconciliation reported ${report.recoveryFailures.length} failure(s)`
+                    + ` for workspace ${workspace.id}:`,
+                  report.recoveryFailures,
+                )
+              }
+            } catch (error) {
+              sessionLog.warn(`Handoff startup reconciliation failed for workspace ${workspace.id}:`, error)
+            }
+          }
         }
       }
 
+      this.sessionsInitialized = true
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
@@ -2912,6 +2981,14 @@ export class SessionManager implements ISessionManager {
       },
       listChildren: allReferences,
       resolveAttachments: (task) => this.resolveSpawnTaskAttachments(task),
+      resolveBotTurnContext: async (task) => {
+        if (task.origin?.kind !== 'handoff') return undefined
+        const delegate = this.handoffDelegateFor(workspaceId)
+        if (!delegate) {
+          throw new Error(`Handoff runtime is unavailable for task ${task.taskId} context recovery`)
+        }
+        return delegate.resolveBotTurnContext(task.origin.handoffId)
+      },
     }
   }
 
@@ -2980,6 +3057,7 @@ export class SessionManager implements ISessionManager {
             name: typeof config.name === 'string' ? config.name : undefined,
             llmConnection: typeof config.llmConnection === 'string' ? config.llmConnection : undefined,
             model: typeof config.model === 'string' ? config.model : undefined,
+            hidden: task.origin?.kind === 'handoff',
             enabledSourceSlugs: Array.isArray(config.enabledSourceSlugs) ? config.enabledSourceSlugs as string[] : undefined,
             permissionMode: typeof config.permissionMode === 'string' ? config.permissionMode as PermissionMode : undefined,
             thinkingLevel: typeof config.thinkingLevel === 'string' ? config.thinkingLevel as ThinkingLevel : undefined,
@@ -2988,12 +3066,14 @@ export class SessionManager implements ISessionManager {
           })
 
           // Publish the child only after its reserved ID/back-reference is durable.
-          this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+          if (task.origin?.kind !== 'handoff') {
+            this.sendEvent({ type: 'session_created', sessionId: child.id }, workspaceId)
+          }
         },
         appendDelegatedPrompt: async ({ task, prompt }) => {
           await this.appendSpawnPrompt(task.childSessionId, task.dispatch.messageId, prompt, workspaceId)
         },
-        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments }) => {
+        dispatchProvider: this.spawnTaskDispatchProvider ?? (({ task, prompt, attachments, botTurnContext }) => {
           // sendMessage reuses the already flushed stable message instead of
           // appending a second user turn. SpawnTaskCoordinator consumes the
           // eventual rejection through the durable provider-error finalizer.
@@ -3004,9 +3084,19 @@ export class SessionManager implements ISessionManager {
             undefined,
             undefined,
             task.dispatch.messageId,
+            undefined,
+            undefined,
+            botTurnContext ? { botTurnContext } : undefined,
           )
         }),
-        onTaskUpdated: this.spawnTaskUpdated,
+        onTaskUpdated: async (change) => {
+          await this.spawnTaskUpdated?.(change)
+          try {
+            await this.handoffDelegateFor(workspaceId)?.onTaskUpdated(change.taskId)
+          } catch (error) {
+            sessionLog.warn(`Handoff task update handling failed for task ${change.taskId}:`, error)
+          }
+        },
         onLateEvent: this.spawnTaskLateEvent ?? ((event) => {
           sessionLog.warn('Ignored late spawned-task event:', event)
         }),
@@ -3019,6 +3109,19 @@ export class SessionManager implements ISessionManager {
       void coordinator.waitForStartupNotification()
         .then(async () => {
           if (retryRecovery) await coordinator.reconcileStartup(this.getSpawnTaskRecoveryAdapter(workspaceId, workspaceRootPath))
+          if (!this.sessionsInitialized) return
+          try {
+            const report = await this.handoffDelegateFor(workspaceId)?.reconcileStartup()
+            if (report?.recoveryFailures.length) {
+              sessionLog.warn(
+                `Handoff startup reconciliation reported ${report.recoveryFailures.length} failure(s)`
+                  + ` for workspace ${workspaceId}:`,
+                report.recoveryFailures,
+              )
+            }
+          } catch (error) {
+            sessionLog.warn(`Handoff startup reconciliation failed for workspace ${workspaceId}:`, error)
+          }
         })
         .catch((error) => {
           if (retryRecovery) this.spawnTaskRecoveryPending.add(workspaceKey)
@@ -4860,6 +4963,22 @@ export class SessionManager implements ISessionManager {
           attachments: fileAttachments,
         })
         return result
+      }
+
+      managed.agent.onSendHandoff = async (request) => {
+        const delegate = this.handoffDelegateFor(managed.workspace.id)
+        if (!delegate) throw new Error('send_handoff is not available in this context.')
+        return delegate.createHandoff({
+          callerSessionId: managed.id,
+          targetBot: request.targetBot,
+          request: request.request,
+        })
+      }
+
+      managed.agent.onInspectHandoff = async (request, signal) => {
+        const delegate = this.handoffDelegateFor(managed.workspace.id)
+        if (!delegate) throw new Error('inspect_handoff is not available in this context.')
+        return delegate.inspectHandoff(managed.id, request, signal)
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)

@@ -33,6 +33,8 @@ import {
 } from '@kata-sh/session-tools-core';
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { createSpawnSessionTool, type SpawnSessionFn } from './spawn-session-tool.ts';
+import { createSendHandoffTool } from './handoff-tool.ts';
+import { createInspectHandoffTool } from './inspect-handoff-tool.ts';
 import { createBrowserTools, type BrowserPaneFns } from './browser-tools.ts';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
@@ -77,6 +79,8 @@ import { attachSessionSelfManagementBindings } from './session-self-management-b
 export const CLAUDE_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
+  'send_handoff',
+  'inspect_handoff',
   'browser_tool',
 ]);
 
@@ -286,6 +290,21 @@ export function getSessionScopedTools(
           const callbacks = getSessionScopedToolCallbacks(sessionId);
           return callbacks?.spawnSessionFn;
         },
+      }),
+    );
+
+    tools.push(
+      createSendHandoffTool({
+        getSendHandoffFn: () => {
+          const callbacks = getSessionScopedToolCallbacks(sessionId);
+          return callbacks?.sendHandoffFn;
+        },
+      }),
+    );
+
+    tools.push(
+      createInspectHandoffTool({
+        getInspectHandoffFn: () => getSessionScopedToolCallbacks(sessionId)?.inspectHandoffFn,
       }),
     );
 

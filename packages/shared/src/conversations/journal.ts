@@ -51,6 +51,8 @@ export interface ConversationJournalOptions {
 export interface AppendJournalEntryInput {
   readonly conversationId: string;
   readonly authorBotId?: string;
+  /** Required for handoff entries; rejected on every other kind. */
+  readonly handoffId?: string;
   readonly kind: JournalEntryKind;
   readonly body: string;
   readonly idempotencyKey: string;
@@ -148,6 +150,7 @@ export function assertJournalEntry(value: unknown): JournalEntry {
     'entryId',
     'conversationId',
     'authorBotId',
+    'handoffId',
     'seq',
     'kind',
     'idempotencyKey',
@@ -172,6 +175,13 @@ export function assertJournalEntry(value: unknown): JournalEntry {
   }
   if (typeof entry.createdAt !== 'string' || !Number.isFinite(Date.parse(entry.createdAt))) {
     fail('createdAt must be an ISO timestamp');
+  }
+  if (entry.kind === 'handoff') {
+    if (entry.handoffId === undefined) fail('handoff entries require handoffId');
+    assertConversationId(entry.handoffId, 'handoffId');
+    if (entry.authorBotId === undefined) fail('handoff entries require an author Bot');
+  } else if (entry.handoffId !== undefined) {
+    fail('only handoff entries may carry handoffId');
   }
   return entry as unknown as JournalEntry;
 }
@@ -217,6 +227,7 @@ export class ConversationJournal {
       entryId,
       conversationId: conversation.conversationId,
       ...(authorBotId !== undefined ? { authorBotId } : {}),
+      ...(input.handoffId !== undefined ? { handoffId: input.handoffId } : {}),
       seq,
       kind: input.kind,
       idempotencyKey,
@@ -283,7 +294,7 @@ export class ConversationJournal {
     }
     const authorBotId = input.authorBotId ?? conversation.soleAuthorBotId;
     if (authorBotId === undefined) {
-      if (input.kind === 'bot' || input.kind === 'tool') {
+      if (input.kind === 'bot' || input.kind === 'tool' || input.kind === 'handoff') {
         throw new Error(`A ${input.kind} entry requires an author Bot`);
       }
       return undefined;
@@ -442,7 +453,7 @@ export class ConversationJournal {
       return;
     }
     const authorBotId = entry.authorBotId;
-    if ((entry.kind === 'bot' || entry.kind === 'tool') && authorBotId === undefined) {
+    if ((entry.kind === 'bot' || entry.kind === 'tool' || entry.kind === 'handoff') && authorBotId === undefined) {
       throw new Error(`Persisted ${entry.kind} entry ${entry.entryId} has no Bot author`);
     }
     if (authorBotId === undefined) return;

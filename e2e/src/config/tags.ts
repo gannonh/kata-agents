@@ -6,6 +6,7 @@ export const E2E_TAGS = {
   agent: "@agent",
   bots: "@bots",
   memory: "@memory",
+  handoffs: "@handoffs",
   channels: "@channels",
   oauth: "@oauth",
   /** Serial Git/GitHub V1 flows, including the authenticated UAT repository path. */

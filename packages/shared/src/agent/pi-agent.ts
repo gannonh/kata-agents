@@ -14,6 +14,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@kata-sh/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -28,6 +29,7 @@ import type {
 import { AbortReason } from './backend/types.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
 import { SourceActivationDrainController } from './source-activation-drain.ts';
+import { PiToolRequestGate } from './pi-tool-request-gate.ts';
 
 import type { PermissionMode } from './mode-manager.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
@@ -113,6 +115,8 @@ import { saveBinaryResponse } from '../utils/binary-detection.ts';
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
+  'send_handoff',
+  'inspect_handoff',
   'browser_tool',
 ]);
 
@@ -275,6 +279,8 @@ export class PiAgent extends BaseAgent {
     resolve: (result: { content: string; isError: boolean }) => void;
     reject: (error: Error) => void;
   }> = new Map();
+  private currentToolAbortController: AbortController | null = null;
+  private readonly toolRequestGate = new PiToolRequestGate();
 
   // Pending mini completions (correlation map for subprocess mini_completion_result)
   private pendingMiniCompletions: Map<string, {
@@ -493,6 +499,9 @@ export class PiAgent extends BaseAgent {
     // Derive AWS env vars from the piAuth credential (single fetch, no race).
     const awsEnv = this.buildAwsEnv(piAuth, runtime);
 
+    const toolRequestCredential = randomUUID();
+    this.toolRequestGate.activate(toolRequestCredential);
+
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
       cwd,
@@ -571,6 +580,7 @@ export class PiAgent extends BaseAgent {
       authType: this.config.authType,
       workspaceId: this.config.workspace.id,
       piAuth,
+      toolRequestCredential,
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -941,6 +951,8 @@ export class PiAgent extends BaseAgent {
           requestId: string;
           toolName: string;
           args: Record<string, unknown>;
+          credential: string;
+          sequence: number;
         });
         break;
 
@@ -1337,6 +1349,8 @@ export class PiAgent extends BaseAgent {
 
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
+      case 'send_handoff_intercept':
+      case 'inspect_handoff_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
@@ -1407,7 +1421,19 @@ export class PiAgent extends BaseAgent {
     requestId: string;
     toolName: string;
     args: Record<string, unknown>;
+    credential: string;
+    sequence: number;
   }): Promise<void> {
+    if (
+      !this.toolRequestGate.accept(request.credential, request.sequence)
+    ) {
+      this.send({
+        type: 'tool_execute_response',
+        requestId: request.requestId,
+        result: { content: i18n.t('handoffs.staleToolRequest'), isError: true },
+      });
+      return;
+    }
     // Prerequisite check: block source tools until guide.md is read
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
@@ -1538,6 +1564,32 @@ export class PiAgent extends BaseAgent {
           }
           const msg = error instanceof Error ? error.message : String(error);
           return { content: `spawn_session failed: ${msg}`, isError: true };
+        }
+      }
+
+      if (toolName === 'send_handoff') {
+        try {
+          const result = await this.preExecuteSendHandoff(args);
+          return { content: JSON.stringify(result, null, 2), isError: false };
+        } catch (error) {
+          const failure = (error && typeof error === 'object' && 'failure' in error)
+            ? (error as { failure?: unknown }).failure
+            : undefined
+          if (failure && typeof failure === 'object') {
+            return { content: JSON.stringify(failure, null, 2), isError: true }
+          }
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: `send_handoff failed: ${msg}`, isError: true };
+        }
+      }
+
+      if (toolName === 'inspect_handoff') {
+        try {
+          const result = await this.preExecuteInspectHandoff(args, this.currentToolAbortController?.signal);
+          return { content: JSON.stringify(result, null, 2), isError: false };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: `inspect_handoff failed: ${msg}`, isError: true };
         }
       }
 
@@ -1783,6 +1835,7 @@ export class PiAgent extends BaseAgent {
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
+    this.toolRequestGate.revoke();
     this.readline = null;
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
@@ -1977,6 +2030,8 @@ export class PiAgent extends BaseAgent {
     let message = messageParam;
     // Reset state for new turn
     this._isProcessing = true;
+    this.currentToolAbortController?.abort();
+    this.currentToolAbortController = new AbortController();
     this.abortReason = undefined;
     this.eventQueue.reset();
     this.currentUserMessage = message;
@@ -2189,6 +2244,8 @@ export class PiAgent extends BaseAgent {
 
       yield { type: 'complete' };
     } finally {
+      this.currentToolAbortController?.abort();
+      this.currentToolAbortController = null;
       this._isProcessing = false;
     }
   }
@@ -2303,6 +2360,7 @@ export class PiAgent extends BaseAgent {
       pending.resolve(false);
     }
     this.pendingPermissions.clear();
+    this.currentToolAbortController?.abort(reason);
 
     // Send abort to subprocess
     this.send({ type: 'abort' });
@@ -2324,6 +2382,7 @@ export class PiAgent extends BaseAgent {
       pending.resolve(false);
     }
     this.pendingPermissions.clear();
+    this.currentToolAbortController?.abort(reason);
 
     // Reject all pending tool executions
     for (const [, pending] of this.pendingToolExecutions) {
@@ -2443,6 +2502,7 @@ export class PiAgent extends BaseAgent {
    */
   private async killSubprocessGracefully(timeoutMs = 2_000, requireExit = false): Promise<void> {
     const child = this.subprocess;
+    this.toolRequestGate.revoke();
     if (!child) {
       this.killSubprocess();
       return;
@@ -2519,6 +2579,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
+    this.toolRequestGate.revoke();
     if (this.readline) {
       this.readline.close();
       this.readline = null;

@@ -128,6 +128,12 @@ export {
   type SpawnSessionRequest,
   type SpawnSessionResult,
   type SpawnSessionHelpResult,
+  type SendHandoffRequest,
+  type SendHandoffResult,
+  type SendHandoffHelpResult,
+  type InspectHandoffRequest,
+  type InspectHandoffResult,
+  type InspectHandoffHelpResult,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
   MINI_AGENT_TOOLS,

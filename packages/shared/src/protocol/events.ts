@@ -17,6 +17,7 @@ import type {
 import type { BrowserAnnotationState } from './browser-annotations'
 import type { GitStatusChangedEvent } from './git'
 import type { ChannelPublicDto, RouteRecord } from '@kata-sh/core'
+import type { HandoffInvalidatedEvent } from './handoffs'
 
 /** Server → client push payload for `channels:event`. */
 export type ChannelEvent =
@@ -40,6 +41,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.labels.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.bots.EVENT]: [event: { type: string; botId?: string; chatId?: string; bot?: unknown }]
   [RPC_CHANNELS.channels.EVENT]: [event: ChannelEvent]
+  [RPC_CHANNELS.handoffs.EVENT]: [event: HandoffInvalidatedEvent]
   [RPC_CHANNELS.statuses.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.automations.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.skills.CHANGED]: [workspaceId: string, skills: LoadedSkill[]]

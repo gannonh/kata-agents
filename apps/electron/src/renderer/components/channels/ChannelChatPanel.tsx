@@ -7,9 +7,13 @@ import type {
   JournalEntry,
   RouteRecord,
 } from '@kata-sh/core'
+import type { HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
+import { HandoffCard } from '../handoffs/HandoffCard'
+import { mergeHandoffTimeline } from '../handoffs/timeline'
+import { useNavigation } from '@/contexts/NavigationContext'
 
 export interface ChannelChatPanelProps {
   workspaceId: string
@@ -28,6 +32,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [channel, setChannel] = React.useState<ChannelPublicDto | null>(null)
   const [members, setMembers] = React.useState<BotPublicDto[]>([])
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
+  const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
   const [routes, setRoutes] = React.useState<RouteRecord[]>([])
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
@@ -37,6 +42,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [error, setError] = React.useState<string | null>(null)
   const refreshGeneration = React.useRef(0)
   const pendingSend = React.useRef<{ message: string; idempotencyKey: string } | null>(null)
+  const { updateRightSidebar } = useNavigation()
 
   const mapError = React.useCallback((err: unknown): string => {
     const mentionName = mentionNameFromError(err)
@@ -50,10 +56,12 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       window.electronAPI.getChannelJournal(workspaceId, channelId),
       window.electronAPI.listChannelRoutes(workspaceId, channelId),
     ])
+    const loadedHandoffs = await window.electronAPI.listConversationHandoffs(channelId)
     if (generation !== refreshGeneration.current) return
     setChannel(journal.channel)
     setMembers(journal.members)
     setEntries(journal.entries)
+    setHandoffs(loadedHandoffs)
     setRoutes([...loadedRoutes].sort((a, b) => a.routeSeq - b.routeSeq))
   }, [workspaceId, channelId])
 
@@ -62,11 +70,24 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     const unsubscribe = window.electronAPI.onChannelEvent(() => {
       refresh().catch(err => console.error('[Channels] Failed to refresh journal:', err))
     })
+    const unsubscribeHandoffs = window.electronAPI.onHandoffEvent(event => {
+      if (event.conversationId !== channelId) return
+      refresh().catch(err => console.error('[Channels] Failed to refresh handoffs:', err))
+    })
     return () => {
       refreshGeneration.current += 1
       unsubscribe()
+      unsubscribeHandoffs()
     }
   }, [refresh])
+
+  const openHandoff = React.useCallback((rail: HandoffRailView) => {
+    updateRightSidebar({ type: 'handoff', conversationId: rail.conversationId, handoffId: rail.handoffId })
+  }, [updateRightSidebar])
+
+  const timeline = React.useMemo(() => {
+    return mergeHandoffTimeline(entries, handoffs)
+  }, [entries, handoffs])
 
   const memberNameById = React.useMemo(
     () => new Map(members.map(member => [member.botId, member.name])),
@@ -207,23 +228,25 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-3">
-        {entries.length === 0 ? (
+        {timeline.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('channels.journalEmpty')}</p>
         ) : (
-          entries.map(entry => (
+          timeline.map(item => item.kind === 'handoff' ? (
+            <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : (
             <div
-              key={entry.entryId}
-              data-testid={`channel-journal-entry-${entry.entryId}`}
-              data-entry-kind={entry.kind}
-              data-author-bot-id={entry.authorBotId}
+              key={item.entry.entryId}
+              data-testid={`channel-journal-entry-${item.entry.entryId}`}
+              data-entry-kind={item.entry.kind}
+              data-author-bot-id={item.entry.authorBotId}
               className="text-sm"
             >
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {entry.authorBotId
-                  ? `${entry.kind} · ${memberNameById.get(entry.authorBotId) ?? entry.authorBotId}`
-                  : entry.kind}
+                {item.entry.authorBotId
+                  ? `${item.entry.kind} · ${memberNameById.get(item.entry.authorBotId) ?? item.entry.authorBotId}`
+                  : item.entry.kind}
               </div>
-              <div className="whitespace-pre-wrap break-words">{entry.body}</div>
+              <div className="whitespace-pre-wrap break-words">{item.entry.body}</div>
             </div>
           ))
         )}

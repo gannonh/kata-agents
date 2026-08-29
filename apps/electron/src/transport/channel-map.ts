@@ -60,6 +60,16 @@ export const CHANNEL_MAP = {
   sendChannelMessage: invoke(RPC_CHANNELS.channels.SEND_MESSAGE),
   listChannelRoutes: invoke(RPC_CHANNELS.channels.LIST_ROUTES),
   onChannelEvent: listener(RPC_CHANNELS.channels.EVENT),
+
+  listConversationHandoffs: invoke(RPC_CHANNELS.handoffs.LIST),
+  getHandoffRail: invoke(RPC_CHANNELS.handoffs.GET_RAIL),
+  waitForHandoff: invoke(RPC_CHANNELS.handoffs.WAIT),
+  cancelHandoffWait: invoke(RPC_CHANNELS.handoffs.CANCEL_WAIT),
+  readHandoffResultChunk: invoke(RPC_CHANNELS.handoffs.READ_RESULT_CHUNK),
+  cancelHandoff: invoke(RPC_CHANNELS.handoffs.CANCEL),
+  markHandoffResultRead: invoke(RPC_CHANNELS.handoffs.MARK_RESULT_READ),
+  onHandoffEvent: listener(RPC_CHANNELS.handoffs.EVENT),
+
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),

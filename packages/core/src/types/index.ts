@@ -60,10 +60,12 @@ export type {
   SpawnTaskDispatchState,
   SpawnTaskFailureCode,
   SpawnTaskAwaitingInputKind,
+  SpawnTaskOrigin,
   SpawnTaskJsonPrimitive,
   SpawnTaskJsonValue,
   SpawnTaskStateTimestamps,
   SpawnTaskDispatchMetadata,
+  SpawnTaskDispatchFence,
   SpawnTaskAwaitingInput,
   SpawnTaskCancellation,
   SpawnTaskResult,
@@ -129,6 +131,27 @@ export {
 } from './bot.ts';
 
 export type {
+  HandoffId,
+  HandoffDeliveryId,
+  DeliveryClaimId,
+  HandoffMailState,
+  HandoffDeliveryClaim,
+  HandoffDeliveryFailure,
+  HandoffDeliveryRecord,
+  HandoffDeliveryPending,
+  HandoffDeliveryClaimed,
+  HandoffDeliveryAcknowledged,
+  HandoffDeliveryFailed,
+  HandoffTaskView,
+} from './handoff.ts';
+export {
+  HANDOFF_SCHEMA_VERSION,
+  HANDOFF_LIMITS,
+  HANDOFF_MAIL_STATES,
+  HANDOFF_MAIL_TRANSITIONS,
+} from './handoff.ts';
+
+export type {
   BotMemoryState,
   BotMemoryMutationKind,
   BotMemoryProvenance,
@@ -191,4 +214,3 @@ export type {
   SessionProcessingStatus,
   ActiveSessionInfo,
 } from './server.ts';
-

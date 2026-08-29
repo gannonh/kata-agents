@@ -316,6 +316,15 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.channels.LIST_ROUTES,
   RPC_CHANNELS.channels.EVENT,
 
+  RPC_CHANNELS.handoffs.LIST,
+  RPC_CHANNELS.handoffs.GET_RAIL,
+  RPC_CHANNELS.handoffs.WAIT,
+  RPC_CHANNELS.handoffs.CANCEL_WAIT,
+  RPC_CHANNELS.handoffs.READ_RESULT_CHUNK,
+  RPC_CHANNELS.handoffs.CANCEL,
+  RPC_CHANNELS.handoffs.MARK_RESULT_READ,
+  RPC_CHANNELS.handoffs.EVENT,
+
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,

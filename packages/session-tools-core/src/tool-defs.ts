@@ -178,6 +178,37 @@ export const SpawnSessionSchema = z.object({
   })).optional().describe('Files to include with the prompt'),
 });
 
+export const SendHandoffSchema = z.object({
+  help: z.boolean().optional()
+    .describe('If true, returns usage guidance instead of creating a handoff'),
+  targetBot: z.string().optional()
+    .describe('Target Bot name or ID (required when not in help mode)'),
+  request: z.string().optional()
+    .describe('Self-contained request for the receiving Bot (required when not in help mode, max 16KB)'),
+  workspaceId: z.never().optional(),
+  sourceBotId: z.never().optional(),
+  conversationId: z.never().optional(),
+  runtimeId: z.never().optional(),
+  sessionId: z.never().optional(),
+  callback: z.never().optional(),
+});
+
+export const InspectHandoffSchema = z.object({
+  help: z.boolean().optional(),
+  action: z.enum(['get', 'wait', 'read-result']).optional(),
+  taskId: z.string().optional(),
+  afterVersion: z.number().int().nonnegative().optional(),
+  timeoutMs: z.number().nonnegative().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  limit: z.number().int().positive().optional(),
+  workspaceId: z.never().optional(),
+  botId: z.never().optional(),
+  conversationId: z.never().optional(),
+  runtimeId: z.never().optional(),
+  sessionId: z.never().optional(),
+  callback: z.never().optional(),
+});
+
 // Session self-management tools
 export const SetSessionLabelsSchema = z.object({
   sessionId: z.string().optional().describe('Session ID to update. Omit to update the current session.'),
@@ -446,6 +477,17 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 A successful spawn returns exactly \`{ taskId, childSessionId, runtimeState, version }\`. The task reserves its child and dispatches at most once after durable persistence.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
+  send_handoff: `Hand the current task to another Bot in this workspace. The receiving Bot runs the request as an independent delegated task with its own model, permission mode, and memory.
+
+The request must be self-contained: the receiving Bot does not see this conversation.
+Identity is derived from the current session. Never pass workspace, Bot, or conversation fields.
+A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeState, version, targetBotId }\`.`,
+
+  inspect_handoff: `Read a handoff task owned by the current Bot conversation.
+
+Use action=get for current state, action=wait with afterVersion for a bounded authoritative wait, or action=read-result with byte offset and limit for canonical result chunks.
+The server derives workspace, Bot, conversation, runtime, and internal Session identity. Unknown and unauthorized task IDs return the same error.`,
+
   send_developer_feedback: `Send freeform feedback to the Kata Agent development team.
 
 Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
@@ -544,6 +586,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSendDeveloperFeedback },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', safeMode: 'block', handler: null },
+  { name: 'send_handoff', description: TOOL_DESCRIPTIONS.send_handoff, inputSchema: SendHandoffSchema, executionMode: 'backend', safeMode: 'block', handler: null },
+  { name: 'inspect_handoff', description: TOOL_DESCRIPTIONS.inspect_handoff, inputSchema: InspectHandoffSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
   // Single CLI-like tool that handles all browser actions via command string.
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', safeMode: 'allow', handler: null },

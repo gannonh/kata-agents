@@ -59,4 +59,22 @@ describe('session-scoped tool callback merge', () => {
     expect(merged?.browserPaneFns).toBe(browserPaneFns);
     expect(merged?.queryFn).toBe(queryFn);
   });
+
+  it('revokes the handoff inspection callback with the session runtime', () => {
+    const inspectHandoffFn = async () => ({
+      taskId: 'task_1',
+      version: 1,
+      runtimeState: 'queued' as const,
+      stateTimestamps: {
+        createdAt: '2026-08-28T00:00:00.000Z',
+        updatedAt: '2026-08-28T00:00:00.000Z',
+        queuedAt: '2026-08-28T00:00:00.000Z',
+      },
+    });
+    registerSessionScopedToolCallbacks(sessionId, { inspectHandoffFn });
+
+    expect(getSessionScopedToolCallbacks(sessionId)?.inspectHandoffFn).toBe(inspectHandoffFn);
+    unregisterSessionScopedToolCallbacks(sessionId);
+    expect(getSessionScopedToolCallbacks(sessionId)).toBeUndefined();
+  });
 });

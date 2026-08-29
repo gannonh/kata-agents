@@ -122,6 +122,7 @@ interface InitMessage {
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
+  toolRequestCredential: string;
 }
 
 interface RuntimeConfigUpdateMessage {
@@ -185,7 +186,14 @@ interface OutboundPreToolUseReq {
   toolCallId?: string;
   input: Record<string, unknown>;
 }
-interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+interface OutboundToolExecReq {
+  type: 'tool_execute_request';
+  requestId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  credential: string;
+  sequence: number;
+}
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
@@ -250,6 +258,7 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+let nextToolRequestSequence = 1;
 
 // Mutable state
 let currentUserMessage = '';
@@ -260,6 +269,18 @@ const pendingToolExecutions = new Map<string, { resolve: (result: { content: str
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
+
+function sendToolExecuteRequest(requestId: string, toolName: string, args: Record<string, unknown>): void {
+  if (!initConfig?.toolRequestCredential) throw new Error('Tool request credential is unavailable');
+  send({
+    type: 'tool_execute_request',
+    requestId,
+    toolName,
+    args,
+    credential: initConfig.toolRequestCredential,
+    sequence: nextToolRequestSequence++,
+  });
+}
 
 // Proxy tool definitions from main process
 let proxyToolDefs: ProxyToolDef[] = [];
@@ -895,12 +916,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
       // Execute via main process
       const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      send({
-        type: 'tool_execute_request',
-        requestId,
-        toolName: def.name,
-        args: approvedInput,
-      });
+      sendToolExecuteRequest(requestId, def.name, approvedInput);
 
       const result = await new Promise<{ content: string; isError: boolean }>((resolve) => {
         pendingToolExecutions.set(requestId, { resolve });
@@ -1223,12 +1239,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
             const promise = new Promise<{ content: string; isError: boolean }>((resolve) => {
               pendingToolExecutions.set(requestId, { resolve });
             });
-            send({
-              type: 'tool_execute_request',
-              requestId,
-              toolName: tc.name!,
-              args: (tc.arguments ?? {}) as Record<string, unknown>,
-            });
+            sendToolExecuteRequest(requestId, tc.name!, (tc.arguments ?? {}) as Record<string, unknown>);
             prefetchCache.set(tc.id!, promise);
           }
         }
@@ -1291,6 +1302,7 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   }
 
   initConfig = msg;
+  nextToolRequestSequence = 1;
 
   // Azure OpenAI requires a tenant-specific endpoint URL.
   // The Pi SDK (via Vercel AI SDK) reads AZURE_OPENAI_BASE_URL from env.

@@ -49,6 +49,7 @@ import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@kat
 import { initModelRefreshService, setFetcherPlatform } from '@kata-sh/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@kata-sh/server-core/services'
 import { getDefaultGitServices } from '@kata-sh/server-core/git'
+import { attachHandoffDelegate } from '@kata-sh/server-core/handoffs'
 import type { HandlerDeps } from '@kata-sh/server-core/handlers'
 
 process.env.KATA_IS_PACKAGED ??= 'false'
@@ -210,7 +211,11 @@ const instance = await (async () => {
           oauthIdToken: oauth?.idToken,
         }
       }),
-      createSessionManager: () => new SessionManager(),
+      createSessionManager: () => {
+        const sessionManager = new SessionManager()
+        attachHandoffDelegate(sessionManager)
+        return sessionManager
+      },
       bindRpcServer: (sm, server) => sm.setRpcServer(server),
       createHandlerDeps: ({ sessionManager, platform, oauthFlowStore }) => {
         messagingHandle = createMessagingBootstrap({
