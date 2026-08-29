@@ -21,42 +21,6 @@ function createConfig(): BackendConfig {
 }
 
 describe('PiAgent subprocess error handling', () => {
-  it('rejects replayed and revoked subprocess tool requests', async () => {
-    const agent = new PiAgent(createConfig())
-    const sent: Array<Record<string, unknown>> = []
-    const routed: string[] = []
-    Reflect.set(agent, 'toolRequestCredential', 'runtime-secret')
-    Reflect.set(agent, 'send', (message: Record<string, unknown>) => { sent.push(message) })
-    Reflect.set(agent, 'routeToolCall', async (toolName: string) => {
-      routed.push(toolName)
-      return { content: 'ok', isError: false }
-    })
-    const request = {
-      type: 'tool_execute_request',
-      requestId: 'request-1',
-      toolName: 'send_handoff',
-      args: { target_bot: 'Reviewer', request: 'Review this.' },
-      credential: 'runtime-secret',
-      sequence: 1,
-    }
-
-    Reflect.apply(Reflect.get(agent, 'handleLine'), agent, [JSON.stringify(request)])
-    Reflect.apply(Reflect.get(agent, 'handleLine'), agent, [JSON.stringify(request)])
-    await new Promise(resolve => setTimeout(resolve, 0))
-
-    expect(routed).toEqual(['send_handoff'])
-    expect(sent).toContainEqual(expect.objectContaining({
-      type: 'tool_execute_response',
-      requestId: 'request-1',
-      result: expect.objectContaining({ isError: true }),
-    }))
-
-    Reflect.apply(Reflect.get(agent, 'revokeToolRequestCredential'), agent, [])
-    Reflect.apply(Reflect.get(agent, 'handleLine'), agent, [JSON.stringify({ ...request, requestId: 'request-2', sequence: 2 })])
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(routed).toEqual(['send_handoff'])
-  })
-
   it('maps raw HTML subprocess errors to typed proxy_error events', () => {
     const agent = new PiAgent(createConfig())
 

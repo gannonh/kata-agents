@@ -29,6 +29,7 @@ import type {
 import { AbortReason } from './backend/types.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
 import { SourceActivationDrainController } from './source-activation-drain.ts';
+import { PiToolRequestGate } from './pi-tool-request-gate.ts';
 
 import type { PermissionMode } from './mode-manager.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
@@ -279,8 +280,7 @@ export class PiAgent extends BaseAgent {
     reject: (error: Error) => void;
   }> = new Map();
   private currentToolAbortController: AbortController | null = null;
-  private toolRequestCredential: string | null = null;
-  private lastToolRequestSequence = 0;
+  private readonly toolRequestGate = new PiToolRequestGate();
 
   // Pending mini completions (correlation map for subprocess mini_completion_result)
   private pendingMiniCompletions: Map<string, {
@@ -499,8 +499,8 @@ export class PiAgent extends BaseAgent {
     // Derive AWS env vars from the piAuth credential (single fetch, no race).
     const awsEnv = this.buildAwsEnv(piAuth, runtime);
 
-    this.toolRequestCredential = randomUUID();
-    this.lastToolRequestSequence = 0;
+    const toolRequestCredential = randomUUID();
+    this.toolRequestGate.activate(toolRequestCredential);
 
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
@@ -580,7 +580,7 @@ export class PiAgent extends BaseAgent {
       authType: this.config.authType,
       workspaceId: this.config.workspace.id,
       piAuth,
-      toolRequestCredential: this.toolRequestCredential,
+      toolRequestCredential,
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
@@ -1425,10 +1425,7 @@ export class PiAgent extends BaseAgent {
     sequence: number;
   }): Promise<void> {
     if (
-      !this.toolRequestCredential
-      || request.credential !== this.toolRequestCredential
-      || !Number.isSafeInteger(request.sequence)
-      || request.sequence !== this.lastToolRequestSequence + 1
+      !this.toolRequestGate.accept(request.credential, request.sequence)
     ) {
       this.send({
         type: 'tool_execute_response',
@@ -1437,8 +1434,6 @@ export class PiAgent extends BaseAgent {
       });
       return;
     }
-    this.lastToolRequestSequence = request.sequence;
-
     // Prerequisite check: block source tools until guide.md is read
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
@@ -1840,7 +1835,7 @@ export class PiAgent extends BaseAgent {
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
-    this.revokeToolRequestCredential();
+    this.toolRequestGate.revoke();
     this.readline = null;
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
@@ -2507,7 +2502,7 @@ export class PiAgent extends BaseAgent {
    */
   private async killSubprocessGracefully(timeoutMs = 2_000, requireExit = false): Promise<void> {
     const child = this.subprocess;
-    this.revokeToolRequestCredential();
+    this.toolRequestGate.revoke();
     if (!child) {
       this.killSubprocess();
       return;
@@ -2584,7 +2579,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
-    this.revokeToolRequestCredential();
+    this.toolRequestGate.revoke();
     if (this.readline) {
       this.readline.close();
       this.readline = null;
@@ -2619,11 +2614,6 @@ export class PiAgent extends BaseAgent {
     // Clear any in-flight overflow-recovery state so a stale fallback timer
     // doesn't fire on a torn-down adapter.
     this.adapter.resetOverflowState();
-  }
-
-  private revokeToolRequestCredential(): void {
-    this.toolRequestCredential = null;
-    this.lastToolRequestSequence = 0;
   }
 
   // ============================================================
