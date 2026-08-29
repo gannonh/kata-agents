@@ -39,10 +39,9 @@ export function resolveToolTarget(
     input.url,
     input.name,
   ) || toolName
-  const value = truncate(raw)
   return {
     kind,
-    value,
-    fingerprint: createHash('sha256').update(value, 'utf8').digest('hex'),
+    value: truncate(raw),
+    fingerprint: createHash('sha256').update(raw, 'utf8').digest('hex'),
   }
 }

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APPROVAL_SCHEMA_VERSION, type StandingRule, type ToolInvocation } from '@kata-sh/core'
+import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION, type StandingRule, type ToolInvocation } from '@kata-sh/core'
+import { writeDurableFileIfAbsent } from '../../spawn-tasks/durable-fs.ts'
 import {
   ApprovalConflictError,
   ApprovalStore,
@@ -12,6 +13,7 @@ import {
   computeOperationHash,
   evaluatePolicy,
   redactValue,
+  resolveToolTarget,
   sanitizeOperation,
 } from '../index.ts'
 
@@ -54,6 +56,7 @@ function rule(overrides: Partial<StandingRule> = {}): StandingRule {
     botId: 'bot_source',
     toolName: 'Write',
     target: '/tmp/bounded.txt',
+    targetFingerprint: 'fp_write',
     effect: 'allow',
     state: 'active',
     createdAt: at,
@@ -244,5 +247,53 @@ describe('ApprovalStore and ToolBroker', () => {
     expect(owner.authorize(invocation(), 'ask').kind).toBe('ask')
     owner.rules.delete(rule.ruleId)
     expect(owner.rules.get(rule.ruleId)).toBeNull()
+  })
+
+  it('recovers an orphaned CAS claim after reload', () => {
+    const root = tempWorkspace()
+    const owner = broker(root)
+    const asked = owner.authorize(invocation(), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    const casDir = join(owner.store.rootPath, asked.request.approvalId, 'cas')
+    mkdirSync(casDir, { recursive: true })
+    expect(writeDurableFileIfAbsent(join(casDir, String(asked.request.version)), 'denied\n')).toBe(true)
+    const recovered = new ApprovalStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    expect(recovered.get(asked.request.approvalId)?.status).toBe('pending')
+    const denied = recovered.resolve(asked.request.approvalId, asked.request.version, 'deny', at)
+    expect(denied.status).toBe('denied')
+  })
+
+  it('does not treat a truncated target prefix as an exact standing allow', () => {
+    const prefix = 'echo '.padEnd(APPROVAL_LIMITS.targetBytes, 'x')
+    const first = resolveToolTarget('Bash', { command: `${prefix} one` })
+    const second = resolveToolTarget('Bash', { command: `${prefix} two` })
+    expect(first.value).toBe(second.value)
+    expect(first.fingerprint).not.toBe(second.fingerprint)
+    const owner = broker(tempWorkspace())
+    const asked = owner.authorize(invocation({
+      toolName: 'Bash',
+      normalizedInput: { command: `${prefix} one` },
+      target: first,
+    }), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    const allowed = owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
+    owner.claimExecution(allowed.approvalId, invocation({
+      toolName: 'Bash',
+      normalizedInput: { command: `${prefix} one` },
+      target: first,
+    }))
+    owner.createStandingAllow(allowed, 'allow')
+    expect(owner.authorize(invocation({
+      toolName: 'Bash',
+      normalizedInput: { command: `${prefix} one` },
+      target: first,
+    }), 'ask')).toEqual({ kind: 'allow', reason: 'standing-allow' })
+    expect(owner.authorize(invocation({
+      toolName: 'Bash',
+      normalizedInput: { command: `${prefix} two` },
+      target: second,
+    }), 'ask').kind).toBe('ask')
   })
 })

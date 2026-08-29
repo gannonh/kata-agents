@@ -26,6 +26,7 @@ function standingRule(overrides: Partial<StandingRule> & Pick<StandingRule, 'eff
     ruleId: 'rule_1',
     workspaceId: 'ws_1',
     botId: 'bot_1',
+    targetFingerprint: 'fp_a',
     state: 'active',
     createdAt: '2026-08-29T00:00:00.000Z',
     updatedAt: '2026-08-29T00:00:00.000Z',
@@ -140,5 +141,24 @@ describe('evaluatePolicy', () => {
       standingRules: [sourceRule],
     });
     expect(bypass.kind).toBe('ask');
+  });
+
+  it('standing allow matches target fingerprint, not only the display target', () => {
+    const rule = standingRule({
+      effect: 'allow',
+      toolName: 'Bash',
+      target: 'echo long',
+      targetFingerprint: 'fp_one',
+    });
+    const other = evaluatePolicy({
+      invocation: invocation({
+        toolName: 'Bash',
+        normalizedInput: { command: 'echo long extra' },
+        target: { kind: 'command', value: 'echo long', fingerprint: 'fp_two' },
+      }),
+      mode: 'ask',
+      standingRules: [rule],
+    });
+    expect(other.kind).toBe('ask');
   });
 });

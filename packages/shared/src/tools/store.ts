@@ -75,8 +75,15 @@ export class ApprovalStore {
     for (const entry of readdirSync(this.rootPath, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue
       const parsed = readJsonFile(this.recordPath(entry.name))
-      if (isRecord(parsed)) this.records.set(parsed.approvalId, parsed)
+      if (!isRecord(parsed)) continue
+      this.dropOrphanCasClaim(parsed.approvalId, parsed.version)
+      this.records.set(parsed.approvalId, parsed)
     }
+  }
+
+  private dropOrphanCasClaim(approvalId: string, version: number): void {
+    const path = this.casPath(approvalId, version)
+    if (existsSync(path)) rmSync(path, { force: true })
   }
 
   get(approvalId: string): ApprovalRecord | null {
@@ -117,10 +124,17 @@ export class ApprovalStore {
 
   private cas(current: ApprovalRecord, next: ApprovalRecord): ApprovalRecord {
     ensureDurableDirectory(join(this.recordDir(current.approvalId), 'cas'))
-    const claimed = writeDurableFileIfAbsent(this.casPath(current.approvalId, current.version), `${next.status}\n`)
+    const marker = this.casPath(current.approvalId, current.version)
+    let claimed = writeDurableFileIfAbsent(marker, `${next.status}\n`)
     if (!claimed) {
       this.reload()
-      throw new ApprovalConflictError('consumed')
+      const latest = this.get(current.approvalId)
+      if (!latest || latest.version !== current.version) throw new ApprovalConflictError('consumed')
+      claimed = writeDurableFileIfAbsent(marker, `${next.status}\n`)
+      if (!claimed) {
+        this.reload()
+        throw new ApprovalConflictError('consumed')
+      }
     }
     writeJsonRecord(this.recordPath(current.approvalId), next)
     this.records.set(current.approvalId, next)

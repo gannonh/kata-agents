@@ -146,6 +146,7 @@ export interface StandingRule {
   readonly botId: string
   readonly toolName: string
   readonly target: string
+  readonly targetFingerprint: string
   readonly effect: StandingRuleEffect
   readonly state: StandingRuleState
   readonly createdAt: string

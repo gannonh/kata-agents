@@ -1195,6 +1195,62 @@ export class PiAgent extends BaseAgent {
     }
   }
 
+  private async completePreToolUsePrompt(
+    requestId: string,
+    sessionId: string | undefined,
+    toolName: string,
+    checkResult: Extract<PreToolUseCheckResult, { type: 'prompt' }>,
+  ): Promise<void> {
+    if (!this.onPermissionRequest) {
+      if (checkResult.modifiedInput) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+      } else {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+      }
+      return;
+    }
+
+    const permRequestId = `pi-perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.debug(`PreToolUse(sessionId=${sessionId}): Prompting user for ${toolName} - ${checkResult.description}`);
+
+    const permissionPromise = new Promise<boolean>((resolve) => {
+      this.pendingPermissions.set(permRequestId, {
+        resolve,
+        toolName,
+      });
+    });
+
+    this.onPermissionRequest({
+      requestId: permRequestId,
+      toolName,
+      command: checkResult.command,
+      description: checkResult.description,
+      type: checkResult.promptType,
+      appName: checkResult.appName,
+      reason: checkResult.reason,
+      impact: checkResult.impact,
+      requiresSystemPrompt: checkResult.requiresSystemPrompt,
+      rememberForMinutes: checkResult.rememberForMinutes,
+      commandHash: checkResult.commandHash,
+      approvalTtlSeconds: checkResult.approvalTtlSeconds,
+      approvalId: checkResult.approvalId,
+    });
+
+    const allowed = await permissionPromise;
+    this.pendingPermissions.delete(permRequestId);
+
+    if (!allowed) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
+      return;
+    }
+
+    if (checkResult.modifiedInput) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
+    } else {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+    }
+  }
+
   /**
    * Handle a pre_tool_use_request from the subprocess.
    * Runs the centralized permission pipeline and sends the decision back.
@@ -1343,6 +1399,8 @@ export class PiAgent extends BaseAgent {
           this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
         } else if (postResult.type === 'block') {
           this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
+        } else if (postResult.type === 'prompt') {
+          await this.completePreToolUsePrompt(requestId, sessionId, toolName, postResult);
         } else {
           this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         }
@@ -1358,56 +1416,7 @@ export class PiAgent extends BaseAgent {
         return;
 
       case 'prompt': {
-        if (!this.onPermissionRequest) {
-          // No permission handler — allow
-          if (checkResult.modifiedInput) {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-          } else {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-          }
-          return;
-        }
-
-        const permRequestId = `pi-perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        this.debug(`PreToolUse(sessionId=${sessionId}): Prompting user for ${toolName} - ${checkResult.description}`);
-
-        // Wait for user response via pendingPermissions
-        const permissionPromise = new Promise<boolean>((resolve) => {
-          this.pendingPermissions.set(permRequestId, {
-            resolve,
-            toolName,
-          });
-        });
-
-        this.onPermissionRequest({
-          requestId: permRequestId,
-          toolName,
-          command: checkResult.command,
-          description: checkResult.description,
-          type: checkResult.promptType,
-          appName: checkResult.appName,
-          reason: checkResult.reason,
-          impact: checkResult.impact,
-          requiresSystemPrompt: checkResult.requiresSystemPrompt,
-          rememberForMinutes: checkResult.rememberForMinutes,
-          commandHash: checkResult.commandHash,
-          approvalTtlSeconds: checkResult.approvalTtlSeconds,
-          approvalId: checkResult.approvalId,
-        });
-
-        const allowed = await permissionPromise;
-        this.pendingPermissions.delete(permRequestId);
-
-        if (!allowed) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
-          return;
-        }
-
-        if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-        } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-        }
+        await this.completePreToolUsePrompt(requestId, sessionId, toolName, checkResult);
         return;
       }
     }

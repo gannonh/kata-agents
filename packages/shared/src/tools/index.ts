@@ -1,7 +1,7 @@
 export { classifyTool } from './classify.ts'
 export type { ToolClassification } from './classify.ts'
 export { computeOperationHash } from './hash.ts'
-export { redactValue, sanitizeOperation } from './redact.ts'
+export { redactValue, redactSecretsInString, sanitizeOperation } from './redact.ts'
 export { evaluatePolicy } from './evaluate.ts'
 export type { EvaluatePolicyInput } from './evaluate.ts'
 export { resolveToolTarget } from './target.ts'

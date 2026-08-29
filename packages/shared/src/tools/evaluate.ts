@@ -25,7 +25,7 @@ function matchesRule(rule: StandingRule, invocation: ToolInvocation): boolean {
     && rule.botId === invocation.botId
     && rule.workspaceId === invocation.workspaceId
     && rule.toolName === invocation.toolName
-    && rule.target === invocation.target.value
+    && rule.targetFingerprint === invocation.target.fingerprint
 }
 
 function block(reason: Extract<PolicyVerdict, { kind: 'block' }>['reason'], message: string): PolicyVerdict {

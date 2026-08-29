@@ -56,4 +56,12 @@ describe('operation hash and preview redaction', () => {
     expect(sanitized.preview).toContain('ok');
     expect(sanitized.preview).toContain('/tmp/a.txt');
   });
+
+  it('redacts bearer tokens inside command strings', () => {
+    const command = 'curl -H "Authorization: Bearer supersecret" https://ex.test?token=abc';
+    const sanitized = sanitizeOperation('Bash', command, { command }, 'shell');
+    expect(sanitized.preview).not.toContain('supersecret');
+    expect(sanitized.preview).not.toContain('token=abc');
+    expect(sanitized.target).not.toContain('supersecret');
+  });
 });

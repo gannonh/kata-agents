@@ -140,6 +140,7 @@ export class ToolBroker {
       botId: record.botId,
       toolName: record.toolName,
       target: record.sanitized.target,
+      targetFingerprint: record.targetFingerprint,
       effect,
       state: 'active',
       createdAt: now,
