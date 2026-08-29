@@ -70,6 +70,13 @@ export const CHANNEL_MAP = {
   markHandoffResultRead: invoke(RPC_CHANNELS.handoffs.MARK_RESULT_READ),
   onHandoffEvent: listener(RPC_CHANNELS.handoffs.EVENT),
 
+  listConversationApprovals: invoke(RPC_CHANNELS.approvals.LIST),
+  resolveApproval: invoke(RPC_CHANNELS.approvals.RESOLVE),
+  listStandingRules: invoke(RPC_CHANNELS.approvals.LIST_STANDING_RULES),
+  disableStandingRule: invoke(RPC_CHANNELS.approvals.DISABLE_STANDING_RULE),
+  deleteStandingRule: invoke(RPC_CHANNELS.approvals.DELETE_STANDING_RULE),
+  onApprovalEvent: listener(RPC_CHANNELS.approvals.EVENT),
+
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),

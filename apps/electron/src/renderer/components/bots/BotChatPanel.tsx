@@ -8,11 +8,12 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, JournalEntry } from '@kata-sh/core'
-import type { HandoffRailView } from '@kata-sh/shared/protocol'
+import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, JournalEntry, StandingRule } from '@kata-sh/core'
+import type { ApprovalCardView, HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
+import { ApprovalCard } from '../approvals/ApprovalCard'
 import { HandoffCard } from '../handoffs/HandoffCard'
 import { mergeHandoffTimeline } from '../handoffs/timeline'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -27,6 +28,8 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [bot, setBot] = React.useState<BotPublicDto | null>(null)
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
   const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
+  const [approvals, setApprovals] = React.useState<ApprovalCardView[]>([])
+  const [standingRules, setStandingRules] = React.useState<StandingRule[]>([])
   const [memory, setMemory] = React.useState<BotMemoryHead | null>(null)
   const [context, setContext] = React.useState<BotContextSnapshot | null>(null)
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
@@ -45,10 +48,14 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       window.electronAPI.getBotContext(workspaceId, botId),
     ])
     const loadedHandoffs = await window.electronAPI.listConversationHandoffs(journal.bot.directChatId)
+    const loadedApprovals = await window.electronAPI.listConversationApprovals(journal.bot.directChatId)
+    const loadedRules = await window.electronAPI.listStandingRules(botId)
     if (generation !== refreshGeneration.current) return
     setBot(journal.bot)
     setEntries(journal.entries)
     setHandoffs(loadedHandoffs)
+    setApprovals(loadedApprovals)
+    setStandingRules(loadedRules)
     setMemory(loadedMemory)
     setContext(loadedContext)
   }, [workspaceId, botId])
@@ -63,10 +70,15 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       if (bot?.directChatId && event.conversationId !== bot.directChatId) return
       refresh().catch(err => console.error('[Bots] Failed to refresh handoffs:', err))
     })
+    const unsubscribeApprovals = window.electronAPI.onApprovalEvent(event => {
+      if (bot?.directChatId && event.conversationId !== bot.directChatId) return
+      refresh().catch(err => console.error('[Bots] Failed to refresh approvals:', err))
+    })
     return () => {
       refreshGeneration.current += 1
       unsubscribe()
       unsubscribeHandoffs()
+      unsubscribeApprovals()
     }
   }, [refresh, botId, bot?.directChatId])
 
@@ -75,8 +87,23 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   }, [updateRightSidebar])
 
   const timeline = React.useMemo(() => {
-    return mergeHandoffTimeline(entries, handoffs)
-  }, [entries, handoffs])
+    return mergeHandoffTimeline(entries, handoffs, approvals)
+  }, [entries, handoffs, approvals])
+
+  const resolveApproval = React.useCallback(async (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => {
+    await window.electronAPI.resolveApproval({
+      approvalId: card.approvalId,
+      expectedVersion: card.version,
+      choice,
+      ...(createStandingAllow ? { createStandingAllow: true } : {}),
+    })
+    await refresh()
+  }, [refresh])
+
+  const setPermissionMode = React.useCallback(async (permissionMode: BotPublicDto['permissionMode']) => {
+    await window.electronAPI.updateBot(workspaceId, botId, { permissionMode })
+    await refresh()
+  }, [workspaceId, botId, refresh])
 
   const updateMemory = React.useCallback(async (memoryId: string, kind: 'edit' | 'forget' | 'restore', content?: string) => {
     if (!memory) return
@@ -124,6 +151,34 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       <PanelHeader title={bot?.name ?? t('bots.title')} />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+        <section data-testid="bot-policy-panel" className="rounded border border-foreground/10 p-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <strong>{t('approvals.policyHeading')}</strong>
+            <select
+              data-testid="bot-permission-mode"
+              className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+              value={bot?.permissionMode ?? 'ask'}
+              onChange={event => setPermissionMode(event.target.value as BotPublicDto['permissionMode'])}
+            >
+              <option value="safe">{t('mode.safe')}</option>
+              <option value="ask">{t('mode.ask')}</option>
+              <option value="allow-all">{t('mode.allow-all')}</option>
+            </select>
+          </div>
+          <strong className="text-sm">{t('approvals.standingHeading')}</strong>
+          {standingRules.length === 0 ? (
+            <p data-testid="bot-standing-empty" className="text-xs text-muted-foreground">{t('approvals.standingEmpty')}</p>
+          ) : standingRules.map(rule => (
+            <div key={rule.ruleId} data-testid={`standing-rule-${rule.ruleId}`} data-rule-state={rule.state} className="flex items-center justify-between gap-2 border-t border-foreground/10 pt-2 text-xs">
+              <span>{rule.toolName} {rule.target} ({rule.effect})</span>
+              {rule.state === 'active' && (
+                <Button type="button" size="sm" variant="outline" data-testid={`standing-rule-disable-${rule.ruleId}`} onClick={() => window.electronAPI.disableStandingRule({ ruleId: rule.ruleId, expectedVersion: rule.version }).then(() => refresh())}>
+                  {t('approvals.disableRule')}
+                </Button>
+              )}
+            </div>
+          ))}
+        </section>
         <section data-testid="bot-memory-panel" className="rounded border border-foreground/10 p-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <strong>{t('bots.memoryHeading')}</strong>
@@ -162,6 +217,8 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
         ) : (
           timeline.map(item => item.kind === 'handoff' ? (
             <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : item.kind === 'approval' ? (
+            <ApprovalCard key={item.card.approvalId} card={item.card} onResolve={resolveApproval} />
           ) : (
             <div
               key={item.entry.entryId}
