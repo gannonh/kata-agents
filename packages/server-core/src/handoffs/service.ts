@@ -60,11 +60,11 @@ export interface HandoffSpawnCoordinator {
     fence?: SpawnTaskDispatchFence,
     botTurnContext?: BotTurnContext,
   ) => Promise<SpawnSessionResult>
-  readonly cancelTask: (taskId: string, reason: string) => Promise<SpawnTaskCancellationResult>
 }
 
 export interface HandoffSessionLookup {
   getSession(sessionId: string): Promise<{ id: string; workspaceId?: string } | null>
+  cancelSpawnTask(taskId: string, reason?: string): Promise<SpawnTaskCancellationResult>
 }
 
 export interface HandoffServiceOptions {
@@ -323,6 +323,16 @@ export class HandoffService {
         childConfig: this.buildChildConfig(target),
       })
     } catch {
+      const failed = this.deliveryStore.failDelivery(delivery.deliveryId, {
+        code: 'task_reservation_failed',
+        message: 'Handoff could not reserve the delegated task.',
+      })
+      this.emit({
+        type: 'handoff-delivery-failed',
+        handoffId: failed.handoffId,
+        deliveryId: failed.deliveryId,
+        conversationId: failed.conversationId,
+      })
       throw new HandoffRejectedError(
         'handoff_reserve_failed',
         'Handoff could not reserve the delegated task.',
@@ -561,8 +571,7 @@ export class HandoffService {
       })
     const unread = delivery.resultUnread !== undefined
     const actions: HandoffAction[] = []
-    if ((delivery.mailState === 'pending' || delivery.mailState === 'claimed')
-      && (!task || !isSpawnTaskTerminal(task.runtimeState))) {
+    if (task && !isSpawnTaskTerminal(task.runtimeState)) {
       actions.push('cancel')
     }
     if (unread) actions.push('read')
@@ -627,7 +636,7 @@ export class HandoffService {
   async cancelHandoff(conversationId: string, handoffId: string, reason: string): Promise<SpawnTaskCancellationResult> {
     const delivery = this.deliveryStore.getByHandoff(handoffId)
     if (!delivery || delivery.conversationId !== conversationId || !delivery.spawnTaskId) throw new TaskAccessError()
-    const result = await this.coordinator.cancelTask(delivery.spawnTaskId, reason)
+    const result = await this.sessionManager.cancelSpawnTask(delivery.spawnTaskId, reason)
     this.emit({
       type: 'handoff-updated',
       handoffId: delivery.handoffId,
@@ -705,8 +714,9 @@ export class HandoffService {
   private reserveMissingTask(delivery: HandoffDeliveryRecord): SpawnTask | null {
     const target = this.tryGetBotById(delivery.targetBotId)
     if (!target || target.lifecycle !== 'active') return null
-    const parentSessionId = readPointerSessionId(botProviderSessionPath(this.workspaceRoot, delivery.sourceBotId))
-      ?? this.findChannelProviderSession(delivery)
+    const parentSessionId = delivery.conversationId.startsWith('channel_')
+      ? this.findChannelProviderSession(delivery)
+      : readPointerSessionId(botProviderSessionPath(this.workspaceRoot, delivery.sourceBotId))
     if (!parentSessionId) return null
     return this.taskStore.reserveForHandoff(delivery.handoffId, {
       parentSessionId,

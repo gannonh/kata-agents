@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { BotRecord, BotTurnContext, JournalEntry, SpawnTask } from '@kata-sh/core'
 import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
+import { botProviderSessionPath } from '@kata-sh/shared/bots'
+import { channelProviderSessionPath } from '@kata-sh/shared/channels'
 import type { ConversationJournal } from '@kata-sh/shared/conversations'
+import { SpawnTaskCoordinator } from '../sessions/spawn-task-coordinator'
 import {
   HandoffService,
   toHandoffTaskView,
@@ -58,6 +61,7 @@ function makeService(
   taskStore: HandoffTaskStore,
   onDispatch?: (task: SpawnTask, botTurnContext?: BotTurnContext) => void,
   journalOverride?: Pick<ConversationJournal, 'append' | 'list'>,
+  overrides?: Partial<Pick<HandoffServiceOptions, 'channelDirectory' | 'sessionManager'>>,
 ): HandoffService {
   const source = bot('bot_source', 'Source', 'chat_source')
   const target = bot('bot_target', 'Reviewer', 'chat_target', 'Review carefully <private>.')
@@ -78,12 +82,13 @@ function makeService(
       getBot: (botId: string) => [source, target].find((candidate) => candidate.botId === botId) ?? null,
       listBots: () => [source, target],
     } as never,
-    channelDirectory: {
+    channelDirectory: overrides?.channelDirectory ?? {
       listChannels: () => [],
       isMember: () => true,
     } as never,
-    sessionManager: {
+    sessionManager: overrides?.sessionManager ?? {
       getSession: async (id: string) => ({ id, workspaceId: 'ws_1' }),
+      cancelSpawnTask: async () => ({ status: 'already_terminal' as const, task: null }),
     },
     taskStore,
     coordinator: {
@@ -96,7 +101,6 @@ function makeService(
         version: reserved.version,
         }
       },
-      cancelTask: async () => ({ status: 'already_terminal' as const, task: null }),
     },
     clock: () => at,
     randomId: (() => {
@@ -165,6 +169,35 @@ describe('HandoffService creation boundary', () => {
       expect(readdirSync(join(workspaceRoot, 'bots', 'bot_target', 'memory', 'runs'))).toEqual([
         `${dispatchedContext!.runId}.json`,
       ])
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('fails durable delivery mail when task reservation fails', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-reserve-failure-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      taskStore.reserveForHandoff = () => { throw new Error('task storage unavailable') }
+      const service = makeService(deliveryStore, taskStore)
+
+      await expect(service.createHandoff({
+        callerSessionId: 'session_source',
+        targetBot: 'Reviewer',
+        request: 'This cannot reserve.',
+      })).rejects.toMatchObject({ code: 'handoff_reserve_failed' })
+
+      expect(deliveryStore.listAll()).toEqual([
+        expect.objectContaining({
+          handoffId: 'handoff_handoff',
+          mailState: 'delivery-failed',
+          failure: expect.objectContaining({ code: 'task_reservation_failed' }),
+        }),
+      ])
+      await service.reconcileStartup()
+      expect(taskStore.getByHandoff('handoff_handoff')).toBeNull()
+      expect(deliveryStore.getByHandoff('handoff_handoff')?.mailState).toBe('delivery-failed')
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
     }
@@ -347,6 +380,114 @@ describe('HandoffService creation boundary', () => {
         ownerEpoch: 1,
       })
       expect(deliveryStore.get('delivery_recover')?.mailState).toBe('acknowledged')
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('recovers a channel handoff through its channel provider session', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-channel-recovery-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      deliveryStore.create({
+        deliveryId: 'delivery_channel',
+        handoffId: 'handoff_channel',
+        workspaceId: 'ws_1',
+        conversationId: 'channel_team',
+        sourceBotId: 'bot_source',
+        targetBotId: 'bot_target',
+        request: 'Recover in the channel.',
+      })
+      const directPointer = botProviderSessionPath(workspaceRoot, 'bot_source')
+      const channelPointer = channelProviderSessionPath(workspaceRoot, 'channel_team', 'bot_source')
+      mkdirSync(dirname(directPointer), { recursive: true })
+      mkdirSync(dirname(channelPointer), { recursive: true })
+      writeFileSync(directPointer, 'session_direct\n', 'utf8')
+      writeFileSync(channelPointer, 'session_channel\n', 'utf8')
+      const service = makeService(deliveryStore, taskStore, undefined, undefined, {
+        channelDirectory: {
+          getChannel: () => ({
+            channelId: 'channel_team',
+            workspaceId: 'ws_1',
+            members: [{ botId: 'bot_source' }],
+          }),
+          listChannels: () => [],
+          isMember: () => true,
+        } as never,
+      })
+
+      await service.reconcileStartup()
+
+      expect(taskStore.getByHandoff('handoff_channel')?.parentSessionId).toBe('session_channel')
+      expect(deliveryStore.get('delivery_channel')?.mailState).toBe('acknowledged')
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('cancels an acknowledged active child and rejects its late result', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-active-cancel-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      const reserved = taskStore.reserveForHandoff('handoff_cancel', {
+        parentSessionId: 'session_source',
+        delegatedPrompt: 'Keep running.',
+        childConfig: {},
+      })
+      deliveryStore.create({
+        deliveryId: 'delivery_cancel',
+        handoffId: 'handoff_cancel',
+        workspaceId: 'ws_1',
+        conversationId: 'chat_source',
+        sourceBotId: 'bot_source',
+        targetBotId: 'bot_target',
+        request: 'Keep running.',
+      })
+      deliveryStore.attachSpawnTask('delivery_cancel', reserved.taskId)
+      const claimed = deliveryStore.claimDelivery('delivery_cancel', {
+        claimId: 'claim_cancel',
+        recipientBotId: 'bot_target',
+        expectedOwnerEpoch: 0,
+      })
+      deliveryStore.acknowledgeDelivery('delivery_cancel', {
+        claimId: claimed.claim!.claimId,
+        recipientBotId: 'bot_target',
+        ownerEpoch: claimed.claim!.ownerEpoch,
+      })
+      let current = taskStore.updateDispatch(reserved.taskId, 'ready', at)
+      current = taskStore.updateDispatch(current.taskId, 'claimed', at)
+      current = taskStore.updateDispatch(current.taskId, 'sent', at)
+      current = taskStore.transition(current.taskId, { runtimeState: 'processing', at })
+      const lateEvents: string[] = []
+      const coordinator = new SpawnTaskCoordinator({
+        store: taskStore,
+        createChild: async () => {},
+        appendDelegatedPrompt: async () => {},
+        dispatchProvider: async () => {},
+        onLateEvent: (event) => { lateEvents.push(event.eventKind) },
+        clock: () => at,
+      })
+      let aborted = false
+      const service = makeService(deliveryStore, taskStore, undefined, undefined, {
+        sessionManager: {
+          getSession: async (id: string) => ({ id, workspaceId: 'ws_1' }),
+          cancelSpawnTask: (taskId, reason) => coordinator.cancelTask(taskId, reason ?? 'cancelled', {
+            abort: () => { aborted = true },
+          }),
+        },
+      })
+
+      expect(service.getHandoffRail('chat_source', 'handoff_cancel').actions).toContain('cancel')
+      await expect(service.cancelHandoff('chat_source', 'handoff_cancel', 'Stop now.'))
+        .resolves.toMatchObject({ status: 'cancelled', task: { runtimeState: 'cancelled' } })
+      expect(aborted).toBe(true)
+
+      await coordinator.finalizeResultForChildSession(current.childSessionId, 'late result')
+      expect(taskStore.get(current.taskId)).toMatchObject({ runtimeState: 'cancelled' })
+      expect(taskStore.get(current.taskId)).not.toHaveProperty('result')
+      expect(lateEvents).toContain('result')
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
     }

@@ -110,12 +110,21 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): void {
+export interface RegisterHandoffsOptions {
+  readonly resolveRuntime?: (ctx: { workspaceId: string | null }) => HandoffRuntime
+}
+
+export function registerHandoffsHandlers(
+  server: RpcServer,
+  deps: HandlerDeps,
+  options: RegisterHandoffsOptions = {},
+): void {
+  const resolveRuntime = options.resolveRuntime ?? ((ctx: { workspaceId: string | null }) => runtimeFor(ctx, deps))
   const waits = new HandoffWaitRegistry()
   server.registerClientDisconnectHandler?.((clientId) => waits.cancelClient(clientId))
   subscribeHandoffEvents((workspaceId, event) => {
     try {
-      const runtime = runtimeFor({ workspaceId }, deps)
+      const runtime = resolveRuntime({ workspaceId })
       const rail = runtime.service.getHandoffRail(event.conversationId, event.handoffId)
       server.push(RPC_CHANNELS.handoffs.EVENT, { to: 'workspace', workspaceId }, {
         workspaceId,
@@ -129,13 +138,13 @@ export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   server.handle(RPC_CHANNELS.handoffs.LIST, async (ctx, conversationId: string) => {
-    const runtime = runtimeFor(ctx, deps)
+    const runtime = resolveRuntime(ctx)
     assertConversation(runtime, conversationId)
     return runtime.service.listConversationHandoffRails(conversationId)
   })
 
   server.handle(RPC_CHANNELS.handoffs.GET_RAIL, async (ctx, input: { conversationId: string; handoffId: string }) => {
-    return railFor(runtimeFor(ctx, deps), input.conversationId, input.handoffId)
+    return railFor(resolveRuntime(ctx), input.conversationId, input.handoffId)
   })
 
   server.handle(
@@ -150,7 +159,7 @@ export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): 
         timeoutMs?: number
       },
     ) => {
-      const runtime = runtimeFor(ctx, deps)
+      const runtime = resolveRuntime(ctx)
       const controller = waits.begin(ctx.clientId, input.waitId)
       const timeoutMs = boundedWaitMs(input.timeoutMs)
       const deadline = Date.now() + timeoutMs
@@ -174,7 +183,7 @@ export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(
     RPC_CHANNELS.handoffs.READ_RESULT_CHUNK,
     async (ctx, input: { conversationId: string; handoffId: string; offset: number; limit: number }) => {
-      const runtime = runtimeFor(ctx, deps)
+      const runtime = resolveRuntime(ctx)
       assertConversation(runtime, input.conversationId)
       return runtime.service.readResultChunk(input.conversationId, input.handoffId, input.offset, input.limit)
     },
@@ -183,7 +192,7 @@ export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(
     RPC_CHANNELS.handoffs.CANCEL,
     async (ctx, input: { conversationId: string; handoffId: string; reason: string }) => {
-      const runtime = runtimeFor(ctx, deps)
+      const runtime = resolveRuntime(ctx)
       assertConversation(runtime, input.conversationId)
       await runtime.service.cancelHandoff(input.conversationId, input.handoffId, input.reason)
       return railFor(runtime, input.conversationId, input.handoffId)
@@ -193,7 +202,7 @@ export function registerHandoffsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(
     RPC_CHANNELS.handoffs.MARK_RESULT_READ,
     async (ctx, input: { conversationId: string; handoffId: string; expectedTaskVersion: number }) => {
-      const runtime = runtimeFor(ctx, deps)
+      const runtime = resolveRuntime(ctx)
       assertConversation(runtime, input.conversationId)
       runtime.service.markResultRead(input.conversationId, input.handoffId, input.expectedTaskVersion)
       return railFor(runtime, input.conversationId, input.handoffId)
