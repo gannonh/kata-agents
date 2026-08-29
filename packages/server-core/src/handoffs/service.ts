@@ -957,14 +957,17 @@ export class HandoffService {
       operationId: `handoff.${this.randomId()}`,
       conversationKind: 'direct',
     }).context
-    if (target.profile === undefined) return context
-    return {
-      ...context,
-      text: truncateUtf8(
-        `<bot_profile_untrusted>\n${escapeUntrustedText(target.profile)}\n</bot_profile_untrusted>\n${context.text}`,
-        SPAWN_TASK_LIMITS.childConfigBytes / 2,
-      ),
-    }
+    const preparedContext = target.profile === undefined
+      ? context
+      : {
+          ...context,
+          text: truncateUtf8(
+            `<bot_profile_untrusted>\n${escapeUntrustedText(target.profile)}\n</bot_profile_untrusted>\n${context.text}`,
+            SPAWN_TASK_LIMITS.childConfigBytes / 2,
+          ),
+        }
+    await ledger.recordRun(preparedContext)
+    return preparedContext
   }
 
   private rebuildTaskIndex(): void {

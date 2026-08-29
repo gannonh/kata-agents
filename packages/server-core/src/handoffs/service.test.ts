@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { BotRecord, BotTurnContext, JournalEntry, SpawnTask } from '@kata-sh/core'
 import { HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import { SpawnTaskStore } from '@kata-sh/shared/spawn-tasks'
@@ -70,7 +70,7 @@ function makeService(
   }) as unknown as ConversationJournal
   const options: HandoffServiceOptions = {
     workspaceId: 'ws_1',
-    workspaceRoot: deliveryStore.rootPath,
+    workspaceRoot: dirname(deliveryStore.rootPath),
     deliveryStore,
     resolveJournal: () => journal,
     botDirectory: {
@@ -162,6 +162,9 @@ describe('HandoffService creation boundary', () => {
       expect(dispatchedContext?.botId).toBe('bot_target')
       expect(dispatchedContext?.text).toContain('Review carefully &lt;private&gt;.')
       expect(dispatchedContext?.text).not.toContain('bot_source')
+      expect(readdirSync(join(workspaceRoot, 'bots', 'bot_target', 'memory', 'runs'))).toEqual([
+        `${dispatchedContext!.runId}.json`,
+      ])
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
     }
