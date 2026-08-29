@@ -296,4 +296,30 @@ describe('ApprovalStore and ToolBroker', () => {
       target: second,
     }), 'ask').kind).toBe('ask')
   })
+
+  it('preExecute keeps a denied record denied when the input also changed', () => {
+    const owner = broker(tempWorkspace())
+    const asked = owner.authorize(invocation(), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    owner.resolve(asked.request.approvalId, asked.request.version, 'deny')
+    const verdict = owner.preExecute(asked.request.approvalId, invocation({
+      normalizedInput: { file_path: '/tmp/bounded.txt', content: 'changed' },
+    }))
+    expect(verdict.kind).toBe('block')
+    if (verdict.kind !== 'block') return
+    expect(verdict.reason).toBe('denied')
+  })
+
+  it('preExecute rejects a runtime identity mismatch', () => {
+    const owner = broker(tempWorkspace())
+    const asked = owner.authorize(invocation(), 'ask')
+    expect(asked.kind).toBe('ask')
+    if (asked.kind !== 'ask') return
+    owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
+    const verdict = owner.preExecute(asked.request.approvalId, invocation({ runtimeId: 'session_other' }))
+    expect(verdict.kind).toBe('block')
+    if (verdict.kind !== 'block') return
+    expect(verdict.reason).toBe('unauthorized')
+  })
 })

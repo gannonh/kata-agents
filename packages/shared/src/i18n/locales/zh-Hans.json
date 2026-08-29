@@ -22,6 +22,7 @@
   "approvals.deny": "拒绝",
   "approvals.disableRule": "停用",
   "approvals.policyHeading": "Bot 策略",
+  "approvals.resolveFailed": "无法应用此决定。请重试。",
   "approvals.standingEmpty": "尚无长期规则。",
   "approvals.standingHeading": "长期规则",
   "approvals.statusAllowedOnce": "已允许一次",

@@ -59,14 +59,19 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       window.electronAPI.listChannelRoutes(workspaceId, channelId),
     ])
     const loadedHandoffs = await window.electronAPI.listConversationHandoffs(channelId)
-    const loadedApprovals = await window.electronAPI.listConversationApprovals(channelId)
     if (generation !== refreshGeneration.current) return
     setChannel(journal.channel)
     setMembers(journal.members)
     setEntries(journal.entries)
     setHandoffs(loadedHandoffs)
-    setApprovals(loadedApprovals)
     setRoutes([...loadedRoutes].sort((a, b) => a.routeSeq - b.routeSeq))
+    try {
+      const loadedApprovals = await window.electronAPI.listConversationApprovals(channelId)
+      if (generation !== refreshGeneration.current) return
+      setApprovals(loadedApprovals)
+    } catch (err) {
+      console.error('[Channels] Failed to load approvals:', err)
+    }
   }, [workspaceId, channelId])
 
   React.useEffect(() => {

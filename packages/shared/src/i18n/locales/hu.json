@@ -22,6 +22,7 @@
   "approvals.deny": "Elutasítás",
   "approvals.disableRule": "Letiltás",
   "approvals.policyHeading": "Bot-szabályzat",
+  "approvals.resolveFailed": "A döntést nem sikerült alkalmazni. Próbálja újra.",
   "approvals.standingEmpty": "Még nincsenek állandó szabályok.",
   "approvals.standingHeading": "Állandó szabályok",
   "approvals.statusAllowedOnce": "Egyszer engedélyezve",

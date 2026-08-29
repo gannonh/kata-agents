@@ -22,6 +22,7 @@
   "approvals.deny": "Odrzuć",
   "approvals.disableRule": "Wyłącz",
   "approvals.policyHeading": "Polityka Bota",
+  "approvals.resolveFailed": "Nie udało się zastosować tej decyzji. Spróbuj ponownie.",
   "approvals.standingEmpty": "Brak stałych reguł.",
   "approvals.standingHeading": "Stałe reguły",
   "approvals.statusAllowedOnce": "Zezwolono raz",

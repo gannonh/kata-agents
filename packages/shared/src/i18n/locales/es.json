@@ -22,6 +22,7 @@
   "approvals.deny": "Denegar",
   "approvals.disableRule": "Desactivar",
   "approvals.policyHeading": "Política del Bot",
+  "approvals.resolveFailed": "No se pudo aplicar esta decisión. Inténtalo de nuevo.",
   "approvals.standingEmpty": "Aún no hay reglas permanentes.",
   "approvals.standingHeading": "Reglas permanentes",
   "approvals.statusAllowedOnce": "Permitido una vez",

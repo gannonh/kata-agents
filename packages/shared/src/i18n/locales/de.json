@@ -22,6 +22,7 @@
   "approvals.deny": "Ablehnen",
   "approvals.disableRule": "Deaktivieren",
   "approvals.policyHeading": "Bot-Richtlinie",
+  "approvals.resolveFailed": "Diese Entscheidung konnte nicht übernommen werden. Versuchen Sie es erneut.",
   "approvals.standingEmpty": "Noch keine Dauerregeln.",
   "approvals.standingHeading": "Dauerregeln",
   "approvals.statusAllowedOnce": "Einmal erlaubt",

@@ -105,18 +105,23 @@ export class ToolBroker {
       record.workspaceId !== invocation.workspaceId
       || record.botId !== invocation.botId
       || record.conversationId !== invocation.conversationId
+      || record.runtimeId !== invocation.runtimeId
     ) {
       return block('unauthorized', 'Approval identity does not match this invocation.')
-    }
-    const hash = computeOperationHash(invocation)
-    if (hash !== record.operationHash || invocation.target.fingerprint !== record.targetFingerprint) {
-      this.store.markStale(approvalId, this.clock())
-      return block('stale', 'The operation changed after approval.')
     }
     if (record.status === 'expired') return block('expired', 'This approval expired before execution.')
     if (record.status === 'denied') return block('denied', 'This operation was denied and cannot run.')
     if (record.status === 'consumed') return block('consumed', 'This one-time approval was already used.')
     if (record.status === 'stale') return block('stale', 'The operation changed after approval.')
+    const hash = computeOperationHash(invocation)
+    if (hash !== record.operationHash || invocation.target.fingerprint !== record.targetFingerprint) {
+      try {
+        this.store.markStale(approvalId, this.clock())
+      } catch (error) {
+        if (!(error instanceof ApprovalConflictError)) throw error
+      }
+      return block('stale', 'The operation changed after approval.')
+    }
     if (record.status === 'allowed-once') return { kind: 'allow', reason: 'one-time' }
     return block('mismatch', 'This approval is not an allowed execution decision.')
   }

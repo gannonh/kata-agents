@@ -6,12 +6,27 @@ import { cn } from '@/lib/utils'
 
 export interface ApprovalCardProps {
   card: ApprovalCardView
-  onResolve: (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => void
+  onResolve: (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => void | Promise<void>
 }
 
 export function ApprovalCard({ card, onResolve }: ApprovalCardProps) {
   const { t } = useTranslation()
   const pending = card.status === 'pending'
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const resolve = React.useCallback(async (choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onResolve(card, choice, createStandingAllow)
+    } catch {
+      setError(t('approvals.resolveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, card, onResolve, t])
 
   return (
     <div
@@ -42,15 +57,18 @@ export function ApprovalCard({ card, onResolve }: ApprovalCardProps) {
       <div data-testid={`approval-card-preview-${card.approvalId}`} className="mt-2 line-clamp-4 whitespace-pre-wrap break-words text-sm">
         {card.preview}
       </div>
+      {error && (
+        <p data-testid={`approval-card-error-${card.approvalId}`} className="mt-2 text-xs text-destructive">{error}</p>
+      )}
       {pending && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" data-testid={`approval-deny-${card.approvalId}`} onClick={() => onResolve(card, 'deny')}>
+          <Button type="button" size="sm" variant="outline" disabled={busy} data-testid={`approval-deny-${card.approvalId}`} onClick={() => void resolve('deny')}>
             {t('approvals.deny')}
           </Button>
-          <Button type="button" size="sm" data-testid={`approval-allow-once-${card.approvalId}`} onClick={() => onResolve(card, 'allow-once')}>
+          <Button type="button" size="sm" disabled={busy} data-testid={`approval-allow-once-${card.approvalId}`} onClick={() => void resolve('allow-once')}>
             {t('approvals.allowOnce')}
           </Button>
-          <Button type="button" size="sm" variant="outline" data-testid={`approval-always-${card.approvalId}`} onClick={() => onResolve(card, 'allow-once', true)}>
+          <Button type="button" size="sm" variant="outline" disabled={busy} data-testid={`approval-always-${card.approvalId}`} onClick={() => void resolve('allow-once', true)}>
             {t('approvals.alwaysAllowExact')}
           </Button>
         </div>

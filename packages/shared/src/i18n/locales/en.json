@@ -22,6 +22,7 @@
   "approvals.deny": "Deny",
   "approvals.disableRule": "Disable",
   "approvals.policyHeading": "Bot policy",
+  "approvals.resolveFailed": "Could not apply this decision. Try again.",
   "approvals.standingEmpty": "No standing rules yet.",
   "approvals.standingHeading": "Standing rules",
   "approvals.statusAllowedOnce": "Allowed once",

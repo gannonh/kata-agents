@@ -134,6 +134,7 @@ test.describe(`Bot tool approvals ${E2E_TAGS.approvals}`, () => {
         await waitForIdleComposer(page);
         await expect(page.locator("[data-testid^='approval-card-'][data-approval-status='pending']")).toHaveCount(0);
         expect(existsSync(standingFile)).toBe(true);
+        expect(readFileSync(standingFile, "utf8")).toContain(standingAgain);
 
         await sendBotPrompt(page, writePrompt(otherFile, otherToken));
         const otherCard = await waitForPendingCard(page, `approval-other-${stamp}.txt`);

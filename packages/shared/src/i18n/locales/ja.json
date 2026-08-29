@@ -22,6 +22,7 @@
   "approvals.deny": "拒否",
   "approvals.disableRule": "無効化",
   "approvals.policyHeading": "Bot ポリシー",
+  "approvals.resolveFailed": "この決定を適用できませんでした。もう一度お試しください。",
   "approvals.standingEmpty": "常設ルールはまだありません。",
   "approvals.standingHeading": "常設ルール",
   "approvals.statusAllowedOnce": "一度許可済み",
