@@ -2981,6 +2981,14 @@ export class SessionManager implements ISessionManager {
       },
       listChildren: allReferences,
       resolveAttachments: (task) => this.resolveSpawnTaskAttachments(task),
+      resolveBotTurnContext: async (task) => {
+        if (task.origin?.kind !== 'handoff') return undefined
+        const delegate = this.handoffDelegateFor(workspaceId)
+        if (!delegate) {
+          throw new Error(`Handoff runtime is unavailable for task ${task.taskId} context recovery`)
+        }
+        return delegate.resolveBotTurnContext(task.origin.handoffId)
+      },
     }
   }
 

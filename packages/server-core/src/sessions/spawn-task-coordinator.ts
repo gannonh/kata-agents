@@ -77,6 +77,7 @@ export interface SpawnTaskRecoveryAdapter {
   readonly findChild: (task: SpawnTask) => SpawnTaskRecoveryChild | Promise<SpawnTaskRecoveryChild>
   readonly listChildren?: () => readonly SpawnTaskRecoveryReference[] | Promise<readonly SpawnTaskRecoveryReference[]>
   readonly resolveAttachments?: (task: SpawnTask) => readonly FileAttachment[] | undefined | Promise<readonly FileAttachment[] | undefined>
+  readonly resolveBotTurnContext?: (task: SpawnTask) => BotTurnContext | undefined | Promise<BotTurnContext | undefined>
 }
 
 export interface SpawnTaskCancellationResult {
@@ -766,6 +767,16 @@ export class SpawnTaskCoordinator {
       }
     }
 
+    let botTurnContext: BotTurnContext | undefined
+    if (recovery.resolveBotTurnContext) {
+      try {
+        botTurnContext = await recovery.resolveBotTurnContext(current)
+      } catch (error) {
+        await this.commitRecoveryFailure(current, 'bot_context', 'spawn_persist_failed', error)
+        return
+      }
+    }
+
     try {
       await this.appendDelegatedPrompt({
         task: current,
@@ -799,6 +810,7 @@ export class SpawnTaskCoordinator {
         task: current,
         prompt: current.delegatedPrompt,
         attachments,
+        ...(botTurnContext ? { botTurnContext } : {}),
       })
       this.markDispatchActive(current.taskId)
       if (providerTurn) {

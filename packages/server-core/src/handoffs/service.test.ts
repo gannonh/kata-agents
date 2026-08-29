@@ -250,6 +250,97 @@ describe('HandoffService creation boundary', () => {
     }
   })
 
+  it('keeps provider-started work recoverable when acknowledgement persistence fails', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-ack-recovery-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      const acknowledgeDelivery = deliveryStore.acknowledgeDelivery.bind(deliveryStore)
+      let rejectAcknowledgement = true
+      deliveryStore.acknowledgeDelivery = (deliveryId, input) => {
+        if (rejectAcknowledgement) {
+          rejectAcknowledgement = false
+          throw new Error('acknowledgement unavailable')
+        }
+        return acknowledgeDelivery(deliveryId, input)
+      }
+      let providerCalls = 0
+      const service = makeService(deliveryStore, taskStore, (dispatched) => {
+        providerCalls += 1
+        let current = taskStore.updateDispatch(dispatched.taskId, 'ready', at)
+        current = taskStore.updateDispatch(current.taskId, 'claimed', at)
+        current = taskStore.updateDispatch(current.taskId, 'sent', at)
+        taskStore.transition(current.taskId, { runtimeState: 'processing', at })
+      })
+
+      const created = await service.createHandoff({
+        callerSessionId: 'session_source',
+        targetBot: 'Reviewer',
+        request: 'Continue through acknowledgement recovery.',
+      })
+
+      expect(deliveryStore.get(created.deliveryId)?.mailState).toBe('claimed')
+      expect(providerCalls).toBe(1)
+
+      const report = await service.reconcileStartup()
+
+      expect(report.acknowledged).toBe(1)
+      expect(deliveryStore.get(created.deliveryId)?.mailState).toBe('acknowledged')
+      expect(providerCalls).toBe(1)
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns stable IDs when requested journal publication needs startup repair', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-journal-repair-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      const entries: JournalEntry[] = []
+      let rejectRequestedEntry = true
+      const journal = {
+        append: (input: Parameters<TestJournal['append']>[0]) => {
+          if (rejectRequestedEntry && input.idempotencyKey.endsWith('.requested')) {
+            rejectRequestedEntry = false
+            throw new Error('journal unavailable')
+          }
+          const entry: JournalEntry = {
+            schemaVersion: 1,
+            entryId: `entry_${entries.length + 1}`,
+            seq: entries.length + 1,
+            createdAt: at,
+            ...input,
+          }
+          entries.push(entry)
+          return entry
+        },
+        list: () => entries,
+      }
+      let providerCalls = 0
+      const service = makeService(deliveryStore, taskStore, () => {
+        providerCalls += 1
+      }, journal)
+
+      const created = await service.createHandoff({
+        callerSessionId: 'session_source',
+        targetBot: 'Reviewer',
+        request: 'Repair the journal without duplicating this task.',
+      })
+
+      expect(created).toMatchObject({ handoffId: 'handoff_handoff', deliveryId: 'delivery_delivery' })
+      expect(providerCalls).toBe(1)
+      expect(entries).toHaveLength(0)
+
+      await service.reconcileStartup()
+
+      expect(entries.map((entry) => entry.idempotencyKey)).toEqual(['handoff.handoff_handoff.requested'])
+      expect(providerCalls).toBe(1)
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('projects journal references through canonical delivery and task state', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-projection-'))
     try {
@@ -664,8 +755,19 @@ describe('HandoffService creation boundary', () => {
       const journal: TestJournal = {
         workspaceId: 'ws_1',
         append: () => { throw new Error('journal disk is full') },
-        list: () => [],
-        getHeadSequence: () => 0,
+        list: () => [{
+          schemaVersion: 1,
+          entryId: 'entry_requested',
+          conversationId: 'chat_source',
+          seq: 1,
+          kind: 'handoff',
+          authorBotId: 'bot_source',
+          handoffId: 'handoff_terminal_failure',
+          idempotencyKey: 'handoff.handoff_terminal_failure.requested',
+          body: JSON.stringify({ type: 'handoff-requested' }),
+          createdAt: at,
+        }],
+        getHeadSequence: () => 1,
       }
       const service = makeService(deliveryStore, taskStore, undefined, journal)
       taskStore.commitResult(current.taskId, 'done', { committedAt: at })

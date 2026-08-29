@@ -121,6 +121,7 @@ export interface HandoffDelegate {
   inspectHandoff(callerSessionId: string, input: InspectHandoffRequest, signal?: AbortSignal): Promise<InspectHandoffResult>
   onTaskUpdated(taskId: string): void | Promise<void>
   reconcileStartup(): Promise<HandoffReconcileReport> | HandoffReconcileReport
+  resolveBotTurnContext(handoffId: string): Promise<BotTurnContext>
 }
 
 const REQUESTED_KEY_SUFFIX = '.requested'
@@ -344,11 +345,15 @@ export class HandoffService {
     this.deliveryIdByTaskId.set(task.taskId, deliveryId)
     this.deliveryStore.attachSpawnTask(delivery.deliveryId, task.taskId)
 
-    this.appendRequestedEntry(delivery)
+    try {
+      this.appendRequestedEntry(delivery)
+    } catch (error) {
+      console.warn(`[Handoffs] Requested journal publication deferred for ${handoffId}`, error)
+    }
     this.emit({ type: 'handoff-created', handoffId, deliveryId, taskId: task.taskId, conversationId: delivery.conversationId })
 
     try {
-      const acknowledged = await this.dispatchAndAcknowledge(delivery, task)
+      const acknowledged = await this.dispatchAndTryAcknowledge(delivery, task)
       const latest = this.taskStore.get(task.taskId)
       if (latest) await this.publishTerminalIfNeeded(acknowledged, latest)
       return {
@@ -448,6 +453,7 @@ export class HandoffService {
           }
           continue
         }
+        this.appendRequestedEntry(snapshot)
         if (snapshot.mailState === 'acknowledged') {
           const task = snapshot.spawnTaskId ? this.taskStore.get(snapshot.spawnTaskId) : null
           if (!task || !isSpawnTaskTerminal(task.runtimeState)) continue
@@ -507,9 +513,8 @@ export class HandoffService {
           continue
         }
 
-        this.appendRequestedEntry(snapshot)
-        const acknowledged = await this.dispatchAndAcknowledge(snapshot, task)
-        report.acknowledged += 1
+        const acknowledged = await this.dispatchAndTryAcknowledge(snapshot, task)
+        if (acknowledged.mailState === 'acknowledged') report.acknowledged += 1
         const latest = this.taskStore.get(task.taskId)
         if (!latest || !isSpawnTaskTerminal(latest.runtimeState)) continue
         try {
@@ -741,7 +746,7 @@ export class HandoffService {
     return null
   }
 
-  private async dispatchAndAcknowledge(
+  private async dispatchAndTryAcknowledge(
     delivery: HandoffDeliveryRecord,
     task: SpawnTask,
   ): Promise<HandoffDeliveryRecord> {
@@ -788,11 +793,22 @@ export class HandoffService {
         && !matchesSpawnTaskDispatchFence(afterTask.dispatch.handoffFence, fence)) {
         throw new Error(`Spawned task ${afterTask.taskId} has a stale handoff dispatch fence`)
       }
-      return this.deliveryStore.acknowledgeDelivery(current.deliveryId, {
-        claimId: claim.claimId,
-        recipientBotId: current.targetBotId,
-        ownerEpoch: claim.ownerEpoch,
-      })
+      try {
+        return this.deliveryStore.acknowledgeDelivery(current.deliveryId, {
+          claimId: claim.claimId,
+          recipientBotId: current.targetBotId,
+          ownerEpoch: claim.ownerEpoch,
+        })
+      } catch (error) {
+        const recoverable = this.deliveryStore.get(current.deliveryId)
+        if (recoverable?.mailState === 'acknowledged') return recoverable
+        if (recoverable?.mailState === 'claimed'
+          && recoverable.claim.claimId === claim.claimId
+          && recoverable.claim.ownerEpoch === claim.ownerEpoch) {
+          return recoverable
+        }
+        throw error
+      }
     } catch (error) {
       throw new HandoffDispatchError(error, ownedClaim, current.targetBotId)
     }
@@ -980,6 +996,14 @@ export class HandoffService {
         }
     await ledger.recordRun(preparedContext)
     return preparedContext
+  }
+
+  async resolveBotTurnContext(handoffId: string): Promise<BotTurnContext> {
+    const delivery = this.deliveryStore.getByHandoff(handoffId)
+    if (!delivery) throw new Error(`Handoff ${handoffId} is unavailable for Bot context recovery`)
+    const target = this.tryGetBotById(delivery.targetBotId)
+    if (!target) throw new Error(`Handoff ${handoffId} target Bot is unavailable for context recovery`)
+    return this.assembleBotContext(target)
   }
 
   private rebuildTaskIndex(): void {

@@ -3372,7 +3372,11 @@ function AppShellContent({
           >
             {showChangesPanel && <ChangesPanel sessionId={focusedSessionId ?? session.selected} />}
             {showHandoffPanel && handoffPanel && (
-              <HandoffRail conversationId={handoffPanel.conversationId} handoffId={handoffPanel.handoffId} />
+              <HandoffRail
+                key={`${handoffPanel.conversationId}:${handoffPanel.handoffId}`}
+                conversationId={handoffPanel.conversationId}
+                handoffId={handoffPanel.handoffId}
+              />
             )}
           </div>
         )}
@@ -3385,7 +3389,11 @@ function AppShellContent({
             <div className="h-full w-[88%] max-w-[420px] overflow-hidden bg-background shadow-modal">
               {showChangesPanel && <ChangesPanel sessionId={focusedSessionId ?? session.selected} />}
               {showHandoffPanel && handoffPanel && (
-                <HandoffRail conversationId={handoffPanel.conversationId} handoffId={handoffPanel.handoffId} />
+                <HandoffRail
+                  key={`${handoffPanel.conversationId}:${handoffPanel.handoffId}`}
+                  conversationId={handoffPanel.conversationId}
+                  handoffId={handoffPanel.handoffId}
+                />
               )}
             </div>
           </div>
