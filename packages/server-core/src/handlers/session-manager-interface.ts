@@ -25,8 +25,9 @@ import type {
 } from '@kata-sh/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@kata-sh/shared/sessions'
 import type { EventSink } from '../transport'
+import type { HandoffRuntimeSessionManager } from '../handoffs/runtime'
 
-export interface ISessionManager {
+export interface ISessionManager extends HandoffRuntimeSessionManager {
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

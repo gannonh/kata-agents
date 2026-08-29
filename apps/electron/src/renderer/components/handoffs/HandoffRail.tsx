@@ -92,7 +92,7 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
       setResultText(null)
       return
     }
-    let disposed = false
+    const controller = new AbortController()
     setResultText(result.preview)
     void readCompleteHandoffResult(
       (offset, limit) => window.electronAPI.readHandoffResultChunk({
@@ -102,12 +102,13 @@ export function HandoffRail({ conversationId, handoffId }: HandoffRailProps) {
         limit,
       }),
       result,
+      controller.signal,
     ).then((text) => {
-      if (!disposed) setResultText(text)
+      if (!controller.signal.aborted) setResultText(text)
     }).catch((err: unknown) => {
-      if (!disposed) setError(err instanceof Error ? err.message : String(err))
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err))
     })
-    return () => { disposed = true }
+    return () => { controller.abort() }
   }, [conversationId, handoffId, rail?.task?.result?.sha256])
 
   const handleRead = React.useCallback(async () => {

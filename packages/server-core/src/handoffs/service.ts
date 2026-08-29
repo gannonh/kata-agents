@@ -73,7 +73,7 @@ export interface HandoffServiceOptions {
   readonly deliveryStore: HandoffDeliveryStore
   readonly resolveJournal: (conversationId: string) => ConversationJournal
   readonly botDirectory: BotDirectory
-  readonly channelDirectory: ChannelDirectory
+  readonly channelDirectory: Pick<ChannelDirectory, 'getChannel' | 'listChannels' | 'isMember'>
   readonly sessionManager: HandoffSessionLookup
   readonly taskStore: HandoffTaskStore
   readonly coordinator: HandoffSpawnCoordinator
@@ -272,7 +272,7 @@ export class HandoffService {
   private readonly deliveryStore: HandoffDeliveryStore
   private readonly resolveJournal: HandoffServiceOptions['resolveJournal']
   private readonly botDirectory: BotDirectory
-  private readonly channelDirectory: ChannelDirectory
+  private readonly channelDirectory: HandoffServiceOptions['channelDirectory']
   private readonly sessionManager: HandoffSessionLookup
   private readonly taskStore: HandoffTaskStore
   private readonly coordinator: HandoffSpawnCoordinator
@@ -327,6 +327,7 @@ export class HandoffService {
         code: 'task_reservation_failed',
         message: 'Handoff could not reserve the delegated task.',
       })
+      this.appendTerminalEntry(failed, null)
       this.emit({
         type: 'handoff-delivery-failed',
         handoffId: failed.handoffId,

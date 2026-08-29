@@ -9,6 +9,12 @@ type ReadChunk = (
   limit: number,
 ) => Promise<SpawnTaskResultChunkView | SpawnTaskIntegrityView>
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new DOMException('The handoff result read was aborted', 'AbortError')
+}
+
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value)
   return Uint8Array.from(binary, character => character.charCodeAt(0))
@@ -17,13 +23,16 @@ function decodeBase64(value: string): Uint8Array {
 export async function readCompleteHandoffResult(
   readChunk: ReadChunk,
   expected: { byteLength: number; sha256: string },
+  signal?: AbortSignal,
 ): Promise<string> {
   if (expected.byteLength > SPAWN_TASK_LIMITS.resultBytes) throw new Error('Handoff result exceeds the durable byte limit')
   const output = new Uint8Array(expected.byteLength)
   let offset = 0
 
   while (true) {
+    throwIfAborted(signal)
     const response = await readChunk(offset, SPAWN_TASK_LIMITS.resultReadBytes)
+    throwIfAborted(signal)
     if ('integrityError' in response) throw new Error(response.integrityError.message)
     if (
       response.offset !== offset

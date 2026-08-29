@@ -83,9 +83,10 @@ function makeService(
       listBots: () => [source, target],
     } as never,
     channelDirectory: overrides?.channelDirectory ?? {
+      getChannel: () => null,
       listChannels: () => [],
       isMember: () => true,
-    } as never,
+    },
     sessionManager: overrides?.sessionManager ?? {
       getSession: async (id: string) => ({ id, workspaceId: 'ws_1' }),
       cancelSpawnTask: async () => ({ status: 'already_terminal' as const, task: null }),
@@ -180,7 +181,26 @@ describe('HandoffService creation boundary', () => {
       const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
       const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
       taskStore.reserveForHandoff = () => { throw new Error('task storage unavailable') }
-      const service = makeService(deliveryStore, taskStore)
+      const entries: Array<Parameters<ConversationJournal['append']>[0]> = []
+      const service = makeService(deliveryStore, taskStore, undefined, {
+        append: (entry) => {
+          entries.push(entry)
+          return {
+            schemaVersion: 1,
+            entryId: `entry_${entries.length}`,
+            seq: entries.length,
+            createdAt: at,
+            ...entry,
+          }
+        },
+        list: () => entries.map((entry, index) => ({
+          schemaVersion: 1,
+          entryId: `entry_${index + 1}`,
+          seq: index + 1,
+          createdAt: at,
+          ...entry,
+        })),
+      })
 
       await expect(service.createHandoff({
         callerSessionId: 'session_source',
@@ -195,7 +215,10 @@ describe('HandoffService creation boundary', () => {
           failure: expect.objectContaining({ code: 'task_reservation_failed' }),
         }),
       ])
+      expect(entries).toHaveLength(1)
+      expect(entries[0]?.idempotencyKey).toBe('handoff.handoff_handoff.terminal')
       await service.reconcileStartup()
+      expect(entries).toHaveLength(1)
       expect(taskStore.getByHandoff('handoff_handoff')).toBeNull()
       expect(deliveryStore.getByHandoff('handoff_handoff')?.mailState).toBe('delivery-failed')
     } finally {
@@ -408,13 +431,19 @@ describe('HandoffService creation boundary', () => {
       const service = makeService(deliveryStore, taskStore, undefined, undefined, {
         channelDirectory: {
           getChannel: () => ({
+            schemaVersion: 1,
             channelId: 'channel_team',
             workspaceId: 'ws_1',
-            members: [{ botId: 'bot_source' }],
+            name: 'Team',
+            lifecycle: 'active',
+            membershipRevision: 1,
+            members: [{ botId: 'bot_source', priority: 0, addedAt: at }],
+            createdAt: at,
+            updatedAt: at,
           }),
           listChannels: () => [],
           isMember: () => true,
-        } as never,
+        },
       })
 
       await service.reconcileStartup()
@@ -451,10 +480,11 @@ describe('HandoffService creation boundary', () => {
         recipientBotId: 'bot_target',
         expectedOwnerEpoch: 0,
       })
+      if (!claimed.claim) throw new Error('Expected the cancellation delivery claim')
       deliveryStore.acknowledgeDelivery('delivery_cancel', {
-        claimId: claimed.claim!.claimId,
+        claimId: claimed.claim.claimId,
         recipientBotId: 'bot_target',
-        ownerEpoch: claimed.claim!.ownerEpoch,
+        ownerEpoch: claimed.claim.ownerEpoch,
       })
       let current = taskStore.updateDispatch(reserved.taskId, 'ready', at)
       current = taskStore.updateDispatch(current.taskId, 'claimed', at)

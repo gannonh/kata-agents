@@ -46,4 +46,27 @@ describe('readCompleteHandoffResult', () => {
     await expect(readCompleteHandoffResult(read, { byteLength: 10, sha256: 'digest' }))
       .rejects.toThrow('Result integrity check failed.')
   })
+
+  it('stops before requesting another chunk after cancellation', async () => {
+    const controller = new AbortController()
+    let calls = 0
+    const read = async (): Promise<SpawnTaskResultChunkView> => {
+      calls += 1
+      controller.abort()
+      return {
+        taskId: 'task_1',
+        offset: 0,
+        nextOffset: 2,
+        byteLength: 2,
+        totalByteLength: 4,
+        sha256: 'digest',
+        dataBase64: 'b2s=',
+        truncated: true,
+      }
+    }
+
+    await expect(readCompleteHandoffResult(read, { byteLength: 4, sha256: 'digest' }, controller.signal))
+      .rejects.toHaveProperty('name', 'AbortError')
+    expect(calls).toBe(1)
+  })
 })
