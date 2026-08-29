@@ -106,3 +106,14 @@ e2e/playwright-report/
 kata-agents.code-workspace
 .pi-subagents
 .pi/subagents
+
+# Installed skills (./scripts/install-skills.sh); repo-local skills stay tracked
+.agents/skills/*
+!.agents/skills/e2e-test-author/
+!.agents/skills/e2e-test-author/**
+!.agents/skills/release-kata-agents/
+!.agents/skills/release-kata-agents/**
+!.agents/skills/verify-kata-agents/
+!.agents/skills/verify-kata-agents/**
+.claude/skills/
+skills-lock.json

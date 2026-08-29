@@ -1,6 +1,0 @@
-{
-  "id": "codex",
-  "repository": "mintlify/codex-plugin",
-  "mcpConfigFile": ".mcp.json",
-  "mcpConfigKey": "mcp_servers"
-}

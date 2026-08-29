@@ -1,6 +1,0 @@
-{
-  "id": "cursor",
-  "repository": "mintlify/cursor-plugin",
-  "mcpConfigFile": "mcp.json",
-  "mcpConfigKey": "mcpServers"
-}
