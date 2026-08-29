@@ -24,10 +24,10 @@ Preconditions:
 - `#app-ready` is visible in an isolated run.
 - The English locale is active, or use the `data-testid` selectors for the mode controls.
 
-- **Open the page.** Click `getByRole("button", { name: "Kata menu" })`, then hover `getByRole("menuitem", { name: "Settings", exact: true })`, then click `getByRole("menuitem", { name: "Appearance", exact: true })`. Wait for the Appearance page's `radiogroup`.
+- **Open the page.** Click `getByRole("button", { name: "Kata menu" })`, then hover `getByRole("menuitem", { name: "Settings", exact: true })`, then click `getByRole("menuitem", { name: "Appearance", exact: true })`. Wait for `[data-testid="appearance-mode-dark"]`. The page has two `radiogroup`s (Mode and Font); Font also has a "System" radio.
 - **Choose dark.** Click `[data-testid="appearance-mode-dark"]`. The `<html>` element gains the `dark` class.
 - **Reload.** Reload the renderer with `waitUntil: "domcontentloaded"`; wait for the ready shell and assert `<html>` still has `dark`.
-- **Confirm persistence.** Read the local-storage key ending in `theme` without writing it. Parse its JSON and require `{ mode: "dark" }`.
+- **Confirm persistence.** Read the local-storage key ending in `theme` without writing it. Parse its JSON and require `.mode === "dark"` (the object also stores `colorTheme` and `font`).
 - **Checked-in regression.** Run `bun run e2e --grep "persists dark theme mode after reload" --trace on`. The existing `@settings` test uses the same real app and persistence assertion.
 - **Proof.** Capture the action trace plus a screenshot/ARIA snapshot of the Appearance page and retain the read-back mode value. A clicked control or a dark screenshot without the post-reload value is incomplete proof.
 

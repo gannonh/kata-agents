@@ -9,7 +9,7 @@ This directory is the maintained user-facing verification map for the Kata Agent
 - Use the checked-in Playwright `desktop-dev` project. It creates a fresh temporary `KATA_CONFIG_DIR` and free Vite port for every test.
 - Keep `KATA_E2E_WORKERS=1`; the repository does not yet isolate all shared subprocess ports for parallel workers.
 - The default locale is English, which is why the stable English ARIA names below match the checked-in test harness. Prefer `data-testid`/`data-tutorial` markers when a translated label is not necessary.
-- Provider-free launch, deferred setup, appearance, and structural browser checks need no AI credential. Agent turns and browser annotation-send require the real provider chain in `e2e/README.md`; GitHub integration additionally needs authenticated `gh` and the configured UAT checkout.
+- Provider-free launch, deferred setup, appearance, structural browser (`Embedded browser panel`), and `@worktree-v2 name root` need no AI credential. Agent turns, Channel routing, Bot memory, handoffs, and browser annotation-send require the real provider chain in `e2e/README.md`. GitHub integration additionally needs authenticated `gh` and the configured UAT checkout. `--grep @browser` and `--grep @settings` are broader than the structural/appearance proofs.
 - Never drive an instance whose manifest was not created by the current run.
 
 ## Driving conventions
@@ -29,4 +29,5 @@ This directory is the maintained user-facing verification map for the Kata Agent
 - [Agent session](./agent-session.md) covers a real provider-backed session, model selection, a deterministic prompt, and the assistant reply.
 - [Channel routing](./channels.md) covers durable Channel creation, Bot membership, autonomous and explicit routing, fan-out, restart, and persisted route evidence.
 - [Bot memory and compaction](./memory.md) covers explicit preference extraction, provenance, edit and forget controls, bounded context, compaction, and restart recovery.
-- [Git workspaces](./git-workspaces.md) covers current checkout versus managed worktree selection, branch identity, configured roots, and cleanup.
+- [Bot handoffs](./handoffs.md) covers `send_handoff` from DirectChat, the inline card, the result rail, and restart recovery.
+- [Git workspaces](./git-workspaces.md) covers current checkout versus managed worktree selection, branch identity, configured roots, and cleanup. Offline identity/root proof is `@worktree-v2 name root`; bare `@git` includes local V1 specs plus authenticated GitHub UAT.

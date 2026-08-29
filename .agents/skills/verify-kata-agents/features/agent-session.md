@@ -26,16 +26,16 @@ Preconditions:
 
 - **Configure the provider.** Let `runWithAgentProviderFallback` and `configureAgentConnection` in `e2e/src/flows/` choose the first working candidate. Do not paste a credential into a trace or invent a deterministic production adapter.
 - **Start a session.** Click `[data-tutorial="new-chat-button"]`; wait for `[data-tutorial="chat-input"]`.
-- **Choose a model.** Click `[data-tutorial="model-picker-trigger"]`, select the candidate's exact `[data-model-id]` entry, and wait for the picker to close.
+- **Choose a model.** Click `[data-tutorial="model-picker-trigger"]`. The picker may expose `[data-model-id]` as the bare id, `pi/${id}`, `chatgpt-plus:${id}`, or `chatgpt-plus:pi/${id}`. Click the first visible candidate (see `selectModel` in `e2e/src/flows/agentChat.ts`).
 - **Send.** Fill `[data-tutorial="chat-input"]` with a unique prompt such as `Reply with exactly this text and nothing else: E2E_AGENT_OK_20260826_001`, using a different suffix for each run, then click `[data-tutorial="send-button"]`.
-- **Assert the reply.** Wait for the last `[data-testid="assistant-turn"]` response, fail fast on `[data-testid="chat-error-message"]`, and require the assistant text to equal the unique token after processing becomes idle.
+- **Assert the reply.** Wait for the last `[data-testid="assistant-turn"] [data-search-root="response"]` text, fail fast on `[data-testid="chat-error-message"]`, and require that inner text to equal the unique token after processing becomes idle. The assistant-turn wrapper includes activity chrome; a user-bubble echo is not a pass.
 - **Checked-in coverage.** Run `bun run e2e --grep @agent --trace on`. The existing test walks the real fallback chain and reports every skipped or failed provider option.
 - **Proof.** Preserve the provider-attempt log, user turn, assistant turn, unique token, and trace. Never include a raw API key or OAuth token in evidence.
 
 ## Gotchas
 
 - Credentials are available in this environment by default; do not claim they are unavailable without checking the Codex OAuth chain and root `.env` fallback described in `AGENTS.md` and `e2e/README.md`.
-- Onboarding can seed an outdated model ID. Explicitly select the live candidate model before sending.
+- Onboarding can seed an outdated model ID. Explicitly select the live candidate model before sending. The `@agent` harness IPC-configures the provider from `#onboarding-wizard`; it does not click provider cards or Setup later.
 - A prompt echoed in the user bubble is not a reply. Assert inside the last assistant response, then verify the turn completed.
 - A provider failure is only conclusive after `runWithAgentProviderFallback` exhausts the configured chain; preserve the aggregated error.
 - This tier makes real external calls. Do not run it as a casual smoke check when the offline launch/settings/browser tiers answer the question.
