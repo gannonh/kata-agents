@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HANDOFF_LIMITS, type HandoffMailState } from '@kata-sh/core';
 import {
   getWorkspaceHandoffsPath,
   handoffByHandoffPath,
-  handoffDeliveryRecordPath,
+  handoffDeliveryVersionsPath,
   HandoffDeliveryClaimConflictError,
   HandoffDeliveryStore,
   type CreateHandoffDeliveryInput,
@@ -66,7 +66,10 @@ function acknowledgeNew(store: HandoffDeliveryStore, deliveryId: string, claimId
 }
 
 function diskRecord(root: string, deliveryId: string): string {
-  return readFileSync(handoffDeliveryRecordPath(getWorkspaceHandoffsPath(root), deliveryId), 'utf8');
+  const versionsPath = handoffDeliveryVersionsPath(getWorkspaceHandoffsPath(root), deliveryId);
+  const latest = readdirSync(versionsPath).sort().at(-1);
+  if (!latest) throw new Error(`Delivery ${deliveryId} has no versions`);
+  return readFileSync(join(versionsPath, latest), 'utf8');
 }
 
 describe('HandoffDeliveryStore create and reads', () => {
@@ -174,6 +177,36 @@ describe('HandoffDeliveryStore claim CAS', () => {
       ownerEpoch: 1,
     });
     expect(() => claim(store, 'delivery_a', 'claim_four', 1)).toThrow('Illegal handoff mail transition: acknowledged -> claimed');
+  });
+
+  it('allows only one stale store instance to claim and acknowledge a delivery', () => {
+    const root = tempWorkspace();
+    const first = createStore(root);
+    first.create(createInput());
+    first.attachSpawnTask('delivery_a', 'task_a');
+    const second = createStore(root);
+
+    const accepted = first.claimDelivery('delivery_a', {
+      claimId: 'claim_one',
+      recipientBotId: 'bot_target',
+      expectedOwnerEpoch: 0,
+    });
+    expect(() => second.claimDelivery('delivery_a', {
+      claimId: 'claim_two',
+      recipientBotId: 'bot_target',
+      expectedOwnerEpoch: 0,
+    })).toThrow(HandoffDeliveryClaimConflictError);
+    expect(() => second.acknowledgeDelivery('delivery_a', {
+      claimId: 'claim_two',
+      recipientBotId: 'bot_target',
+      ownerEpoch: 1,
+    })).toThrow(HandoffDeliveryClaimConflictError);
+
+    expect(first.acknowledgeDelivery('delivery_a', {
+      claimId: accepted.claim!.claimId,
+      recipientBotId: 'bot_target',
+      ownerEpoch: accepted.claim!.ownerEpoch,
+    }).mailState).toBe('acknowledged');
   });
 
   it('rejects a claim on a delivery-failed delivery', () => {
@@ -376,8 +409,8 @@ describe('HandoffDeliveryStore reload', () => {
     store.create(createInput());
 
     const handoffsRoot = getWorkspaceHandoffsPath(root);
-    mkdirSync(join(handoffsRoot, 'deliveries', 'delivery_bad'), { recursive: true });
-    writeFileSync(join(handoffsRoot, 'deliveries', 'delivery_bad', 'record.json'), '{ not json', 'utf8');
+    mkdirSync(join(handoffsRoot, 'deliveries', 'delivery_bad', 'versions'), { recursive: true });
+    writeFileSync(join(handoffsRoot, 'deliveries', 'delivery_bad', 'versions', '000000000001.json'), '{ not json', 'utf8');
 
     const reloaded = new HandoffDeliveryStore({ workspaceRoot: root, clock: () => at });
     expect(reloaded.get('delivery_a')).toEqual(store.get('delivery_a'));

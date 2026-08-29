@@ -3,8 +3,9 @@ export {
   getWorkspaceHandoffsPath,
   handoffByConversationPath,
   handoffByHandoffPath,
-  handoffDeliveryRecordPath,
   handoffDeliveriesPath,
+  handoffDeliveryVersionPath,
+  handoffDeliveryVersionsPath,
 } from './layout.ts';
 export {
   assertHandoffDeliveryRecord,

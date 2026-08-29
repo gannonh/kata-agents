@@ -5,8 +5,10 @@ export function getWorkspaceHandoffsPath(workspaceRoot: string): string {
 }
 
 export const handoffDeliveriesPath = (root: string): string => join(root, 'deliveries');
-export const handoffDeliveryRecordPath = (root: string, deliveryId: string): string =>
-  join(handoffDeliveriesPath(root), deliveryId, 'record.json');
+export const handoffDeliveryVersionsPath = (root: string, deliveryId: string): string =>
+  join(handoffDeliveriesPath(root), deliveryId, 'versions');
+export const handoffDeliveryVersionPath = (root: string, deliveryId: string, version: number): string =>
+  join(handoffDeliveryVersionsPath(root, deliveryId), `${String(version).padStart(12, '0')}.json`);
 export const handoffByHandoffPath = (root: string, handoffId: string): string =>
   join(root, 'by-handoff', `${handoffId}.json`);
 export const handoffByConversationPath = (root: string, conversationId: string, deliveryId: string): string =>

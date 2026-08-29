@@ -21,8 +21,9 @@ import {
   getWorkspaceHandoffsPath,
   handoffByConversationPath,
   handoffByHandoffPath,
-  handoffDeliveryRecordPath,
   handoffDeliveriesPath,
+  handoffDeliveryVersionPath,
+  handoffDeliveryVersionsPath,
 } from './layout.ts';
 
 export interface HandoffDeliveryStoreOptions {
@@ -80,6 +81,7 @@ export class HandoffDeliveryClaimConflictError extends Error {
 }
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const VERSION_FILE = /^(\d{12})\.json$/;
 
 function fail(message: string): never {
   throw new TypeError(`Invalid handoff delivery record: ${message}`);
@@ -245,7 +247,7 @@ export class HandoffDeliveryStore {
     if (Buffer.byteLength(input.request, 'utf8') > HANDOFF_LIMITS.requestBytes) {
       throw new Error(`request exceeds the ${HANDOFF_LIMITS.requestBytes} byte limit`);
     }
-    const existing = this.byHandoff.get(handoffId);
+    const existing = this.readByHandoffPointer(handoffId);
     if (existing) throw new Error(`Handoff ID ${handoffId} is already owned by delivery ${existing}`);
 
     const now = this.clock();
@@ -265,8 +267,8 @@ export class HandoffDeliveryStore {
     };
     assertHandoffDeliveryRecord(record);
 
-    const recordPath = handoffDeliveryRecordPath(this.rootPath, deliveryId);
-    if (!writeJsonIfAbsent(recordPath, record)) {
+    const versionPath = handoffDeliveryVersionPath(this.rootPath, deliveryId, record.version);
+    if (!writeJsonIfAbsent(versionPath, record)) {
       throw new Error(`Handoff delivery already exists: ${deliveryId}`);
     }
     if (!this.claimHandoffPointer(handoffId, deliveryId)) {
@@ -285,18 +287,28 @@ export class HandoffDeliveryStore {
 
   get(deliveryId: string): HandoffDeliveryRecord | null {
     assertHandoffPathId(deliveryId, 'deliveryId');
-    const record = this.deliveries.get(deliveryId);
-    return record ? clone(record) : null;
+    let record: HandoffDeliveryRecord | null;
+    try {
+      record = this.readLatest(deliveryId);
+    } catch (error) {
+      this.loadErrors.set(deliveryId, error instanceof Error ? error.message : String(error));
+      return null;
+    }
+    if (!record) return null;
+    this.loadErrors.delete(deliveryId);
+    this.index(record);
+    return clone(record);
   }
 
   getByHandoff(handoffId: string): HandoffDeliveryRecord | null {
     assertHandoffPathId(handoffId, 'handoffId');
-    const deliveryId = this.byHandoff.get(handoffId);
+    const deliveryId = this.readByHandoffPointer(handoffId);
     return deliveryId ? this.get(deliveryId) : null;
   }
 
   listByConversation(conversationId: string): HandoffDeliveryRecord[] {
     assertHandoffPathId(conversationId, 'conversationId');
+    this.reload();
     return [...(this.byConversation.get(conversationId) ?? [])]
       .map((deliveryId) => this.deliveries.get(deliveryId))
       .filter((record): record is HandoffDeliveryRecord => record !== undefined)
@@ -305,6 +317,7 @@ export class HandoffDeliveryStore {
   }
 
   listAll(): HandoffDeliveryRecord[] {
+    this.reload();
     return [...this.deliveries.values()]
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.deliveryId.localeCompare(right.deliveryId))
       .map(clone);
@@ -321,7 +334,7 @@ export class HandoffDeliveryStore {
   }
 
   claimDelivery(deliveryId: string, input: ClaimHandoffDeliveryInput): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     const claimId = assertHandoffPathId(input.claimId, 'claim.claimId');
     const recipientBotId = assertHandoffPathId(input.recipientBotId, 'recipientBotId');
     if (!Number.isSafeInteger(input.expectedOwnerEpoch) || input.expectedOwnerEpoch < 0) {
@@ -367,11 +380,11 @@ export class HandoffDeliveryStore {
       claim: { claimId, ownerEpoch, claimedAt: this.clock() },
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   acknowledgeDelivery(deliveryId: string, input: AcknowledgeHandoffDeliveryInput): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     if (current.mailState !== 'claimed') {
       throw new HandoffDeliveryClaimConflictError(
         `Illegal handoff mail transition: ${current.mailState} -> acknowledged`,
@@ -402,11 +415,11 @@ export class HandoffDeliveryStore {
       spawnTaskId: current.spawnTaskId,
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   failDelivery(deliveryId: string, input: FailHandoffDeliveryInput): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     if (current.mailState !== 'pending' && current.mailState !== 'claimed') {
       throw new HandoffDeliveryClaimConflictError(
         `Illegal handoff mail transition: ${current.mailState} -> delivery-failed`,
@@ -455,11 +468,11 @@ export class HandoffDeliveryStore {
       },
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   attachSpawnTask(deliveryId: string, spawnTaskId: string): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     const validatedTaskId = assertHandoffPathId(spawnTaskId, 'spawnTaskId');
     if (current.mailState !== 'pending' && current.mailState !== 'claimed') {
       throw new Error(`Cannot attach a spawned task to handoff delivery in state ${current.mailState}`);
@@ -474,11 +487,11 @@ export class HandoffDeliveryStore {
       spawnTaskId: validatedTaskId,
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   markResultUnread(deliveryId: string, input: MarkHandoffResultUnreadInput): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     if (current.mailState !== 'acknowledged') {
       throw new Error(
         `Handoff delivery ${deliveryId} must be acknowledged to mark task results unread, not ${current.mailState}`,
@@ -496,11 +509,11 @@ export class HandoffDeliveryStore {
       resultUnread: { taskVersion: input.taskVersion, at: input.at },
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   markResultRead(deliveryId: string, input: MarkHandoffResultReadInput): HandoffDeliveryRecord {
-    const current = this.require(deliveryId);
+    const current = this.requireLatest(deliveryId);
     assertPositiveSafeInteger(input.expectedTaskVersion, 'expectedTaskVersion');
     if (!current.resultUnread || current.resultUnread.taskVersion !== input.expectedTaskVersion) {
       throw new Error(
@@ -515,7 +528,7 @@ export class HandoffDeliveryStore {
       resultReadTaskVersion: input.expectedTaskVersion,
       updatedAt: this.clock(),
     };
-    return this.commit(next);
+    return this.commit(current, next);
   }
 
   reload(): void {
@@ -533,12 +546,8 @@ export class HandoffDeliveryStore {
       if (!entry.isDirectory()) continue;
       try {
         assertHandoffPathId(entry.name, 'delivery directory');
-        const recordPath = handoffDeliveryRecordPath(this.rootPath, entry.name);
-        assertNotSymlink(recordPath, 'handoff delivery record');
-        assertRegularFile(recordPath, 'handoff delivery record');
-        const raw = readJsonFile(recordPath);
-        if (!raw) throw new Error('Handoff delivery record is missing');
-        const record = assertHandoffDeliveryRecord(raw);
+        const record = this.readLatest(entry.name);
+        if (!record) throw new Error('Handoff delivery has no committed version');
         if (record.deliveryId !== entry.name) {
           throw new Error(`Handoff delivery ownership mismatch for ${entry.name}`);
         }
@@ -560,19 +569,62 @@ export class HandoffDeliveryStore {
     return record;
   }
 
+  private requireLatest(deliveryId: string): HandoffDeliveryRecord {
+    assertHandoffPathId(deliveryId, 'deliveryId');
+    const record = this.readLatest(deliveryId);
+    if (!record) throw new Error(`Handoff delivery not found: ${deliveryId}`);
+    this.index(record);
+    return record;
+  }
+
   private assertMailTransition(from: HandoffMailState, to: HandoffMailState): void {
     if (!HANDOFF_MAIL_TRANSITIONS[from].includes(to)) {
       throw new Error(`Illegal handoff mail transition: ${from} -> ${to}`);
     }
   }
 
-  private commit(next: HandoffDeliveryRecord): HandoffDeliveryRecord {
+  private commit(current: HandoffDeliveryRecord, next: HandoffDeliveryRecord): HandoffDeliveryRecord {
     const validated = assertHandoffDeliveryRecord(next);
-    const recordPath = handoffDeliveryRecordPath(this.rootPath, validated.deliveryId);
-    assertNotSymlink(recordPath, 'handoff delivery record');
-    writeJsonRecord(recordPath, validated);
+    if (validated.deliveryId !== current.deliveryId || validated.version !== current.version + 1) {
+      throw new Error('Handoff delivery mutation must advance one owned version');
+    }
+    const versionPath = handoffDeliveryVersionPath(this.rootPath, validated.deliveryId, validated.version);
+    if (!writeJsonIfAbsent(versionPath, validated)) {
+      const winner = this.requireLatest(validated.deliveryId);
+      throw new HandoffDeliveryClaimConflictError(
+        `Handoff delivery ${validated.deliveryId} changed from version ${current.version} to ${winner.version}`,
+      );
+    }
     this.index(validated);
     return clone(validated);
+  }
+
+  private readLatest(deliveryId: string): HandoffDeliveryRecord | null {
+    const versionsPath = handoffDeliveryVersionsPath(this.rootPath, deliveryId);
+    assertNotSymlink(versionsPath, 'handoff delivery versions directory');
+    if (!existsSync(versionsPath)) return null;
+    const versions = readdirSync(versionsPath, { withFileTypes: true })
+      .filter((entry) => !entry.name.startsWith('.'))
+      .map((entry) => {
+        if (entry.isSymbolicLink() || !entry.isFile()) {
+          throw new Error(`Handoff delivery version ${entry.name} must be a regular file`);
+        }
+        const match = VERSION_FILE.exec(entry.name);
+        if (!match) throw new Error(`Invalid handoff delivery version file: ${entry.name}`);
+        return { name: entry.name, version: Number(match[1]) };
+      })
+      .sort((left, right) => right.version - left.version);
+    const latest = versions[0];
+    if (!latest) return null;
+    const versionPath = join(versionsPath, latest.name);
+    assertRegularFile(versionPath, 'handoff delivery version');
+    const raw = readJsonFile(versionPath);
+    if (!raw) throw new Error('Handoff delivery version is missing');
+    const record = assertHandoffDeliveryRecord(raw);
+    if (record.deliveryId !== deliveryId || record.version !== latest.version) {
+      throw new Error(`Handoff delivery version ownership mismatch for ${deliveryId}`);
+    }
+    return record;
   }
 
   private index(record: HandoffDeliveryRecord): void {
