@@ -99,7 +99,16 @@ test.describe(`Bot handoffs ${E2E_TAGS.handoffs}`, () => {
         await page.getByTestId("bot-chat-input").fill(handoffPrompt);
         await page.getByTestId("bot-chat-send").click();
 
-        const cards = page.locator("[data-testid^='handoff-card-'][data-handoff-id]");
+        const pendingApproval = page.locator("[data-testid^='approval-card-'][data-approval-status='pending']");
+        const handoffCards = page.locator("[data-testid^='handoff-card-'][data-handoff-id]");
+        await expect(pendingApproval.or(handoffCards).first()).toBeVisible({ timeout: E2E_TIMEOUTS.agentReplyMs });
+        if (await pendingApproval.count()) {
+          const approvalId = await pendingApproval.first().getAttribute("data-approval-id");
+          if (!approvalId) throw new Error("Pending handoff approval is missing its approval ID");
+          await page.getByTestId(`approval-allow-once-${approvalId}`).click();
+        }
+
+        const cards = handoffCards;
         await expect(cards).toHaveCount(1, { timeout: E2E_TIMEOUTS.agentReplyMs });
         await expect(cards.first()).toContainText(sourceName);
         await expect(cards.first()).toContainText(targetName);
