@@ -126,4 +126,4 @@ The image includes Chromium and needs enough RAM for one headless browser plus B
 
 All Bots share one OS account and filesystem. A file or browser login created by Bot A is available to Bot B after an explicit profile handoff, a client disconnect that releases the profile lease, or a server restart that drops stale leases. A browser profile still has one active writer at a time.
 
-systemd remains supported for localhost (`127.0.0.1`) installs. New systemd lifecycle features are out of this slice. The tarball `install.sh --systemd` path is unchanged besides `KATA_DATA_ROOT`.
+systemd remains supported for localhost (`127.0.0.1`) installs. New systemd lifecycle features are out of this slice. The tarball wrapper does not default `KATA_DATA_ROOT`. Packaged mode fails closed if that variable is unset. `install.sh` writes `KATA_DATA_ROOT=$DIR/data` only when it creates a new `.env`.

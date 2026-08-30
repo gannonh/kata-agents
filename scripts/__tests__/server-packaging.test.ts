@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { renderCanonicalCompose, renderSystemdUnit, CANONICAL_DATA_ROOT } from '../server-packaging.ts'
+import {
+  renderCanonicalCompose,
+  renderSystemdUnit,
+  renderPackagedServerWrapper,
+  renderPackagedInstallScript,
+  renderPackagedSystemdUnit,
+  CANONICAL_DATA_ROOT,
+} from '../server-packaging.ts'
 
 describe('server packaging', () => {
   it('compose uses a durable data root, token file, TLS, and healthcheck', () => {
@@ -31,5 +38,21 @@ describe('server packaging', () => {
     expect(unit).toContain('KATA_RPC_HOST=127.0.0.1')
     expect(unit).toContain('User=kata')
     expect(unit).not.toContain('0.0.0.0')
+  })
+
+  it('packaged wrapper does not invent a data root', () => {
+    const wrapper = renderPackagedServerWrapper()
+    expect(wrapper).toContain('KATA_IS_PACKAGED=true')
+    expect(wrapper).not.toContain('KATA_DATA_ROOT')
+    expect(wrapper).not.toContain(CANONICAL_DATA_ROOT)
+  })
+
+  it('install.sh embeds the canonical localhost systemd unit', () => {
+    const install = renderPackagedInstallScript()
+    const unit = renderPackagedSystemdUnit()
+    expect(install).toContain(unit)
+    expect(install).toContain('KATA_DATA_ROOT=$DIR/data')
+    expect(install).toContain('KATA_RPC_HOST=127.0.0.1')
+    expect(install).not.toContain('0.0.0.0')
   })
 })

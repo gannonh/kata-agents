@@ -285,6 +285,32 @@ describe('headless server smoke test', () => {
     expect(body.checks.some((check) => check.name === 'computer_storage' && check.status === 'pass')).toBe(true)
   }, TEST_TIMEOUT)
 
+  it('fails closed when packaged without KATA_DATA_ROOT', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'kata-server-smoke-'))
+    const {
+      CLAUDECODE: _,
+      KATA_SERVER_TOKEN: _serverToken,
+      KATA_CONFIG_DIR: _configDir,
+      KATA_DATA_ROOT: _dataRoot,
+      KATA_IS_PACKAGED: _packaged,
+      ...parentEnv
+    } = process.env
+    const proc = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
+      env: {
+        ...parentEnv,
+        KATA_IS_PACKAGED: 'true',
+        KATA_SERVER_TOKEN: 'token-with-enough-entropy-0123456789',
+        KATA_RPC_PORT: '0',
+        KATA_RPC_HOST: '127.0.0.1',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const exitCode = await proc.exited
+    rmSync(configDir, { recursive: true, force: true })
+    expect(exitCode).not.toBe(0)
+  }, TEST_TIMEOUT)
+
   it('fails closed when packaged without a token', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'kata-server-smoke-'))
     const {
