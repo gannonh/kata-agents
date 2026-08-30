@@ -22,6 +22,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Bug Fixes
 
 - **Packaged tarball keeps the data root you set.** `bin/kata-server` no longer defaults `KATA_DATA_ROOT` to `/var/lib/kata-agents`. Compose still uses that path. A packaged process without `KATA_DATA_ROOT` fails closed instead of switching state ([#82](https://github.com/gannonh/kata-agents/issues/82)).
+- **Compose reads the TLS key as the key owner.** Set `KATA_UID` and `KATA_GID` to `id -u` / `id -g` of `certs/key.pem`. Keep the key mode `0600`. Unpackaged `--allow-insecure-bind` still works. Packaged mode rejects that flag before listen. The server prints `KATA_SERVER_TOKEN` only for a generated development token, not a configured one ([#82](https://github.com/gannonh/kata-agents/issues/82)).
 
 - **Durable delegated task lifecycle** — Spawned child sessions now persist normalized Claude/Pi output and failures as task-owned results before update notifications, safely pause for permission/auth input, reconcile restart interruptions, and handle cancellation/deletion races without replaying late provider events ([#64](https://github.com/gannonh/kata-agents/issues/64)).
 - Failed Chrome cookie imports no longer wipe the live Kata browser session. New cookies are written first, leftover cookies are removed only after at least one replacement lands, and a total write failure reports an error instead of success with zero imported cookies ([#30](https://github.com/gannonh/kata-agents/issues/30)).

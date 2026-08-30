@@ -29,14 +29,9 @@ For production-like local testing with built subprocesses and web UI assets:
 bun run server:prod
 ```
 
-On startup, the server prints the connection values clients need:
+On startup, the server prints `KATA_SERVER_URL`. It prints `KATA_SERVER_TOKEN` only when it generated an ephemeral development token for that run. A token you set in the environment or a token file is not written to stdout. `--generate-token` still prints a newly generated token and exits.
 
-```bash
-KATA_SERVER_URL=ws://127.0.0.1:9100
-KATA_SERVER_TOKEN=...
-```
-
-If `KATA_SERVER_TOKEN` is not set, the standalone server generates an ephemeral token for that run. For stable clients or production deployments, generate and export a persistent token yourself:
+If `KATA_SERVER_TOKEN` is not set, the standalone unpackaged server generates an ephemeral token for that run and prints it. For stable clients or production deployments, generate and export a persistent token yourself:
 
 ```bash
 export KATA_SERVER_TOKEN="$(bun run packages/server/src/index.ts --generate-token)"
@@ -76,10 +71,14 @@ Canonical production deploy is Docker Compose. The image is immutable. Mutable s
 3. Start the computer.
 
 ```bash
+export KATA_UID="$(id -u)"
+export KATA_GID="$(id -g)"
 docker compose -f docker-compose.server.yml up --build -d
 ```
 
-The compose file binds `0.0.0.0:9100` with TLS. Startup fails closed if the token, data root, or TLS pair is missing. A public bind without TLS also fails closed unless you pass `--allow-insecure-bind`.
+`KATA_UID` and `KATA_GID` must be the numeric owner of `certs/key.pem`. Compose fails closed if either is unset. Keep the key mode `0600`. Do not chmod it `0644` so the container can read it.
+
+The compose file binds `0.0.0.0:9100` with TLS. Startup fails closed if the token, data root, or TLS pair is missing. Unpackaged local runs may pass `--allow-insecure-bind` for a public bind without TLS. Packaged mode rejects that flag before listen.
 
 Connect a desktop thin client over WSS:
 
@@ -99,6 +98,8 @@ Unpackaged local runs may generate an ephemeral token. Packaged and Compose runs
 ### Enable TLS
 
 Set both `KATA_RPC_TLS_CERT` and `KATA_RPC_TLS_KEY`. Setting only one fails closed. Optional `KATA_RPC_TLS_CA` supplies a CA chain.
+
+The image user `kataagents` cannot read a host-owned `0600` key. Compose runs as `KATA_UID:KATA_GID` instead so the process uid matches the key owner. The key can stay mode `0600`. Confirm with `ls -l certs/key.pem` and `id -u` before `up`.
 
 ### Bind the data volume
 
