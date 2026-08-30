@@ -3,6 +3,7 @@ import { CLIENT_BROWSER_INVOKE } from '@kata-sh/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@kata-sh/server-core/handlers'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import type { Computer } from '../computer/computer.ts'
+import { ProfileBusyError } from '../computer/errors.ts'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
@@ -9964,7 +9965,15 @@ export class SessionManager implements ISessionManager {
         const overlayBpm = this.getBrowserPaneManagerForSession(sessionId)
         if (overlayBpm && shouldActivateOverlay) {
           // Ensure first browser action in a turn gets an instance before overlay activation.
-          overlayBpm.getOrCreateForSession(sessionId, { workspaceId })
+          // Headless create is async and may reject with ProfileBusyError; do not use the sync
+          // pending-id path (requirePane cannot resolve those ids).
+          void overlayBpm.getOrCreateForSessionAsync(sessionId, { workspaceId }).catch((error) => {
+            if (error instanceof ProfileBusyError) return
+            sessionLog.warn('[browser-pane] overlay getOrCreateForSessionAsync failed', {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
 
           const resolvedDisplayName = toolDisplayMeta?.displayName
             ?? event.displayName

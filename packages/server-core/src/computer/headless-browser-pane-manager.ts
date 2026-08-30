@@ -24,6 +24,7 @@ import type {
   BrowserWaitArgs,
   BrowserWaitResult,
 } from '../handlers/browser-pane-manager-interface.ts'
+import { ProfileBusyError } from './errors.ts'
 import type { BrowserHost } from './browser-host.ts'
 
 interface SnapshotRef {
@@ -115,7 +116,9 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     for (const [id, pane] of [...this.panes]) {
       if (pane.sessionId === sessionId) {
         this.panes.delete(id)
-        void pane.page.close().catch(() => {})
+        void pane.page.close().catch((error) => {
+          this.ignoreBackgroundRejection(error)
+        })
       }
     }
     this.releaseSessionLeaseIfIdle(sessionId)
@@ -124,9 +127,8 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   async clearVisualsForSession(_sessionId: string): Promise<void> {}
   unbindAllForSession(_sessionId: string): void {}
 
-  getOrCreateForSession(sessionId: string, options?: { workspaceId?: string | null }): string {
-    void this.getOrCreateForSessionAsync(sessionId, options)
-    return `pending:${sessionId}`
+  getOrCreateForSession(_sessionId: string, _options?: { workspaceId?: string | null }): string {
+    throw new Error('HeadlessBrowserPaneManager.getOrCreateForSession is unavailable; use getOrCreateForSessionAsync')
   }
 
   async getOrCreateForSessionAsync(sessionId: string, options?: { workspaceId?: string | null }): Promise<string> {
@@ -139,9 +141,8 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     _options?: { workspaceId?: string | null },
   ): void {}
 
-  createForSession(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): string {
-    void this.createForSessionAsync(sessionId, options)
-    return `pending:${sessionId}`
+  createForSession(_sessionId: string, _options?: { show?: boolean; workspaceId?: string | null }): string {
+    throw new Error('HeadlessBrowserPaneManager.createForSession is unavailable; use createForSessionAsync')
   }
 
   async createForSessionAsync(sessionId: string, options?: { show?: boolean; workspaceId?: string | null }): Promise<string> {
@@ -253,9 +254,8 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     return this.listInstances()
   }
 
-  focusBoundForSession(sessionId: string, options?: { workspaceId?: string | null }): string {
-    void this.focusBoundForSessionAsync(sessionId, options)
-    return `pending:${sessionId}`
+  focusBoundForSession(_sessionId: string, _options?: { workspaceId?: string | null }): string {
+    throw new Error('HeadlessBrowserPaneManager.focusBoundForSession is unavailable; use focusBoundForSessionAsync')
   }
 
   async focusBoundForSessionAsync(sessionId: string, options?: { workspaceId?: string | null }): Promise<string> {
@@ -274,7 +274,9 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     const pane = this.panes.get(id)
     if (!pane) return
     this.panes.delete(id)
-    void pane.page.close().catch(() => {})
+    void pane.page.close().catch((error) => {
+      this.ignoreBackgroundRejection(error)
+    })
     this.releaseSessionLeaseIfIdle(pane.sessionId)
   }
   hide(_id: string): void {}
@@ -422,7 +424,9 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   }
 
   windowResize(id: string, width: number, height: number): { width: number; height: number } {
-    void this.requirePane(id).page.setViewportSize({ width, height })
+    void this.requirePane(id).page.setViewportSize({ width, height }).catch((error) => {
+      this.ignoreBackgroundRejection(error)
+    })
     return { width, height }
   }
 
@@ -481,7 +485,13 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     void this.host.releaseProfileLease({
       profileId,
       sessionId: brandSessionId(sessionId),
-    }).catch(() => {})
+    }).catch((error) => {
+      this.ignoreBackgroundRejection(error)
+    })
+  }
+
+  private ignoreBackgroundRejection(error: unknown): void {
+    if (error instanceof ProfileBusyError) return
   }
 
   private locatorForRef(pane: Pane, ref: string): Locator {
