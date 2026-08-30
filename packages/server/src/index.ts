@@ -7,6 +7,8 @@
  *
  * Environment:
  *   KATA_SERVER_TOKEN         — required bearer token for client auth
+ *   KATA_SERVER_TOKEN_FILE    — token file (wins over KATA_SERVER_TOKEN)
+ *   KATA_DATA_ROOT            — durable computer data root (required when packaged)
  *   KATA_RPC_HOST             — bind address (default: 127.0.0.1)
  *   KATA_RPC_PORT             — bind port (default: 9100)
  *   KATA_RPC_TLS_CERT         — path to PEM certificate file (enables TLS/wss)
@@ -26,8 +28,8 @@
  *   KATA_MESSAGING_NODE_BIN   — Node binary used to spawn the WhatsApp worker (default: node)
  */
 
+import './align-data-root.ts'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { readFileSync, existsSync } from 'node:fs'
 import { version as packageVersion } from '../package.json'
 import { enableDebug } from '@kata-sh/shared/utils/debug'
@@ -51,8 +53,40 @@ import { setSearchPlatform, setImageProcessor } from '@kata-sh/server-core/servi
 import { getDefaultGitServices } from '@kata-sh/server-core/git'
 import { attachHandoffDelegate } from '@kata-sh/server-core/handoffs'
 import type { HandlerDeps } from '@kata-sh/server-core/handlers'
+import { filterCapabilitiesForComputer, parseComputerConfig } from '@kata-sh/shared/computer'
+import { Computer } from '@kata-sh/server-core/computer'
 
 process.env.KATA_IS_PACKAGED ??= 'false'
+
+function isPackagedProcess(): boolean {
+  const value = process.env.KATA_IS_PACKAGED?.trim().toLowerCase()
+  return value === 'true' || value === '1'
+}
+
+if (!isPackagedProcess() && !process.env.KATA_SERVER_TOKEN && !process.env.KATA_SERVER_TOKEN_FILE) {
+  process.env.KATA_SERVER_TOKEN = generateServerToken()
+  console.warn('[server] KATA_SERVER_TOKEN not set; generated an ephemeral token for this run.')
+}
+
+let computerConfig
+try {
+  computerConfig = parseComputerConfig(process.env, { argv: process.argv })
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
+
+if (process.argv.includes('--health') || process.argv[2] === 'health') {
+  const peeked = Computer.peekHealth(computerConfig.dataRoot)
+  console.log(JSON.stringify({
+    status: peeked.status,
+    readiness: peeked.readiness,
+  }))
+  process.exit(peeked.status === 'unhealthy' ? 1 : 0)
+}
+
+const skipBrowser = process.env.KATA_SKIP_BROWSER === '1' || process.env.KATA_SKIP_BROWSER === 'true'
+const computer = await Computer.open(computerConfig, { skipBrowser })
 
 // Prevent unhandled rejections from crashing the server.
 // SDK subprocess abort can reject promises that propagate up unhandled;
@@ -100,17 +134,11 @@ const bundledAssetsRoot = process.env.KATA_BUNDLED_ASSETS_ROOT
 
 // TLS configuration — when cert + key paths are provided, server listens on wss://
 let tls: WsRpcTlsOptions | undefined
-const tlsCertPath = process.env.KATA_RPC_TLS_CERT
-const tlsKeyPath = process.env.KATA_RPC_TLS_KEY
-if (tlsCertPath || tlsKeyPath) {
-  if (!tlsCertPath || !tlsKeyPath) {
-    console.error('TLS requires both KATA_RPC_TLS_CERT and KATA_RPC_TLS_KEY.')
-    process.exit(1)
-  }
+if (computer.config.rpc.tls) {
   tls = {
-    cert: readFileSync(tlsCertPath),
-    key: readFileSync(tlsKeyPath),
-    ...(process.env.KATA_RPC_TLS_CA ? { ca: readFileSync(process.env.KATA_RPC_TLS_CA) } : {}),
+    cert: readFileSync(computer.config.rpc.tls.certPath),
+    key: readFileSync(computer.config.rpc.tls.keyPath),
+    ...(computer.config.rpc.tls.caPath ? { ca: readFileSync(computer.config.rpc.tls.caPath) } : {}),
   }
 }
 
@@ -119,10 +147,7 @@ const webuiDir = process.env.KATA_WEBUI_DIR || undefined
 const webuiEnabled = webuiDir && existsSync(webuiDir)
 const webuiSecureCookies = parseOptionalBooleanEnv('KATA_WEBUI_SECURE_COOKIE', process.env.KATA_WEBUI_SECURE_COOKIE)
 const webuiWsUrl = parseOptionalWebSocketUrl('KATA_WEBUI_WS_URL', process.env.KATA_WEBUI_WS_URL)
-const serverToken = process.env.KATA_SERVER_TOKEN ?? generateServerToken()
-if (!process.env.KATA_SERVER_TOKEN) {
-  console.warn('[server] KATA_SERVER_TOKEN not set; generated an ephemeral token for this run.')
-}
+const serverToken = computer.config.rpc.token
 
 // ---------------------------------------------------------------------------
 // Create WebUI handler early so it can be embedded in the WsRpcServer.
@@ -173,9 +198,13 @@ const instance = await (async () => {
   try {
     return await bootstrapServer<SessionManager, HandlerDeps>({
       serverToken,
+      rpcHost: computer.config.rpc.host,
+      rpcPort: computer.config.rpc.port,
       bundledAssetsRoot,
       serverVersion: process.env.KATA_VERSION ?? packageVersion,
       tls,
+      filterClientCapabilities: (capabilities) =>
+        filterCapabilitiesForComputer(computer.identity.kind, capabilities),
       // When web UI is enabled, accept JWT session cookies on WebSocket upgrade
       validateSessionCookie: webuiEnabled && serverToken
         ? async (cookieHeader) => {
@@ -214,6 +243,7 @@ const instance = await (async () => {
       createSessionManager: () => {
         const sessionManager = new SessionManager()
         attachHandoffDelegate(sessionManager)
+        sessionManager.setComputer(computer)
         return sessionManager
       },
       bindRpcServer: (sm, server) => sm.setRpcServer(server),
@@ -222,7 +252,7 @@ const instance = await (async () => {
           sessionManager,
           credentialManager: getCredentialManager(),
           getMessagingDir: (wsId: string) =>
-            join(homedir(), '.kata-agents', 'workspaces', wsId, 'messaging'),
+            join(computer.layout.workspacesDir, wsId, 'messaging'),
           // Headless has no legacy messaging dir — workspaces start clean.
           whatsapp: {
             workerEntry: waWorkerEntry,
@@ -236,6 +266,7 @@ const instance = await (async () => {
           oauthFlowStore,
           messagingRegistry: messagingHandle.registry,
           gitServices: getDefaultGitServices(),
+          computer,
         }
       },
       registerAllRpcHandlers: registerCoreRpcHandlers,
@@ -287,7 +318,7 @@ if (messagingHandle !== null) {
 // Wire up the lazy health check now that the session manager is ready
 if (webuiHandler) {
   const { getHealthCheck } = await import('@kata-sh/server-core/handlers/rpc/server')
-  const depsLike = { sessionManager: instance.sessionManager } as any
+  const depsLike = { sessionManager: instance.sessionManager, computer } as any
   healthCheckFn = () => getHealthCheck(depsLike)
 
   // Wire up OAuth callback deps so /api/oauth/callback works
@@ -303,10 +334,10 @@ if (webuiHandler) {
 }
 
 // Start HTTP health endpoint if KATA_HEALTH_PORT is set
-const healthPort = parseInt(process.env.KATA_HEALTH_PORT ?? '0', 10)
+const healthPort = computer.config.healthPort
 const healthServer = await startHealthHttpServer({
   port: healthPort,
-  deps: { sessionManager: instance.sessionManager },
+  deps: { sessionManager: instance.sessionManager, computer },
   wsServer: instance.wsServer,
   platform: instance.platform,
 })
@@ -314,6 +345,9 @@ const healthServer = await startHealthHttpServer({
 const serverProto = instance.protocol === 'wss' ? 'https' : 'http'
 console.log(`KATA_SERVER_URL=${instance.protocol}://${instance.host}:${instance.port}`)
 console.log(`KATA_SERVER_TOKEN=${instance.token}`)
+if (healthServer) {
+  console.log(`KATA_HEALTH_URL=http://127.0.0.1:${healthServer.port}/health`)
+}
 if (webuiHandler) {
   const webuiHost = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host
   const webuiUrl = `${serverProto}://${webuiHost}:${instance.port}`
@@ -358,6 +392,11 @@ const shutdown = async () => {
     } catch (error) {
       console.error('[messaging] dispose failed:', error)
     }
+  }
+  try {
+    await computer.shutdown({ reason: 'signal', timeoutMs: 10_000 })
+  } catch (error) {
+    console.error('[computer] shutdown failed:', error)
   }
   await instance.stop()
   process.exit(0)
