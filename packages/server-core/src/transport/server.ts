@@ -111,6 +111,8 @@ export interface WsRpcServerOptions {
    * Must use Node.js HTTP callback signature (IncomingMessage, ServerResponse).
    */
   httpHandler?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  /** Drop or rewrite advertised client capabilities after handshake. */
+  filterClientCapabilities?: (capabilities: readonly string[]) => readonly string[]
 }
 
 const transportLog = createLogger('ws-rpc-server')
@@ -146,6 +148,7 @@ export class WsRpcServer implements RpcServer {
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected']
   private readonly clientDisconnectHandlers = new Set<(clientId: string) => void>()
   private readonly httpHandler: WsRpcServerOptions['httpHandler']
+  private readonly filterClientCapabilities: WsRpcServerOptions['filterClientCapabilities']
 
   constructor(opts?: WsRpcServerOptions) {
     this.host = opts?.host ?? '127.0.0.1'
@@ -160,6 +163,7 @@ export class WsRpcServer implements RpcServer {
     this.onClientConnected = opts?.onClientConnected
     this.onClientDisconnected = opts?.onClientDisconnected
     this.httpHandler = opts?.httpHandler
+    this.filterClientCapabilities = opts?.filterClientCapabilities
   }
 
   /** The actual port the server is listening on (available after listen()). */
@@ -562,12 +566,16 @@ export class WsRpcServer implements RpcServer {
 
         // ── Normal fresh connect ──
         const clientId = randomUUID()
+        const advertised = envelope.clientCapabilities ?? []
+        const filtered = this.filterClientCapabilities
+          ? this.filterClientCapabilities(advertised)
+          : advertised
         const client: ClientConnection = {
           id: clientId,
           ws,
           workspaceId: envelope.workspaceId ?? null,
           webContentsId: envelope.webContentsId ?? null,
-          capabilities: new Set(envelope.clientCapabilities ?? []),
+          capabilities: new Set(filtered),
           missedPongs: 0,
           alive: true,
           eventBuffer: [],

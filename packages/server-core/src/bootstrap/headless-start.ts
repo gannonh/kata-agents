@@ -53,6 +53,7 @@ export interface ServerBootstrapOptions<TSessionManager, THandlerDeps> {
    * When provided, the WsRpcServer serves HTTP (e.g. WebUI) on the same port.
    */
   httpHandler?: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void
+  filterClientCapabilities?: (capabilities: readonly string[]) => readonly string[]
 }
 
 export interface ServerHandlerContext {
@@ -305,6 +306,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
     serverVersion: options.serverVersion,
     tls: options.tls,
     httpHandler: options.httpHandler,
+    filterClientCapabilities: options.filterClientCapabilities,
     onClientConnected: options.onClientConnected,
     onClientDisconnected: (clientId) => {
       options.cleanupClientResources?.(clientId)
@@ -417,7 +419,7 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
 
 export interface HealthHttpServerOptions {
   port: number
-  deps: { sessionManager: { getWorkspaces(): unknown[] } }
+  deps: { sessionManager: { getWorkspaces(): unknown[] }; computer?: import('../computer/computer.ts').Computer }
   wsServer: WsRpcServer
   platform: PlatformServices
 }
@@ -426,13 +428,18 @@ export interface HealthHttpServerOptions {
  * Start a minimal HTTP server for health/status probes.
  * Only starts if port > 0. Returns a cleanup function.
  */
-export async function startHealthHttpServer(options: HealthHttpServerOptions): Promise<{ stop: () => void } | null> {
+export async function startHealthHttpServer(
+  options: HealthHttpServerOptions,
+): Promise<{ stop: () => void; port: number } | null> {
   if (options.port <= 0) return null
 
   // Dynamic import — getHealthCheck uses HandlerDeps shape
   const { getHealthCheck } = await import('../handlers/rpc/server')
 
-  const depsLike = { sessionManager: options.deps.sessionManager } as any
+  const depsLike = {
+    sessionManager: options.deps.sessionManager,
+    computer: options.deps.computer,
+  } as any
 
   // Use Bun.serve if available, otherwise skip (Node.js/Electron doesn't need HTTP health)
   if (typeof globalThis.Bun !== 'undefined') {
@@ -443,17 +450,18 @@ export async function startHealthHttpServer(options: HealthHttpServerOptions): P
         if (path === '/health') {
           const health = getHealthCheck(depsLike)
           return Response.json(health, {
-            status: health.status === 'ok' ? 200 : 503,
+            status: health.status === 'unhealthy' ? 503 : 200,
           })
         }
         return new Response('Not Found', { status: 404 })
       },
     })
 
-    options.platform.logger.info(`[bootstrap] Health endpoint listening on http://0.0.0.0:${options.port}/health`)
+    options.platform.logger.info(`[bootstrap] Health endpoint listening on http://0.0.0.0:${server.port}/health`)
 
     return {
       stop: () => server.stop(),
+      port: server.port,
     }
   }
 

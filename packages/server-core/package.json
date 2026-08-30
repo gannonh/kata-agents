@@ -21,6 +21,7 @@
     "./handlers/rpc/*": "./src/handlers/rpc/*.ts",
     "./handlers/push-sources-changed": "./src/handlers/push-sources-changed.ts",
     "./sessions": "./src/sessions/index.ts",
+    "./computer": "./src/computer/index.ts",
     "./handoffs": "./src/handoffs/index.ts",
     "./webui": "./src/webui/index.ts"
   },
@@ -28,12 +29,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
     "@kata-sh/core": "workspace:*",
     "@kata-sh/shared": "workspace:*",
     "jose": "^6.0.0",
-    "ws": "^8.19.0",
+    "playwright-core": "1.55.0",
     "sharp": "0.34.5",
-    "@earendil-works/pi-ai": "0.84.1"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

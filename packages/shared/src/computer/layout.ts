@@ -18,6 +18,8 @@ export function layoutForRoot(root: string): DataRootLayout {
     manifestPath: join(absolute, 'computer', 'manifest.json'),
     recordPath: join(absolute, 'computer', 'record.json'),
     shutdownDir: join(absolute, 'computer', 'shutdown'),
+    migrationLockPath: join(absolute, 'computer', '.migration.lock'),
+    runtimeLockPath: join(absolute, 'computer', '.runtime.lock'),
     configPath: join(absolute, 'config.json'),
     credentialsPath: join(absolute, 'credentials.enc'),
     worktreesDir: join(absolute, 'worktrees'),

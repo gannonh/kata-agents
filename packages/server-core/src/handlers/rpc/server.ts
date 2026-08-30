@@ -7,6 +7,7 @@ import { getDefaultWorkspacesDir, ensureDefaultWorkspacesDir } from '@kata-sh/sh
 import type { ServerStatus, ServerHealth } from '@kata-sh/core/types'
 import type { RpcServer } from '@kata-sh/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import type { Computer } from '../../computer/computer.ts'
 import type { ServerHandlerContext } from '../../bootstrap/headless-start'
 
 export const HANDLED_CHANNELS = [
@@ -15,6 +16,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.server.GET_STATUS,
   RPC_CHANNELS.server.GET_HEALTH,
   RPC_CHANNELS.server.GET_ACTIVE_SESSIONS,
+  RPC_CHANNELS.server.GET_COMPUTER_IDENTITY,
   RPC_CHANNELS.server.HOME_DIR,
 ] as const
 
@@ -114,6 +116,13 @@ export function registerServerHandlers(
     return sessionManager.getActiveSessionsInfo()
   })
 
+  server.handle(RPC_CHANNELS.server.GET_COMPUTER_IDENTITY, async () => {
+    if (!deps.computer) {
+      throw new Error('Computer identity is not available on this server')
+    }
+    return deps.computer.publicIdentity()
+  })
+
   // -----------------------------------------------------------------------
   // Server Home Directory (REMOTE_ELIGIBLE — returns this server's home)
   // -----------------------------------------------------------------------
@@ -127,7 +136,7 @@ export function registerServerHandlers(
 // Health check logic (reusable by both RPC handler and HTTP endpoint)
 // ---------------------------------------------------------------------------
 
-export function getHealthCheck(deps: Pick<HandlerDeps, 'sessionManager'>): ServerHealth {
+export function getHealthCheck(deps: Pick<HandlerDeps, 'sessionManager'> & { computer?: Computer }): ServerHealth {
   const checks: ServerHealth['checks'] = []
 
   // Check 1: SessionManager is operational (has loaded workspaces)
@@ -155,12 +164,31 @@ export function getHealthCheck(deps: Pick<HandlerDeps, 'sessionManager'>): Serve
     message: `Heap: ${Math.round(heapGB * 100) / 100} GB`,
   })
 
-  // Aggregate status
-  const allPass = checks.every(c => c.status === 'pass')
-  const anyFail = checks.some(c => c.status === 'fail')
+  if (deps.computer) {
+    const readiness = deps.computer.snapshotReadiness()
+    const pushDimension = (name: string, status: typeof readiness.process) => {
+      checks.push({
+        name,
+        status: status.tag === 'ready' ? 'pass' : 'fail',
+        message: status.tag === 'ready' ? undefined : `${status.tag}: ${status.reason}`,
+      })
+    }
+    pushDimension('computer_process', readiness.process)
+    pushDimension('computer_storage', readiness.storage)
+    pushDimension('computer_browser', readiness.browser)
+  }
+
+  const sessionFailed = checks.some((check) => check.name === 'session_manager' && check.status === 'fail')
+  const memoryFailed = checks.some((check) => check.name === 'memory' && check.status === 'fail')
+  const computerHealth = deps.computer ? deps.computer.healthStatus() : 'ok'
+  const status: ServerHealth['status'] = sessionFailed || memoryFailed || computerHealth === 'unhealthy'
+    ? 'unhealthy'
+    : computerHealth === 'degraded'
+      ? 'degraded'
+      : checks.every((check) => check.status === 'pass') ? 'ok' : 'unhealthy'
 
   return {
-    status: allPass ? 'ok' : anyFail ? 'unhealthy' : 'degraded',
+    status,
     checks,
   }
 }
