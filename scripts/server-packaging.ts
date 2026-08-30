@@ -31,7 +31,7 @@ export function renderCanonicalCompose(opts?: { dockerfile?: string }): string {
       timeout: 5s
       retries: 3
     restart: unless-stopped
-    user: "kataagents"
+    user: "\${KATA_UID:?Set KATA_UID to the numeric uid that owns certs/key.pem}:\${KATA_GID:?Set KATA_GID to the numeric gid of certs/key.pem}"
 
 volumes:
   kata-data:

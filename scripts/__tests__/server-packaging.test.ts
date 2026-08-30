@@ -21,6 +21,10 @@ describe('server packaging', () => {
     expect(compose).toContain('curl')
     expect(compose).toContain('http://127.0.0.1:9101/health')
     expect(compose).toContain('dockerfile: Dockerfile.server')
+    expect(compose).toContain(
+      'user: "${KATA_UID:?Set KATA_UID to the numeric uid that owns certs/key.pem}:${KATA_GID:?Set KATA_GID to the numeric gid of certs/key.pem}"',
+    )
+    expect(compose).not.toContain('user: "kataagents"')
     expect(compose).not.toContain('/root/.kata-agents')
   })
 
