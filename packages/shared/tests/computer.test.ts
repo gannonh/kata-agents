@@ -123,6 +123,44 @@ describe('parseComputerConfig', () => {
       'weak-token',
     );
   });
+
+  it('rejects a port value that is not entirely an integer', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_DATA_ROOT: tempRoot(),
+        KATA_RPC_PORT: '9100junk',
+      }),
+      'invalid-port',
+    );
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_DATA_ROOT: tempRoot(),
+        KATA_HEALTH_PORT: '9101junk',
+      }),
+      'invalid-port',
+    );
+  });
+
+  it('rejects --allow-insecure-bind in packaged mode before listen', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_IS_PACKAGED: 'true',
+        KATA_DATA_ROOT: tempRoot(),
+        KATA_SERVER_TOKEN: 'token-with-enough-entropy-01',
+        KATA_RPC_HOST: '127.0.0.1',
+      }, { argv: ['--allow-insecure-bind'] }),
+      'packaged-insecure-bind',
+    );
+  });
+
+  it('still allows --allow-insecure-bind outside packaged mode', () => {
+    const config = parseComputerConfig({
+      KATA_DATA_ROOT: tempRoot(),
+      KATA_RPC_HOST: '0.0.0.0',
+    }, { argv: ['--allow-insecure-bind'] });
+    expect(config.packaged).toBe(false);
+    expect(config.rpc.allowInsecurePublicBind).toBe(true);
+  });
 });
 
 describe('openDataRootLayout', () => {

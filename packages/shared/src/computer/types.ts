@@ -136,6 +136,7 @@ export type ComputerConfigErrorCode =
   | 'missing-token'
   | 'tls-incomplete'
   | 'insecure-public-bind'
+  | 'packaged-insecure-bind'
   | 'weak-token'
   | 'invalid-port'
 

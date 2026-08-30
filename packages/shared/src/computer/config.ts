@@ -19,8 +19,12 @@ function envFlag(value: string | undefined): boolean {
 
 function parsePort(name: string, value: string | undefined, fallback: number): number {
   if (value == null || value.trim() === '') return fallback
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 65535) {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) {
+    throw new ComputerConfigError('invalid-port', `${name} must be an integer 0-65535`)
+  }
+  const parsed = Number(trimmed)
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
     throw new ComputerConfigError('invalid-port', `${name} must be an integer 0-65535`)
   }
   return parsed
@@ -72,6 +76,12 @@ export function parseComputerConfig(
   const packaged = opts?.packaged ?? envFlag(env.KATA_IS_PACKAGED)
   const argv = opts?.argv ?? []
   const allowInsecurePublicBind = argv.includes('--allow-insecure-bind')
+  if (packaged && allowInsecurePublicBind) {
+    throw new ComputerConfigError(
+      'packaged-insecure-bind',
+      '--allow-insecure-bind is not allowed in packaged mode. Bind 127.0.0.1 or set KATA_RPC_TLS_CERT and KATA_RPC_TLS_KEY.',
+    )
+  }
 
   const dataRootEnv = env.KATA_DATA_ROOT?.trim() ?? ''
   if (packaged && !dataRootEnv) {
