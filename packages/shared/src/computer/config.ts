@@ -65,10 +65,6 @@ function parseTls(env: NodeJS.ProcessEnv): ComputerRpcConfig['tls'] {
   return null
 }
 
-function isLocalHost(host: string): boolean {
-  return LOCAL_HOSTS.has(host)
-}
-
 export function parseComputerConfig(
   env: NodeJS.ProcessEnv,
   opts?: { packaged?: boolean; argv?: string[] },
@@ -85,7 +81,10 @@ export function parseComputerConfig(
 
   const token = readToken(env)
   if (!token && packaged) {
-    throw new ComputerConfigError('missing-token', 'KATA_SERVER_TOKEN or KATA_SERVER_TOKEN_FILE is required in packaged mode')
+    throw new ComputerConfigError(
+      'missing-token',
+      'KATA_SERVER_TOKEN or KATA_SERVER_TOKEN_FILE is required in packaged mode',
+    )
   }
   if (token) assertTokenStrength(token)
 
@@ -94,7 +93,7 @@ export function parseComputerConfig(
   const healthPort = parsePort('KATA_HEALTH_PORT', env.KATA_HEALTH_PORT, 0)
   const tls = parseTls(env)
 
-  if (!isLocalHost(host) && tls === null && !allowInsecurePublicBind) {
+  if (!LOCAL_HOSTS.has(host) && tls === null && !allowInsecurePublicBind) {
     throw new ComputerConfigError(
       'insecure-public-bind',
       'Refusing to bind a non-localhost address without TLS. Set KATA_RPC_TLS_CERT/KEY or pass --allow-insecure-bind.',

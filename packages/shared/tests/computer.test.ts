@@ -1,184 +1,224 @@
-import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ComputerConfigError,
   aggregateHealth,
   filterCapabilitiesForComputer,
   openDataRootLayout,
   parseComputerConfig,
-} from '../src/computer/index.ts'
+} from '@kata-sh/shared/computer';
 
-const tempRoots: string[] = []
+const tempRoots: string[] = [];
 
 afterEach(() => {
-  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true })
-})
+  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'kata-computer-'))
-  tempRoots.push(root)
-  return root
+  const root = mkdtempSync(join(tmpdir(), 'kata-computer-'));
+  tempRoots.push(root);
+  return root;
 }
 
-function strongToken(): string {
-  return 'token-with-enough-entropy-0123456789'
+function expectConfigCode(fn: () => unknown, code: string): void {
+  try {
+    fn();
+    throw new Error(`expected ${code}`);
+  } catch (error) {
+    if (!(error instanceof ComputerConfigError)) throw error;
+    expect(error.code).toBe(code);
+  }
 }
 
 describe('parseComputerConfig', () => {
-  it('uses KATA_DATA_ROOT in unpackaged mode', () => {
-    const dataRoot = tempRoot()
+  it('unpackaged parse picks KATA_DATA_ROOT', () => {
     const config = parseComputerConfig({
-      KATA_DATA_ROOT: dataRoot,
-      KATA_SERVER_TOKEN: strongToken(),
-    }, { packaged: false })
-    expect(config.dataRoot).toBe(dataRoot)
-    expect(config.kind).toBe('local-client')
-    expect(config.packaged).toBe(false)
-  })
+      KATA_DATA_ROOT: '/tmp/kata-data-root',
+      KATA_CONFIG_DIR: '/tmp/should-not-win',
+    });
+    expect(config.dataRoot).toBe('/tmp/kata-data-root');
+    expect(config.kind).toBe('local-client');
+    expect(config.packaged).toBe(false);
+  });
 
-  it('fails closed when packaged mode has no data root', () => {
-    try {
-      parseComputerConfig({
+  it('packaged missing data root throws', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
         KATA_IS_PACKAGED: 'true',
-        KATA_SERVER_TOKEN: strongToken(),
-      }, { packaged: true })
-      throw new Error('expected parse to throw')
-    } catch (error) {
-      expect(error).toBeInstanceOf(ComputerConfigError)
-      expect((error as ComputerConfigError).code).toBe('missing-data-root')
-    }
-  })
+        KATA_CONFIG_DIR: '/tmp/should-not-satisfy-packaged',
+        KATA_SERVER_TOKEN: 'token-with-enough-entropy-01',
+      }),
+      'missing-data-root',
+    );
+  });
 
-  it('prefers KATA_SERVER_TOKEN_FILE over KATA_SERVER_TOKEN', () => {
-    const root = tempRoot()
-    const tokenFile = join(root, 'token')
-    writeFileSync(tokenFile, `  ${strongToken()}-from-file  \n`)
+  it('token file wins over env', () => {
+    const root = tempRoot();
+    const tokenFile = join(root, 'token');
+    writeFileSync(tokenFile, '  file-token-with-entropy-01  \n');
     const config = parseComputerConfig({
       KATA_DATA_ROOT: root,
-      KATA_SERVER_TOKEN: strongToken(),
+      KATA_SERVER_TOKEN: 'env-token-with-entropy-012',
       KATA_SERVER_TOKEN_FILE: tokenFile,
-    }, { packaged: false })
-    expect(config.rpc.token).toBe(`${strongToken()}-from-file`)
-  })
+    });
+    expect(config.rpc.token).toBe('file-token-with-entropy-01');
+  });
 
-  it('fails closed when only one TLS path is set', () => {
-    try {
-      parseComputerConfig({
+  it('TLS incomplete throws', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
         KATA_DATA_ROOT: tempRoot(),
-        KATA_SERVER_TOKEN: strongToken(),
         KATA_RPC_TLS_CERT: '/certs/cert.pem',
-      }, { packaged: false })
-      throw new Error('expected parse to throw')
-    } catch (error) {
-      expect(error).toBeInstanceOf(ComputerConfigError)
-      expect((error as ComputerConfigError).code).toBe('tls-incomplete')
-    }
-  })
+      }),
+      'tls-incomplete',
+    );
+  });
 
-  it('fails closed for a public bind without TLS', () => {
-    try {
-      parseComputerConfig({
+  it('insecure public bind throws', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
         KATA_DATA_ROOT: tempRoot(),
-        KATA_SERVER_TOKEN: strongToken(),
         KATA_RPC_HOST: '0.0.0.0',
-      }, { packaged: false, argv: [] })
-      throw new Error('expected parse to throw')
-    } catch (error) {
-      expect(error).toBeInstanceOf(ComputerConfigError)
-      expect((error as ComputerConfigError).code).toBe('insecure-public-bind')
-    }
-  })
+      }, { argv: [] }),
+      'insecure-public-bind',
+    );
+  });
 
   it('falls back to KATA_CONFIG_DIR then the default home path', () => {
-    const configDir = tempRoot()
+    const configDir = tempRoot();
     const fromConfigDir = parseComputerConfig({
       KATA_CONFIG_DIR: configDir,
-      KATA_SERVER_TOKEN: strongToken(),
-    }, { packaged: false })
-    expect(fromConfigDir.dataRoot).toBe(configDir)
+    });
+    expect(fromConfigDir.dataRoot).toBe(configDir);
 
-    const fromHome = parseComputerConfig({
-      KATA_SERVER_TOKEN: strongToken(),
-    }, { packaged: false })
-    expect(fromHome.dataRoot).toBe(join(homedir(), '.kata-agents'))
-  })
-})
+    const fromHome = parseComputerConfig({});
+    expect(fromHome.dataRoot).toBe(join(homedir(), '.kata-agents'));
+  });
+
+  it('packaged missing token throws', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_IS_PACKAGED: 'true',
+        KATA_DATA_ROOT: tempRoot(),
+      }),
+      'missing-token',
+    );
+  });
+
+  it('weak token throws', () => {
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_DATA_ROOT: tempRoot(),
+        KATA_SERVER_TOKEN: 'short',
+      }),
+      'weak-token',
+    );
+    expectConfigCode(
+      () => parseComputerConfig({
+        KATA_DATA_ROOT: tempRoot(),
+        KATA_SERVER_TOKEN: 'aaaaaaaaaaaaaaaa',
+      }),
+      'weak-token',
+    );
+  });
+});
 
 describe('openDataRootLayout', () => {
-  it('creates a v1 manifest on an empty data root', () => {
-    const root = tempRoot()
-    const opened = openDataRootLayout(root)
-    expect(opened.tag).toBe('opened')
-    if (opened.tag !== 'opened') return
-    expect(opened.created).toBe(true)
-    expect(opened.computerId.length).toBeGreaterThan(0)
-    const again = openDataRootLayout(root)
-    expect(again.tag).toBe('opened')
-    if (again.tag !== 'opened') return
-    expect(again.created).toBe(false)
-    expect(again.computerId).toBe(opened.computerId)
-    expect(again.layout.workspacesDir).toBe(join(again.layout.root, 'workspaces'))
-    expect(again.layout.credentialsPath).toBe(join(again.layout.root, 'credentials.enc'))
-    expect(again.layout.worktreesDir).toBe(join(again.layout.root, 'worktrees'))
-  })
+  it('openDataRootLayout creates manifest v1', () => {
+    const root = tempRoot();
+    const opened = openDataRootLayout(root);
+    expect(opened.tag).toBe('opened');
+    if (opened.tag !== 'opened') return;
+    expect(opened.created).toBe(true);
 
-  it('returns corrupt for a broken manifest instead of switching roots', () => {
-    const root = tempRoot()
-    mkdirSync(join(root, 'computer'), { recursive: true })
-    writeFileSync(join(root, 'computer', 'manifest.json'), '{not-json')
-    const result = openDataRootLayout(root)
-    expect(result.tag).toBe('corrupt')
-    if (result.tag !== 'corrupt') return
-    expect(result.path).toContain('manifest.json')
-  })
+    const manifestPath = join(root, 'computer', 'manifest.json');
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      throw new Error('manifest is not an object');
+    }
+    const record = manifest as { layoutVersion?: unknown; computerId?: unknown };
+    expect(record.layoutVersion).toBe(1);
+    expect(typeof record.computerId).toBe('string');
+    expect(String(record.computerId).length).toBeGreaterThan(0);
 
-  it('returns incompatible for an unsupported layout version', () => {
-    const root = tempRoot()
-    mkdirSync(join(root, 'computer'), { recursive: true })
-    writeFileSync(join(root, 'computer', 'manifest.json'), JSON.stringify({
-      layoutVersion: 99,
-      computerId: 'cmp_old',
-    }))
-    const result = openDataRootLayout(root)
-    expect(result.tag).toBe('incompatible')
-    if (result.tag !== 'incompatible') return
-    expect(result.found).toBe(99)
-  })
-})
+    expect(existsSync(join(root, 'workspaces'))).toBe(true);
+    expect(existsSync(join(root, 'worktrees'))).toBe(true);
+    expect(existsSync(join(root, 'browser', 'profiles'))).toBe(true);
+    expect(existsSync(join(root, 'browser', 'displays'))).toBe(true);
+    expect(existsSync(join(root, 'browser', 'locks'))).toBe(true);
+    expect(existsSync(join(root, 'computer', 'shutdown'))).toBe(true);
+
+    const again = openDataRootLayout(root);
+    expect(again.tag).toBe('opened');
+    if (again.tag !== 'opened') return;
+    expect(again.created).toBe(false);
+    expect(again.computerId).toBe(opened.computerId);
+  });
+
+  it('corrupt manifest returns corrupt', () => {
+    const root = tempRoot();
+    const manifestPath = join(root, 'computer', 'manifest.json');
+    mkdirSync(join(root, 'computer'), { recursive: true });
+    writeFileSync(manifestPath, '{not-json');
+    const result = openDataRootLayout(root);
+    expect(result.tag).toBe('corrupt');
+    if (result.tag !== 'corrupt') return;
+    expect(result.path).toBe(manifestPath);
+    expect(readFileSync(manifestPath, 'utf8')).toBe('{not-json');
+  });
+
+  it('incompatible version returns incompatible', () => {
+    const root = tempRoot();
+    const manifestPath = join(root, 'computer', 'manifest.json');
+    mkdirSync(join(root, 'computer'), { recursive: true });
+    writeFileSync(manifestPath, JSON.stringify({ layoutVersion: 99, computerId: 'cmp_old' }));
+    const result = openDataRootLayout(root);
+    expect(result.tag).toBe('incompatible');
+    if (result.tag !== 'incompatible') return;
+    expect(result.found).toBe(99);
+    expect(readFileSync(manifestPath, 'utf8')).toContain('"layoutVersion":99');
+  });
+});
 
 describe('aggregateHealth', () => {
-  it('treats a browser-only failure as degraded', () => {
+  it('aggregateHealth browser-fail is degraded', () => {
     expect(aggregateHealth({
       process: { tag: 'ready' },
       storage: { tag: 'ready' },
       browser: { tag: 'failed', reason: 'chromium down' },
       checkedAt: '2026-08-30T00:00:00.000Z',
-    })).toBe('degraded')
-  })
+    })).toBe('degraded');
+  });
 
-  it('treats storage failure as unhealthy', () => {
+  it('treats process or storage failure as unhealthy', () => {
+    expect(aggregateHealth({
+      process: { tag: 'failed', reason: 'dead' },
+      storage: { tag: 'ready' },
+      browser: { tag: 'ready' },
+      checkedAt: '2026-08-30T00:00:00.000Z',
+    })).toBe('unhealthy');
     expect(aggregateHealth({
       process: { tag: 'ready' },
       storage: { tag: 'failed', reason: 'corrupt' },
       browser: { tag: 'ready' },
       checkedAt: '2026-08-30T00:00:00.000Z',
-    })).toBe('unhealthy')
-  })
-})
+    })).toBe('unhealthy');
+  });
+});
 
 describe('filterCapabilitiesForComputer', () => {
-  it('drops client:browser:invoke for a self-hosted computer', () => {
+  it('filterCapabilitiesForComputer drops invoke on self-hosted', () => {
     expect(filterCapabilitiesForComputer('self-hosted-headless', [
       'client:browser:invoke',
       'other',
-    ])).toEqual(['other'])
-  })
+    ])).toEqual(['other']);
+  });
 
-  it('keeps client:browser:invoke for a local client computer', () => {
+  it('leaves client:browser:invoke for local-client', () => {
     expect(filterCapabilitiesForComputer('local-client', [
       'client:browser:invoke',
-    ])).toEqual(['client:browser:invoke'])
-  })
-})
+    ])).toEqual(['client:browser:invoke']);
+  });
+});

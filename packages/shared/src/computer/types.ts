@@ -30,7 +30,6 @@ export type DataRootLayout = Readonly<{
   manifestPath: string
   recordPath: string
   shutdownDir: string
-  migrationLockPath: string
   configPath: string
   credentialsPath: string
   worktreesDir: string
@@ -43,7 +42,7 @@ export type DataRootLayout = Readonly<{
 export type LayoutOpenResult =
   | { tag: 'opened'; layout: DataRootLayout; created: boolean; computerId: ComputerId }
   | { tag: 'corrupt'; reason: string; path: string }
-  | { tag: 'incompatible'; found: number; supported: LayoutVersion[] }
+  | { tag: 'incompatible'; found: LayoutVersion; supported: LayoutVersion[] }
 
 export type DimensionStatus =
   | { tag: 'ready' }
@@ -99,6 +98,6 @@ export function brandComputerId(value: string): ComputerId {
 }
 
 export function brandLayoutVersion(value: number): LayoutVersion {
-  if (!Number.isInteger(value) || value < 1) throw new Error('layout version must be a positive integer')
+  if (!Number.isInteger(value)) throw new Error('layout version must be an integer')
   return value as LayoutVersion
 }

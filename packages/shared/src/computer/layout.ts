@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import {
   CURRENT_LAYOUT_VERSION,
   brandComputerId,
+  brandLayoutVersion,
   type ComputerId,
   type DataRootLayout,
   type LayoutOpenResult,
@@ -17,7 +18,6 @@ export function layoutForRoot(root: string): DataRootLayout {
     manifestPath: join(absolute, 'computer', 'manifest.json'),
     recordPath: join(absolute, 'computer', 'record.json'),
     shutdownDir: join(absolute, 'computer', 'shutdown'),
-    migrationLockPath: join(absolute, 'computer', '.migration.lock'),
     configPath: join(absolute, 'config.json'),
     credentialsPath: join(absolute, 'credentials.enc'),
     worktreesDir: join(absolute, 'worktrees'),
@@ -65,7 +65,7 @@ function parseManifest(path: string): LayoutOpenResult | { tag: 'ok'; computerId
   if (record.layoutVersion !== CURRENT_LAYOUT_VERSION) {
     return {
       tag: 'incompatible',
-      found: record.layoutVersion,
+      found: brandLayoutVersion(record.layoutVersion),
       supported: [CURRENT_LAYOUT_VERSION],
     }
   }
@@ -82,24 +82,23 @@ export function openDataRootLayout(root: string): LayoutOpenResult {
     return { tag: 'corrupt', reason: 'data root is not a directory', path: layout.root }
   }
 
-  mkdirSync(layout.root, { recursive: true })
-  ensureLayoutDirs(layout)
-
-  if (!existsSync(layout.manifestPath)) {
-    const computerId = brandComputerId(randomUUID())
-    writeFileSync(
-      layout.manifestPath,
-      `${JSON.stringify({
-        layoutVersion: CURRENT_LAYOUT_VERSION,
-        computerId,
-        createdAt: new Date().toISOString(),
-      }, null, 2)}\n`,
-      'utf8',
-    )
-    return { tag: 'opened', layout, created: true, computerId }
+  if (existsSync(layout.manifestPath)) {
+    const parsed = parseManifest(layout.manifestPath)
+    if (parsed.tag !== 'ok') return parsed
+    ensureLayoutDirs(layout)
+    return { tag: 'opened', layout, created: false, computerId: parsed.computerId }
   }
 
-  const parsed = parseManifest(layout.manifestPath)
-  if (parsed.tag !== 'ok') return parsed
-  return { tag: 'opened', layout, created: false, computerId: parsed.computerId }
+  mkdirSync(layout.root, { recursive: true })
+  ensureLayoutDirs(layout)
+  const computerId = brandComputerId(randomUUID())
+  writeFileSync(
+    layout.manifestPath,
+    `${JSON.stringify({
+      layoutVersion: CURRENT_LAYOUT_VERSION,
+      computerId,
+    }, null, 2)}\n`,
+    'utf8',
+  )
+  return { tag: 'opened', layout, created: true, computerId }
 }
