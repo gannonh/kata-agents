@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { renderCanonicalCompose, renderSystemdUnit, CANONICAL_DATA_ROOT } from '../server-packaging.ts'
+
+describe('server packaging', () => {
+  it('compose uses a durable data root, token file, TLS, and healthcheck', () => {
+    const compose = renderCanonicalCompose()
+    expect(compose).toContain(`KATA_DATA_ROOT: ${CANONICAL_DATA_ROOT}`)
+    expect(compose).toContain(`kata-data:${CANONICAL_DATA_ROOT}`)
+    expect(compose).toContain('KATA_SERVER_TOKEN_FILE: /run/secrets/kata_server_token')
+    expect(compose).toContain('KATA_RPC_TLS_CERT: /certs/cert.pem')
+    expect(compose).toContain('KATA_RPC_TLS_KEY: /certs/key.pem')
+    expect(compose).toContain('curl')
+    expect(compose).toContain('http://127.0.0.1:9101/health')
+    expect(compose).not.toContain('/root/.kata-agents')
+  })
+
+  it('repo-root docker-compose.server.yml matches the canonical renderer', () => {
+    const committed = readFileSync(join(import.meta.dir, '..', '..', 'docker-compose.server.yml'), 'utf8')
+    expect(committed).toBe(renderCanonicalCompose())
+  })
+
+  it('systemd unit still binds localhost', () => {
+    const unit = renderSystemdUnit({
+      serviceUser: 'kata',
+      workingDirectory: '/opt/kata-server',
+      execStart: '/opt/kata-server/bin/kata-server',
+      envFile: '/opt/kata-server/.env',
+    })
+    expect(unit).toContain('KATA_RPC_HOST=127.0.0.1')
+    expect(unit).toContain('User=kata')
+    expect(unit).not.toContain('0.0.0.0')
+  })
+})

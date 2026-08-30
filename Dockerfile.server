@@ -11,15 +11,15 @@
 #     -e KATA_SERVER_TOKEN=<secret> \
 #     kata-agent-server
 #
-# Run with TLS + mounted config:
+# Run with TLS + mounted data root:
 #   docker run --rm -p 9100:9100 \
 #     --user $(id -u):$(id -g) \
 #     -e HOME=/home/kataagents \
-#     -e KATA_SERVER_TOKEN=<secret> \
+#     -e KATA_SERVER_TOKEN_FILE=/run/secrets/kata_server_token \
 #     -e KATA_RPC_TLS_CERT=/certs/cert.pem \
 #     -e KATA_RPC_TLS_KEY=/certs/key.pem \
 #     -v /path/to/certs:/certs:ro \
-#     -v ~/.kata-agents:/home/kataagents/.kata-agents \
+#     -v kata-data:/var/lib/kata-agents \
 #     kata-agent-server
 # =============================================================================
 
@@ -34,7 +34,7 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 # upgrades are explicit — must match the --target in scripts/build-wa-worker.ts.
 ARG NODE_MAJOR=20
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git ripgrep curl gnupg && \
+    apt-get install -y --no-install-recommends ca-certificates git ripgrep curl gnupg chromium fonts-liberation xvfb && \
     curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
@@ -92,20 +92,25 @@ RUN bun run scripts/build-wa-worker.ts
 # so low-RAM build hosts (e.g. 4GB VPS) can complete the build.
 RUN NODE_OPTIONS="--max-old-space-size=4096" bunx vite build --config apps/webui/vite.config.ts
 
-# Pre-create .kata-agents so Docker named volumes inherit the correct permissions.
-RUN mkdir -p /home/kataagents/.kata-agents
+# Pre-create data root so named volumes inherit the correct permissions.
+RUN mkdir -p /home/kataagents/.kata-agents /var/lib/kata-agents
 
 # Make app world-readable so any --user can run it. Home dir is writable for .kata-agents.
 # Use find to only touch files/dirs missing the read bit — much faster than chmod -R on the
 # entire tree (node_modules alone has hundreds of thousands of entries).
 RUN find /app -not -perm -o=r -exec chmod o+r {} + && \
     find /app -type d -not -perm -o=x -exec chmod o+x {} + && \
-    chmod -R 777 /home/kataagents
+    chmod -R 777 /home/kataagents && \
+    chmod -R 777 /var/lib/kata-agents
 
 USER kataagents
 
 ENV KATA_RPC_HOST=0.0.0.0
 ENV KATA_RPC_PORT=9100
+ENV KATA_IS_PACKAGED=true
+ENV KATA_DATA_ROOT=/var/lib/kata-agents
+ENV KATA_HEALTH_PORT=9101
+ENV KATA_CHROMIUM_PATH=/usr/bin/chromium
 ENV KATA_WEBUI_DIR=/app/apps/webui/dist
 ENV KATA_BUNDLED_ASSETS_ROOT=/app/apps/electron
 # WhatsApp worker — Bun cannot run the CJS worker, so we point the adapter at
@@ -115,6 +120,6 @@ ENV KATA_BUNDLED_ASSETS_ROOT=/app/apps/electron
 ENV KATA_MESSAGING_WA_WORKER=/app/packages/messaging-whatsapp-worker/dist/worker.cjs
 ENV KATA_MESSAGING_NODE_BIN=node
 
-EXPOSE 9100
+EXPOSE 9100 9101
 
 ENTRYPOINT ["bun", "run", "packages/server/src/index.ts"]

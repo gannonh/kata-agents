@@ -47,6 +47,7 @@ import {
 } from 'fs';
 import { $ } from 'bun';
 import { verifyLegalDirectory } from './verify-legal-assets';
+import { renderCanonicalCompose } from './server-packaging';
 import {
   type Platform,
   type Arch,
@@ -589,6 +590,7 @@ export KATA_BUNDLED_ASSETS_ROOT="$ROOT"
 export KATA_IS_PACKAGED=true
 export KATA_APP_ROOT="$ROOT"
 export KATA_RESOURCES_PATH="$ROOT/resources"
+export KATA_DATA_ROOT="${KATA_DATA_ROOT:-/var/lib/kata-agents}"
 
 # CLI tools (doc tools use uv + Python scripts)
 export KATA_UV="$ROOT/resources/bin/uv"
@@ -606,6 +608,11 @@ exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
   const startSh = `#!/bin/sh
 # Kata Agent Server — convenience entry point
 DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$DIR/.env" ]; then
+  set -a
+  . "$DIR/.env"
+  set +a
+fi
 exec "$DIR/bin/kata-server" "$@"
 `;
   writeFileSync(join(outputDir, 'start.sh'), startSh);
@@ -630,12 +637,14 @@ for wrapper in "$DIR/resources/bin/"*; do
 done
 
 echo "Binaries configured."
+mkdir -p "$DIR/data"
 
 # Generate token if not set
 if [ -z "\${KATA_SERVER_TOKEN:-}" ]; then
   TOKEN=\$(openssl rand -hex 32)
   cat > "$DIR/.env" <<ENVFILE
 KATA_SERVER_TOKEN=$TOKEN
+KATA_DATA_ROOT=$DIR/data
 
 # TLS — uncomment and set paths to enable wss://
 # KATA_RPC_TLS_CERT=/path/to/cert.pem
@@ -738,36 +747,17 @@ ENV KATA_UV=/app/resources/bin/uv
 ENV KATA_SCRIPTS=/app/resources/scripts
 ENV KATA_RPC_HOST=0.0.0.0
 ENV KATA_RPC_PORT=9100
+ENV KATA_DATA_ROOT=/var/lib/kata-agents
+ENV KATA_HEALTH_PORT=9101
 ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"
 
-EXPOSE 9100
+EXPOSE 9100 9101
 
 ENTRYPOINT ["/app/bin/kata-server"]
 `;
   writeFileSync(join(outputDir, 'Dockerfile'), dockerfile);
 
-  const dockerCompose = `version: "3.8"
-services:
-  kata-server:
-    build: .
-    ports:
-      - "9100:9100"
-    environment:
-      - KATA_SERVER_TOKEN=\${KATA_SERVER_TOKEN:?Set KATA_SERVER_TOKEN}
-      - KATA_RPC_PORT=9100
-      # TLS — uncomment to enable wss://
-      # - KATA_RPC_TLS_CERT=/certs/cert.pem
-      # - KATA_RPC_TLS_KEY=/certs/key.pem
-    volumes:
-      - kata-data:/root/.kata-agents
-      # TLS — mount cert directory
-      # - ./certs:/certs:ro
-    restart: unless-stopped
-
-volumes:
-  kata-data:
-`;
-  writeFileSync(join(outputDir, 'docker-compose.yml'), dockerCompose);
+  writeFileSync(join(outputDir, 'docker-compose.yml'), renderCanonicalCompose());
 }
 
 // ---------------------------------------------------------------------------
