@@ -4,6 +4,7 @@ import { uptime as osUptime } from 'node:os'
 import { ComputerAlreadyRunning } from './errors.ts'
 
 const heldLocks = new Set<string>()
+const MAX_ACQUIRE_ATTEMPTS = 16
 
 export interface RuntimeLockHandle {
   path: string
@@ -45,27 +46,28 @@ function isLockFromPreviousBoot(startedAt: number): boolean {
   return startedAt < bootTime
 }
 
-export function acquireRuntimeLock(lockPath: string): RuntimeLockHandle {
-  const path = resolve(lockPath)
-  if (heldLocks.has(path)) throw new ComputerAlreadyRunning(process.pid, path)
+function isExclusiveCreateConflict(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'EEXIST'
+}
 
-  if (existsSync(path)) {
-    const lock = parseLock(readFileSync(path, 'utf8'))
-    if (lock) {
-      if (lock.pid === process.pid) {
-        // PID reuse after a container restart. This process does not hold the lock.
-      } else if (isProcessAlive(lock.pid) && !isLockFromPreviousBoot(lock.startedAt)) {
-        throw new ComputerAlreadyRunning(lock.pid, path)
-      }
-    }
+function isStaleLock(lock: LockPayload): boolean {
+  if (lock.pid === process.pid) return true
+  if (!isProcessAlive(lock.pid)) return true
+  return isLockFromPreviousBoot(lock.startedAt)
+}
+
+function readLockFile(path: string): LockPayload | null {
+  try {
+    if (!existsSync(path)) return null
+    return parseLock(readFileSync(path, 'utf8'))
+  } catch {
+    return null
   }
+}
 
-  const payload: LockPayload = { pid: process.pid, startedAt: Date.now() }
-  writeFileSync(path, `${JSON.stringify(payload)}\n`, 'utf8')
-  heldLocks.add(path)
-
+function makeHandle(path: string): RuntimeLockHandle {
   let released = false
-  const handle: RuntimeLockHandle = {
+  return {
     path,
     pid: process.pid,
     release() {
@@ -79,5 +81,33 @@ export function acquireRuntimeLock(lockPath: string): RuntimeLockHandle {
       } catch {}
     },
   }
-  return handle
+}
+
+export function acquireRuntimeLock(lockPath: string): RuntimeLockHandle {
+  const path = resolve(lockPath)
+  if (heldLocks.has(path)) throw new ComputerAlreadyRunning(process.pid, path)
+
+  const payload: LockPayload = { pid: process.pid, startedAt: Date.now() }
+  const serialized = `${JSON.stringify(payload)}\n`
+
+  for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
+    try {
+      writeFileSync(path, serialized, { flag: 'wx' })
+      heldLocks.add(path)
+      return makeHandle(path)
+    } catch (error) {
+      if (!isExclusiveCreateConflict(error)) throw error
+    }
+
+    const lock = readLockFile(path)
+    if (!lock || isStaleLock(lock)) {
+      try {
+        unlinkSync(path)
+      } catch {}
+      continue
+    }
+    throw new ComputerAlreadyRunning(lock.pid, path)
+  }
+
+  throw new ComputerAlreadyRunning(process.pid, path)
 }
