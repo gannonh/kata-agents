@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import type { BrowserContext, Page } from 'playwright-core'
+import type { BrowserContext, Locator, Page } from 'playwright-core'
 import {
   DEFAULT_BROWSER_PROFILE_ID,
   brandSessionId,
@@ -26,6 +26,12 @@ import type {
 } from '../handlers/browser-pane-manager-interface.ts'
 import type { BrowserHost } from './browser-host.ts'
 
+interface SnapshotRef {
+  role: string
+  name: string
+  nth: number
+}
+
 interface Pane {
   id: string
   sessionId: string
@@ -34,7 +40,7 @@ interface Pane {
   console: BrowserConsoleEntry[]
   network: BrowserNetworkEntry[]
   downloads: BrowserDownloadEntry[]
-  refs: Map<string, string>
+  refs: Map<string, SnapshotRef>
   info: BrowserInstanceInfo
 }
 
@@ -106,21 +112,13 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   setSessionPathResolver(_fn: (sessionId: string) => string | null): void {}
 
   destroyForSession(sessionId: string): void {
-    void this.destroyForSessionAsync(sessionId)
-  }
-
-  private async destroyForSessionAsync(sessionId: string): Promise<void> {
     for (const [id, pane] of [...this.panes]) {
       if (pane.sessionId === sessionId) {
-        await pane.page.close().catch(() => {})
         this.panes.delete(id)
+        void pane.page.close().catch(() => {})
       }
     }
-    const profileId = this.sessionProfile.get(sessionId)
-    if (profileId) {
-      await this.host.releaseProfileLease({ profileId, sessionId: brandSessionId(sessionId) }).catch(() => {})
-      this.sessionProfile.delete(sessionId)
-    }
+    this.releaseSessionLeaseIfIdle(sessionId)
   }
 
   async clearVisualsForSession(_sessionId: string): Promise<void> {}
@@ -275,8 +273,9 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   destroyInstance(id: string): void {
     const pane = this.panes.get(id)
     if (!pane) return
-    void pane.page.close()
     this.panes.delete(id)
+    void pane.page.close().catch(() => {})
+    this.releaseSessionLeaseIfIdle(pane.sessionId)
   }
   hide(_id: string): void {}
   clearAgentControl(_sessionId: string): void {}
@@ -305,14 +304,19 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     const snapshot = await pane.page.accessibility.snapshot()
     pane.refs.clear()
     const nodes: AccessibilitySnapshot['nodes'] = []
+    const occurrence = new Map<string, number>()
     const walk = (node: Awaited<ReturnType<Page['accessibility']['snapshot']>> | null, index: { n: number }) => {
       if (!node) return
       const ref = `ref-${index.n++}`
-      pane.refs.set(ref, node.role)
+      const name = node.name ?? ''
+      const key = `${node.role}\0${name}`
+      const nth = occurrence.get(key) ?? 0
+      occurrence.set(key, nth + 1)
+      pane.refs.set(ref, { role: node.role, name, nth })
       nodes.push({
         ref,
         role: node.role,
-        name: node.name ?? '',
+        name,
         value: typeof node.value === 'string' ? node.value : undefined,
         focused: node.focused,
         checked: typeof node.checked === 'boolean' ? node.checked : undefined,
@@ -325,13 +329,7 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   }
 
   async clickElement(id: string, ref: string, _options?: { waitFor?: 'none' | 'navigation' | 'network-idle'; timeoutMs?: number }): Promise<void> {
-    const pane = this.requirePane(id)
-    const role = pane.refs.get(ref)
-    if (role) {
-      await pane.page.getByRole(role as never).first().click()
-      return
-    }
-    await pane.page.locator(ref).first().click()
+    await this.locatorForRef(this.requirePane(id), ref).click()
   }
 
   async clickAtCoordinates(id: string, x: number, y: number): Promise<void> {
@@ -347,13 +345,7 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   }
 
   async fillElement(id: string, ref: string, value: string): Promise<void> {
-    const pane = this.requirePane(id)
-    const role = pane.refs.get(ref)
-    if (role) {
-      await pane.page.getByRole(role as never).first().fill(value)
-      return
-    }
-    await pane.page.locator(ref).first().fill(value)
+    await this.locatorForRef(this.requirePane(id), ref).fill(value)
   }
 
   async typeText(id: string, text: string): Promise<void> {
@@ -361,7 +353,7 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   }
 
   async selectOption(id: string, ref: string, value: string): Promise<void> {
-    await this.requirePane(id).page.locator(ref).first().selectOption(value)
+    await this.locatorForRef(this.requirePane(id), ref).selectOption(value)
   }
 
   private clipboardText = ''
@@ -388,7 +380,7 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
   }
 
   async uploadFile(id: string, ref: string, filePaths: string[]): Promise<unknown> {
-    await this.requirePane(id).page.locator(ref).first().setInputFiles(filePaths)
+    await this.locatorForRef(this.requirePane(id), ref).setInputFiles(filePaths)
     return { uploaded: filePaths.length }
   }
 
@@ -479,6 +471,27 @@ export class HeadlessBrowserPaneManager implements IBrowserPaneManager {
     }
     this.sessionProfile.delete(fromSessionId)
     this.sessionProfile.set(toSessionId, profileId)
+  }
+
+  private releaseSessionLeaseIfIdle(sessionId: string): void {
+    if ([...this.panes.values()].some((pane) => pane.sessionId === sessionId)) return
+    const profileId = this.sessionProfile.get(sessionId)
+    if (!profileId) return
+    this.sessionProfile.delete(sessionId)
+    void this.host.releaseProfileLease({
+      profileId,
+      sessionId: brandSessionId(sessionId),
+    }).catch(() => {})
+  }
+
+  private locatorForRef(pane: Pane, ref: string): Locator {
+    const target = pane.refs.get(ref)
+    if (!target) return pane.page.locator(ref).first()
+    const role = target.role as Parameters<Page['getByRole']>[0]
+    if (target.name.length > 0) {
+      return pane.page.getByRole(role, { name: target.name, exact: true }).nth(target.nth)
+    }
+    return pane.page.getByRole(role).nth(target.nth)
   }
 
   private requirePane(id: string): Pane {

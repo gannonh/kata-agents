@@ -98,4 +98,53 @@ describe('HeadlessBrowserPaneManager', () => {
 
     fixture.stop()
   }, 90_000)
+
+  it('clicks the second same-role snapshot ref and releases the default profile on close', async () => {
+    if (!chrome) {
+      throw new Error('No Chromium executable on this host. Install google-chrome or set KATA_CHROMIUM_PATH.')
+    }
+
+    const root = mkdtempSync(join(tmpdir(), 'kata-computer-browser-refs-'))
+    roots.push(root)
+
+    const fixture = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(
+          '<html><head><title>refs-ok</title></head><body>'
+          + '<button id="first" onclick="window.__clicked=\'first\'">Same</button>'
+          + '<button id="second" onclick="window.__clicked=\'second\'">Same</button>'
+          + '</body></html>',
+          { headers: { 'content-type': 'text/html; charset=utf-8' } },
+        )
+      },
+    })
+    const fixtureUrl = `http://127.0.0.1:${fixture.port}/`
+
+    const config = parseComputerConfig({
+      KATA_DATA_ROOT: root,
+      KATA_SERVER_TOKEN: 'token-with-enough-entropy-0123456789',
+      KATA_COMPUTER_KIND: 'self-hosted-headless',
+      KATA_RPC_HOST: '127.0.0.1',
+      KATA_CHROMIUM_PATH: chrome,
+    }, { packaged: false })
+
+    const computer = await Computer.open(config)
+    computers.push(computer)
+
+    const bpmA = computer.browserPaneManagerForSession('bot-a')
+    const instanceA = await bpmA.createForSessionAsync('bot-a')
+    await bpmA.navigate(instanceA, fixtureUrl)
+    const snapshot = await bpmA.getAccessibilitySnapshot(instanceA)
+    const buttons = snapshot.nodes.filter((node) => node.role === 'button' && node.name === 'Same')
+    expect(buttons.length).toBeGreaterThanOrEqual(2)
+    await bpmA.clickElement(instanceA, buttons[1].ref)
+    expect(await bpmA.evaluate(instanceA, 'window.__clicked')).toBe('second')
+
+    bpmA.destroyInstance(instanceA)
+    const instanceB = await computer.browserPaneManagerForSession('bot-b').createForSessionAsync('bot-b')
+    expect(instanceB.length).toBeGreaterThan(0)
+
+    fixture.stop()
+  }, 90_000)
 })
