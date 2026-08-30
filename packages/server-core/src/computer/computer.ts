@@ -450,9 +450,7 @@ export class Computer {
           readFileSync(join(this.layout.browserDisplaysDir, name), 'utf8'),
         ) as VirtualDisplay
         this.displays.set(display.displayId, display)
-      } catch {
-        // skip unreadable display records
-      }
+      } catch {}
     }
   }
 

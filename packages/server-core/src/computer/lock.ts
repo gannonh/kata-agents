@@ -76,9 +76,7 @@ export function acquireRuntimeLock(lockPath: string): RuntimeLockHandle {
         if (!existsSync(path)) return
         const current = parseLock(readFileSync(path, 'utf8'))
         if (current && current.pid === process.pid) unlinkSync(path)
-      } catch {
-        // best-effort
-      }
+      } catch {}
     },
   }
   return handle

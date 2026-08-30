@@ -13,9 +13,7 @@ afterEach(async () => {
   for (const computer of computers.splice(0)) {
     try {
       await computer.shutdown({ reason: 'operator', timeoutMs: 1_000 })
-    } catch {
-      // already closed
-    }
+    } catch {}
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })

@@ -253,7 +253,6 @@ const instance = await (async () => {
           credentialManager: getCredentialManager(),
           getMessagingDir: (wsId: string) =>
             join(computer.layout.workspacesDir, wsId, 'messaging'),
-          // Headless has no legacy messaging dir — workspaces start clean.
           whatsapp: {
             workerEntry: waWorkerEntry,
             nodeBin: waNodeBin,
