@@ -28,6 +28,7 @@
     "./channels": "./src/channels/index.ts",
     "./branding": "./src/branding.ts",
     "./colors": "./src/colors/index.ts",
+    "./computer": "./src/computer/index.ts",
     "./config": "./src/config/index.ts",
     "./config/agents-cli-invoke": "./src/config/agents-cli-invoke.ts",
     "./config/types": "./src/config/types.ts",
