@@ -229,4 +229,34 @@ describe('Computer.open', () => {
     expect(recovery).toContainEqual({ sessionId: 'sess-ok', action: 'resume', from: 'checkpointed' })
     expect(recovery.some((item) => item.sessionId === 'sess-ok' && item.action === 'surface')).toBe(false)
   })
+
+  it('does not report uncertain after a clean shutdown with no leftover work', async () => {
+    const root = tempRoot()
+    const first = await open(root)
+    await first.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(first), 1)
+
+    const second = await open(root)
+    const recovery = await second.reconcileRecovery()
+    expect(recovery.some((item) => item.from === 'uncertain')).toBe(false)
+  })
+
+  it('surfaces an epoch-0 crash that left no shutdown work', async () => {
+    const root = tempRoot()
+    const child = Bun.spawn(['bun', join(import.meta.dir, 'crash-unclean-child.ts')], {
+      env: {
+        ...process.env,
+        KATA_DATA_ROOT: root,
+        KATA_SERVER_TOKEN: 'token-with-enough-entropy-0123456789',
+        KATA_COMPUTER_KIND: 'self-hosted-headless',
+        KATA_RPC_HOST: '127.0.0.1',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(await child.exited).toBe(9)
+    const computer = await open(root)
+    const recovery = await computer.reconcileRecovery()
+    expect(recovery).toContainEqual({ sessionId: 'computer', action: 'surface', from: 'uncertain' })
+  })
 })

@@ -48,6 +48,7 @@ export class Computer {
   private headlessBpm: HeadlessBrowserPaneManager | null = null
   private unavailableBpm: IBrowserPaneManager
   private closed = false
+  private priorUnclean = false
   private displays = new Map<string, VirtualDisplay>()
   private leases = new Map<string, LeasedBrowserProfile>()
 
@@ -59,6 +60,7 @@ export class Computer {
     record: ComputerRecord
     readiness: ComputerReadiness
     unavailableBpm: IBrowserPaneManager
+    priorUnclean: boolean
   }) {
     this.config = input.config
     this.layout = input.layout
@@ -67,6 +69,7 @@ export class Computer {
     this.record = input.record
     this.readiness = input.readiness
     this.unavailableBpm = input.unavailableBpm
+    this.priorUnclean = input.priorUnclean
   }
 
   static peekHealth(dataRoot: string): {
@@ -93,6 +96,7 @@ export class Computer {
       const osAccount = userInfo().username
       const now = new Date().toISOString()
       let record = loadComputerRecord(opened.layout)
+      let priorUnclean = false
       if (!record) {
         record = {
           computerId: opened.computerId,
@@ -105,6 +109,7 @@ export class Computer {
           lastReadiness: null,
         }
       } else {
+        priorUnclean = record.unclean
         record = {
           ...record,
           kind: config.kind,
@@ -140,6 +145,7 @@ export class Computer {
             ? 'Browser runtime was not started (skipBrowser)'
             : 'Server-resident browser is not ready',
         ),
+        priorUnclean,
       })
       computer.loadPersistedDisplays()
       computer.dropStaleLeases()
@@ -307,7 +313,7 @@ export class Computer {
 
   async reconcileRecovery(): Promise<readonly RecoveryDisposition[]> {
     const items = this.readShutdownWork()
-    if (items.length === 0 && this.record.unclean && this.record.shutdownEpoch > 0) {
+    if (items.length === 0 && this.priorUnclean) {
       return [{ sessionId: 'computer', action: 'surface', from: 'uncertain' }]
     }
     return items
