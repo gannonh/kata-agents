@@ -63,8 +63,10 @@ function isPackagedProcess(): boolean {
   return value === 'true' || value === '1'
 }
 
+let generatedDevelopmentToken = false
 if (!isPackagedProcess() && !process.env.KATA_SERVER_TOKEN && !process.env.KATA_SERVER_TOKEN_FILE) {
   process.env.KATA_SERVER_TOKEN = generateServerToken()
+  generatedDevelopmentToken = true
   console.warn('[server] KATA_SERVER_TOKEN not set; generated an ephemeral token for this run.')
 }
 
@@ -343,7 +345,9 @@ const healthServer = await startHealthHttpServer({
 
 const serverProto = instance.protocol === 'wss' ? 'https' : 'http'
 console.log(`KATA_SERVER_URL=${instance.protocol}://${instance.host}:${instance.port}`)
-console.log(`KATA_SERVER_TOKEN=${instance.token}`)
+if (generatedDevelopmentToken) {
+  console.log(`KATA_SERVER_TOKEN=${instance.token}`)
+}
 if (healthServer) {
   console.log(`KATA_HEALTH_URL=http://127.0.0.1:${healthServer.port}/health`)
 }
@@ -351,11 +355,8 @@ if (webuiHandler) {
   const webuiHost = instance.host === '0.0.0.0' ? '127.0.0.1' : instance.host
   const webuiUrl = `${serverProto}://${webuiHost}:${instance.port}`
   console.log(`KATA_WEBUI_URL=${webuiUrl}`)
-  // When a login password/token is configured, print a one-click authenticated URL.
-  // The token is validated by /api/auth/token against the same hash as the login form.
-  const authToken = process.env.KATA_WEBUI_PASSWORD || instance.token
-  if (authToken) {
-    console.log(`KATA_WEBUI_AUTH_URL=${webuiUrl}/api/auth/token?token=${encodeURIComponent(authToken)}`)
+  if (generatedDevelopmentToken) {
+    console.log(`KATA_WEBUI_AUTH_URL=${webuiUrl}/api/auth/token?token=${encodeURIComponent(instance.token)}`)
   }
 }
 

@@ -27,6 +27,7 @@ interface SpawnedServer {
   healthUrl: string | null
   proc: Subprocess
   configDir: string
+  stdout: () => string
   stop: () => Promise<void>
 }
 
@@ -90,6 +91,7 @@ async function spawnTestServer(
     let printedToken = provideToken ? token : ''
     let healthUrl: string | null = null
     let buffer = ''
+    let stdoutText = ''
     const needsHealth = Number.parseInt(extraEnv?.KATA_HEALTH_PORT ?? '0', 10) > 0
 
     const processLines = () => {
@@ -113,6 +115,7 @@ async function spawnTestServer(
             healthUrl,
             proc,
             configDir,
+            stdout: () => stdoutText,
             stop: async () => {
               proc.kill('SIGTERM')
               await proc.exited
@@ -131,7 +134,9 @@ async function spawnTestServer(
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          buffer += decoder.decode(value, { stream: true })
+          const chunk = decoder.decode(value, { stream: true })
+          stdoutText += chunk
+          buffer += chunk
           processLines()
         }
       } catch {
@@ -201,6 +206,9 @@ describe('headless server smoke test', () => {
 
   it('accepts valid token handshake', async () => {
     server = await spawnTestServer()
+    await Bun.sleep(200)
+    expect(server.stdout()).not.toContain('KATA_SERVER_TOKEN=')
+    expect(server.stdout()).not.toContain('KATA_WEBUI_AUTH_URL=')
     const ws = await connectWs(server.url, server.token)
     expect(ws.readyState).toBe(WebSocket.OPEN)
     ws.close()
@@ -216,6 +224,7 @@ describe('headless server smoke test', () => {
   it('generates and prints a token when KATA_SERVER_TOKEN is not set', async () => {
     server = await spawnTestServer(undefined, { provideToken: false })
     expect(server.token).toMatch(/^[0-9a-f]{48}$/)
+    expect(server.stdout()).toContain(`KATA_SERVER_TOKEN=${server.token}`)
 
     const ws = await connectWs(server.url, server.token)
     expect(ws.readyState).toBe(WebSocket.OPEN)
@@ -299,6 +308,33 @@ describe('headless server smoke test', () => {
       env: {
         ...parentEnv,
         KATA_IS_PACKAGED: 'true',
+        KATA_SERVER_TOKEN: 'token-with-enough-entropy-0123456789',
+        KATA_RPC_PORT: '0',
+        KATA_RPC_HOST: '127.0.0.1',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const exitCode = await proc.exited
+    rmSync(configDir, { recursive: true, force: true })
+    expect(exitCode).not.toBe(0)
+  }, TEST_TIMEOUT)
+
+  it('fails closed when packaged with --allow-insecure-bind', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'kata-server-smoke-'))
+    const {
+      CLAUDECODE: _,
+      KATA_SERVER_TOKEN: _serverToken,
+      KATA_CONFIG_DIR: _configDir,
+      KATA_DATA_ROOT: _dataRoot,
+      KATA_IS_PACKAGED: _packaged,
+      ...parentEnv
+    } = process.env
+    const proc = Bun.spawn(['bun', 'run', SERVER_ENTRY, '--allow-insecure-bind'], {
+      env: {
+        ...parentEnv,
+        KATA_IS_PACKAGED: 'true',
+        KATA_DATA_ROOT: configDir,
         KATA_SERVER_TOKEN: 'token-with-enough-entropy-0123456789',
         KATA_RPC_PORT: '0',
         KATA_RPC_HOST: '127.0.0.1',
