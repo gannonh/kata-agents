@@ -1,5 +1,6 @@
 import type { PlatformServices } from '../runtime/platform'
 import type { GitServices, GitStatusSubscription } from '../git'
+import type { Computer } from '../computer/computer.ts'
 import type { ISessionManager } from './session-manager-interface'
 import type { IOAuthFlowStore } from './oauth-flow-store-interface'
 import type { IBrowserPaneManager } from './browser-pane-manager-interface'
@@ -41,4 +42,5 @@ export interface HandlerDeps<
    * request an immediate status refresh instead of waiting for the poll tick.
    */
   gitStatusSubscription?: GitStatusSubscription
+  computer?: Computer
 }

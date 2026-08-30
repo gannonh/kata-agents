@@ -48,6 +48,11 @@ import {
 import { $ } from 'bun';
 import { verifyLegalDirectory } from './verify-legal-assets';
 import {
+  renderCanonicalCompose,
+  renderPackagedInstallScript,
+  renderPackagedServerWrapper,
+} from './server-packaging';
+import {
   type Platform,
   type Arch,
   type BuildConfig,
@@ -576,131 +581,22 @@ function createEntryScripts(config: ServerBuildConfig): void {
   const binDir = join(outputDir, 'bin');
   mkdirSync(binDir, { recursive: true });
 
-  // bin/kata-server — main entry wrapper
-  const kataServer = `#!/bin/sh
-set -e
-
-# Resolve the distribution root
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(dirname "$SCRIPT_DIR")"
-
-# Set environment for resource resolution
-export KATA_BUNDLED_ASSETS_ROOT="$ROOT"
-export KATA_IS_PACKAGED=true
-export KATA_APP_ROOT="$ROOT"
-export KATA_RESOURCES_PATH="$ROOT/resources"
-
-# CLI tools (doc tools use uv + Python scripts)
-export KATA_UV="$ROOT/resources/bin/uv"
-export KATA_SCRIPTS="$ROOT/resources/scripts"
-
-# Prepend resource bin to PATH (makes doc tool wrappers available)
-export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
-
-# Use bundled Bun runtime
-exec "$ROOT/vendor/bun/bun" run "$ROOT/packages/server/src/index.ts" "$@"
-`;
-  writeFileSync(join(binDir, 'kata-server'), kataServer);
+  writeFileSync(join(binDir, 'kata-server'), renderPackagedServerWrapper());
 
   // start.sh — convenience entry
   const startSh = `#!/bin/sh
 # Kata Agent Server — convenience entry point
 DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$DIR/.env" ]; then
+  set -a
+  . "$DIR/.env"
+  set +a
+fi
 exec "$DIR/bin/kata-server" "$@"
 `;
   writeFileSync(join(outputDir, 'start.sh'), startSh);
 
-  // install.sh — setup + optional systemd
-  const installSh = `#!/bin/bash
-set -euo pipefail
-
-DIR="$(cd "$(dirname "$0")" && pwd)"
-
-echo "=== Kata Agent Server Setup ==="
-echo ""
-
-# Make binaries executable
-chmod +x "$DIR/bin/kata-server" "$DIR/start.sh"
-[ -f "$DIR/vendor/bun/bun" ] && chmod +x "$DIR/vendor/bun/bun"
-[ -f "$DIR/resources/bin/uv" ] && chmod +x "$DIR/resources/bin/uv"
-
-# Make doc tool wrappers executable
-for wrapper in "$DIR/resources/bin/"*; do
-  [ -f "$wrapper" ] && chmod +x "$wrapper"
-done
-
-echo "Binaries configured."
-
-# Generate token if not set
-if [ -z "\${KATA_SERVER_TOKEN:-}" ]; then
-  TOKEN=\$(openssl rand -hex 32)
-  cat > "$DIR/.env" <<ENVFILE
-KATA_SERVER_TOKEN=$TOKEN
-
-# TLS — uncomment and set paths to enable wss://
-# KATA_RPC_TLS_CERT=/path/to/cert.pem
-# KATA_RPC_TLS_KEY=/path/to/key.pem
-# KATA_RPC_TLS_CA=/path/to/ca.pem
-ENVFILE
-  echo ""
-  echo "Generated server token (saved to $DIR/.env)"
-else
-  TOKEN="\$KATA_SERVER_TOKEN"
-  echo ""
-  echo "Using KATA_SERVER_TOKEN from environment."
-fi
-
-# Systemd installation
-if [ "\${1:-}" = "--systemd" ]; then
-  if [ "\$(id -u)" -ne 0 ]; then
-    echo "Error: --systemd requires root. Run with sudo."
-    exit 1
-  fi
-
-  SERVICE_USER="\${KATA_USER:-\$(logname 2>/dev/null || echo kata)}"
-  SERVICE_FILE="/etc/systemd/system/kata-server.service"
-
-  cat > "$SERVICE_FILE" <<UNIT
-[Unit]
-Description=Kata Agent Server
-After=network.target
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-WorkingDirectory=$DIR
-EnvironmentFile=$DIR/.env
-Environment=KATA_RPC_HOST=127.0.0.1
-Environment=KATA_RPC_PORT=9100
-ExecStart=$DIR/bin/kata-server
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-  systemctl daemon-reload
-  systemctl enable kata-server
-
-  echo ""
-  echo "Systemd service installed."
-  echo "  Start:   sudo systemctl start kata-server"
-  echo "  Status:  sudo systemctl status kata-server"
-  echo "  Logs:    journalctl -u kata-server -f"
-  echo ""
-  exit 0
-fi
-
-echo ""
-echo "Quick start:"
-echo "  KATA_SERVER_TOKEN=$TOKEN $DIR/start.sh"
-echo ""
-echo "Or with systemd:"
-echo "  sudo $DIR/install.sh --systemd"
-echo ""
-`;
-  writeFileSync(join(outputDir, 'install.sh'), installSh);
+  writeFileSync(join(outputDir, 'install.sh'), renderPackagedInstallScript());
 
   // Make scripts executable at build time
   for (const script of [
@@ -738,36 +634,17 @@ ENV KATA_UV=/app/resources/bin/uv
 ENV KATA_SCRIPTS=/app/resources/scripts
 ENV KATA_RPC_HOST=0.0.0.0
 ENV KATA_RPC_PORT=9100
+ENV KATA_DATA_ROOT=/var/lib/kata-agents
+ENV KATA_HEALTH_PORT=9101
 ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"
 
-EXPOSE 9100
+EXPOSE 9100 9101
 
 ENTRYPOINT ["/app/bin/kata-server"]
 `;
   writeFileSync(join(outputDir, 'Dockerfile'), dockerfile);
 
-  const dockerCompose = `version: "3.8"
-services:
-  kata-server:
-    build: .
-    ports:
-      - "9100:9100"
-    environment:
-      - KATA_SERVER_TOKEN=\${KATA_SERVER_TOKEN:?Set KATA_SERVER_TOKEN}
-      - KATA_RPC_PORT=9100
-      # TLS — uncomment to enable wss://
-      # - KATA_RPC_TLS_CERT=/certs/cert.pem
-      # - KATA_RPC_TLS_KEY=/certs/key.pem
-    volumes:
-      - kata-data:/root/.kata-agents
-      # TLS — mount cert directory
-      # - ./certs:/certs:ro
-    restart: unless-stopped
-
-volumes:
-  kata-data:
-`;
-  writeFileSync(join(outputDir, 'docker-compose.yml'), dockerCompose);
+  writeFileSync(join(outputDir, 'docker-compose.yml'), renderCanonicalCompose({ dockerfile: 'Dockerfile' }));
 }
 
 // ---------------------------------------------------------------------------

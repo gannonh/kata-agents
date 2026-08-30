@@ -2,6 +2,8 @@ import type { EventSink, RpcServer } from '@kata-sh/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@kata-sh/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@kata-sh/server-core/handlers'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
+import type { Computer } from '../computer/computer.ts'
+import { ProfileBusyError } from '../computer/errors.ts'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@kata-sh/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@kata-sh/server-core/runtime'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
@@ -1582,6 +1584,7 @@ export class SessionManager implements ISessionManager {
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
   private eventSink: EventSink | null = null
+  private computer: Computer | null = null
 
   setEventSink(sink: EventSink): void {
     this.eventSink = sink
@@ -1589,6 +1592,12 @@ export class SessionManager implements ISessionManager {
 
   setBrowserPaneManager(bpm: IBrowserPaneManager): void {
     this.browserPaneManager = bpm
+    bpm.setSessionPathResolver((sessionId) => this.getSessionPath(sessionId))
+  }
+
+  setComputer(computer: Computer): void {
+    this.computer = computer
+    const bpm = computer.browserPaneManagerForSession('computer')
     bpm.setSessionPathResolver((sessionId) => this.getSessionPath(sessionId))
   }
 
@@ -1610,16 +1619,19 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Resolve the {@link IBrowserPaneManager} that owns the user's local browser
-   * for a given session. Returns:
+   * Resolve the {@link IBrowserPaneManager} that owns browser tools for a session.
    *
-   * 1. The locally-injected `browserPaneManager` when present (Electron client co-located
-   *    with the agent), regardless of session.
-   * 2. A session-bound {@link RemoteBrowserPaneManager} when `rpcServer` is set.
-   *    Cached in `remoteBpms` so repeat lookups don't allocate.
-   * 3. `null` when there's neither a local BPM nor an RPC server.
+   * 1. The Computer's server-resident manager when `kind === 'self-hosted-headless'`.
+   *    Never a {@link RemoteBrowserPaneManager} in that case.
+   * 2. The locally-injected `browserPaneManager` when present (Electron co-located
+   *    with the agent).
+   * 3. A session-bound {@link RemoteBrowserPaneManager} when `rpcServer` is set.
+   * 4. `null` when none of the above apply.
    */
   getBrowserPaneManagerForSession(sid: string): IBrowserPaneManager | null {
+    if (this.computer?.identity.kind === 'self-hosted-headless') {
+      return this.computer.browserPaneManagerForSession(sid)
+    }
     if (this.browserPaneManager) return this.browserPaneManager
     if (!this.rpcServer) return null
 
@@ -4331,8 +4343,9 @@ export class SessionManager implements ISessionManager {
         sessionId: managed.id,
         hasLocalBpm: !!this.browserPaneManager,
         hasRpcServer: !!this.rpcServer,
+        computerKind: this.computer?.identity.kind ?? null,
       })
-      if (this.browserPaneManager || this.rpcServer) {
+      if (this.computer?.identity.kind === 'self-hosted-headless' || this.browserPaneManager || this.rpcServer) {
         const sid = managed.id
         const bpm = this.getBrowserPaneManagerForSession(sid)
         if (!bpm) {
@@ -4340,7 +4353,9 @@ export class SessionManager implements ISessionManager {
         }
         sessionLog.info('[browser-pane] BPF block resolved BPM', {
           sessionId: sid,
-          bpmKind: this.browserPaneManager === bpm ? 'local' : 'remote',
+          bpmKind: this.computer?.identity.kind === 'self-hosted-headless'
+            ? 'computer'
+            : this.browserPaneManager === bpm ? 'local' : 'remote',
         })
 
         const workspaceId = managed.workspace.id
@@ -9950,7 +9965,15 @@ export class SessionManager implements ISessionManager {
         const overlayBpm = this.getBrowserPaneManagerForSession(sessionId)
         if (overlayBpm && shouldActivateOverlay) {
           // Ensure first browser action in a turn gets an instance before overlay activation.
-          overlayBpm.getOrCreateForSession(sessionId, { workspaceId })
+          // Headless create is async and may reject with ProfileBusyError; do not use the sync
+          // pending-id path (requirePane cannot resolve those ids).
+          void overlayBpm.getOrCreateForSessionAsync(sessionId, { workspaceId }).catch((error) => {
+            if (error instanceof ProfileBusyError) return
+            sessionLog.warn('[browser-pane] overlay getOrCreateForSessionAsync failed', {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
 
           const resolvedDisplayName = toolDisplayMeta?.displayName
             ?? event.displayName

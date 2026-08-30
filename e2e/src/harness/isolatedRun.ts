@@ -78,6 +78,13 @@ export async function createIsolatedRun(input: {
     KATA_DEEPLINK_SCHEME: "kataagentse2e",
   };
 
+  const computerUrl = process.env.KATA_E2E_COMPUTER_URL?.trim();
+  const computerToken = process.env.KATA_E2E_COMPUTER_TOKEN?.trim();
+  if (computerUrl) {
+    baseEnv.KATA_SERVER_URL = computerUrl;
+    if (computerToken) baseEnv.KATA_SERVER_TOKEN = computerToken;
+  }
+
   cleanupCallbacks.push(async () => {
     await rm(configDir, { recursive: true, force: true });
   });

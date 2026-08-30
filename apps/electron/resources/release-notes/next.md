@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **One self-hosted computer for every Bot.** Deploy the Linux server with Docker Compose, connect a thin desktop client over WSS, and keep files, Git, credentials, and the server-resident browser on one durable data root across restart ([#82](https://github.com/gannonh/kata-agents/issues/82)).
 - **Bot tool approvals at Grok-style boundaries.** In Ask mode a Bot pauses on a consequential tool until you deny or allow once. Explore mode blocks the same mutation without a prompt. A standing allow matches only that exact tool and target ([#81](https://github.com/gannonh/kata-agents/issues/81)).
 - **Channels route messages among Bots** — Create a Channel, add several Bots, and send. An ordinary message is offered to every eligible member and the Bot with the highest claim confidence owns the reply; `@Bot` assigns it outright and several mentions fan out to separately owned replies. Every decision is persisted as an inspectable route record ([#78](https://github.com/gannonh/kata-agents/issues/78)).
 - **Named Bots with durable direct chat** — Create a named Bot that keeps one DirectChat and ConversationJournal across restart; provider Sessions stay internal execution records ([#77](https://github.com/gannonh/kata-agents/issues/77)).
@@ -19,6 +20,9 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Eliminated managed-worktree event-loop stalls** — Worktree registry reads and mutations now acquire their cross-process lock asynchronously, so a held lock no longer blocks the Node event loop for the full acquisition timeout. Sessions stay responsive while another process holds the registry lock during worktree handoff, fork, and cleanup ([#45](https://github.com/gannonh/kata-agents/issues/45)).
 
 ## Bug Fixes
+
+- **Packaged tarball keeps the data root you set.** `bin/kata-server` no longer defaults `KATA_DATA_ROOT` to `/var/lib/kata-agents`. Compose still uses that path. A packaged process without `KATA_DATA_ROOT` fails closed instead of switching state ([#82](https://github.com/gannonh/kata-agents/issues/82)).
+- **Compose reads the TLS key as the key owner.** Set `KATA_UID` and `KATA_GID` to `id -u` / `id -g` of `certs/key.pem`. Keep the key mode `0600`. Unpackaged `--allow-insecure-bind` still works. Packaged mode rejects that flag before listen. The server prints `KATA_SERVER_TOKEN` only for a generated development token, not a configured one ([#82](https://github.com/gannonh/kata-agents/issues/82)).
 
 - **Durable delegated task lifecycle** — Spawned child sessions now persist normalized Claude/Pi output and failures as task-owned results before update notifications, safely pause for permission/auth input, reconcile restart interruptions, and handle cancellation/deletion races without replaying late provider events ([#64](https://github.com/gannonh/kata-agents/issues/64)).
 - Failed Chrome cookie imports no longer wipe the live Kata browser session. New cookies are written first, leftover cookies are removed only after at least one replacement lands, and a total write failure reports an error instead of success with zero imported cookies ([#30](https://github.com/gannonh/kata-agents/issues/30)).

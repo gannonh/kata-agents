@@ -91,22 +91,30 @@ without changing repository state.
 
 ## Configuration
 
-Runtime config lives at `~/.kata-agents/` (unchanged from Kata Agents upstream):
+Runtime config lives at `~/.kata-agents/` for a local desktop (unchanged from Kata Agents upstream). A self-hosted computer uses one explicit data root (`KATA_DATA_ROOT`, canonical `/var/lib/kata-agents`) for the same tree plus computer and browser state:
 
 ```
-~/.kata-agents/
-├── config.json           # Workspaces, LLM connections
-├── credentials.enc       # AES-256-GCM encrypted credentials
-├── preferences.json      # UI preferences (language, theme, etc.)
-├── theme.json            # App-level theme
-├── worktrees/            # Fixed registry and default managed-worktree root
+<dataRoot>/                  # ~/.kata-agents or KATA_DATA_ROOT
+├── computer/
+│   ├── manifest.json        # layout version and computer id
+│   ├── record.json          # readiness and shutdown epoch
+│   └── shutdown/            # checkpointed / interrupted / uncertain work
+├── config.json              # Workspaces, LLM connections
+├── credentials.enc          # AES-256-GCM encrypted credentials
+├── preferences.json         # UI preferences (language, theme, etc.)
+├── theme.json               # App-level theme
+├── worktrees/               # Fixed registry and default managed-worktree root
+├── browser/
+│   ├── profiles/            # Server-resident Chromium user-data dirs
+│   ├── displays/            # Persistent virtual display records
+│   └── locks/               # Exclusive profile-writer leases
 └── workspaces/{id}/
     ├── config.json
-    ├── sessions/         # Session JSONL
-    ├── sources/          # Connected sources
-    ├── skills/           # Custom SKILL.md skills
-    ├── statuses/         # Dynamic session statuses
-    └── automations.json  # Event-driven automations
+    ├── sessions/            # Session JSONL
+    ├── sources/             # Connected sources
+    ├── skills/              # Custom SKILL.md skills
+    ├── statuses/            # Dynamic session statuses
+    └── automations.json     # Event-driven automations
 ```
 
 ## Tech stack
