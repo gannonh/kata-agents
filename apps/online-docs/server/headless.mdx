@@ -66,3 +66,64 @@ so local and remote workspaces expose the same controls.
 <Warning>
   Treat a headless server like any other service with access to tools and credentials. Scope network exposure, credentials, and workspace permissions carefully.
 </Warning>
+
+## Deploy the shared computer with Docker Compose
+
+Canonical production deploy is Docker Compose. The image is immutable. Mutable state lives in one data root at `/var/lib/kata-agents`. Every Bot on this server shares that computer. Bots are not a security boundary.
+
+1. Write a token to `secrets/kata_server_token`. Use at least 16 mixed characters.
+2. Write TLS files to `certs/cert.pem` and `certs/key.pem`.
+3. Start the computer.
+
+```bash
+docker compose -f docker-compose.server.yml up --build -d
+```
+
+The compose file binds `0.0.0.0:9100` with TLS. Startup fails closed if the token, data root, or TLS pair is missing. A public bind without TLS also fails closed unless you pass `--allow-insecure-bind`.
+
+Connect a desktop thin client over WSS:
+
+```bash
+export KATA_SERVER_URL=wss://your-host:9100
+export KATA_SERVER_TOKEN="$(cat secrets/kata_server_token)"
+```
+
+Then launch the desktop app. Remote-eligible channels run on the server. The client cannot host the server-resident browser.
+
+### Inject and rotate the token
+
+Compose reads `KATA_SERVER_TOKEN_FILE` from Docker secret `kata_server_token`. To rotate, write a new token to `secrets/kata_server_token` and recreate the container. Existing clients must use the new token.
+
+Unpackaged local runs may generate an ephemeral token. Packaged and Compose runs never do.
+
+### Enable TLS
+
+Set both `KATA_RPC_TLS_CERT` and `KATA_RPC_TLS_KEY`. Setting only one fails closed. Optional `KATA_RPC_TLS_CA` supplies a CA chain.
+
+### Bind the data volume
+
+Compose mounts named volume `kata-data` at `/var/lib/kata-agents` (`KATA_DATA_ROOT`). That directory owns config, credentials, workspaces, journals, Channels, memory, routines, approvals, tasks, artifacts, browser profiles, and managed worktrees.
+
+`KATA_DATA_ROOT` is the authority. When it is set and `KATA_CONFIG_DIR` is not, the process aliases `KATA_CONFIG_DIR` to the same path.
+
+### Back up the data root
+
+Stop the server, then copy the volume or `/var/lib/kata-agents` tree. That copy is the backup boundary. Restore by replacing the volume contents and starting the same image. Automated backup, upgrade, and rollback are out of this slice.
+
+### Restart the computer
+
+```bash
+docker compose -f docker-compose.server.yml restart
+```
+
+The computer id is stable across restart. Graceful shutdown checkpoints work it can persist. Interrupted or uncertain work is surfaced on the next open and is never silently replayed.
+
+### Resource needs
+
+The image includes Chromium and needs enough RAM for one headless browser plus Bot runtimes. Keep `/dev/shm` large enough for Chromium, or keep the default `--disable-dev-shm-usage` flag that the server already passes.
+
+### Shared-computer boundary
+
+All Bots share one OS account and filesystem. A file or browser login created by Bot A is available to Bot B after an explicit profile handoff, a client disconnect that releases the profile lease, or a server restart that drops stale leases. A browser profile still has one active writer at a time.
+
+systemd remains supported for localhost (`127.0.0.1`) installs. New systemd lifecycle features are out of this slice. The tarball `install.sh --systemd` path is unchanged besides `KATA_DATA_ROOT`.

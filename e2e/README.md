@@ -30,6 +30,7 @@ bun run e2e --grep @channels                    # real Channel routing and resta
 bun run e2e --grep @memory                      # Bot memory, compaction, and restart
 bun run e2e --grep @handoffs                    # Bot send_handoff card and rail
 bun run e2e --grep @approvals                   # Bot tool approval cards and standing rules
+bun run e2e --grep @computer-headless           # thin client against a Linux Docker computer
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
@@ -83,6 +84,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@memory`    | (in-test)                              | Real provider Bot flow: establish, edit, forget, compact, restart, and compare durable memory and journal evidence.                                                                                   |
 | `@handoffs`  | (in-test)                              | Real provider Bot flow: `send_handoff` from DirectChat, inline card, result rail, restart recovery.                                                                                                    |
 | `@approvals` | (in-test)                              | Real provider Bot flow: deny and allow-once a Write, Explore-mode block, exact standing allow.                                                                                                         |
+| `@computer-headless` | `appWindow` plus `KATA_E2E_COMPUTER_URL` | Thin Electron client against a Linux Docker computer with TLS. Requires `KATA_E2E_COMPUTER_URL` and `KATA_E2E_COMPUTER_TOKEN`. Missing vars fail the spec. GUI launch is macOS-only. Server persistence is covered by `packages/server` smoke and `packages/server-core` computer tests. |
 | `@agent`     | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
 | `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
@@ -198,7 +200,8 @@ pipeline; generic harness modules must not import flows.
   `[data-testid="user-turn"]`, `[data-testid="assistant-turn"]`.
   Guest page clicks go through the guest `webContents` (`sendInputEvent`)
   because Electron BrowserViews are not Playwright pages.
-- **Fail loud.** Missing build artifacts, release app path, or provider key
+- **Fail loud.** Missing build artifacts, release app path, provider key, or
+  `KATA_E2E_COMPUTER_URL` / `KATA_E2E_COMPUTER_TOKEN` for `@computer-headless`
   throw with the variable name and a pointer here.
 
 ## Known follow-ups

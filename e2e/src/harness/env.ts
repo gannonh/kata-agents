@@ -211,6 +211,18 @@ export function isVideoEnabled(): boolean {
   return process.env.KATA_E2E_VIDEO === "1";
 }
 
+export function readComputerHeadlessPrerequisite(): PrerequisiteResult {
+  const missing: string[] = [];
+  if (!firstNonEmpty(process.env.KATA_E2E_COMPUTER_URL)) {
+    missing.push("KATA_E2E_COMPUTER_URL");
+  }
+  if (!firstNonEmpty(process.env.KATA_E2E_COMPUTER_TOKEN)) {
+    missing.push("KATA_E2E_COMPUTER_TOKEN");
+  }
+  if (missing.length > 0) return { ok: false, missing };
+  return { ok: true };
+}
+
 export function assertMacOsHost(): void {
   if (platform() !== "darwin") {
     throw new Error(

@@ -14,6 +14,8 @@ export const E2E_TAGS = {
   git: "@git",
   /** Offline Worktree V2 identity/root parity flows. */
   worktreeV2: "@worktree-v2",
+  /** Self-hosted headless computer with a thin Electron client. */
+  computerHeadless: "@computer-headless",
 } as const;
 
 export type E2ETag = (typeof E2E_TAGS)[keyof typeof E2E_TAGS];
