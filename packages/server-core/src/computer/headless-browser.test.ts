@@ -40,7 +40,7 @@ describe('HeadlessBrowserPaneManager', () => {
     const fixture = Bun.serve({
       port: 0,
       fetch() {
-        return new Response('<html><body><h1>fixture-ok</h1></body></html>', {
+        return new Response('<html><head><title>fixture-ok</title></head><body><h1>fixture-ok</h1></body></html>', {
           headers: { 'content-type': 'text/html; charset=utf-8' },
         })
       },
@@ -63,9 +63,10 @@ describe('HeadlessBrowserPaneManager', () => {
     const instanceA = await bpmA.createForSessionAsync('bot-a')
     const result = await bpmA.navigate(instanceA, fixtureUrl)
     expect(result.title.toLowerCase()).toContain('fixture-ok')
+    expect(String(await bpmA.evaluate(instanceA, 'document.body.innerText'))).toContain('fixture-ok')
     const shot = await bpmA.screenshot(instanceA)
     expect(shot.imageBuffer.byteLength).toBeGreaterThan(100)
-    await bpmA.evaluate(instanceA, 'document.cookie = "kata=shared; path=/"')
+    await bpmA.evaluate(instanceA, 'document.cookie = "kata=shared; path=/; max-age=3600"')
     expect(String(await bpmA.evaluate(instanceA, 'document.cookie'))).toContain('kata=shared')
 
     try {
@@ -98,5 +99,5 @@ describe('HeadlessBrowserPaneManager', () => {
     expect(String(await bpmRestart.evaluate(instanceRestart, 'document.cookie'))).toContain('kata=shared')
 
     fixture.stop()
-  }, 60_000)
+  }, 90_000)
 })

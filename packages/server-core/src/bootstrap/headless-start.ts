@@ -461,7 +461,7 @@ export async function startHealthHttpServer(
 
     return {
       stop: () => server.stop(),
-      port: server.port,
+      port: server.port ?? options.port,
     }
   }
 
