@@ -6,6 +6,7 @@ import type {
   DataRootLayout,
 } from '@kata-sh/shared/computer'
 import { brandComputerId } from '@kata-sh/shared/computer'
+import { ComputerLayoutError } from './errors.ts'
 
 export interface ComputerRecord {
   computerId: string
@@ -20,19 +21,41 @@ export interface ComputerRecord {
 
 export function loadComputerRecord(layout: DataRootLayout): ComputerRecord | null {
   if (!existsSync(layout.recordPath)) return null
-  const parsed = JSON.parse(readFileSync(layout.recordPath, 'utf8')) as Record<string, unknown>
-  if (typeof parsed.computerId !== 'string' || parsed.computerId.length === 0) {
-    throw new Error(`computer record is corrupt: ${layout.recordPath}`)
+  const raw = readFileSync(layout.recordPath, 'utf8')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new ComputerLayoutError({
+      tag: 'corrupt',
+      reason: 'computer record is not JSON',
+      path: layout.recordPath,
+    })
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ComputerLayoutError({
+      tag: 'corrupt',
+      reason: 'computer record is not an object',
+      path: layout.recordPath,
+    })
+  }
+  const record = parsed as Record<string, unknown>
+  if (typeof record.computerId !== 'string' || record.computerId.trim().length === 0) {
+    throw new ComputerLayoutError({
+      tag: 'corrupt',
+      reason: 'computer record computerId missing',
+      path: layout.recordPath,
+    })
   }
   return {
-    computerId: parsed.computerId,
-    kind: parsed.kind === 'self-hosted-headless' ? 'self-hosted-headless' : 'local-client',
-    osAccount: typeof parsed.osAccount === 'string' ? parsed.osAccount : '',
-    createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-    appVersion: typeof parsed.appVersion === 'string' ? parsed.appVersion : '',
-    shutdownEpoch: typeof parsed.shutdownEpoch === 'number' ? parsed.shutdownEpoch : 0,
-    unclean: parsed.unclean === true,
-    lastReadiness: (parsed.lastReadiness as ComputerReadiness | null) ?? null,
+    computerId: record.computerId,
+    kind: record.kind === 'self-hosted-headless' ? 'self-hosted-headless' : 'local-client',
+    osAccount: typeof record.osAccount === 'string' ? record.osAccount : '',
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
+    appVersion: typeof record.appVersion === 'string' ? record.appVersion : '',
+    shutdownEpoch: typeof record.shutdownEpoch === 'number' ? record.shutdownEpoch : 0,
+    unclean: record.unclean === true,
+    lastReadiness: (record.lastReadiness as ComputerReadiness | null) ?? null,
   }
 }
 

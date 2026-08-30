@@ -91,6 +91,42 @@ describe('Computer.open', () => {
     }
   })
 
+  it('fails closed on a corrupt computer record', async () => {
+    const root = tempRoot()
+    const first = await open(root)
+    const recordPath = first.layout.recordPath
+    await first.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(first), 1)
+    writeFileSync(recordPath, '{not-json')
+    try {
+      await Computer.open(configFor(root), { skipBrowser: true })
+      throw new Error('expected ComputerLayoutError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ComputerLayoutError)
+      expect((error as ComputerLayoutError).tag).toBe('corrupt')
+      expect((error as ComputerLayoutError).path).toBe(recordPath)
+      expect(error).not.toBeInstanceOf(SyntaxError)
+    }
+  })
+
+  it('fails closed on a computer record with an empty computerId', async () => {
+    const root = tempRoot()
+    const first = await open(root)
+    const recordPath = first.layout.recordPath
+    const raw = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, unknown>
+    await first.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(first), 1)
+    writeFileSync(recordPath, `${JSON.stringify({ ...raw, computerId: '' })}\n`)
+    try {
+      await Computer.open(configFor(root), { skipBrowser: true })
+      throw new Error('expected ComputerLayoutError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ComputerLayoutError)
+      expect((error as ComputerLayoutError).tag).toBe('corrupt')
+      expect((error as ComputerLayoutError).path).toBe(recordPath)
+    }
+  })
+
   it('denies a second writer on the same browser profile', async () => {
     const computer = await open(tempRoot())
     const profileId = brandProfileId('shared')
@@ -176,6 +212,12 @@ describe('Computer.open', () => {
     const crashed = recovery.find((item) => item.sessionId === 'sess-crash')
     expect(crashed).toEqual({ sessionId: 'sess-crash', action: 'surface', from: 'interrupted' })
     expect(recovery.some((item) => item.sessionId === 'sess-crash' && item.action === 'resume')).toBe(false)
+
+    await computer.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(computer), 1)
+    const again = await open(root)
+    const second = await again.reconcileRecovery()
+    expect(second.some((item) => item.sessionId === 'sess-crash')).toBe(false)
   })
 
   it('keeps Bot A files under the data root after restart', async () => {
@@ -228,6 +270,33 @@ describe('Computer.open', () => {
     const recovery = await second.reconcileRecovery()
     expect(recovery).toContainEqual({ sessionId: 'sess-ok', action: 'resume', from: 'checkpointed' })
     expect(recovery.some((item) => item.sessionId === 'sess-ok' && item.action === 'surface')).toBe(false)
+
+    await second.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(second), 1)
+    const third = await open(root)
+    const again = await third.reconcileRecovery()
+    expect(again.some((item) => item.sessionId === 'sess-ok')).toBe(false)
+  })
+
+  it('replays only the latest shutdown epoch', async () => {
+    const root = tempRoot()
+    const first = await open(root)
+    await first.shutdown({ reason: 'drain', timeoutMs: 1_000 })
+    computers.splice(computers.indexOf(first), 1)
+
+    writeFileSync(
+      join(root, 'computer', 'shutdown', '1.json'),
+      `${JSON.stringify({ epoch: 1, work: [{ kind: 'checkpointed', domain: 'session', ref: 'sess-old' }] })}\n`,
+    )
+    writeFileSync(
+      join(root, 'computer', 'shutdown', '2.json'),
+      `${JSON.stringify({ epoch: 2, work: [{ kind: 'checkpointed', domain: 'session', ref: 'sess-new' }] })}\n`,
+    )
+
+    const second = await open(root)
+    const recovery = await second.reconcileRecovery()
+    expect(recovery).toContainEqual({ sessionId: 'sess-new', action: 'resume', from: 'checkpointed' })
+    expect(recovery.some((item) => item.sessionId === 'sess-old')).toBe(false)
   })
 
   it('does not report uncertain after a clean shutdown with no leftover work', async () => {

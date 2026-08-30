@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -313,21 +313,22 @@ export class Computer {
 
   async reconcileRecovery(): Promise<readonly RecoveryDisposition[]> {
     const items = this.readShutdownWork()
-    if (items.length === 0 && this.priorUnclean) {
-      return [{ sessionId: 'computer', action: 'surface', from: 'uncertain' }]
-    }
-    return items
-      .filter((item) => item.domain === 'session' || item.domain === 'browser-profile')
-      .map((item) => {
-        if (item.kind === 'checkpointed') {
-          return { sessionId: item.ref, action: 'resume' as const, from: 'checkpointed' as const }
-        }
-        return {
-          sessionId: item.ref,
-          action: 'surface' as const,
-          from: item.kind === 'interrupted' ? 'interrupted' as const : 'uncertain' as const,
-        }
-      })
+    const dispositions = items.length === 0 && this.priorUnclean
+      ? [{ sessionId: 'computer', action: 'surface' as const, from: 'uncertain' as const }]
+      : items
+        .filter((item) => item.domain === 'session' || item.domain === 'browser-profile')
+        .map((item) => {
+          if (item.kind === 'checkpointed') {
+            return { sessionId: item.ref, action: 'resume' as const, from: 'checkpointed' as const }
+          }
+          return {
+            sessionId: item.ref,
+            action: 'surface' as const,
+            from: item.kind === 'interrupted' ? 'interrupted' as const : 'uncertain' as const,
+          }
+        })
+    this.archiveReconciledShutdownWork()
+    return dispositions
   }
 
   async shutdown(input: { reason: 'signal' | 'drain' | 'operator'; timeoutMs: number }): Promise<{
@@ -477,25 +478,55 @@ export class Computer {
     )
   }
 
-  private readShutdownWork(): ShutdownWorkItem[] {
+  private listShutdownJsonFiles(): string[] {
     if (!existsSync(this.layout.shutdownDir)) return []
-    const items: ShutdownWorkItem[] = []
-    for (const name of readdirSync(this.layout.shutdownDir)) {
-      if (!name.endsWith('.json')) continue
-      try {
-        const parsed = JSON.parse(readFileSync(join(this.layout.shutdownDir, name), 'utf8')) as {
-          work?: ShutdownWorkItem[]
-        } | ShutdownWorkItem
-        if ('kind' in parsed && 'domain' in parsed && 'ref' in parsed) {
-          items.push(parsed)
-        } else if (parsed && 'work' in parsed && Array.isArray(parsed.work)) {
-          items.push(...parsed.work)
-        }
-      } catch {
-        items.push({ kind: 'uncertain', domain: 'session', ref: name, detail: 'unreadable shutdown record' })
+    return readdirSync(this.layout.shutdownDir).filter((name) => name.endsWith('.json'))
+  }
+
+  private parseShutdownFile(name: string): ShutdownWorkItem[] {
+    try {
+      const parsed = JSON.parse(readFileSync(join(this.layout.shutdownDir, name), 'utf8')) as {
+        work?: ShutdownWorkItem[]
+      } | ShutdownWorkItem
+      if ('kind' in parsed && 'domain' in parsed && 'ref' in parsed) {
+        return [parsed]
       }
+      if (parsed && 'work' in parsed && Array.isArray(parsed.work)) {
+        return parsed.work
+      }
+      return []
+    } catch {
+      return [{ kind: 'uncertain', domain: 'session', ref: name, detail: 'unreadable shutdown record' }]
     }
-    return items
+  }
+
+  private readShutdownWork(): ShutdownWorkItem[] {
+    const names = this.listShutdownJsonFiles()
+    const epochFiles: { epoch: number; name: string }[] = []
+    const currentFiles: string[] = []
+    for (const name of names) {
+      const match = /^(\d+)\.json$/.exec(name)
+      if (match) epochFiles.push({ epoch: Number(match[1]), name })
+      else currentFiles.push(name)
+    }
+    epochFiles.sort((a, b) => b.epoch - a.epoch)
+    const selected = [...currentFiles, ...(epochFiles[0] ? [epochFiles[0].name] : [])]
+    return selected.flatMap((name) => this.parseShutdownFile(name))
+  }
+
+  private archiveReconciledShutdownWork(): void {
+    const names = this.listShutdownJsonFiles()
+    if (names.length === 0) return
+    const dest = join(
+      this.layout.shutdownDir,
+      'reconciled',
+      String(this.record.shutdownEpoch),
+      `${Date.now()}`,
+    )
+    mkdirSync(dest, { recursive: true })
+    for (const name of names) {
+      renameSync(join(this.layout.shutdownDir, name), join(dest, name))
+    }
   }
 }
 
