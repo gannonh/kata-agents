@@ -1,12 +1,13 @@
 export const CANONICAL_DATA_ROOT = '/var/lib/kata-agents'
 export const CANONICAL_HEALTH_PORT = 9101
 
-export function renderCanonicalCompose(): string {
+export function renderCanonicalCompose(opts?: { dockerfile?: string }): string {
+  const dockerfile = opts?.dockerfile ?? 'Dockerfile.server'
   return `services:
   kata-server:
     build:
       context: .
-      dockerfile: Dockerfile.server
+      dockerfile: ${dockerfile}
     ports:
       - "9100:9100"
     environment:

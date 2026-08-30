@@ -20,7 +20,15 @@ describe('server packaging', () => {
     expect(compose).toContain('KATA_RPC_TLS_KEY: /certs/key.pem')
     expect(compose).toContain('curl')
     expect(compose).toContain('http://127.0.0.1:9101/health')
+    expect(compose).toContain('dockerfile: Dockerfile.server')
     expect(compose).not.toContain('/root/.kata-agents')
+  })
+
+  it('packaged compose builds the emitted Dockerfile', () => {
+    const compose = renderCanonicalCompose({ dockerfile: 'Dockerfile' })
+    expect(compose).toMatch(/dockerfile:\s*Dockerfile\n/)
+    expect(compose).not.toContain('Dockerfile.server')
+    expect(compose).toContain(`KATA_DATA_ROOT: ${CANONICAL_DATA_ROOT}`)
   })
 
   it('repo-root docker-compose.server.yml matches the canonical renderer', () => {

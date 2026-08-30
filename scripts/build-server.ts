@@ -644,7 +644,7 @@ ENTRYPOINT ["/app/bin/kata-server"]
 `;
   writeFileSync(join(outputDir, 'Dockerfile'), dockerfile);
 
-  writeFileSync(join(outputDir, 'docker-compose.yml'), renderCanonicalCompose());
+  writeFileSync(join(outputDir, 'docker-compose.yml'), renderCanonicalCompose({ dockerfile: 'Dockerfile' }));
 }
 
 // ---------------------------------------------------------------------------
