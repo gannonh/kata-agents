@@ -59,6 +59,28 @@ describe('RoutineEngine', () => {
     expect(engine.listRuns(routine.routineId)[0]?.state.kind).toBe('succeeded')
   })
 
+  it('persists every matching event occurrence before dispatching any run', async () => {
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const first = store.create(input({ kind: 'event', source: 'SessionStatusChange', matcher: { field: 'newState', equals: 'done' } }))
+    const second = store.create(input({ kind: 'event', source: 'SessionStatusChange', matcher: { field: 'newState', equals: 'done' } }))
+    let runCountAtFirstExecution = 0
+    const executor: RoutineExecutor = {
+      async execute() {
+        runCountAtFirstExecution = store.listAllRuns().length
+        return { kind: 'completed', reply: 'done' }
+      },
+    }
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: executor, clock: () => at })
+
+    const runs = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'event-all', payload: { newState: 'done' } })
+
+    expect(runCountAtFirstExecution).toBe(2)
+    expect(runs).toHaveLength(2)
+    expect(engine.listRuns(first.routineId)).toHaveLength(1)
+    expect(engine.listRuns(second.routineId)).toHaveLength(1)
+  })
+
   it('advances a durable schedule cursor and creates each missed occurrence once', async () => {
     let now = at
     const executor = new FakeExecutor()
