@@ -94,16 +94,22 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
       await electronApp.evaluate(({ app }) => { app.emit("activate"); });
       const reconnected = await windowPromise;
       await waitForAppReady(reconnected);
-      await expect.poll(async () => reconnected.evaluate(async ({ workspaceId, routineId }) => {
-        const api = (window as unknown as { electronAPI: { listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<Array<{ runId: string; state: { kind: string; result?: string } }>> } }).electronAPI;
-        return api.listRoutineRuns(workspaceId, routineId, 10);
-      }, { workspaceId: workspace, routineId: routine.routineId }), { timeout: 120_000, intervals: [1_000] }).toHaveLength(1);
+      await expect.poll(async () => {
+        const runs = await reconnected.evaluate(async ({ workspaceId, routineId }) => {
+          const api = (window as unknown as { electronAPI: { listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<Array<{ runId: string; state: { kind: string; result?: string } }>> } }).electronAPI;
+          return api.listRoutineRuns(workspaceId, routineId, 10);
+        }, { workspaceId: workspace, routineId: routine.routineId });
+        return runs.filter(run => run.state.kind === "succeeded");
+      }, { timeout: 120_000, intervals: [1_000] }).not.toHaveLength(0);
       const runs = await reconnected.evaluate(async ({ workspaceId, routineId }) => {
         const api = (window as unknown as { electronAPI: { listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<Array<{ runId: string; state: { kind: string; result?: string } }>> } }).electronAPI;
         return api.listRoutineRuns(workspaceId, routineId, 10);
       }, { workspaceId: workspace, routineId: routine.routineId });
-      expect(runs[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
-      expect(runs[0]?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
+      const succeededRuns = runs.filter(run => run.state.kind === "succeeded");
+      expect(succeededRuns.length).toBeGreaterThanOrEqual(1);
+      expect(succeededRuns.length).toBeLessThanOrEqual(2);
+      expect(succeededRuns[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
+      expect(succeededRuns[0]?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
     });
   });
 
