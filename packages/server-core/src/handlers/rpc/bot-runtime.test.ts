@@ -496,7 +496,7 @@ describe('sendToBotSession', () => {
     const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-uncertain-'))
     const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
     mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
-    writeFileSync(sessionPointerPath, 'session-1\\n')
+    writeFileSync(sessionPointerPath, 'session-1\n')
     fixture.sessions.set('session-1', {
       id: 'session-1',
       workspaceId: target.workspaceId,
