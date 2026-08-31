@@ -136,7 +136,6 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
         await waitForAppReady(activePage);
       },
     });
-    });
   });
 
   test("runs one matching event and ignores unrelated and duplicate events", async ({ appWindow }) => {
