@@ -51,6 +51,7 @@
     "./prompts": "./src/prompts/index.ts",
     "./protocol": "./src/protocol/index.ts",
     "./resources": "./src/resources/index.ts",
+    "./routines": "./src/routines/index.ts",
     "./search": "./src/search/index.ts",
     "./sessions": "./src/sessions/index.ts",
     "./skills": "./src/skills/index.ts",

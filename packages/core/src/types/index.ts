@@ -252,3 +252,26 @@ export {
   POLICY_BLOCK_REASONS,
   POLICY_ALLOW_REASONS,
 } from './tool-approval.ts';
+
+// Durable Bot-owned routines
+export type {
+  RoutineId,
+  RoutineRunId,
+  TriggerOccurrenceId,
+  RoutineLifecycle,
+  RoutineApprovalBoundary,
+  RoutineFailurePolicy,
+  RoutineEventMatcher,
+  RoutineTrigger,
+  RoutineDestination,
+  RoutineRecord,
+  RoutineRevision,
+  RoutineOccurrence,
+  RoutineRunState,
+  RoutineRunOrigin,
+  RoutineRun,
+  RoutinePublicDto,
+  RoutinePublicRunState,
+  RoutineRunPublicDto,
+} from './routine.ts';
+export { ROUTINE_SCHEMA_VERSION } from './routine.ts';
