@@ -76,6 +76,31 @@ describe('RoutineEngine', () => {
     expect(store.getScheduleCursor(routine.routineId, 1)).toBe('2026-08-31T02:00:00.000Z')
   })
 
+  it('reclaims an expired claim without repeating the claimed transition', async () => {
+    let now = at
+    const root = workspace()
+    const executor = new FakeExecutor()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => now })
+    const routine = store.create(input({ kind: 'on-demand' }))
+    const occurrence = store.recordOccurrence({ routineId: routine.routineId, routineRevision: 1, source: 'on-demand', externalEventId: 'on-demand_1' })
+    const run = store.createRun({ occurrenceId: occurrence.occurrenceId, ownerBotId: 'bot_1' })
+    const claimed = store.transitionRun(run.runId, run.version, {
+      kind: 'claimed',
+      at,
+      workerId: 'dead-worker',
+      leaseUntil: '2026-08-31T00:00:00.001Z',
+    })
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: executor, clock: () => now })
+
+    now = '2026-08-31T00:01:00.000Z'
+    await engine.tick(now)
+
+    expect(claimed.state.kind).toBe('claimed')
+    expect(executor.calls).toBe(1)
+    expect(store.getRun(run.runId)?.state.kind).toBe('succeeded')
+    await engine.stop()
+  })
+
   it('honors retry and uncertain failure policies with a durable attempt count', async () => {
     const root = workspace()
     const executor = new FakeExecutor()
@@ -223,6 +248,46 @@ describe('RoutineEngine', () => {
     const result = await runPromise
     expect(result.state.kind).toBe('cancelled')
     expect(result.state).toMatchObject({ reason: 'routine-paused' })
+    await engine.stop()
+  })
+
+  it('does not await scheduled catch-up execution during startup', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let now = at
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => now })
+    const executor: RoutineExecutor = { async execute() { await gate; return { kind: 'completed', reply: 'done' } } }
+    const routine = store.create(input({ kind: 'schedule', cron: '0 * * * *', timezone: 'UTC', dst: { gap: 'skip', fold: 'once' } }))
+    now = '2026-08-31T02:00:00.000Z'
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: executor, clock: () => now })
+
+    const start = engine.start()
+    const startup = await Promise.race([
+      start.then(() => 'started' as const),
+      new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 50)),
+    ])
+    expect(startup).toBe('started')
+    release()
+    await start
+    await engine.stop()
+    expect(store.listRuns(routine.routineId)).toHaveLength(2)
+  })
+
+  it('rejects replay of a nonterminal run', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const routine = store.create(input({ kind: 'on-demand' }))
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: { async execute() { await gate; return { kind: 'completed', reply: 'done' } } }, clock: () => at })
+    const runPromise = engine.testRoutine(routine.routineId)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const run = store.listRuns(routine.routineId)[0]!
+
+    await expect(engine.replayRun(run.runId)).rejects.toThrow(`Only terminal routine runs can be replayed: ${run.runId}`)
+    release()
+    await runPromise
     await engine.stop()
   })
 

@@ -168,7 +168,7 @@ export class RoutineEngine {
     this.started = true
     this.store.recover()
     await this.recoverRuns()
-    await this.tick()
+    void this.tick().catch(() => undefined)
     this.timer = setInterval(() => {
       const now = timestamp(this.clock)
       const promise = this.emitLegacyScheduleTick(now)
@@ -368,6 +368,9 @@ export class RoutineEngine {
   async replayRun(runId: RoutineRunId): Promise<RoutineRunPublicDto> {
     const original = this.store.getRun(runId)
     if (!original) throw new Error(`Routine run not found: ${runId}`)
+    if (!['succeeded', 'failed', 'cancelled', 'uncertain', 'reconciled'].includes(original.state.kind)) {
+      throw new Error(`Only terminal routine runs can be replayed: ${runId}`)
+    }
     const routine = this.store.get(original.routineId)
     if (!routine || routine.lifecycle !== 'enabled') throw new Error(`Routine is not enabled: ${original.routineId}`)
     const run = await this.triggerOccurrence({
@@ -692,12 +695,6 @@ export class RoutineEngine {
         if (current.state.workerId !== this.workerId && current.state.leaseUntil > now) return current
         const claim = this.store.claimOccurrence({ occurrenceId: current.origin.occurrenceId, workerId: this.workerId, leaseMs: DEFAULT_CLAIM_LEASE_MS })
         if (!claim) return current
-        current = this.store.transitionRun(current.runId, current.version, {
-          kind: 'claimed',
-          at: now,
-          workerId: this.workerId,
-          leaseUntil: claim.leaseUntil!,
-        })
       }
       current = this.store.transitionRun(current.runId, current.version, { kind: 'running', at: timestamp(this.clock) })
     }
