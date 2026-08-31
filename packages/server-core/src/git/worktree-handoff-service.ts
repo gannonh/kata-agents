@@ -294,11 +294,48 @@ export class WorktreeHandoffService {
       ...(facts.returnRef ? { returnRef: facts.returnRef } : {}),
       recoveryBehavior: facts.recoveryBehavior,
     }
-    return await this.deps.registry.runExclusive(async () => {
+    return await this.deps.mutationLock.withLock(facts.gitCommonDir, async () => this.deps.registry.runExclusive(async () => {
+      const existingTransaction = this.transactions.get(input.sessionId)
       const existingJournal = this.deps.journal.inProgress().find(
         (entry) => entry.op === 'handoff' && entry.sessionIds.includes(input.sessionId),
       )
-      if (existingJournal) {
+      if (existingTransaction && existingTransaction.state !== 'pending') {
+        return {
+          ...preview,
+          previewFingerprint: sha256(JSON.stringify({ blocked: 'handoff-in-progress', sessionId: input.sessionId })),
+          blocked: {
+            blocked: true,
+            code: 'handoff-in-progress' as const,
+            reason: 'A handoff transaction is already in progress for this session.',
+          },
+        }
+      }
+      if (existingTransaction?.state === 'pending') {
+        const pendingEntry = existingJournal?.journalId === existingTransaction.journalId ? existingJournal : undefined
+        if (
+          resolvePath(existingTransaction.gitCommonDir) === resolvePath(facts.gitCommonDir)
+          && pendingEntry
+          && pendingEntry.steps.length === 0
+          && pendingEntry.metadata?.state === 'pending'
+        ) {
+          this.deps.journal.updateMetadata(existingTransaction.journalId, { state: 'preview-superseded', supersededAt: Date.now() })
+          this.deps.journal.recover(existingTransaction.journalId, 'preview-superseded')
+          this.transactions.delete(input.sessionId)
+        } else {
+          return {
+            ...preview,
+            previewFingerprint: sha256(JSON.stringify({ blocked: 'handoff-in-progress', sessionId: input.sessionId })),
+            blocked: {
+              blocked: true,
+              code: 'handoff-in-progress' as const,
+              reason: 'A handoff transaction is already in progress for this session.',
+            },
+          }
+        }
+      }
+      if (this.deps.journal.inProgress().some(
+        (entry) => entry.op === 'handoff' && entry.sessionIds.includes(input.sessionId),
+      )) {
         return {
           ...preview,
           previewFingerprint: sha256(JSON.stringify({ blocked: 'handoff-in-progress', sessionId: input.sessionId })),
@@ -342,7 +379,7 @@ export class WorktreeHandoffService {
       transaction.journalId = journal.journalId
       this.transactions.set(input.sessionId, transaction)
       return preview
-    })
+    }))
   }
 
   // -------------------------------------------------------------------------
@@ -390,10 +427,23 @@ export class WorktreeHandoffService {
     const txn = this.transactions.get(input.sessionId)
     if (!txn || txn.transactionId !== input.transactionId) return { active: false }
     if (txn.state !== 'pending') return this.status(input.sessionId)
-    this.deps.journal.updateMetadata(txn.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
-    this.deps.journal.recover(txn.journalId, 'preview-cancelled')
-    this.transactions.delete(input.sessionId)
-    return { active: false }
+    return this.deps.mutationLock.withLock(txn.gitCommonDir, async () => {
+      const current = this.transactions.get(input.sessionId)
+      const entry = this.deps.journal.entries().find(candidate => candidate.journalId === txn.journalId)
+      if (
+        current !== txn
+        || current?.transactionId !== input.transactionId
+        || current?.state !== 'pending'
+        || !entry
+        || entry.status !== 'in-progress'
+        || entry.steps.length > 0
+        || entry.metadata?.state !== 'pending'
+      ) return this.status(input.sessionId)
+      this.deps.journal.updateMetadata(txn.journalId, { state: 'preview-cancelled', cancelledAt: Date.now() })
+      this.deps.journal.recover(txn.journalId, 'preview-cancelled')
+      this.transactions.delete(input.sessionId)
+      return { active: false }
+    })
   }
 
   /**
@@ -406,20 +456,24 @@ export class WorktreeHandoffService {
   async cancelForSessionDeletion(sessionId: string): Promise<void> {
     const txn = this.transactions.get(sessionId)
     if (!txn) return
-    if (!txn.steps.includes('binding-committed')) {
-      try {
-        await this.rollbackTransaction(txn)
-      } catch (error) {
-        this.deps.journal.fail(txn.journalId, sanitizeError(error))
+    await this.deps.mutationLock.withLock(txn.gitCommonDir, async () => {
+      const current = this.transactions.get(sessionId)
+      if (current !== txn) return
+      if (!txn.steps.includes('binding-committed')) {
+        try {
+          await this.rollbackTransaction(txn)
+        } catch (error) {
+          this.deps.journal.fail(txn.journalId, sanitizeError(error))
+        }
       }
-    }
-    try {
-      this.deps.journal.updateMetadata(txn.journalId, { state: 'rolled-back', rolledBackAt: Date.now() })
-      this.deps.journal.recover(txn.journalId, 'rolled-back')
-    } catch {
-      /* best-effort; startup reconciliation covers stragglers */
-    }
-    this.transactions.delete(sessionId)
+      try {
+        this.deps.journal.updateMetadata(txn.journalId, { state: 'rolled-back', rolledBackAt: Date.now() })
+        this.deps.journal.recover(txn.journalId, 'rolled-back')
+      } catch {
+        /* best-effort; startup reconciliation covers stragglers */
+      }
+      this.transactions.delete(sessionId)
+    })
   }
 
   // -------------------------------------------------------------------------
@@ -438,17 +492,23 @@ export class WorktreeHandoffService {
     if (!session) throw new WorktreeHandoffError('HANDOFF_SESSION_UNKNOWN', 'Unknown session for handoff confirmation.')
     const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
     if (!capability || capability.executionCwdRebindable !== true) {
-      this.deps.journal.fail(txn.journalId, 'The provider adapter cannot safely rebind its execution CWD.')
-      this.transactions.delete(input.sessionId)
-      return this.blockedResult(txn, 'unsupported-provider', 'The provider adapter cannot safely rebind its execution CWD.')
+      return this.deps.mutationLock.withLock(txn.gitCommonDir, async () => {
+        this.assertPendingTransaction(txn)
+        this.deps.journal.fail(txn.journalId, 'The provider adapter cannot safely rebind its execution CWD.')
+        this.transactions.delete(input.sessionId)
+        return this.blockedResult(txn, 'unsupported-provider', 'The provider adapter cannot safely rebind its execution CWD.')
+      })
     }
     if (!this.hooks.resolveCapabilityAdapter?.(input.sessionId) || !this.hooks.commitSessionBinding) {
-      this.deps.journal.fail(txn.journalId, 'Handoff runtime or durable session binding is not wired.')
-      this.transactions.delete(input.sessionId)
-      throw new WorktreeHandoffError(
-        'HANDOFF_NOT_IMPLEMENTED',
-        'Handoff requires a live runtime rebind and durable session-binding host.',
-      )
+      return this.deps.mutationLock.withLock(txn.gitCommonDir, async () => {
+        this.assertPendingTransaction(txn)
+        this.deps.journal.fail(txn.journalId, 'Handoff runtime or durable session binding is not wired.')
+        this.transactions.delete(input.sessionId)
+        throw new WorktreeHandoffError(
+          'HANDOFF_NOT_IMPLEMENTED',
+          'Handoff requires a live runtime rebind and durable session-binding host.',
+        )
+      })
     }
 
     if (txn.direction === 'managed-to-current') {
@@ -459,6 +519,7 @@ export class WorktreeHandoffService {
     }
 
     return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
+      this.assertPendingTransaction(txn)
       const facts = await this.gatherFacts(
         {
           sessionId: input.sessionId,
@@ -467,7 +528,6 @@ export class WorktreeHandoffService {
         },
         session,
         capability,
-        txn.transactionId,
       )
       if (facts.blocker) {
         this.deps.journal.fail(txn.journalId, facts.blockerReason ?? 'Handoff precondition failed.')
@@ -738,6 +798,7 @@ export class WorktreeHandoffService {
     capability: WorktreeHandoffProviderCapability,
   ): Promise<WorktreeHandoffResult> {
     return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
+      this.assertPendingTransaction(txn)
       const facts = await this.gatherFacts(
         {
           sessionId: input.sessionId,
@@ -746,7 +807,6 @@ export class WorktreeHandoffService {
         },
         session,
         capability,
-        txn.transactionId,
       )
       if (facts.blocker) {
         this.deps.journal.fail(txn.journalId, facts.blockerReason ?? 'Handoff precondition failed.')
@@ -1013,6 +1073,7 @@ export class WorktreeHandoffService {
     capability: WorktreeHandoffProviderCapability,
   ): Promise<WorktreeHandoffResult> {
     return this.deps.mutationLock.withLock<WorktreeHandoffResult>(txn.gitCommonDir, async () => {
+      this.assertPendingTransaction(txn)
       const facts = await this.gatherFacts(
         {
           sessionId: input.sessionId,
@@ -1021,7 +1082,6 @@ export class WorktreeHandoffService {
         },
         session,
         capability,
-        txn.transactionId,
       )
       if (facts.blocker) {
         this.deps.journal.fail(txn.journalId, facts.blockerReason ?? 'Handoff precondition failed.')
@@ -1300,6 +1360,22 @@ export class WorktreeHandoffService {
     })
   }
 
+  private assertPendingTransaction(txn: HandoffTransaction): void {
+    const current = this.transactions.get(txn.sessionId)
+    const entry = this.deps.journal.entries().find(candidate => candidate.journalId === txn.journalId)
+    if (
+      current !== txn
+      || current?.transactionId !== txn.transactionId
+      || current?.state !== 'pending'
+      || !entry
+      || entry.status !== 'in-progress'
+      || entry.steps.length > 0
+      || entry.metadata?.state !== 'pending'
+    ) {
+      throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'The handoff transaction is no longer pending.')
+    }
+  }
+
   private blockedResult(
     txn: HandoffTransaction,
     code: WorktreeHandoffBlockerCode,
@@ -1385,14 +1461,27 @@ export class WorktreeHandoffService {
     // mutated anything, so it can be discarded; anything past pending is
     // recovery-required with its retained snapshot authority.
     if (txn.state === 'pending') {
-      this.deps.journal.recover(txn.journalId, 'preview-cancelled')
-      this.transactions.delete(input.sessionId)
-      return {
-        outcome: 'blocked',
-        transactionId: input.transactionId,
-        code: 'identity-drift',
-        reason: 'The preview transaction expired before confirmation; preview again.',
-      }
+      return this.deps.mutationLock.withLock(txn.gitCommonDir, async () => {
+        const current = this.transactions.get(input.sessionId)
+        const entry = this.deps.journal.entries().find(candidate => candidate.journalId === txn.journalId)
+        if (
+          current !== txn
+          || current?.transactionId !== input.transactionId
+          || current?.state !== 'pending'
+          || !entry
+          || entry.status !== 'in-progress'
+          || entry.steps.length > 0
+          || entry.metadata?.state !== 'pending'
+        ) throw new WorktreeHandoffError('HANDOFF_TRANSACTION_UNKNOWN', 'The handoff transaction is no longer pending.')
+        this.deps.journal.recover(txn.journalId, 'preview-cancelled')
+        this.transactions.delete(input.sessionId)
+        return {
+          outcome: 'blocked',
+          transactionId: input.transactionId,
+          code: 'identity-drift',
+          reason: 'The preview transaction expired before confirmation; preview again.',
+        }
+      })
     }
     // A durable binding without a journal commit is ambiguous (the binding
     // cannot be revoked through this service); only explicit recovery applies.
@@ -1855,7 +1944,6 @@ export class WorktreeHandoffService {
     input: WorktreeHandoffPreviewInput,
     session: HandoffSessionInfo,
     capability: WorktreeHandoffProviderCapability | null,
-    transactionIdToAllow?: string,
   ): Promise<{
     blocker: WorktreeHandoffBlockerCode | null
     blockerReason?: string
@@ -1893,19 +1981,6 @@ export class WorktreeHandoffService {
       return { ...fail('unsupported-provider', 'The provider adapter cannot safely rebind its execution CWD.'), ...this.emptyFacts(sourcePath, repositoryRoot) }
     }
     const existingTransaction = this.transactions.get(input.sessionId)
-    if (existingTransaction && existingTransaction.transactionId !== transactionIdToAllow) {
-      if (existingTransaction.state === 'pending') {
-        // A fresh preview supersedes a stale pending preview. A pending
-        // transaction has never mutated anything (quiescence happens at
-        // confirm), so cancelling it is safe and keeps StrictMode double-mounts
-        // and dialog re-opens from stranding the session with a fenced
-        // transaction the user never confirmed.
-        this.deps.journal.recover(existingTransaction.journalId, 'preview-superseded')
-        this.transactions.delete(input.sessionId)
-      } else {
-        return { ...fail('handoff-in-progress', 'A handoff transaction is already in progress for this session.'), ...this.emptyFacts(sourcePath, repositoryRoot) }
-      }
-    }
     if (this.hooks.isSessionActive?.(input.sessionId)) {
       return { ...fail('runtime-active', 'The session has an active turn; handoff requires an idle session.'), ...this.emptyFacts(sourcePath, repositoryRoot) }
     }

@@ -527,6 +527,39 @@ describe('HandoffService creation boundary', () => {
     }
   })
 
+  it('serializes concurrent recovery through one handoff dispatch', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-dispatch-race-'))
+    try {
+      const deliveryStore = new HandoffDeliveryStore({ workspaceRoot, clock: () => at })
+      const taskStore = new SpawnTaskStore({ workspaceRoot, workspaceId: 'ws_1', clock: () => at })
+      const reserved = taskStore.reserveForHandoff('handoff_race', {
+        parentSessionId: 'session_source',
+        delegatedPrompt: 'Dispatch once.',
+        childConfig: {},
+      })
+      deliveryStore.create({
+        deliveryId: 'delivery_race',
+        handoffId: 'handoff_race',
+        workspaceId: 'ws_1',
+        conversationId: 'chat_source',
+        sourceBotId: 'bot_source',
+        targetBotId: 'bot_target',
+        request: 'Dispatch once.',
+      })
+      deliveryStore.attachSpawnTask('delivery_race', reserved.taskId)
+      let providerCalls = 0
+      const first = makeService(deliveryStore, taskStore, () => { providerCalls += 1 })
+      const second = makeService(deliveryStore, taskStore, () => { providerCalls += 1 })
+
+      await Promise.all([first.reconcileStartup(), second.reconcileStartup()])
+
+      expect(providerCalls).toBe(1)
+      expect(deliveryStore.get('delivery_race')?.mailState).toBe('acknowledged')
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('recovers a channel handoff through its channel provider session', async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'handoff-channel-recovery-'))
     try {

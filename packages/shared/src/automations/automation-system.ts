@@ -284,6 +284,22 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
+   * Emit the legacy schedule event from the workspace's durable routine clock.
+   * SessionManager leaves SchedulerService disabled so this remains the only
+   * scheduler authority for the workspace.
+   */
+  async emitSchedulerTick(timestamp = new Date().toISOString()): Promise<void> {
+    const date = new Date(timestamp)
+    if (!Number.isFinite(date.getTime())) throw new TypeError('Scheduler timestamp must be an ISO timestamp')
+    await this.eventBus.emit('SchedulerTick', {
+      workspaceId: this.options.workspaceId,
+      timestamp: date.getTime(),
+      localTime: date.toTimeString().slice(0, 5),
+      utcTime: date.toISOString(),
+    })
+  }
+
+  /**
    * Start the scheduler service.
    */
   private startScheduler(): void {

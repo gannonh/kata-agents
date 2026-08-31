@@ -1120,7 +1120,7 @@ app.whenReady().then(async () => {
         } catch (error) {
           mainLog.error('Failed to flush sessions (pre-update):', error)
         }
-        sessionManager.cleanup()
+        await sessionManager.cleanupAsync()
         if (browserPaneManager) browserPaneManager.destroyAll()
         if (oauthFlowStore) oauthFlowStore.dispose()
         getModelRefreshService().stopAll()
@@ -1267,7 +1267,7 @@ app.on('before-quit', async (event) => {
       mainLog.error('Failed to flush sessions:', error)
     }
     // Clean up SessionManager resources (file watchers, timers, etc.)
-    sessionManager.cleanup()
+    await sessionManager.cleanupAsync()
 
     // Clean up browser pane instances
     if (browserPaneManager) {

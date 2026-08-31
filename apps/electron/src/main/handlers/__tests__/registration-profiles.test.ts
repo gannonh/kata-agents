@@ -111,6 +111,8 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     onboarding,
     resources,
     transfer,
+    routines,
+    approvals,
   ] = await Promise.all([
     import('@kata-sh/server-core/handlers/rpc/auth'),
     import('@kata-sh/server-core/handlers/rpc/automations'),
@@ -132,6 +134,8 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     import('@kata-sh/server-core/handlers/rpc/onboarding'),
     import('@kata-sh/server-core/handlers/rpc/resources'),
     import('@kata-sh/server-core/handlers/rpc/transfer'),
+    import('@kata-sh/server-core/handlers/rpc/routines'),
+    import('@kata-sh/server-core/handlers/rpc/approvals'),
   ])
 
   return new Set([
@@ -155,6 +159,8 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...onboarding.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
+    ...routines.HANDLED_CHANNELS,
+    ...approvals.HANDLED_CHANNELS,
   ])
 }
 

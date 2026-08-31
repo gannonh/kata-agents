@@ -237,17 +237,57 @@ describe('validation', () => {
       expect(result.errors.some(e => e.message.includes('ReDoS'))).toBe(true);
     });
 
-    it('should reject ReDoS patterns (repeated alternation)', () => {
+    it('should reject bounded nested quantifiers that still trigger exponential backtracking', () => {
       const json = JSON.stringify({
         automations: {
           LabelAdd: [{
-            matcher: '(a|b)+',
+            matcher: '^(a?){30}a{30}$',
             actions: [{ type: 'prompt', prompt: 'echo test' }],
           }],
         },
       });
       const result = validateAutomationsContent(json);
       expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.message.includes('ReDoS'))).toBe(true);
+    });
+
+    it('should reject ReDoS patterns (repeated alternation)', () => {
+      const json = JSON.stringify({
+        automations: {
+          LabelAdd: [{
+            matcher: '(a|aa)+',
+            actions: [{ type: 'prompt', prompt: 'echo test' }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(false);
+    });
+
+    it('should accept linear quantified groups', () => {
+      const json = JSON.stringify({
+        automations: {
+          LabelAdd: [
+            { matcher: '(.a)+', actions: [{ type: 'prompt', prompt: 'echo test' }] },
+            { matcher: '(a|b)+', actions: [{ type: 'prompt', prompt: 'echo test' }] },
+          ],
+        },
+      });
+      expect(validateAutomationsContent(json).valid).toBe(true);
+    });
+
+    it('should reject adjacent overlapping quantified atoms', () => {
+      const json = JSON.stringify({
+        automations: {
+          LabelAdd: [{
+            matcher: '[ab]+[ab]+[ab]+[ab]+[ab]+[ab]+[ab]+x',
+            actions: [{ type: 'prompt', prompt: 'echo test' }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.message.includes('ReDoS'))).toBe(true);
     });
 
     it('should reject ReDoS patterns (repeated greedy quantifiers)', () => {

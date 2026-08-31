@@ -16,6 +16,7 @@ export function computeOperationHash(invocation: ToolInvocation): string {
     conversationId: invocation.conversationId,
     normalizedInput: invocation.normalizedInput,
     policyRevision: invocation.policyRevision,
+    runtimeId: invocation.runtimeId,
     targetFingerprint: invocation.target.fingerprint,
     targetValue: invocation.target.value,
     toolName: invocation.toolName,

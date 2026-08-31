@@ -108,7 +108,7 @@ function apiKeySlugFor(provider: string): string {
   return provider === "anthropic" ? ANTHROPIC_API_KEY_SLUG : PI_API_KEY_SLUG;
 }
 
-/** Make a connection the global default (retries must repoint the default). */
+/** Make a connection the global and workspace default for new sessions and Bots. */
 async function setDefaultConnection(page: Page, slug: string): Promise<void> {
   const result = await page.evaluate(async (targetSlug) => {
     const api = (
@@ -118,10 +118,23 @@ async function setDefaultConnection(page: Page, slug: string): Promise<void> {
             success: boolean;
             error?: string;
           }>;
+          getWindowWorkspace(): Promise<string | null>;
+          updateWorkspaceSetting(
+            workspaceId: string,
+            key: "defaultLlmConnection",
+            value: string,
+          ): Promise<void>;
         };
       }
     ).electronAPI;
-    return api.setDefaultLlmConnection(targetSlug);
+    const globalResult = await api.setDefaultLlmConnection(targetSlug);
+    if (!globalResult.success) return globalResult;
+    const workspaceId = await api.getWindowWorkspace();
+    if (!workspaceId) {
+      throw new Error("Agent E2E setup: the ready shell has no active workspace.");
+    }
+    await api.updateWorkspaceSetting(workspaceId, "defaultLlmConnection", targetSlug);
+    return globalResult;
   }, slug);
   if (!result.success) {
     throw new Error(
@@ -234,19 +247,24 @@ export async function configureAgentConnection(
     return api.getChatGptAuthStatus(connectionSlug);
   }, CHATGPT_CONNECTION_SLUG);
 
-  if (authStatus.authenticated) {
+  const oauthAccessIsFresh =
+    authStatus.authenticated &&
+    (authStatus.expiresAt === undefined || authStatus.expiresAt > Date.now() + 5 * 60 * 1000);
+  if (oauthAccessIsFresh) {
     await completeConfiguredChatGptOnboarding(page, candidate.model);
-    // A retry may have pointed the default at an earlier api-key candidate;
-    // repoint it at the OAuth connection so new sessions use it.
-    await setDefaultConnection(page, CHATGPT_CONNECTION_SLUG);
     return;
   }
 
   if (candidate.apiKey) {
     console.warn(
-      `[e2e][provider] chatgpt-plus OAuth credential is not available; falling back to ${candidate.keySource}`,
+      `[e2e][provider] chatgpt-plus OAuth access is expired or expiring; falling back to ${candidate.keySource}`,
     );
     await configureApiKeyConnection(page, candidate);
+    return;
+  }
+
+  if (authStatus.authenticated) {
+    await completeConfiguredChatGptOnboarding(page, candidate.model);
     return;
   }
 
@@ -322,9 +340,9 @@ export async function completeConfiguredChatGptOnboarding(
     );
   }
 
-  // The direct connection setup persists the isolated config and the OAuth
-  // credential remains in the shared credential manager. Reload so App.tsx
-  // recomputes setup needs and enters the normal ready shell.
+  // Persist both defaults before reload so Bot creation and new sessions use
+  // the same connection after App.tsx rebuilds its workspace state.
+  await setDefaultConnection(page, CHATGPT_CONNECTION_SLUG);
   await page.reload({ waitUntil: "domcontentloaded" });
   await handleWorkspacePickerIfPresent(page);
   await setAgentWorkingDirectory(page);

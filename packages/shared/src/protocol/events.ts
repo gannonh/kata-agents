@@ -41,6 +41,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.sources.CHANGED]: [workspaceId: string, sources: LoadedSource[]]
   [RPC_CHANNELS.labels.CHANGED]: [workspaceId: string]
   [RPC_CHANNELS.bots.EVENT]: [event: { type: string; botId?: string; chatId?: string; bot?: unknown }]
+  [RPC_CHANNELS.routines.EVENT]: [event: { type: string; routineId?: string; runId?: string }]
   [RPC_CHANNELS.channels.EVENT]: [event: ChannelEvent]
   [RPC_CHANNELS.handoffs.EVENT]: [event: HandoffInvalidatedEvent]
   [RPC_CHANNELS.approvals.EVENT]: [event: ApprovalInvalidatedEvent]

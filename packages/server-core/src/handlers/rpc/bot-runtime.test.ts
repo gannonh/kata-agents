@@ -3,14 +3,17 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import type { BotTurnContext, ToolInvocation } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
 import { resetBotProviderSessions, sendToBotSession } from './bot-runtime'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
 import { channelProviderSessionPath } from '@kata-sh/shared/channels'
+import { respondToPermissionOnce } from '../../routines/bot-routine-executor'
 
 function makeSessionManager() {
   const sessions = new Map<string, { id: string; workspaceId: string; hidden?: boolean; model?: string; llmConnection?: string; messages: Array<{ id?: string; role: string; content: string }> }>()
   const calls: string[] = []
+  const rpcContexts: unknown[] = []
   let created = 0
   let messageCount = 0
 
@@ -35,7 +38,15 @@ function makeSessionManager() {
     ) {
       const session = sessions.get(sessionId)
       if (!session) throw new Error('session not found')
+      rpcContexts.push(args[6])
       calls.push(sessionId)
+      const existingMessageId = args[3] as string | undefined
+      if (existingMessageId) {
+        session.messages.push({ role: 'assistant', content: `reply: ${message}` })
+        const onAck = args[5]
+        if (typeof onAck === 'function') (onAck as (messageId: string) => void)(existingMessageId)
+        return
+      }
       const messageId = `message-${++messageCount}`
       session.messages.push({ id: messageId, role: 'user', content: message })
       session.messages.push({ role: 'assistant', content: `reply: ${message}` })
@@ -44,7 +55,7 @@ function makeSessionManager() {
     },
   }
 
-  return { manager, sessions, calls, get created() { return created } }
+  return { manager, sessions, calls, rpcContexts, get created() { return created } }
 }
 
 const target = {
@@ -56,6 +67,131 @@ const target = {
 }
 
 describe('sendToBotSession', () => {
+  it('persists permission delivery so duplicate approval recovery sends one response', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-approval-response-'))
+    let responses = 0
+    const manager = {
+      respondToPermission() {
+        responses += 1
+        return true
+      },
+    }
+
+    expect(respondToPermissionOnce(manager as unknown as HandlerDeps['sessionManager'], root, 'approval-one', 'session-one', 'request-one', true)).toBe(true)
+    expect(respondToPermissionOnce(manager as unknown as HandlerDeps['sessionManager'], root, 'approval-one', 'session-one', 'request-one', true)).toBe(true)
+    expect(respondToPermissionOnce(manager as unknown as HandlerDeps['sessionManager'], root, 'approval-one', 'session-one', 'request-two', true)).toBe(true)
+    expect(responses).toBe(2)
+  })
+
+  it('does not replay a permission response when its durable marker is malformed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-approval-marker-'))
+    const approvalId = 'approval-one'
+    const sessionId = 'session-one'
+    const requestId = 'request-one'
+    const markerDirectory = join(root, '.routines', 'approval-responses')
+    mkdirSync(markerDirectory, { recursive: true })
+    const markerKey = createHash('sha256').update(JSON.stringify([approvalId, requestId, true]), 'utf8').digest('hex')
+    writeFileSync(join(markerDirectory, `${markerKey}.json`), '{}')
+    let responses = 0
+    const manager = { respondToPermission: () => { responses += 1; return true } }
+
+    expect(() => respondToPermissionOnce(
+      manager as unknown as HandlerDeps['sessionManager'],
+      root,
+      approvalId,
+      sessionId,
+      requestId,
+      true,
+    )).toThrow('outcome is uncertain')
+    expect(responses).toBe(0)
+  })
+
+  it('forwards Bot routine identity and context to SessionManager', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-context-'))
+    const context = {
+      workspaceId: target.workspaceId,
+      botId: target.botId,
+      conversationId: 'chat-one',
+      runId: 'run-one',
+      operationId: 'routine.run-one',
+      journalCursor: 0,
+      conversationCursor: 0,
+      memoryRevision: 0,
+      checkpointRevision: 0,
+      text: 'routine prompt',
+      memoryIds: [],
+    }
+    const result = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath: join(root, 'provider-session') },
+      'routine prompt',
+      {
+        waitForReply: true,
+        botTurnContext: context,
+        botRoutineRunId: 'run-one',
+        botAttempt: 3,
+        stopOnPendingApproval: true,
+      },
+    )
+
+    expect(result.reply).toBe('reply: routine prompt')
+    expect(fixture.rpcContexts[0]).toMatchObject({
+      botTurnContext: context,
+      botRoutineRunId: 'run-one',
+      botPermissionMode: 'ask',
+      botAttempt: 3,
+    })
+  })
+
+  it('preserves a dispatch whose provider outcome is unknown after user-message persistence', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-starting-'))
+    const sessionPointerPath = botProviderSessionPath(root, 'bot-one')
+    const sessions = new Map<string, { id: string; workspaceId: string; hidden: true; model: string; llmConnection: string; messages: Array<{ id?: string; role: string; content: string; idempotencyKey?: string }>; isProcessing?: boolean }>()
+    let sends = 0
+    const manager = {
+      async createSession(workspaceId: string, options: { model?: string; llmConnection?: string }) {
+        const session = { id: 'session-1', workspaceId, hidden: true as const, model: options.model!, llmConnection: options.llmConnection!, messages: [] }
+        sessions.set(session.id, session)
+        return session
+      },
+      async getSession(sessionId: string) { return sessions.get(sessionId) ?? null },
+      async sendMessage(sessionId: string, message: string, ...args: unknown[]) {
+        const session = sessions.get(sessionId)!
+        sends += 1
+        const existingMessageId = args[3] as string | undefined
+        const rpcContext = args[6] as { botDispatchIdempotencyKey?: string } | undefined
+        if (existingMessageId) {
+          session.messages.push({ role: 'assistant', content: `reply: ${message}` })
+          ;(args[5] as (messageId: string) => void)(existingMessageId)
+          return
+        }
+        const messageId = 'message-1'
+        session.messages.push({ id: messageId, role: 'user', content: message, idempotencyKey: rpcContext?.botDispatchIdempotencyKey })
+        if (sends === 1) throw new Error('simulated crash after message persistence')
+        session.messages.push({ role: 'assistant', content: `reply: ${message}` })
+        ;(args[5] as (messageId: string) => void)(messageId)
+      },
+    }
+
+    await expect(sendToBotSession(
+      manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath },
+      'recover me',
+      { waitForReply: true, dispatchIdempotencyKey: 'dispatch.starting' },
+    )).rejects.toThrow('simulated crash')
+
+    await expect(sendToBotSession(
+      manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath },
+      'recover me',
+      { waitForReply: true, dispatchIdempotencyKey: 'dispatch.starting' },
+    )).rejects.toThrow('uncertain')
+
+    expect(sends).toBe(1)
+    expect(sessions.get('session-1')?.messages.filter(message => message.role === 'user')).toHaveLength(1)
+  })
+
   it('creates one durable hidden session per pointer and serializes concurrent sends', async () => {
     const fixture = makeSessionManager()
     const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-'))
@@ -167,6 +303,89 @@ describe('sendToBotSession', () => {
     expect(fixture.calls).toEqual([])
   })
 
+  it('resumes an approved idle routine dispatch through the existing user message', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-routine-restart-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'session-1\n')
+    fixture.sessions.set('session-1', {
+      id: 'session-1',
+      workspaceId: target.workspaceId,
+      hidden: true,
+      model: target.providerConfig.modelId,
+      llmConnection: target.providerConfig.providerId,
+      messages: [{ id: 'user-one', role: 'user', content: 'approved work' }],
+    })
+    const key = 'dispatch.routine-restart'
+    const dispatchDir = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    const hash = createHash('sha256').update(key).digest('hex')
+    writeFileSync(join(dispatchDir, `${hash}.json`), JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
+    const botTurnContext: BotTurnContext = {
+      runId: 'run-restart',
+      operationId: 'routine.run-restart',
+      workspaceId: target.workspaceId,
+      botId: target.botId,
+      conversationId: 'channel-one',
+      journalCursor: 0,
+      conversationCursor: 0,
+      memoryRevision: 0,
+      checkpointRevision: 0,
+      text: 'approved work',
+      memoryIds: [],
+    }
+
+    const result = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath },
+      'approved work',
+      {
+        waitForReply: true,
+        dispatchIdempotencyKey: key,
+        botTurnContext,
+        botRoutineRunId: 'run-restart',
+        botAttempt: 2,
+      },
+    )
+
+    expect(result.reply).toBe('reply: approved work')
+    expect(fixture.calls).toEqual(['session-1'])
+  })
+
+  it('preserves an approved idle dispatch when the provider reply is missing', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-approved-restart-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'session-1\n')
+    fixture.sessions.set('session-1', {
+      id: 'session-1',
+      workspaceId: target.workspaceId,
+      hidden: true,
+      model: target.providerConfig.modelId,
+      llmConnection: target.providerConfig.providerId,
+      messages: [{ id: 'user-one', role: 'user', content: 'approved work' }],
+    })
+    const key = 'dispatch.approved-restart'
+    const dispatchDir = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    const hash = createHash('sha256').update(key).digest('hex')
+    const dispatchPath = join(dispatchDir, `${hash}.json`)
+    writeFileSync(dispatchPath, JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
+    const approvalInvocation = {} as ToolInvocation
+
+    await expect(sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath, approvalInvocation },
+      'approved work',
+      { waitForReply: true, dispatchIdempotencyKey: key, stopOnPendingApproval: true },
+    )).rejects.toThrow('uncertain')
+
+    expect(fixture.calls).toEqual([])
+    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).state).toBe('pending')
+  })
+
   it('does not recover an assistant reply from a later provider turn', async () => {
     const fixture = makeSessionManager()
     const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-interleaved-'))
@@ -191,18 +410,17 @@ describe('sendToBotSession', () => {
     const hash = createHash('sha256').update(key).digest('hex')
     writeFileSync(join(dispatchDir, `${hash}.json`), JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
 
-    const result = await sendToBotSession(
+    await expect(sendToBotSession(
       fixture.manager as unknown as HandlerDeps['sessionManager'],
       { ...target, sessionPointerPath },
-      'new turn',
+      'old',
       { waitForReply: true, dispatchIdempotencyKey: key },
-    )
+    )).rejects.toThrow('uncertain')
 
-    expect(result.reply).toBe('reply: new turn')
-    expect(fixture.calls).toEqual(['session-1'])
+    expect(fixture.calls).toEqual([])
   })
 
-  it('clears a stale pending record after unsuccessful recovery so a restart cannot retry the old turn', async () => {
+  it('rejects a pending dispatch when its user message changed', async () => {
     const existingMessageIds: Array<string | undefined> = []
     const sessions = new Map<string, { id: string; workspaceId: string; hidden?: boolean; model?: string; llmConnection?: string; messages: Array<{ id?: string; role: string; content: string }>; isProcessing?: boolean }>()
     let created = 0
@@ -261,34 +479,64 @@ describe('sendToBotSession', () => {
     const dispatchPath = join(dispatchDir, `${hash}.json`)
     writeFileSync(dispatchPath, JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-old' }))
 
-    const first = await sendToBotSession(
+    await expect(sendToBotSession(
       manager as unknown as HandlerDeps['sessionManager'],
       { ...target, sessionPointerPath },
       'new turn',
       { waitForReply: true, dispatchIdempotencyKey: key },
-    )
-    expect(first.reply).toBe('reply: new turn')
-    expect(existingMessageIds).toEqual([undefined])
-    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).userMessageId).toBeUndefined()
-    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).state).toBe('completed')
+    )).rejects.toThrow('message changed')
+    expect(existingMessageIds).toEqual([])
+    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).userMessageId).toBe('user-old')
+    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).state).toBe('pending')
+    expect(sessions.get('session-1')?.messages.filter(message => message.role === 'user')).toHaveLength(1)
+  })
 
-    // Crash window: pending record for the new turn exists, reply is already in the transcript.
-    writeFileSync(dispatchPath, JSON.stringify({
-      schemaVersion: 1,
-      dispatchIdempotencyKey: key,
-      sessionId: 'session-1',
-      state: 'pending',
-      userMessageId: 'message-1',
-    }))
-    const restarted = await sendToBotSession(
-      manager as unknown as HandlerDeps['sessionManager'],
+  it('preserves an unresolved routine dispatch instead of replaying an idle provider turn', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-uncertain-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'session-1\n')
+    fixture.sessions.set('session-1', {
+      id: 'session-1',
+      workspaceId: target.workspaceId,
+      hidden: true,
+      model: target.providerConfig.modelId,
+      llmConnection: target.providerConfig.providerId,
+      messages: [{ id: 'user-one', role: 'user', content: 'mutate' }],
+    })
+    const key = 'dispatch.uncertain'
+    const dispatchDir = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    const hash = createHash('sha256').update(key).digest('hex')
+    const dispatchPath = join(dispatchDir, `${hash}.json`)
+    writeFileSync(dispatchPath, JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
+
+    await expect(sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
       { ...target, sessionPointerPath },
-      'new turn',
-      { waitForReply: true, dispatchIdempotencyKey: key },
-    )
-    expect(restarted.reply).toBe('reply: new turn')
-    expect(existingMessageIds).toEqual([undefined])
-    expect(sessions.get('session-1')?.messages.filter(message => message.role === 'user')).toHaveLength(2)
+      'mutate',
+      { waitForReply: true, dispatchIdempotencyKey: key, stopOnPendingApproval: true },
+    )).rejects.toThrow('uncertain')
+    expect(fixture.calls).toEqual([])
+    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).state).toBe('pending')
+  })
+
+  it('clears provider dispatch records when the pointed session lookup fails', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-reset-lookup-fail-'))
+    const sessionPointerPath = botProviderSessionPath(root, 'bot-one')
+    mkdirSync(join(sessionPointerPath, '..'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'missing-session\n')
+    const dispatchDir = join(sessionPointerPath, '..', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    writeFileSync(join(dispatchDir, 'stale.json'), '{}')
+    fixture.manager.getSession = async () => { throw new Error('provider lookup failed') }
+
+    await resetBotProviderSessions(fixture.manager as unknown as HandlerDeps['sessionManager'], root, target.workspaceId, 'bot-one')
+
+    expect(existsSync(sessionPointerPath)).toBe(false)
+    expect(existsSync(dispatchDir)).toBe(false)
   })
 
   it('invalidates provider session pointers when deleteSession fails so the next send creates a new session', async () => {
@@ -341,7 +589,7 @@ describe('sendToBotSession', () => {
     const second = await sendToBotSession(
       fixture.manager as unknown as HandlerDeps['sessionManager'],
       completeTarget,
-      'hello again',
+      'hello',
       { waitForReply: true, dispatchIdempotencyKey: key },
     )
 

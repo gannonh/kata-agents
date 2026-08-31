@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION, type StandingRule, type ToolInvocation } from '@kata-sh/core'
+import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION, type ApprovalRecord, type StandingRule, type ToolInvocation } from '@kata-sh/core'
 import { writeDurableFileIfAbsent } from '../../spawn-tasks/durable-fs.ts'
 import {
   ApprovalConflictError,
@@ -257,11 +257,15 @@ describe('ApprovalStore and ToolBroker', () => {
     if (asked.kind !== 'ask') return
     const casDir = join(owner.store.rootPath, asked.request.approvalId, 'cas')
     mkdirSync(casDir, { recursive: true })
-    expect(writeDurableFileIfAbsent(join(casDir, String(asked.request.version)), 'denied\n')).toBe(true)
+    const pending = owner.store.get(asked.request.approvalId)
+    expect(pending?.status).toBe('pending')
+    if (!pending) return
+    const interrupted: ApprovalRecord = { ...pending, status: 'denied', version: pending.version + 1, resolvedAt: at, updatedAt: at }
+    const marker = join(casDir, String(asked.request.version))
+    expect(writeDurableFileIfAbsent(marker, `${JSON.stringify(interrupted)}\n`)).toBe(true)
     const recovered = new ApprovalStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
-    expect(recovered.get(asked.request.approvalId)?.status).toBe('pending')
-    const denied = recovered.resolve(asked.request.approvalId, asked.request.version, 'deny', at)
-    expect(denied.status).toBe('denied')
+    expect(recovered.get(asked.request.approvalId)?.status).toBe('denied')
+    expect(existsSync(marker)).toBe(false)
   })
 
   it('does not treat a truncated target prefix as an exact standing allow', () => {
@@ -311,13 +315,16 @@ describe('ApprovalStore and ToolBroker', () => {
     expect(verdict.reason).toBe('denied')
   })
 
-  it('preExecute rejects a runtime identity mismatch', () => {
+  it('rejects a runtime identity mismatch before approval consumption', () => {
     const owner = broker(tempWorkspace())
     const asked = owner.authorize(invocation(), 'ask')
     expect(asked.kind).toBe('ask')
     if (asked.kind !== 'ask') return
     owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
-    const verdict = owner.preExecute(asked.request.approvalId, invocation({ runtimeId: 'session_other' }))
+    const otherSession = invocation({ runtimeId: 'session_other' })
+    expect(() => owner.claimExecution(asked.request.approvalId, otherSession)).toThrow(ApprovalConflictError)
+    expect(owner.store.get(asked.request.approvalId)?.status).toBe('allowed-once')
+    const verdict = owner.preExecute(asked.request.approvalId, otherSession)
     expect(verdict.kind).toBe('block')
     if (verdict.kind !== 'block') return
     expect(verdict.reason).toBe('unauthorized')

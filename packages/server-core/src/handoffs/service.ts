@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import {
   HANDOFF_LIMITS,
   SPAWN_TASK_LIMITS,
@@ -15,6 +16,7 @@ import {
   type SpawnTaskResultChunkView,
 } from '@kata-sh/core'
 import { isSpawnTaskTerminal, matchesSpawnTaskDispatchFence } from '@kata-sh/shared/spawn-tasks'
+import { withDurableLockAsync } from '@kata-sh/shared/spawn-tasks/durable-fs'
 import { HandoffDeliveryClaimConflictError, HandoffDeliveryStore } from '@kata-sh/shared/handoffs'
 import {
   BotContextLedger,
@@ -128,6 +130,19 @@ const REQUESTED_KEY_SUFFIX = '.requested'
 const TERMINAL_KEY_SUFFIX = '.terminal'
 const MAX_INSPECT_WAIT_MS = 25_000
 const INSPECT_WAIT_POLL_MS = 50
+const HANDOFF_DISPATCH_LOCK_WAIT_MS = 120_000
+
+async function withHandoffDispatchLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + HANDOFF_DISPATCH_LOCK_WAIT_MS
+  while (true) {
+    try {
+      return await withDurableLockAsync(path, operation)
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('Durable lock is busy:') || Date.now() >= deadline) throw error
+      await delay(50)
+    }
+  }
+}
 
 function requestedKey(handoffId: string): string {
   return `handoff.${handoffId}${REQUESTED_KEY_SUFFIX}`
@@ -750,6 +765,13 @@ export class HandoffService {
     delivery: HandoffDeliveryRecord,
     task: SpawnTask,
   ): Promise<HandoffDeliveryRecord> {
+    return withHandoffDispatchLock(this.dispatchLockPath(delivery.deliveryId), () => this.dispatchAndTryAcknowledgeOwned(delivery, task))
+  }
+
+  private async dispatchAndTryAcknowledgeOwned(
+    delivery: HandoffDeliveryRecord,
+    task: SpawnTask,
+  ): Promise<HandoffDeliveryRecord> {
     const current = this.deliveryStore.get(delivery.deliveryId)
     if (!current || (current.mailState !== 'pending' && current.mailState !== 'claimed')) {
       if (current?.mailState === 'acknowledged') return current
@@ -812,6 +834,10 @@ export class HandoffService {
     } catch (error) {
       throw new HandoffDispatchError(error, ownedClaim, current.targetBotId)
     }
+  }
+
+  private dispatchLockPath(deliveryId: string): string {
+    return join(this.deliveryStore.rootPath, 'dispatch-locks', `${deliveryId}.lock`)
   }
 
   private async publishTerminalIfNeeded(delivery: HandoffDeliveryRecord, task: SpawnTask): Promise<void> {

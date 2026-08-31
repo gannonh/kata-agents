@@ -26,6 +26,11 @@ export interface ProviderAttemptRecord {
   readonly durationMs?: number;
 }
 
+export interface AgentProviderFallbackOptions {
+  /** Restore the test surface before the next candidate is configured. */
+  readonly recoverAfterFailure?: () => Promise<void>;
+}
+
 /**
  * Raised only after every provider option in the fallback chain has been
  * attempted. The message names each candidate, its credential source, and its
@@ -66,6 +71,7 @@ export async function runWithAgentProviderFallback<T>(
   page: Page,
   label: string,
   run: (candidate: AgentProviderCandidate) => Promise<T>,
+  options: AgentProviderFallbackOptions = {},
 ): Promise<T> {
   const chain = readAgentProviderChain();
   const attempts: ProviderAttemptRecord[] = [];
@@ -98,6 +104,7 @@ export async function runWithAgentProviderFallback<T>(
         `[e2e][provider] ${label}: candidate ${candidate.index}/${chain.length} FAILED after ${durationMs}ms — ${candidate.provider}: ${reason.slice(0, 500)}`,
       );
       attempts.push({ candidate, status: "failed", error: reason, durationMs });
+      await options.recoverAfterFailure?.();
     }
   }
 

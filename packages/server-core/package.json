@@ -23,7 +23,8 @@
     "./sessions": "./src/sessions/index.ts",
     "./computer": "./src/computer/index.ts",
     "./handoffs": "./src/handoffs/index.ts",
-    "./webui": "./src/webui/index.ts"
+    "./webui": "./src/webui/index.ts",
+    "./routines": "./src/routines/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

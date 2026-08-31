@@ -11,8 +11,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, renameSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   CONVERSATION_LIMITS,
   CONVERSATION_SCHEMA_VERSION,
@@ -21,7 +21,7 @@ import {
   type JournalEntry,
   type JournalEntryKind,
 } from '@kata-sh/core';
-import { ensureDurableDirectory } from '../spawn-tasks/durable-fs.ts';
+import { assertDurableLock, assertRegularFile, ensureDurableDirectory, syncDirectory, withDurableLock } from '../spawn-tasks/durable-fs.ts';
 import { readJsonFile, writeJsonIfAbsent, writeJsonRecord } from './durable-json.ts';
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$/;
@@ -68,6 +68,72 @@ interface JournalIndex {
   readonly nextSeq: number;
   readonly byIdempotencyKey: Record<string, string>;
   readonly entries: { readonly entryId: string; readonly seq: number }[];
+}
+
+function emptyJournalIndex(conversationId: string): JournalIndex {
+  return {
+    schemaVersion: CONVERSATION_SCHEMA_VERSION,
+    conversationId,
+    nextSeq: 1,
+    byIdempotencyKey: {},
+    entries: [],
+  };
+}
+
+function assertJournalIndex(value: unknown, conversationId: string): JournalIndex {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Journal index is corrupt');
+  const record = value as Record<string, unknown>;
+  const allowed = ['schemaVersion', 'conversationId', 'nextSeq', 'byIdempotencyKey', 'entries'];
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) throw new TypeError(`Journal index.${key} is unknown`);
+  }
+  if (record.schemaVersion !== CONVERSATION_SCHEMA_VERSION || record.conversationId !== conversationId) {
+    throw new Error(`Journal index identity or schema mismatch for ${conversationId}`);
+  }
+  if (!Number.isSafeInteger(record.nextSeq) || (record.nextSeq as number) < 1) {
+    throw new TypeError(`Journal index for ${conversationId} is corrupt`);
+  }
+  const byIdempotencyKey = record.byIdempotencyKey;
+  if (!byIdempotencyKey || typeof byIdempotencyKey !== 'object' || Array.isArray(byIdempotencyKey)) {
+    throw new TypeError(`Journal index for ${conversationId} has invalid idempotency mappings`);
+  }
+  if (!Array.isArray(record.entries)) throw new TypeError(`Journal index for ${conversationId} has invalid entries`);
+
+  const entries: { entryId: string; seq: number }[] = [];
+  const entryIds = new Set<string>();
+  const sequences = new Set<number>();
+  for (const item of record.entries) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new TypeError(`Journal index for ${conversationId} has an invalid entry reference`);
+    const reference = item as Record<string, unknown>;
+    if (Object.keys(reference).some((key) => key !== 'entryId' && key !== 'seq')) throw new TypeError(`Journal index for ${conversationId} has an invalid entry reference`);
+    const entryId = assertConversationId(reference.entryId, 'index.entryId');
+    const seq = reference.seq;
+    if (!Number.isSafeInteger(seq) || (seq as number) < 1) throw new TypeError(`Journal index for ${conversationId} has an invalid sequence`);
+    if (entryIds.has(entryId) || sequences.has(seq as number)) throw new Error(`Journal index for ${conversationId} has duplicate entries`);
+    entryIds.add(entryId);
+    sequences.add(seq as number);
+    entries.push({ entryId, seq: seq as number });
+  }
+
+  const mappings: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const [key, entryIdValue] of Object.entries(byIdempotencyKey)) {
+    assertJournalIdempotencyKey(key, 'index.idempotencyKey');
+    const entryId = assertConversationId(entryIdValue, 'index.entryId');
+    if (!entryIds.has(entryId)) throw new Error(`Journal index for ${conversationId} maps to an unknown entry`);
+    mappings[key] = entryId;
+  }
+  if (Object.keys(mappings).length !== entries.length) throw new Error(`Journal index for ${conversationId} has inconsistent idempotency mappings`);
+  const maxSeq = entries.reduce((maximum, entry) => Math.max(maximum, entry.seq), 0);
+  if ((record.nextSeq as number) !== maxSeq + 1) throw new Error(`Journal index for ${conversationId} has an invalid next sequence`);
+  if (entries.length !== maxSeq) throw new Error(`Journal index for ${conversationId} has a sequence gap`);
+
+  return {
+    schemaVersion: CONVERSATION_SCHEMA_VERSION,
+    conversationId,
+    nextSeq: record.nextSeq as number,
+    byIdempotencyKey: mappings,
+    entries,
+  };
 }
 
 export function journalEntriesPath(root: string, conversationId: string): string {
@@ -218,40 +284,50 @@ export class ConversationJournal {
     const idempotencyKey = assertJournalIdempotencyKey(input.idempotencyKey);
     const authorBotId = this.resolveAuthor(conversation, input);
 
-    const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId));
-    const existingId = Object.hasOwn(index.byIdempotencyKey, idempotencyKey)
-      ? index.byIdempotencyKey[idempotencyKey]
-      : undefined;
-    if (existingId) {
-      const existingSeq = index.entries.find((item) => item.entryId === existingId)?.seq;
-      if (existingSeq === undefined) throw new Error(`Journal index is missing entry ${existingId}`);
-      return this.requireEntry(conversation.conversationId, existingSeq, existingId);
-    }
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => {
+      const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId, lockPath, lockToken), lockPath, lockToken);
+      const existingId = Object.hasOwn(index.byIdempotencyKey, idempotencyKey)
+        ? index.byIdempotencyKey[idempotencyKey]
+        : undefined;
+      if (existingId) {
+        const existingSeq = index.entries.find((item) => item.entryId === existingId)?.seq;
+        if (existingSeq === undefined) throw new Error(`Journal index is missing entry ${existingId}`);
+        return this.requireEntry(conversation.conversationId, existingSeq, existingId, lockPath, lockToken);
+      }
 
-    const seq = index.nextSeq;
-    const entryId = assertConversationId(
-      input.entryId ?? deriveJournalEntryId(conversation.conversationId, idempotencyKey),
-      'entryId',
-    );
-    const entry: JournalEntry = assertJournalEntry({
-      schemaVersion: CONVERSATION_SCHEMA_VERSION,
-      entryId,
-      conversationId: conversation.conversationId,
-      ...(authorBotId !== undefined ? { authorBotId } : {}),
-      ...(input.handoffId !== undefined ? { handoffId: input.handoffId } : {}),
-      ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
-      seq,
-      kind: input.kind,
-      idempotencyKey,
-      body: input.body,
-      createdAt: input.createdAt ?? this.clock(),
+      const seq = index.nextSeq;
+      const entryId = assertConversationId(
+        input.entryId ?? deriveJournalEntryId(conversation.conversationId, idempotencyKey),
+        'entryId',
+      );
+      const existingEntry = index.entries.find((item) => item.entryId === entryId);
+      if (existingEntry) {
+        const existing = this.requireEntry(conversation.conversationId, existingEntry.seq, existingEntry.entryId, lockPath, lockToken);
+        if (existing.idempotencyKey !== idempotencyKey) throw new Error(`Journal entry ID collision: ${entryId}`);
+        return existing;
+      }
+      const entry: JournalEntry = assertJournalEntry({
+        schemaVersion: CONVERSATION_SCHEMA_VERSION,
+        entryId,
+        conversationId: conversation.conversationId,
+        ...(authorBotId !== undefined ? { authorBotId } : {}),
+        ...(input.handoffId !== undefined ? { handoffId: input.handoffId } : {}),
+        ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
+        seq,
+        kind: input.kind,
+        idempotencyKey,
+        body: input.body,
+        createdAt: input.createdAt ?? this.clock(),
+      });
+
+      const entryPath = journalEntryPath(this.journalRoot, conversation.conversationId, seq, entryId);
+      assertDurableLock(lockPath, lockToken);
+      const committed = writeJsonIfAbsent(entryPath, entry)
+        ? entry
+        : this.requireEntry(conversation.conversationId, seq, entryId, lockPath, lockToken);
+      return this.commitIndex(index, committed, lockPath, lockToken);
     });
-
-    const entryPath = journalEntryPath(this.journalRoot, conversation.conversationId, seq, entryId);
-    const committed = writeJsonIfAbsent(entryPath, entry)
-      ? entry
-      : this.requireEntry(conversation.conversationId, seq, entryId);
-    return this.commitIndex(index, committed);
   }
 
   list(conversationId: string, options?: { afterSeq?: number; limit?: number }): JournalEntry[] {
@@ -261,22 +337,31 @@ export class ConversationJournal {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
       throw new Error('limit must be a non-negative safe integer');
     }
-    return this.readIndex(conversation.conversationId).entries
-      .filter((item) => item.seq > afterSeq)
-      .sort((left, right) => left.seq - right.seq)
-      .slice(0, limit)
-      .map((item) => this.requireEntry(conversation.conversationId, item.seq, item.entryId));
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => {
+      const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId, lockPath, lockToken), lockPath, lockToken);
+      return index.entries
+        .filter((item) => item.seq > afterSeq)
+        .sort((left, right) => left.seq - right.seq)
+        .slice(0, limit)
+        .map((item) => this.requireEntry(conversation.conversationId, item.seq, item.entryId, lockPath, lockToken));
+    });
   }
 
   getEntry(conversationId: string, entryId: string): JournalEntry | null {
     const conversation = this.require(conversationId);
-    const found = this.readIndex(conversation.conversationId).entries.find((item) => item.entryId === entryId);
-    return found ? this.requireEntry(conversation.conversationId, found.seq, found.entryId) : null;
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => {
+      const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId, lockPath, lockToken), lockPath, lockToken);
+      const found = index.entries.find((item) => item.entryId === entryId);
+      return found ? this.requireEntry(conversation.conversationId, found.seq, found.entryId, lockPath, lockToken) : null;
+    });
   }
 
   getCursor(conversationId: string): JournalCursor {
     const conversation = this.require(conversationId);
-    return this.buildCursor(conversation.conversationId, this.readLastReadSeq(conversation.conversationId));
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => this.buildCursor(conversation.conversationId, this.readLastReadSeq(conversation.conversationId, lockPath, lockToken), lockPath, lockToken));
   }
 
   /** The authoritative highest sequence, independent of the UI read cursor. */
@@ -284,19 +369,25 @@ export class ConversationJournal {
     const conversation = this.require(conversationId);
     // Reconcile orphans before reporting the head so a crash between entry write
     // and index commit cannot leave recovered entries invisible to assemblers.
-    return this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId)).nextSeq - 1;
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId, lockPath, lockToken), lockPath, lockToken).nextSeq - 1);
   }
 
   markRead(conversationId: string, seq: number): JournalCursor {
     const conversation = this.require(conversationId);
     if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('seq must be a non-negative safe integer');
-    const lastSeq = this.readIndex(conversation.conversationId).nextSeq - 1;
-    const lastReadSeq = Math.max(this.readLastReadSeq(conversation.conversationId), Math.min(seq, lastSeq));
-    writeJsonRecord(journalCursorPath(this.journalRoot, conversation.conversationId), {
-      conversationId: conversation.conversationId,
-      lastReadSeq,
+    const lockPath = this.journalLockPath(conversation.conversationId);
+    return withDurableLock(lockPath, (lockToken) => {
+      const index = this.reconcileOrphanedEntries(this.readIndex(conversation.conversationId, lockPath, lockToken), lockPath, lockToken);
+      const lastSeq = index.nextSeq - 1;
+      const lastReadSeq = Math.min(lastSeq, Math.max(this.readLastReadSeq(conversation.conversationId, lockPath, lockToken), seq));
+      assertDurableLock(lockPath, lockToken);
+      writeJsonRecord(journalCursorPath(this.journalRoot, conversation.conversationId), {
+        conversationId: conversation.conversationId,
+        lastReadSeq,
+      });
+      return this.buildCursor(conversation.conversationId, lastReadSeq, lockPath, lockToken);
     });
-    return this.buildCursor(conversation.conversationId, lastReadSeq);
   }
 
   private resolveAuthor(conversation: ConversationRef, input: AppendJournalEntryInput): string | undefined {
@@ -321,7 +412,7 @@ export class ConversationJournal {
     return authorBotId;
   }
 
-  private commitIndex(index: JournalIndex, entry: JournalEntry): JournalEntry {
+  private commitIndex(index: JournalIndex, entry: JournalEntry, lockPath: string, lockToken: string): JournalEntry {
     // ponytail: full index rewrite per append is O(n) in entries. Fine at chat
     // volumes; upgrade path is an append-only index log plus periodic snapshot.
     const next: JournalIndex = {
@@ -331,6 +422,7 @@ export class ConversationJournal {
       byIdempotencyKey: { ...index.byIdempotencyKey, [entry.idempotencyKey]: entry.entryId },
       entries: [...index.entries, { entryId: entry.entryId, seq: entry.seq }],
     };
+    assertDurableLock(lockPath, lockToken);
     writeJsonRecord(journalIndexPath(this.journalRoot, index.conversationId), next);
     return entry;
   }
@@ -340,7 +432,7 @@ export class ConversationJournal {
    * on disk while missing from the index. Fold those orphans into the index and
    * advance nextSeq past the highest on-disk seq before allocating a new one.
    */
-  private reconcileOrphanedEntries(index: JournalIndex): JournalIndex {
+  private reconcileOrphanedEntries(index: JournalIndex, lockPath: string, lockToken: string): JournalIndex {
     let files: string[];
     try {
       files = readdirSync(journalEntriesPath(this.journalRoot, index.conversationId));
@@ -349,33 +441,57 @@ export class ConversationJournal {
       throw error;
     }
 
-    const indexedIds = new Set(index.entries.map((item) => item.entryId));
+    const indexedSeqById = new Map(index.entries.map((item) => [item.entryId, item.seq]));
+    const indexedSequences = new Set(index.entries.map((item) => item.seq));
+    const indexedKeys = new Set(Object.keys(index.byIdempotencyKey));
     let nextSeq = index.nextSeq;
     let byIdempotencyKey = index.byIdempotencyKey;
     let entries = index.entries;
     let changed = false;
 
-    for (const file of files) {
+    for (const file of files.sort()) {
       const match = ENTRY_FILENAME.exec(file);
       if (!match) continue;
       const seq = Number(match[1]);
       const entryId = match[2]!;
       if (!Number.isSafeInteger(seq) || seq < 1) continue;
 
-      if (seq >= nextSeq) {
-        nextSeq = seq + 1;
-        changed = true;
+      const indexedSeq = indexedSeqById.get(entryId);
+      const entryPath = journalEntryPath(this.journalRoot, index.conversationId, seq, entryId);
+      if (indexedSeq !== undefined) {
+        if (indexedSeq !== seq) this.quarantine(entryPath, new Error(`Journal orphan reuses entry ID ${entryId}`));
+        continue;
       }
-      if (indexedIds.has(entryId)) continue;
+      if (indexedSequences.has(seq)) {
+        this.quarantine(entryPath, new Error(`Journal orphan conflicts with committed sequence ${seq}`));
+        continue;
+      }
+      if (seq !== nextSeq) {
+        this.quarantine(entryPath, new Error(`Journal orphan leaves a sequence gap before ${seq}`));
+        continue;
+      }
 
-      const entry = this.requireEntry(index.conversationId, seq, entryId);
+      let entry: JournalEntry;
+      try {
+        entry = this.requireEntry(index.conversationId, seq, entryId, lockPath, lockToken);
+      } catch (error) {
+        this.quarantine(entryPath, error);
+        continue;
+      }
+      if (indexedKeys.has(entry.idempotencyKey)) {
+        this.quarantine(entryPath, new Error(`Journal orphan conflicts with idempotency key ${entry.idempotencyKey}`));
+        continue;
+      }
       if (!changed) {
         byIdempotencyKey = { ...index.byIdempotencyKey };
         entries = [...index.entries];
       }
       byIdempotencyKey = { ...byIdempotencyKey, [entry.idempotencyKey]: entry.entryId };
       entries = [...entries, { entryId: entry.entryId, seq: entry.seq }];
-      indexedIds.add(entryId);
+      indexedSeqById.set(entryId, entry.seq);
+      indexedSequences.add(entry.seq);
+      indexedKeys.add(entry.idempotencyKey);
+      nextSeq = Math.max(nextSeq, entry.seq + 1);
       changed = true;
     }
 
@@ -388,75 +504,118 @@ export class ConversationJournal {
       byIdempotencyKey,
       entries: [...entries].sort((left, right) => left.seq - right.seq),
     };
+    assertDurableLock(lockPath, lockToken);
     writeJsonRecord(journalIndexPath(this.journalRoot, index.conversationId), reconciled);
     return reconciled;
   }
 
-  private buildCursor(conversationId: string, lastReadSeq: number): JournalCursor {
-    const lastSeq = this.readIndex(conversationId).nextSeq - 1;
-    return { conversationId, lastReadSeq, unreadCount: Math.max(0, lastSeq - lastReadSeq) };
-  }
-
-  private readLastReadSeq(conversationId: string): number {
-    const raw = readJsonFile(journalCursorPath(this.journalRoot, conversationId)) as
-      | Record<string, unknown>
-      | null;
-    if (!raw) return 0;
-    const migrated = this.migrateLegacyCursor(raw, conversationId);
-    if (!Number.isSafeInteger(migrated.lastReadSeq) || (migrated.lastReadSeq as number) < 0) {
-      throw new Error(`Journal cursor for ${conversationId} is corrupt`);
-    }
-    if (migrated.rewritten) {
+  private buildCursor(conversationId: string, lastReadSeq: number, lockPath: string, lockToken: string): JournalCursor {
+    const index = this.reconcileOrphanedEntries(this.readIndex(conversationId, lockPath, lockToken), lockPath, lockToken);
+    const lastSeq = index.nextSeq - 1;
+    const boundedLastReadSeq = Math.min(Math.max(lastReadSeq, 0), lastSeq);
+    if (boundedLastReadSeq !== lastReadSeq) {
+      assertDurableLock(lockPath, lockToken);
       writeJsonRecord(journalCursorPath(this.journalRoot, conversationId), {
         conversationId,
-        lastReadSeq: migrated.lastReadSeq,
+        lastReadSeq: boundedLastReadSeq,
       });
     }
-    return migrated.lastReadSeq as number;
+    return { conversationId, lastReadSeq: boundedLastReadSeq, unreadCount: Math.max(0, lastSeq - boundedLastReadSeq) };
   }
 
-  private readIndex(conversationId: string): JournalIndex {
-    const raw = readJsonFile(journalIndexPath(this.journalRoot, conversationId)) as
-      | Record<string, unknown>
-      | null;
-    if (!raw) {
-      return {
-        schemaVersion: CONVERSATION_SCHEMA_VERSION,
+  private readLastReadSeq(conversationId: string, lockPath: string, lockToken: string): number {
+    const path = journalCursorPath(this.journalRoot, conversationId);
+    if (!existsSync(path)) return 0;
+    let lastReadSeq: number;
+    let rewritten = false;
+    try {
+      assertRegularFile(path, 'Journal cursor');
+      const raw = readJsonFile(path);
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Journal cursor for ${conversationId} is corrupt`);
+      const migrated = this.migrateLegacyCursor(raw as Record<string, unknown>, conversationId);
+      if (!Number.isSafeInteger(migrated.lastReadSeq) || (migrated.lastReadSeq as number) < 0) {
+        throw new Error(`Journal cursor for ${conversationId} is corrupt`);
+      }
+      lastReadSeq = migrated.lastReadSeq as number;
+      rewritten = migrated.rewritten;
+    } catch (error) {
+      this.quarantine(path, error);
+      return 0;
+    }
+    if (rewritten) {
+      assertDurableLock(lockPath, lockToken);
+      writeJsonRecord(path, {
         conversationId,
-        nextSeq: 1,
-        byIdempotencyKey: {},
-        entries: [],
-      };
+        lastReadSeq,
+      });
     }
-    const { index, migrated } = this.migrateLegacyIndex(raw, conversationId);
-    if (index.schemaVersion !== CONVERSATION_SCHEMA_VERSION) {
-      throw new Error(`Unsupported journal index for ${conversationId}`);
-    }
-    if (index.conversationId !== conversationId) {
-      throw new Error(`Journal index identity mismatch for ${conversationId}`);
-    }
-    if (!Number.isSafeInteger(index.nextSeq) || index.nextSeq < 1) {
-      throw new Error(`Journal index for ${conversationId} is corrupt`);
+    return lastReadSeq;
+  }
+
+  private readIndex(conversationId: string, lockPath: string, lockToken: string): JournalIndex {
+    const path = journalIndexPath(this.journalRoot, conversationId);
+    if (!existsSync(path)) return emptyJournalIndex(conversationId);
+    let index: JournalIndex;
+    let migrated = false;
+    try {
+      assertRegularFile(path, 'Journal index');
+      const raw = readJsonFile(path);
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Journal index for ${conversationId} is corrupt`);
+      const legacy = this.migrateLegacyIndex(raw as Record<string, unknown>, conversationId);
+      index = assertJournalIndex(legacy.index, conversationId);
+      migrated = legacy.migrated;
+      for (const reference of index.entries) {
+        const entryPath = journalEntryPath(this.journalRoot, conversationId, reference.seq, reference.entryId);
+        assertRegularFile(entryPath, 'Journal entry');
+        const entryRaw = readJsonFile(entryPath);
+        if (!entryRaw) throw new Error(`Journal entry not found: ${reference.entryId}`);
+        const { record: normalized } = migrateLegacyJournalEntry(entryRaw);
+        const entry = assertJournalEntry(normalized);
+        if (entry.conversationId !== conversationId || entry.seq !== reference.seq || entry.entryId !== reference.entryId) {
+          throw new Error(`Journal entry identity mismatch for ${reference.entryId}`);
+        }
+        if (index.byIdempotencyKey[entry.idempotencyKey] !== entry.entryId) {
+          throw new Error(`Journal index idempotency mapping mismatch for ${reference.entryId}`);
+        }
+      }
+    } catch (error) {
+      this.quarantine(path, error);
+      return emptyJournalIndex(conversationId);
     }
     if (migrated) {
-      writeJsonRecord(journalIndexPath(this.journalRoot, conversationId), index);
+      assertDurableLock(lockPath, lockToken);
+      writeJsonRecord(path, index);
     }
     return index;
   }
 
-  private requireEntry(conversationId: string, seq: number, entryId: string): JournalEntry {
+  private requireEntry(conversationId: string, seq: number, entryId: string, lockPath: string, lockToken: string): JournalEntry {
     const path = journalEntryPath(this.journalRoot, conversationId, seq, entryId);
+    if (!existsSync(path)) throw new Error(`Journal entry not found: ${entryId}`);
+    assertRegularFile(path, 'Journal entry');
     const record = readJsonFile(path);
     if (!record) throw new Error(`Journal entry not found: ${entryId}`);
     const { record: normalized, migrated } = migrateLegacyJournalEntry(record);
     const entry = assertJournalEntry(normalized);
-    if (migrated) writeJsonRecord(path, entry);
     if (entry.conversationId !== conversationId || entry.seq !== seq || entry.entryId !== entryId) {
       throw new Error(`Journal entry identity mismatch for ${entryId}`);
+    }
+    if (migrated) {
+      assertDurableLock(lockPath, lockToken);
+      writeJsonRecord(path, entry);
     }
     const conversation = this.require(conversationId);
     this.assertPersistedAuthor(conversation, entry);
     return entry;
+  }
+
+  private quarantine(path: string, _error: unknown): void {
+    try {
+      renameSync(path, `${path}.corrupt-${randomUUID()}`);
+      syncDirectory(dirname(path));
+    } catch {
+      // Preserve the original recovery error when another process removed the artifact.
+    }
   }
 
   private assertPersistedAuthor(conversation: ConversationRef, entry: JournalEntry): void {
@@ -471,6 +630,9 @@ export class ConversationJournal {
     if (authorBotId === undefined) return;
     if (conversation.soleAuthorBotId !== undefined && conversation.soleAuthorBotId !== authorBotId) {
       throw new Error(`Persisted entry ${entry.entryId} is authored by the wrong Bot`);
+    }
+    if (conversation.mayAuthor && !conversation.mayAuthor(authorBotId)) {
+      throw new Error(`Persisted entry ${entry.entryId}: Bot ${authorBotId} may not author in conversation ${conversation.conversationId}`);
     }
   }
 
@@ -517,6 +679,10 @@ export class ConversationJournal {
       throw new Error(`Journal cursor identity mismatch for ${conversationId}`);
     }
     return { lastReadSeq: raw.lastReadSeq, rewritten: false };
+  }
+
+  private journalLockPath(conversationId: string): string {
+    return join(this.journalRoot, 'journals', conversationId, '.lock');
   }
 
   private require(conversationId: string): ConversationRef {

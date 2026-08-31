@@ -252,6 +252,8 @@ export interface Message {
   id: string;
   role: MessageRole;
   content: string;
+  /** Internal idempotency key for durable Bot routine dispatches. */
+  idempotencyKey?: string;
   timestamp: number;
   // Tool-specific fields
   toolName?: string;
@@ -339,6 +341,8 @@ export interface StoredMessage {
   id: string;
   type: MessageRole;
   content: string;
+  /** Internal idempotency key for durable Bot routine dispatches. */
+  idempotencyKey?: string;
   timestamp?: number;
   // Tool-specific fields
   toolName?: string;

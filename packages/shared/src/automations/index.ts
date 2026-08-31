@@ -101,6 +101,7 @@ export { resolveAutomationsConfigPath, generateShortId } from './resolve-config-
 
 // Cron matching
 export { matchesCron } from './cron-matcher.ts';
+export { isPotentiallyCatastrophicRegex, regexTestBounded, MAX_REGEX_LENGTH, REGEX_MATCH_TIMEOUT_MS } from './regex-safety.ts';
 
 // Event Bus
 export {

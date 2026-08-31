@@ -285,6 +285,21 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // tasks — workspace content
   RPC_CHANNELS.tasks.GET_OUTPUT,
 
+  // routines — durable Bot-owned execution
+  RPC_CHANNELS.routines.LIST,
+  RPC_CHANNELS.routines.GET,
+  RPC_CHANNELS.routines.CREATE,
+  RPC_CHANNELS.routines.UPDATE,
+  RPC_CHANNELS.routines.ENABLE,
+  RPC_CHANNELS.routines.PAUSE,
+  RPC_CHANNELS.routines.DELETE,
+  RPC_CHANNELS.routines.TEST,
+  RPC_CHANNELS.routines.LIST_RUNS,
+  RPC_CHANNELS.routines.REPLAY,
+  RPC_CHANNELS.routines.RESUME_APPROVAL,
+  RPC_CHANNELS.routines.INGEST_EVENT,
+  RPC_CHANNELS.routines.EVENT,
+
   // bots — BotDirectory + ConversationJournal
   RPC_CHANNELS.bots.LIST,
   RPC_CHANNELS.bots.GET,

@@ -19,6 +19,7 @@ import { Cron } from 'croner';
 import type { ValidationResult, ValidationIssue } from '../config/validators.ts';
 import type { AutomationsConfig, AutomationsValidationResult } from './types.ts';
 import { MAX_CONDITION_DEPTH_EXCLUSIVE, CONDITION_DEPTH_WARNING_THRESHOLD } from './conditions-constants.ts';
+import { isPotentiallyCatastrophicRegex, MAX_REGEX_LENGTH } from './regex-safety.ts';
 
 /**
  * Validate automations config (internal - returns parsed config)
@@ -74,7 +75,6 @@ function runMatcherSemanticValidations(
 
       if (matcher.matcher) {
         // ReDoS prevention: limit regex complexity
-        const MAX_REGEX_LENGTH = 500;
         if (matcher.matcher.length > MAX_REGEX_LENGTH) {
           errors.push({
             file,
@@ -89,11 +89,7 @@ function runMatcherSemanticValidations(
             new RegExp(matcher.matcher);
 
             // Reject catastrophic backtracking (ReDoS) patterns
-            // Detect nested quantifiers: a group containing a quantifier that itself has a quantifier
-            const nestedQuantifiers = /\([^)]*[+*][^)]*\)[+*{]/;
-            // Also detect repeated alternation like (a|a)+ and adjacent greedy quantifiers like .*.*
-            const riskyPatterns = /(\.\*){2,}|(\.\+){2,}|\([^)]*\|[^)]*\)[+*{]/;
-            if (nestedQuantifiers.test(matcher.matcher) || riskyPatterns.test(matcher.matcher)) {
+            if (isPotentiallyCatastrophicRegex(matcher.matcher)) {
               errors.push({
                 file,
                 path: `automations.${event}[${i}].matcher`,

@@ -30,6 +30,7 @@ bun run e2e --grep @channels                    # real Channel routing and resta
 bun run e2e --grep @memory                      # Bot memory, compaction, and restart
 bun run e2e --grep @handoffs                    # Bot send_handoff card and rail
 bun run e2e --grep @approvals                   # Bot tool approval cards and standing rules
+bun run e2e --grep @routines                   # Durable Bot routines and event deduplication
 bun run e2e --grep @computer-headless           # thin client against a Linux Docker computer
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
@@ -84,6 +85,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@memory`    | (in-test)                              | Real provider Bot flow: establish, edit, forget, compact, restart, and compare durable memory and journal evidence.                                                                                   |
 | `@handoffs`  | (in-test)                              | Real provider Bot flow: `send_handoff` from DirectChat, inline card, result rail, restart recovery.                                                                                                    |
 | `@approvals` | (in-test)                              | Real provider Bot flow: deny and allow-once a Write, Explore-mode block, exact standing allow.                                                                                                         |
+| `@routines` | (in-test)                              | Real provider Bot flow: run a scheduled routine with its renderer window closed, then create an event-triggered routine and verify matching, unrelated, and duplicate events.                                                         |
 | `@computer-headless` | `appWindow` plus `KATA_E2E_COMPUTER_URL` | Thin Electron client against a Linux Docker computer with TLS. Requires `KATA_E2E_COMPUTER_URL` and `KATA_E2E_COMPUTER_TOKEN`. Missing vars fail the spec. GUI launch is macOS-only. This tag does not replace issue #82 acceptance 15. Persistence unit tests live under `packages/server` and `packages/server-core`. |
 | `@agent`     | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
