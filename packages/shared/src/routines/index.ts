@@ -15,4 +15,4 @@ export type {
   CreateRoutineRunInput,
   RoutineRecoveryReport,
 } from './routine-store.ts'
-export { nextScheduledInstant, scheduledInstantsBetween } from './schedule.ts'
+export { latestScheduledInstant, nextScheduledInstant, scheduledInstantsBetween } from './schedule.ts'

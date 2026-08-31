@@ -76,6 +76,26 @@ describe('RoutineEngine', () => {
     expect(store.getScheduleCursor(routine.routineId, 1)).toBe('2026-08-31T02:00:00.000Z')
   })
 
+  it('skips scheduled instants accumulated while a routine is paused', async () => {
+    let now = at
+    const executor = new FakeExecutor()
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => now })
+    const routine = store.create(input({ kind: 'schedule', cron: '0 * * * *', timezone: 'UTC', dst: { gap: 'skip', fold: 'once' } }))
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: executor, clock: () => now })
+
+    now = '2026-08-31T01:00:00.000Z'
+    await engine.tick(now)
+    engine.pause(routine.routineId)
+    now = '2026-08-31T04:00:00.000Z'
+    engine.enable(routine.routineId)
+    await engine.tick(now)
+
+    expect(executor.calls).toBe(1)
+    expect(engine.listRuns(routine.routineId)).toHaveLength(1)
+    expect(store.getScheduleCursor(routine.routineId, 1)).toBe('2026-08-31T04:00:00.000Z')
+  })
+
   it('reclaims an expired claim without repeating the claimed transition', async () => {
     let now = at
     const root = workspace()

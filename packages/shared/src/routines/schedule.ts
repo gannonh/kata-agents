@@ -21,6 +21,16 @@ export function nextScheduledInstant(
   return next?.toISOString() ?? null
 }
 
+/** Return the latest real UTC instant at or before `to`. */
+export function latestScheduledInstant(
+  trigger: Extract<RoutineTrigger, { kind: 'schedule' }>,
+  to: string,
+): string | null {
+  const end = parseAfter(to)
+  const previous = cronFor(trigger).previousRuns(1, new Date(end.getTime() + 1_000))[0]
+  return previous?.toISOString() ?? null
+}
+
 /** Return all real UTC instants strictly after `from` and at or before `to`. */
 export function scheduledInstantsBetween(
   trigger: Extract<RoutineTrigger, { kind: 'schedule' }>,

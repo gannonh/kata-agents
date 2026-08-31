@@ -17,6 +17,7 @@ import {
   type RecordOccurrenceInput,
   type UpdateRoutineInput,
   toRoutineRunPublicDto,
+  latestScheduledInstant,
   nextScheduledInstant,
   scheduledInstantsBetween,
 } from '@kata-sh/shared/routines'
@@ -252,7 +253,16 @@ export class RoutineEngine {
   }
 
   enable(routineId: RoutineId): RoutinePublicDto {
+    const previous = this.store.get(routineId)
     const record = this.store.enable(routineId)
+    if (previous?.lifecycle === 'paused') {
+      const revision = this.store.getActiveRevision(record.routineId)
+      if (revision.trigger.kind === 'schedule') {
+        const cursor = this.store.getScheduleCursor(record.routineId, revision.revision) ?? revision.createdAt
+        const latest = latestScheduledInstant(revision.trigger, timestamp(this.clock))
+        if (latest && Date.parse(latest) > Date.parse(cursor)) this.store.advanceScheduleCursor(record.routineId, revision.revision, latest)
+      }
+    }
     this.notify(record.routineId)
     void this.tick()
     return this.publicRoutine(record.routineId)
@@ -357,7 +367,7 @@ export class RoutineEngine {
       if (!Number.isFinite(parsed)) throw new TypeError('occurredAt must be an ISO timestamp')
       return new Date(parsed).toISOString()
     })()
-    const runs: RoutineRunPublicDto[] = []
+    const pendingRuns: RoutineRun[] = []
     for (const record of this.store.list({ lifecycle: 'enabled' })) {
       const revision = this.store.getActiveRevision(record.routineId)
       if (
@@ -365,14 +375,21 @@ export class RoutineEngine {
         || revision.trigger.source !== event.source
         || !routineEventMatches(event.payload, revision.trigger.matcher)
       ) continue
-      const run = await this.triggerOccurrence({
+      const occurrence = this.store.recordOccurrence({
         routineId: record.routineId,
         routineRevision: revision.revision,
         source: event.source,
         externalEventId: event.externalEventId,
         occurredAt,
       })
-      if (run) runs.push(toRoutineRunPublicDto(run))
+      const run = this.ensureRunForOccurrence(occurrence)
+      if (run) pendingRuns.push(run)
+    }
+    const runs: RoutineRunPublicDto[] = []
+    for (const run of pendingRuns) {
+      await this.dispatch(run)
+      const current = this.store.getRun(run.runId)
+      if (current) runs.push(toRoutineRunPublicDto(current))
     }
     return runs
   }
