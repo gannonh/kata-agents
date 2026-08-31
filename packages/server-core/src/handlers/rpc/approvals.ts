@@ -3,6 +3,7 @@ import { getWorkspaceByNameOrId } from '@kata-sh/shared/config'
 import { pushTyped, type RpcServer } from '@kata-sh/server-core/transport'
 import { ApprovalConflictError } from '@kata-sh/shared/tools'
 import type { HandlerDeps } from '../handler-deps'
+import { respondToPermissionOnce } from '../../routines/bot-routine-executor'
 import {
   getApprovalRuntime,
   journalFor,
@@ -14,12 +15,42 @@ import {
 
 const LIVE_LINK_CLEANUP_MS = 120_000
 
-function retainRequestlessLink(runtime: ApprovalRuntime, approvalId: string, sessionId: string): void {
+function retainRequestlessLink(runtime: ApprovalRuntime, approvalId: string, sessionId: string, requestId?: string): void {
   const cleanup = setTimeout(() => {
     const current = runtime.links.get(approvalId)
-    if (current?.sessionId === sessionId && !current.requestId) runtime.links.delete(approvalId)
+    if (current?.sessionId === sessionId && current.requestId === requestId) runtime.links.delete(approvalId)
   }, LIVE_LINK_CLEANUP_MS)
   cleanup.unref?.()
+}
+
+async function markApprovalResponseUncertain(
+  sessionManager: HandlerDeps['sessionManager'],
+  runtime: ApprovalRuntime,
+  approvalId: string,
+): Promise<void> {
+  try {
+    await sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResponseUncertain(approvalId)
+  } catch (error) {
+    console.error('[Approvals] Failed to persist uncertain approval response', error)
+  }
+}
+
+async function deliverApprovalResponse(
+  sessionManager: HandlerDeps['sessionManager'],
+  runtime: ApprovalRuntime,
+  approvalId: string,
+  sessionId: string,
+  requestId: string,
+  allowed: boolean,
+): Promise<boolean> {
+  try {
+    const delivered = respondToPermissionOnce(sessionManager, runtime.workspaceRoot, approvalId, sessionId, requestId, allowed)
+    if (!delivered) await markApprovalResponseUncertain(sessionManager, runtime, approvalId)
+    return delivered
+  } catch (error) {
+    await markApprovalResponseUncertain(sessionManager, runtime, approvalId)
+    throw error
+  }
 }
 
 export const HANDLED_CHANNELS = [
@@ -90,40 +121,47 @@ export function registerApprovalsHandlers(server: RpcServer, deps: HandlerDeps):
         runtime.broker.createStandingAllow(record, 'allow')
       }
       const link = runtime.links.get(record.approvalId)
+      let responseDelivered = !(link && input.choice === 'allow-once' && !link.requestId)
       if (link?.requestId) {
         if (input.choice === 'allow-once') {
           try {
             runtime.broker.claimExecution(record.approvalId, link.invocation)
           } catch (error) {
-            try {
-              const current = runtime.store.get(record.approvalId)
-              if (current?.status === 'allowed-once') runtime.store.markStale(record.approvalId)
-            } catch { /* the approval may have reached a terminal state concurrently */ }
-            try {
-              sessionManager.respondToPermission(link.sessionId, link.requestId, false, false)
-            } finally {
-              runtime.links.delete(record.approvalId)
+            const current = runtime.store.get(record.approvalId)
+            const alreadyClaimed = current?.status === 'consumed'
+              && current.operationHash === record.operationHash
+              && current.targetFingerprint === link.invocation.target.fingerprint
+            if (!alreadyClaimed) {
+              try {
+                if (current?.status === 'allowed-once') runtime.store.markStale(record.approvalId)
+              } catch { /* the approval may have reached a terminal state concurrently */ }
+              responseDelivered = await deliverApprovalResponse(sessionManager, runtime, record.approvalId, link.sessionId, link.requestId, false)
+              retainRequestlessLink(runtime, record.approvalId, link.sessionId, link.requestId)
+              if (responseDelivered) {
+                try {
+                  await sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(record.approvalId, false)
+                } catch (recoveryError) {
+                  console.error('[Approvals] Failed to cancel routine after claim failure', recoveryError)
+                }
+              }
+              throw error
             }
-            try {
-              await sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(record.approvalId, false)
-            } catch (recoveryError) {
-              console.error('[Approvals] Failed to cancel routine after claim failure', recoveryError)
-            }
-            throw error
           }
         }
-        sessionManager.respondToPermission(link.sessionId, link.requestId, input.choice === 'allow-once', false)
-        runtime.links.delete(record.approvalId)
+        responseDelivered = await deliverApprovalResponse(sessionManager, runtime, record.approvalId, link.sessionId, link.requestId, input.choice === 'allow-once')
+        retainRequestlessLink(runtime, record.approvalId, link.sessionId, link.requestId)
       } else if (input.choice === 'deny' && link) {
         retainRequestlessLink(runtime, record.approvalId, link.sessionId)
       } else if (link && input.choice === 'allow-once') {
         retainRequestlessLink(runtime, record.approvalId, link.sessionId)
       }
       notifyApproval(runtime, runtime.store.get(record.approvalId) ?? record)
-      void sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(
-        record.approvalId,
-        input.choice === 'allow-once',
-      ).catch(error => console.error('[Approvals] Failed to resume routine run:', error))
+      if (responseDelivered) {
+        void sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(
+          record.approvalId,
+          input.choice === 'allow-once',
+        ).catch(error => console.error('[Approvals] Failed to resume routine run:', error))
+      }
       return toApprovalCardView(runtime.store.get(record.approvalId) ?? record)
     },
   )

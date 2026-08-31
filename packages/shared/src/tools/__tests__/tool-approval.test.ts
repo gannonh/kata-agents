@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION, type StandingRule, type ToolInvocation } from '@kata-sh/core'
+import { APPROVAL_LIMITS, APPROVAL_SCHEMA_VERSION, type ApprovalRecord, type StandingRule, type ToolInvocation } from '@kata-sh/core'
 import { writeDurableFileIfAbsent } from '../../spawn-tasks/durable-fs.ts'
 import {
   ApprovalConflictError,
@@ -257,11 +257,15 @@ describe('ApprovalStore and ToolBroker', () => {
     if (asked.kind !== 'ask') return
     const casDir = join(owner.store.rootPath, asked.request.approvalId, 'cas')
     mkdirSync(casDir, { recursive: true })
-    expect(writeDurableFileIfAbsent(join(casDir, String(asked.request.version)), 'denied\n')).toBe(true)
+    const pending = owner.store.get(asked.request.approvalId)
+    expect(pending?.status).toBe('pending')
+    if (!pending) return
+    const interrupted: ApprovalRecord = { ...pending, status: 'denied', version: pending.version + 1, resolvedAt: at, updatedAt: at }
+    const marker = join(casDir, String(asked.request.version))
+    expect(writeDurableFileIfAbsent(marker, `${JSON.stringify(interrupted)}\n`)).toBe(true)
     const recovered = new ApprovalStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
-    expect(recovered.get(asked.request.approvalId)?.status).toBe('pending')
-    const denied = recovered.resolve(asked.request.approvalId, asked.request.version, 'deny', at)
-    expect(denied.status).toBe('denied')
+    expect(recovered.get(asked.request.approvalId)?.status).toBe('denied')
+    expect(existsSync(marker)).toBe(false)
   })
 
   it('does not treat a truncated target prefix as an exact standing allow', () => {

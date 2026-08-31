@@ -683,17 +683,12 @@ export class IsolatedConversationForkService {
       currentHead: facts.currentHead,
     }
 
-    if (input.strategy !== 'isolated-worktree') {
-      // Shared-worktree forks reuse the existing branch/shared-checkout path
-      // and own no transaction; only the isolated target does.
-      return preview
-    }
-
-    return this.deps.registry.runExclusive(async () => {
+    return this.deps.mutationLock.withLock(facts.gitCommonDir, async () => this.deps.registry.runExclusive(async () => {
+      const existingTransaction = this.transactions.get(input.sessionId)
       const existingJournal = this.deps.journal.inProgress().find(
         (entry) => entry.op === 'fork' && entry.sessionIds.includes(input.sessionId),
       )
-      if (existingJournal) {
+      if (existingTransaction && existingTransaction.state !== 'pending') {
         return {
           ...preview,
           previewFingerprint: sha256(JSON.stringify({ blocked: 'fork-in-progress', sessionId: input.sessionId })),
@@ -704,6 +699,43 @@ export class IsolatedConversationForkService {
           },
         }
       }
+      if (existingTransaction?.state === 'pending') {
+        const pendingEntry = existingJournal?.journalId === existingTransaction.journalId ? existingJournal : undefined
+        if (
+          resolvePath(existingTransaction.gitCommonDir) === resolvePath(facts.gitCommonDir)
+          && pendingEntry
+          && pendingEntry.steps.length === 0
+          && pendingEntry.metadata?.state === 'pending'
+        ) {
+          this.deps.journal.updateMetadata(existingTransaction.journalId, { state: 'preview-superseded', supersededAt: Date.now() })
+          this.deps.journal.recover(existingTransaction.journalId, 'preview-superseded')
+          this.transactions.delete(input.sessionId)
+        } else {
+          return {
+            ...preview,
+            previewFingerprint: sha256(JSON.stringify({ blocked: 'fork-in-progress', sessionId: input.sessionId })),
+            blocked: {
+              blocked: true,
+              code: 'fork-in-progress' as const,
+              reason: 'A fork transaction is already in progress for this session.',
+            },
+          }
+        }
+      }
+      if (this.deps.journal.inProgress().some(
+        (entry) => entry.op === 'fork' && entry.sessionIds.includes(input.sessionId),
+      )) {
+        return {
+          ...preview,
+          previewFingerprint: sha256(JSON.stringify({ blocked: 'fork-in-progress', sessionId: input.sessionId })),
+          blocked: {
+            blocked: true,
+            code: 'fork-in-progress' as const,
+            reason: 'A fork transaction is already in progress for this session.',
+          },
+        }
+      }
+      if (input.strategy !== 'isolated-worktree') return preview
       const transaction: ForkTransaction = {
         transactionId,
         sessionId: input.sessionId,
@@ -734,7 +766,7 @@ export class IsolatedConversationForkService {
       transaction.journalId = journal.journalId
       this.transactions.set(input.sessionId, transaction)
       return preview
-    })
+    }))
   }
 
   // -------------------------------------------------------------------------
@@ -841,7 +873,6 @@ export class IsolatedConversationForkService {
     // Required so the lock scope is explicit at every call site. The registry
     // lock is not reentrant: a transaction MUST pass `(id) => tx.get(id)` here.
     recordLookup: (id: string) => ManagedWorktreeRecordVersioned | undefined | Promise<ManagedWorktreeRecordVersioned | undefined>,
-    transactionIdToAllow?: string,
     options?: { allowOwnedDestination?: boolean; ownedLeaseId?: string },
   ): Promise<ForkFacts> {
     const fail = (code: ConversationForkBlockerCode, reason: string, overrides: Partial<ForkFacts> = {}): ForkFacts =>
@@ -873,25 +904,6 @@ export class IsolatedConversationForkService {
       return fail('missing-parent-anchor', 'missing-parent-anchor')
     }
     const existingTransaction = this.transactions.get(input.sessionId)
-    if (existingTransaction && existingTransaction.transactionId !== transactionIdToAllow) {
-      if (existingTransaction.state === 'pending') {
-        // A fresh preview supersedes a stale pending preview. A pending
-        // transaction has never mutated anything (quiescence and capture
-        // happen at confirm), so cancelling it is safe and keeps dialog
-        // re-opens from stranding the session with a fenced transaction.
-        if (existingTransaction.journalId) {
-          this.deps.journal.recover(existingTransaction.journalId, 'preview-superseded')
-        }
-        this.transactions.delete(input.sessionId)
-      } else {
-        return fail('fork-in-progress', 'A fork transaction is already in progress for this session.')
-      }
-    }
-    if (isIsolated && this.deps.journal.inProgress().some(
-      (entry) => entry.op === 'fork' && entry.sessionIds.includes(input.sessionId) && entry.recordId !== transactionIdToAllow,
-    )) {
-      return fail('fork-in-progress', 'A fork transaction is already in progress for this session.')
-    }
     if (this.deps.lifecycle.isCleanupInProgress()) {
       return fail('cleanup-in-progress', 'Worktree lifecycle cleanup is running; try again shortly.')
     }
@@ -1215,21 +1227,41 @@ export class IsolatedConversationForkService {
     const session = this.hooks.resolveSession?.(input.sessionId)
     if (!session) throw new ConversationForkError('FORK_SESSION_UNKNOWN', 'Unknown session for fork confirmation.')
     const capability = this.hooks.resolveCapability?.(input.sessionId) ?? null
-    if (!capability || capability.strictCrossCwdNativeFork !== true) {
-      this.deps.journal.fail(txn.journalId, 'The provider adapter cannot establish a strict cross-CWD native fork.')
-      this.transactions.delete(input.sessionId)
-      return this.blockedResult(txn, 'unsupported-provider', 'The provider adapter cannot establish a strict cross-CWD native fork.')
-    }
-    if (!this.hooks.createForkChildSession || !this.hooks.deleteForkChildSession) {
-      this.deps.journal.fail(txn.journalId, 'Fork child-session hooks are not wired.')
-      this.transactions.delete(input.sessionId)
-      throw new ConversationForkError(
-        'FORK_HOOK_NOT_WIRED',
-        'Isolated fork confirmation requires a wired child-session creation hook.',
-      )
-    }
 
     return this.deps.mutationLock.withLock<ConversationForkResult>(txn.gitCommonDir, async () => {
+      // Capability and hook failures also fence the transaction. Keep them
+      // under the same lock as confirm/cancel/preview so a superseding preview
+      // cannot be deleted by a late confirmation failure.
+      const durableEntry = this.deps.journal.entries().find(
+        (candidate) =>
+          candidate.op === 'fork' &&
+          candidate.journalId === txn.journalId &&
+          candidate.sessionIds.includes(txn.sessionId),
+      )
+      if (!durableEntry || durableEntry.status !== 'in-progress') {
+        throw new ConversationForkError(
+          'FORK_TRANSACTION_UNKNOWN',
+          'The fork transaction is no longer in progress (cancelled or superseded).',
+        )
+      }
+      const current = this.transactions.get(input.sessionId)
+      const deleteCurrent = () => {
+        if (!current || current.transactionId === txn.transactionId) this.transactions.delete(input.sessionId)
+      }
+      if (!capability || capability.strictCrossCwdNativeFork !== true) {
+        this.deps.journal.fail(txn.journalId, 'The provider adapter cannot establish a strict cross-CWD native fork.')
+        deleteCurrent()
+        return this.blockedResult(txn, 'unsupported-provider', 'The provider adapter cannot establish a strict cross-CWD native fork.')
+      }
+      if (!this.hooks.createForkChildSession || !this.hooks.deleteForkChildSession) {
+        this.deps.journal.fail(txn.journalId, 'Fork child-session hooks are not wired.')
+        deleteCurrent()
+        throw new ConversationForkError(
+          'FORK_HOOK_NOT_WIRED',
+          'Isolated fork confirmation requires a wired child-session creation hook.',
+        )
+      }
+
       return this.confirmLocked(txn, input, session, capability)
     })
   }
@@ -1276,7 +1308,6 @@ export class IsolatedConversationForkService {
         session,
         capability,
         (id: string) => tx.get(id),
-        txn.transactionId,
         {
           // A transaction that already materialized its target must not be
           // blocked by its own destination when resuming after a crash.

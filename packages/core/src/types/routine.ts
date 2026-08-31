@@ -61,6 +61,7 @@ export interface RoutineRevision {
 
 export interface RoutineOccurrence {
   readonly schemaVersion: typeof ROUTINE_SCHEMA_VERSION
+  readonly workspaceId: string
   readonly occurrenceId: TriggerOccurrenceId
   readonly routineId: RoutineId
   readonly routineRevision: number
@@ -77,7 +78,13 @@ export interface RoutineOccurrence {
 
 export type RoutineRunState =
   | { readonly kind: 'queued'; readonly at: string }
-  | { readonly kind: 'claimed'; readonly at: string; readonly workerId: string; readonly leaseUntil: string }
+  | {
+    readonly kind: 'claimed'
+    readonly at: string
+    readonly workerId: string
+    readonly claimToken: string
+    readonly leaseUntil: string
+  }
   | { readonly kind: 'running'; readonly at: string }
   | { readonly kind: 'awaiting-approval'; readonly at: string; readonly approvalId: string; readonly operationHash: string; readonly version: number }
   | { readonly kind: 'succeeded'; readonly at: string; readonly result: string }
@@ -92,6 +99,7 @@ export type RoutineRunOrigin =
 
 export interface RoutineRun {
   readonly schemaVersion: typeof ROUTINE_SCHEMA_VERSION
+  readonly workspaceId: string
   readonly runId: RoutineRunId
   readonly routineId: RoutineId
   readonly routineRevision: number

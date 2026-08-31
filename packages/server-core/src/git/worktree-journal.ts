@@ -18,10 +18,10 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { writeDurableFileIfAbsent, syncDirectory } from '@kata-sh/shared/spawn-tasks/durable-fs'
 import { CrossProcessFileLock } from './mutation-lock'
 
 export type WorktreeJournalOp =
@@ -117,9 +117,10 @@ export class WorktreeJournal {
   private writeAll(entries: WorktreeJournalEntry[]): void {
     const lines = entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n'
     const tmp = `${this.path}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`
-    writeFileSync(tmp, lines, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    if (!writeDurableFileIfAbsent(tmp, lines)) throw new Error('Could not create a unique worktree journal temporary file')
     try {
       renameSync(tmp, this.path)
+      syncDirectory(dirname(this.path))
     } catch (error) {
       try {
         rmSync(tmp, { force: true })

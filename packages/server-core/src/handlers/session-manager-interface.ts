@@ -155,7 +155,7 @@ export interface ISessionManager extends HandoffRuntimeSessionManager {
     existingMessageId?: string,
     _isAuthRetry?: boolean,
     onAck?: (messageId: string) => void,
-    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext; botRoutineRunId?: string; botPermissionMode?: BotPermissionMode; botAttempt?: number; botApprovalInvocation?: ToolInvocation },
+    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext; botRoutineRunId?: string; botPermissionMode?: BotPermissionMode; botAttempt?: number; botApprovalInvocation?: ToolInvocation; botDispatchIdempotencyKey?: string },
   ): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>

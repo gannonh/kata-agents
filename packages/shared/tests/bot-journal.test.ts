@@ -102,6 +102,15 @@ describe('ConversationJournal ordering', () => {
     expect(journal.list(bot.directChatId)).toHaveLength(1);
   });
 
+  it('preserves the __proto__ idempotency key across reloads', () => {
+    const { root, journal, bot } = setup();
+    const first = journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'first', idempotencyKey: '__proto__' });
+    const reloaded = createDirectChatJournal({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at });
+
+    expect(reloaded.append({ conversationId: bot.directChatId, kind: 'user', body: 'second', idempotencyKey: '__proto__' })).toEqual(first);
+    expect(reloaded.list(bot.directChatId)).toEqual([first]);
+  });
+
   it('reconciles an entry written before the index commit after a crash', () => {
     const { journal, bot } = setup();
     const botsRoot = journal.journalRoot;
@@ -175,9 +184,84 @@ describe('ConversationJournal ordering', () => {
       entries: [],
     });
 
-    expect(journal.getHeadSequence(bot.directChatId)).toBe(1);
     expect(journal.list(bot.directChatId)).toHaveLength(1);
     expect(journal.list(bot.directChatId)[0]?.entryId).toBe(orphanId);
+    expect(journal.getEntry(bot.directChatId, orphanId)?.body).toBe('survived on disk');
+    expect(journal.getHeadSequence(bot.directChatId)).toBe(1);
+  });
+
+  it('quarantines orphan entries that conflict with a committed sequence or key', () => {
+    const { journal, bot } = setup();
+    const committed = journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'committed', idempotencyKey: 'committed-key' });
+    const entriesRoot = journal.journalRoot;
+    const sequenceConflictId = 'entry_sequenceconflict12345678901234';
+    const keyConflictId = 'entry_keyconflict123456789012345678';
+    writeJsonRecord(journalEntryPath(entriesRoot, bot.directChatId, committed.seq, sequenceConflictId), {
+      ...committed,
+      entryId: sequenceConflictId,
+      idempotencyKey: 'other-key',
+    });
+    writeJsonRecord(journalEntryPath(entriesRoot, bot.directChatId, committed.seq + 1, keyConflictId), {
+      ...committed,
+      entryId: keyConflictId,
+      seq: committed.seq + 1,
+    });
+    writeJsonRecord(journalEntryPath(entriesRoot, bot.directChatId, committed.seq + 2, committed.entryId), {
+      ...committed,
+      seq: committed.seq + 2,
+      idempotencyKey: 'another-key',
+    });
+
+    expect(journal.list(bot.directChatId)).toEqual([committed]);
+    expect(readdirSync(journalEntriesPath(entriesRoot, bot.directChatId)).filter((file) => file.includes('.corrupt-'))).toHaveLength(3);
+  });
+
+  it('rejects an explicit entry ID reused for another idempotency key', () => {
+    const { journal, bot } = setup();
+    const entryId = 'entry_explicit1234567890123456789012';
+    journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'first', idempotencyKey: 'first-key', entryId });
+
+    expect(() => journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'second', idempotencyKey: 'second-key', entryId })).toThrow('entry ID collision');
+    expect(journal.list(bot.directChatId)).toHaveLength(1);
+  });
+
+  it('quarantines an index with invalid entry metadata and rebuilds it from entries', () => {
+    const { journal, bot } = setup();
+    const entryId = 'entry_indexrepair123456789012345678';
+    writeJsonRecord(journalEntryPath(journal.journalRoot, bot.directChatId, 1, entryId), {
+      schemaVersion: 1,
+      entryId,
+      conversationId: bot.directChatId,
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'index-repair',
+      body: 'recoverable',
+      createdAt: at,
+    });
+    writeJsonRecord(journalIndexPath(journal.journalRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 1,
+      byIdempotencyKey: {},
+      entries: {},
+    });
+
+    expect(journal.list(bot.directChatId).map((entry) => entry.body)).toEqual(['recoverable']);
+  });
+
+  it('quarantines a gapped index and allocates the next contiguous sequence', () => {
+    const { journal, bot } = setup();
+    const first = journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'first', idempotencyKey: 'gap-first' });
+    writeJsonRecord(journalIndexPath(journal.journalRoot, bot.directChatId), {
+      schemaVersion: 1,
+      conversationId: bot.directChatId,
+      nextSeq: 4,
+      byIdempotencyKey: { 'gap-first': first.entryId },
+      entries: [{ entryId: first.entryId, seq: first.seq }],
+    });
+
+    expect(journal.append({ conversationId: bot.directChatId, kind: 'user', body: 'second', idempotencyKey: 'gap-second' }).seq).toBe(2);
+    expect(journal.list(bot.directChatId).map((entry) => entry.seq)).toEqual([1, 2]);
   });
 
   it('preserves imported authorship timestamps', () => {
@@ -235,6 +319,19 @@ describe('ConversationJournal cursors', () => {
       unreadCount: 0,
     });
   });
+
+  it('clamps a persisted read cursor to the current head', () => {
+    const { journal, bot } = setup();
+    journal.append({ conversationId: bot.directChatId, kind: 'bot', body: 'one', idempotencyKey: 'cursor-one' });
+    writeJsonRecord(journalCursorPath(journal.journalRoot, bot.directChatId), {
+      conversationId: bot.directChatId,
+      lastReadSeq: 99,
+    });
+
+    expect(journal.getCursor(bot.directChatId)).toMatchObject({ lastReadSeq: 1, unreadCount: 0 });
+    journal.append({ conversationId: bot.directChatId, kind: 'bot', body: 'two', idempotencyKey: 'cursor-two' });
+    expect(journal.getCursor(bot.directChatId)).toMatchObject({ lastReadSeq: 1, unreadCount: 1 });
+  });
 });
 
 describe('ConversationJournal boundaries', () => {
@@ -287,6 +384,40 @@ describe('ConversationJournal boundaries', () => {
       createdAt: at,
     });
     expect(() => journal.list(bot.directChatId)).toThrow(/wrong Bot/);
+  });
+
+  it('rejects persisted authors that are no longer allowed in a multi-author conversation', () => {
+    const root = tempWorkspace();
+    const conversationId = 'channel_authors';
+    const entryId = 'entry_blockedauthor12345678901234567';
+    const journal = new ConversationJournal({
+      journalRoot: root,
+      workspaceId: 'ws_1',
+      resolveConversation: (id) => id === conversationId
+        ? { conversationId: id, workspaceId: 'ws_1', mayAuthor: (botId) => botId === 'bot_allowed' }
+        : null,
+      clock: () => at,
+    });
+    writeJsonRecord(journalIndexPath(root, conversationId), {
+      schemaVersion: 1,
+      conversationId,
+      nextSeq: 2,
+      byIdempotencyKey: { blocked: entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(journalEntryPath(root, conversationId, 1, entryId), {
+      schemaVersion: 1,
+      entryId,
+      conversationId,
+      authorBotId: 'bot_blocked',
+      seq: 1,
+      kind: 'bot',
+      idempotencyKey: 'blocked',
+      body: 'should not be readable',
+      createdAt: at,
+    });
+
+    expect(() => journal.list(conversationId)).toThrow(/may not author/);
   });
 });
 
@@ -485,6 +616,38 @@ describe('ConversationJournal legacy Bot schema migration', () => {
     });
     expect(appended.seq).toBe(2);
     expect(journal.list(bot.directChatId).map((entry) => entry.seq)).toEqual([1, 2]);
+  });
+
+  it('checks migrated entry identity before rewriting the source record', () => {
+    const { journal, bot } = setup();
+    const botsRoot = journal.journalRoot;
+    const entryId = 'entry_legacyidentity1234567890123';
+    const entryPath = journalEntryPath(botsRoot, bot.directChatId, 1, entryId);
+
+    writeJsonRecord(journalIndexPath(botsRoot, bot.directChatId), {
+      schemaVersion: 1,
+      chatId: bot.directChatId,
+      nextSeq: 2,
+      byIdempotencyKey: { 'legacy-identity': entryId },
+      entries: [{ entryId, seq: 1 }],
+    });
+    writeJsonRecord(entryPath, {
+      schemaVersion: 1,
+      entryId,
+      chatId: 'chat_other',
+      seq: 1,
+      kind: 'user',
+      idempotencyKey: 'legacy-identity',
+      body: 'wrong conversation',
+      createdAt: at,
+    });
+
+    expect(journal.list(bot.directChatId)).toEqual([]);
+    const quarantined = readdirSync(journalEntriesPath(botsRoot, bot.directChatId)).find((file) => file.includes('.corrupt-'));
+    expect(quarantined).toBeDefined();
+    const source = readJsonFile(join(journalEntriesPath(botsRoot, bot.directChatId), quarantined!)) as Record<string, unknown>;
+    expect(source.chatId).toBe('chat_other');
+    expect(source.conversationId).toBeUndefined();
   });
 
   it('migrates legacy user entries without carrying botId into authorBotId', () => {

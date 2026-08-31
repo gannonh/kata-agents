@@ -14,5 +14,6 @@ export type {
   ClaimOccurrenceInput,
   CreateRoutineRunInput,
   RoutineRecoveryReport,
+  RoutineRecoveryError,
 } from './routine-store.ts'
 export { latestScheduledInstant, nextScheduledInstant, scheduledInstantsBetween } from './schedule.ts'

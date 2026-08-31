@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createManagedSession } from './SessionManager.ts'
+import { SessionManager, createManagedSession } from './SessionManager.ts'
 
 describe('createManagedSession', () => {
   const workspace = {
@@ -25,5 +25,12 @@ describe('createManagedSession', () => {
     }, workspace as any)
 
     expect(managed.thinkingLevel).toBeUndefined()
+  })
+
+  it('rejects sends after cleanup begins', async () => {
+    const manager = Object.create(SessionManager.prototype) as SessionManager
+    ;(manager as unknown as { shuttingDown: boolean }).shuttingDown = true
+
+    await expect(manager.sendMessage('session-after-cleanup', 'hello')).rejects.toThrow('SessionManager is shutting down')
   })
 })

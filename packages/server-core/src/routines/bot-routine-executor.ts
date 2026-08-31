@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { assertDurableLock, assertRegularFile, ensureDurableDirectory, withDurableLock } from '@kata-sh/shared/spawn-tasks/durable-fs'
 import type {
   BotTurnContext,
   RoutineDestination,
@@ -14,7 +18,8 @@ import {
 } from '@kata-sh/shared/bots'
 import { ChannelDirectory, channelProviderSessionPath, createChannelJournal, RetryableStageDispatchError } from '@kata-sh/shared/channels'
 import type { ConversationJournal } from '@kata-sh/shared/conversations'
-import { computeOperationHash } from '@kata-sh/shared/tools'
+import { readJsonFile, writeJsonRecord } from '@kata-sh/shared/conversations'
+import { ApprovalConflictError, computeOperationHash } from '@kata-sh/shared/tools'
 import { getApprovalRuntime, notifyApproval } from '../approvals/runtime'
 import type { ISessionManager } from '../handlers/session-manager-interface'
 import {
@@ -28,6 +33,42 @@ const REQUESTLESS_LINK_CLEANUP_MS = 120_000
 
 function destinationId(destination: RoutineDestination): string {
   return destination.kind === 'direct' ? destination.chatId : destination.channelId
+}
+
+function approvalResponsePath(workspaceRoot: string, approvalId: string, requestId: string, allowed: boolean): string {
+  const key = createHash('sha256').update(JSON.stringify([approvalId, requestId, allowed]), 'utf8').digest('hex')
+  return join(workspaceRoot, '.routines', 'approval-responses', `${key}.json`)
+}
+
+export function respondToPermissionOnce(
+  sessionManager: ISessionManager,
+  workspaceRoot: string,
+  approvalId: string,
+  sessionId: string,
+  requestId: string,
+  allowed: boolean,
+): boolean {
+  const path = approvalResponsePath(workspaceRoot, approvalId, requestId, allowed)
+  ensureDurableDirectory(dirname(path))
+  return withDurableLock(`${path}.lock`, (lockToken) => {
+    if (existsSync(path)) {
+      try {
+        assertRegularFile(path, 'Routine approval response marker')
+        const existing = readJsonFile(path) as { schemaVersion?: unknown; approvalId?: unknown; sessionId?: unknown; requestId?: unknown; allowed?: unknown; state?: unknown } | null
+        if (existing?.schemaVersion === 1 && existing.approvalId === approvalId && existing.sessionId === sessionId && existing.requestId === requestId && existing.allowed === allowed && existing.state === 'delivered') return true
+        throw new Error('Routine approval response marker identity mismatch')
+      } catch {
+        throw new Error('Routine approval response outcome is uncertain')
+      }
+    }
+    assertDurableLock(`${path}.lock`, lockToken)
+    const delivered = sessionManager.respondToPermission(sessionId, requestId, allowed, false)
+    if (delivered) {
+      assertDurableLock(`${path}.lock`, lockToken)
+      writeJsonRecord(path, { schemaVersion: 1, approvalId, sessionId, requestId, allowed, state: 'delivered' })
+    }
+    return delivered
+  })
 }
 
 function retainApprovalLink(runtime: ReturnType<typeof getApprovalRuntime>, approvalId: string, sessionId: string, requestId?: string): void {
@@ -195,9 +236,18 @@ export class BotRoutineExecutor implements RoutineExecutor {
     const runtime = getApprovalRuntime(attempt.invocation.workspaceId)
     const record = runtime.store.get(attempt.approvalId)
     if (!record) throw new Error('Routine approval record is missing')
-    if (record.status === 'consumed') return
+    if (record.status === 'consumed') {
+      if (record.operationHash === attempt.operationHash && record.targetFingerprint === attempt.invocation.target.fingerprint && computeOperationHash(attempt.invocation) === attempt.operationHash) return
+      throw new Error('Routine approval record changed')
+    }
     if (record.status !== 'allowed-once') throw new Error(`Routine approval is ${record.status}`)
-    runtime.broker.claimExecution(attempt.approvalId, attempt.invocation)
+    try {
+      runtime.broker.claimExecution(attempt.approvalId, attempt.invocation)
+    } catch (error) {
+      if (!(error instanceof ApprovalConflictError) || error.reason !== 'consumed') throw error
+      const consumed = runtime.store.get(attempt.approvalId)
+      if (!consumed || consumed.status !== 'consumed' || consumed.operationHash !== attempt.operationHash || consumed.targetFingerprint !== attempt.invocation.target.fingerprint) throw error
+    }
   }
 
   async resolveApproval(attempt: RoutineApprovalAttempt, allowed: boolean): Promise<void> {
@@ -213,17 +263,17 @@ export class BotRoutineExecutor implements RoutineExecutor {
     }
     const runtime = getApprovalRuntime(attempt.invocation.workspaceId)
     const record = runtime.store.get(attempt.approvalId)
-    if (!record) return
+    if (!record) throw new Error('Routine approval record is missing')
     const link = runtime.links.get(attempt.approvalId)
     const requestId = attempt.requestId ?? link?.requestId
     if (!requestId) {
       if (link) retainApprovalLink(runtime, attempt.approvalId, link.sessionId)
       return
     }
-    if (link?.requestId && link.requestId !== requestId) return
-    const delivered = this.sessionManager.respondToPermission(attempt.sessionId, requestId, true, false)
-    if (delivered) runtime.links.delete(attempt.approvalId)
-    else if (link) retainApprovalLink(runtime, attempt.approvalId, link.sessionId, link.requestId)
+    if (link?.requestId && link.requestId !== requestId) throw new Error('Routine approval request identity changed')
+    const delivered = respondToPermissionOnce(this.sessionManager, this.workspaceRoot, attempt.approvalId, attempt.sessionId, requestId, true)
+    if (!delivered) throw new Error('Routine approval response outcome is uncertain')
+    if (link) retainApprovalLink(runtime, attempt.approvalId, link.sessionId, link.requestId)
   }
 
   async denyApproval(approvalId: string, sessionId?: string, requestId?: string): Promise<void> {
@@ -252,16 +302,17 @@ export class BotRoutineExecutor implements RoutineExecutor {
     if (link && (!sessionId || link.sessionId === sessionId)) {
       const linkedRequestId = requestId ?? link.requestId
       if (linkedRequestId && record?.status !== 'consumed') {
-        const delivered = this.sessionManager.respondToPermission(link.sessionId, linkedRequestId, false, false)
-        if (delivered) runtime.links.delete(approvalId)
-        else retainApprovalLink(runtime, approvalId, link.sessionId, link.requestId)
+        const delivered = respondToPermissionOnce(this.sessionManager, this.workspaceRoot, approvalId, link.sessionId, linkedRequestId, false)
+        if (!delivered) throw new Error('Routine approval response outcome is uncertain')
+        retainApprovalLink(runtime, approvalId, link.sessionId, link.requestId)
       } else if (record?.status === 'consumed') {
         runtime.links.delete(approvalId)
       } else {
         retainApprovalLink(runtime, approvalId, link.sessionId)
       }
     } else if (!link && sessionId && requestId && record?.status !== 'consumed') {
-      this.sessionManager.respondToPermission(sessionId, requestId, false, false)
+      const delivered = respondToPermissionOnce(this.sessionManager, this.workspaceRoot, approvalId, sessionId, requestId, false)
+      if (!delivered) throw new Error('Routine approval response outcome is uncertain')
     }
     if (durableError) throw durableError
   }

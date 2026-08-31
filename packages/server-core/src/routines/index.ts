@@ -9,5 +9,5 @@ export type {
   RoutineExecutor,
   RoutineApprovalAttempt,
 } from './routine-engine'
-export { BotRoutineExecutor } from './bot-routine-executor'
+export { BotRoutineExecutor, respondToPermissionOnce } from './bot-routine-executor'
 export type { BotRoutineExecutorOptions } from './bot-routine-executor'
