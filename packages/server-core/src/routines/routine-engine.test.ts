@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { RoutineStore } from '@kata-sh/shared/routines'
 import type { RoutineRevision, RoutineRun, ToolInvocation } from '@kata-sh/core'
 import { computeOperationHash } from '@kata-sh/shared/tools'
-import { RoutineEngine, type RoutineExecutionResult, type RoutineExecutor } from './routine-engine'
+import { RoutineEngine, msUntilNextMinute, routineEventMatches, type RoutineExecutionResult, type RoutineExecutor } from './routine-engine'
 
 const roots: string[] = []
 const at = '2026-08-31T00:00:00.000Z'
@@ -44,6 +44,19 @@ class FakeExecutor implements RoutineExecutor {
 }
 
 describe('RoutineEngine', () => {
+  it('rejects catastrophic event matcher patterns at match time', () => {
+    const started = Date.now()
+    expect(routineEventMatches({ value: `${'a'.repeat(24)}b` }, { field: 'value', matches: '(a+)+$' })).toBe(false)
+    expect(Date.now() - started).toBeLessThan(50)
+    expect(routineEventMatches({ value: 'done' }, { field: 'value', matches: '^done$' })).toBe(true)
+    expect(routineEventMatches({ value: 'fooXbar' }, { field: 'value', matches: 'foo.*bar' })).toBe(true)
+  })
+
+  it('aligns a 60-second tick to the next local minute', () => {
+    expect(msUntilNextMinute(new Date(2026, 7, 31, 12, 0, 0, 0))).toBe(60_000)
+    expect(msUntilNextMinute(new Date(2026, 7, 31, 12, 34, 56, 789))).toBe(3_211)
+  })
+
   it('deduplicates a narrow external event before execution', async () => {
     const executor = new FakeExecutor()
     const root = workspace()

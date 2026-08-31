@@ -1,3 +1,5 @@
+import { Script } from 'node:vm'
+
 export const MAX_REGEX_LENGTH = 500
 
 type RegexAtom = {
@@ -188,4 +190,22 @@ export function isPotentiallyCatastrophicRegex(pattern: string): boolean {
   if (pattern.length > MAX_REGEX_LENGTH) return true
   if (/\\(?:[1-9]\d*|k<[^>]+>)|\(\?(?:[=!]|<[=!])/.test(pattern)) return true
   return hasNestedQuantifiers(pattern) || hasAdjacentOverlappingQuantifiers(pattern) || hasAmbiguousQuantifiedAlternation(pattern) || /(\.\*){2,}|(\.\+){2,}/.test(pattern)
+}
+
+export const REGEX_MATCH_TIMEOUT_MS = 20
+
+const REGEX_TEST_SCRIPT = new Script('Boolean(re.test(input))')
+
+export function regexTestBounded(pattern: string, input: string, timeoutMs = REGEX_MATCH_TIMEOUT_MS): boolean {
+  let re: RegExp
+  try {
+    re = new RegExp(pattern)
+  } catch {
+    return false
+  }
+  try {
+    return Boolean(REGEX_TEST_SCRIPT.runInNewContext({ re, input }, { timeout: timeoutMs }))
+  } catch {
+    return false
+  }
 }

@@ -26,6 +26,7 @@ import {
 } from '@kata-sh/shared/routines'
 import { readJsonFile, removePointer, writeJsonRecord } from '@kata-sh/shared/conversations'
 import { computeOperationHash } from '@kata-sh/shared/tools'
+import { isPotentiallyCatastrophicRegex, regexTestBounded } from '@kata-sh/shared/automations'
 import { assertDurableLock, assertRegularFile, withDurableLock } from '@kata-sh/shared/spawn-tasks/durable-fs'
 
 export interface RoutineEventInput {
@@ -104,13 +105,19 @@ function getField(payload: unknown, field: string): unknown {
   return current
 }
 
+export function msUntilNextMinute(now: Date): number {
+  const elapsed = now.getSeconds() * 1000 + now.getMilliseconds()
+  return elapsed === 0 ? 60_000 : 60_000 - elapsed
+}
+
 export function routineEventMatches(payload: unknown, matcher: RoutineEventMatcher): boolean {
   const value = getField(payload, matcher.field)
   if (matcher.equals !== undefined) {
     return typeof value === 'string' && value === matcher.equals
   }
   if (matcher.matches !== undefined) {
-    return typeof value === 'string' && new RegExp(matcher.matches).test(value)
+    if (typeof value !== 'string' || isPotentiallyCatastrophicRegex(matcher.matches)) return false
+    return regexTestBounded(matcher.matches, value)
   }
   return false
 }
@@ -127,6 +134,7 @@ export class RoutineEngine {
   private readonly onLegacyScheduleTick?: (timestamp: string) => void | Promise<void>
   private legacyScheduleMinute: string | null = null
   private timer: ReturnType<typeof setInterval> | null = null
+  private alignmentTimer: ReturnType<typeof setTimeout> | null = null
   private legacyTickPromise: Promise<void> | null = null
   private tickPromise: Promise<void> | null = null
   private started = false
@@ -194,7 +202,12 @@ export class RoutineEngine {
     await recovery
     if (this.stopping || generation !== this.lifecycleGeneration) return
     void this.tick(undefined, generation).catch(() => undefined)
-    this.timer = setInterval(() => {
+    this.armTickTimer(generation)
+  }
+
+  private armTickTimer(generation: number): void {
+    const fire = () => {
+      if (this.stopping || generation !== this.lifecycleGeneration) return
       const now = timestamp(this.clock)
       const promise = this.emitLegacyScheduleTick(now)
         .then(() => this.tick(now, generation))
@@ -203,8 +216,22 @@ export class RoutineEngine {
       void promise.then(() => {
         if (this.legacyTickPromise === promise) this.legacyTickPromise = null
       })
-    }, this.tickIntervalMs)
-    if (typeof this.timer === 'object' && 'unref' in this.timer) this.timer.unref()
+    }
+    const armInterval = () => {
+      this.timer = setInterval(fire, this.tickIntervalMs)
+      if (typeof this.timer === 'object' && 'unref' in this.timer) this.timer.unref()
+    }
+    if (this.tickIntervalMs === DEFAULT_TICK_INTERVAL_MS) {
+      this.alignmentTimer = setTimeout(() => {
+        this.alignmentTimer = null
+        if (this.stopping || generation !== this.lifecycleGeneration) return
+        fire()
+        armInterval()
+      }, msUntilNextMinute(new Date()))
+      if (typeof this.alignmentTimer === 'object' && 'unref' in this.alignmentTimer) this.alignmentTimer.unref()
+      return
+    }
+    armInterval()
   }
 
   async close(): Promise<void> {
@@ -235,6 +262,10 @@ export class RoutineEngine {
         startup.catch(() => undefined),
         new Promise<void>(resolve => setTimeout(resolve, startupRemaining)),
       ])
+    }
+    if (this.alignmentTimer) {
+      clearTimeout(this.alignmentTimer)
+      this.alignmentTimer = null
     }
     if (this.timer) {
       clearInterval(this.timer)
