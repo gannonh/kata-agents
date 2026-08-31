@@ -585,7 +585,10 @@ export class RoutineEngine {
         await this.dispatch(queued)
         continue
       }
-      if (run.state.kind === 'queued') await this.dispatch(run)
+      if (run.state.kind === 'queued') {
+        void this.dispatch(run).catch(() => undefined)
+        continue
+      }
       if (run.state.kind === 'succeeded' || run.state.kind === 'failed' || run.state.kind === 'cancelled' || run.state.kind === 'uncertain' || run.state.kind === 'reconciled') {
         await this.cleanupApproval(run)
         await this.publish(run)

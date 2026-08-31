@@ -274,6 +274,28 @@ describe('RoutineEngine', () => {
     expect(store.listRuns(routine.routineId)).toHaveLength(2)
   })
 
+  it('does not await queued recovery execution during startup', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const routine = store.create(input({ kind: 'on-demand' }))
+    const occurrence = store.recordOccurrence({ routineId: routine.routineId, routineRevision: 1, source: 'event', externalEventId: 'queued-recovery' })
+    store.createRun({ occurrenceId: occurrence.occurrenceId, ownerBotId: 'bot_1' })
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: { async execute() { await gate; return { kind: 'completed', reply: 'done' } } }, clock: () => at })
+
+    const start = engine.start()
+    const startup = await Promise.race([
+      start.then(() => 'started' as const),
+      new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 50)),
+    ])
+    expect(startup).toBe('started')
+    release()
+    await start
+    await engine.stop()
+    expect(store.getRun(store.listRuns(routine.routineId)[0]!.runId)?.state.kind).toBe('succeeded')
+  })
+
   it('rejects replay of a nonterminal run', async () => {
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })

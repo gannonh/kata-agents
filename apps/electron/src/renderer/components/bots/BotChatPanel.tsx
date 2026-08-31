@@ -23,6 +23,24 @@ export interface BotChatPanelProps {
   botId: string
 }
 
+const ROUTINE_STATE_KEYS: Record<RoutineRunPublicDto['state']['kind'], string> = {
+  queued: 'routines.stateQueued',
+  claimed: 'routines.stateClaimed',
+  running: 'routines.stateRunning',
+  'awaiting-approval': 'routines.stateAwaitingApproval',
+  succeeded: 'routines.stateSucceeded',
+  failed: 'routines.stateFailed',
+  cancelled: 'routines.stateCancelled',
+  uncertain: 'routines.stateUncertain',
+  reconciled: 'routines.stateReconciled',
+}
+
+const ROUTINE_LIFECYCLE_KEYS: Record<RoutinePublicDto['lifecycle'], string> = {
+  enabled: 'routines.lifecycleEnabled',
+  paused: 'routines.lifecyclePaused',
+  deleted: 'routines.lifecycleDeleted',
+}
+
 export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const { t } = useTranslation()
   const [bot, setBot] = React.useState<BotPublicDto | null>(null)
@@ -59,6 +77,9 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [editRoutineFailurePolicy, setEditRoutineFailurePolicy] = React.useState<RoutineRevision['failurePolicy']>('uncertain')
   const [editRoutineDestinationKind, setEditRoutineDestinationKind] = React.useState<RoutineRevision['destination']['kind']>('direct')
   const [editRoutineChannelId, setEditRoutineChannelId] = React.useState('')
+  const [editRoutineEventSource, setEditRoutineEventSource] = React.useState('')
+  const [editRoutineEventField, setEditRoutineEventField] = React.useState('')
+  const [editRoutineEventValue, setEditRoutineEventValue] = React.useState('')
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
@@ -208,6 +229,11 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       setEditRoutineCron(routine.revision.trigger.cron)
       setEditRoutineTimezone(routine.revision.trigger.timezone)
     }
+    if (routine.revision.trigger.kind === 'event') {
+      setEditRoutineEventSource(routine.revision.trigger.source)
+      setEditRoutineEventField(routine.revision.trigger.matcher.field)
+      setEditRoutineEventValue(routine.revision.trigger.matcher.equals ?? routine.revision.trigger.matcher.matches ?? '')
+    }
   }, [])
 
   const saveRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
@@ -216,9 +242,13 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     if (editRoutineDestinationKind === 'direct' && !directChatId) return
     setRoutineBusy(routine.routineId)
     try {
-      const trigger = routine.revision.trigger.kind === 'schedule'
-        ? { kind: 'schedule' as const, cron: editRoutineCron.trim(), timezone: editRoutineTimezone.trim(), dst: { gap: 'skip' as const, fold: 'once' as const } }
-        : routine.revision.trigger
+      const trigger: RoutineRevision['trigger'] = routine.revision.trigger.kind === 'schedule'
+        ? { kind: 'schedule', cron: editRoutineCron.trim(), timezone: editRoutineTimezone.trim(), dst: { gap: 'skip', fold: 'once' } }
+        : routine.revision.trigger.kind === 'event'
+          ? routine.revision.trigger.matcher.matches !== undefined
+            ? { kind: 'event', source: editRoutineEventSource.trim(), matcher: { field: editRoutineEventField.trim(), matches: editRoutineEventValue } }
+            : { kind: 'event', source: editRoutineEventSource.trim(), matcher: { field: editRoutineEventField.trim(), equals: editRoutineEventValue } }
+          : routine.revision.trigger
       await window.electronAPI.updateRoutine(workspaceId, routine.routineId, {
         name: editRoutineName.trim(),
         input: editRoutineInput.trim(),
@@ -467,11 +497,19 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
           ) : routines.map(routine => {
             const trigger = routine.revision.trigger
             const latest = routineRuns[routine.routineId]?.[0]
+            const latestStatus = t('routines.status', { status: t(latest ? ROUTINE_STATE_KEYS[latest.state.kind] : ROUTINE_LIFECYCLE_KEYS[routine.lifecycle]) })
+            const latestLabel = latest
+              ? latest.state.kind === 'succeeded'
+                ? latest.state.result
+                : latest.state.kind === 'failed'
+                  ? latest.state.error
+                  : t(ROUTINE_STATE_KEYS[latest.state.kind])
+              : ''
             return (
               <div key={routine.routineId} data-testid={`routine-${routine.routineId}`} data-routine-state={routine.lifecycle} className="flex flex-col gap-1 border-t border-foreground/10 pt-2">
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <strong>{routine.name}</strong>
-                  <span className="text-xs text-muted-foreground">{t('routines.status', { status: latest?.state.kind ?? routine.lifecycle })}</span>
+                  <span className="text-xs text-muted-foreground">{latestStatus}</span>
                 </div>
                   <div className="text-xs text-muted-foreground">
                   {trigger.kind === 'schedule'
@@ -487,6 +525,13 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
                       <div className="grid grid-cols-2 gap-2">
                         <Input value={editRoutineCron} onChange={event => setEditRoutineCron(event.target.value)} aria-label={t('routines.cron')} required />
                         <Input value={editRoutineTimezone} onChange={event => setEditRoutineTimezone(event.target.value)} aria-label={t('routines.timezone')} required />
+                      </div>
+                    )}
+                    {trigger.kind === 'event' && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input value={editRoutineEventSource} onChange={event => setEditRoutineEventSource(event.target.value)} aria-label={t('routines.eventSource')} required />
+                        <Input value={editRoutineEventField} onChange={event => setEditRoutineEventField(event.target.value)} aria-label={t('routines.eventField')} required />
+                        <Input value={editRoutineEventValue} onChange={event => setEditRoutineEventValue(event.target.value)} aria-label={t('routines.eventValue')} required />
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-2">
@@ -535,7 +580,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
                     </div>
                   </div>
                 )}
-                {latest && <div data-testid={`routine-latest-${routine.routineId}`} className="text-xs whitespace-pre-wrap break-words">{latest.state.kind === 'succeeded' ? latest.state.result : latest.state.kind === 'failed' ? latest.state.error : latest.state.kind}</div>}
+                {latest && <div data-testid={`routine-latest-${routine.routineId}`} className="text-xs whitespace-pre-wrap break-words">{latestLabel}</div>}
                 <div className="flex gap-2">
                   <Button type="button" size="sm" disabled={routineBusy !== null} data-testid={`routine-run-${routine.routineId}`} onClick={() => runRoutine(routine)}>{t('routines.runNow')}</Button>
                   {latest && ['succeeded', 'failed', 'cancelled', 'uncertain', 'reconciled'].includes(latest.state.kind) && <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-replay-${routine.routineId}`} onClick={() => replayRoutine(latest)}>{t('routines.replay')}</Button>}

@@ -329,6 +329,7 @@ export class RoutineStore {
   getPublic(routineId: RoutineId): RoutinePublicDto { const record = this.require(routineId); return toRoutinePublicDto(record, this.getRevision(record.routineId, record.activeRevision)) }
 
   update(routineId: RoutineId, input: UpdateRoutineInput): RoutineRecord {
+    this.recover()
     const current = this.require(routineId)
     if (current.lifecycle === 'deleted') throw new Error('Cannot update a deleted routine')
     const previous = this.getActiveRevision(current.routineId)
@@ -344,8 +345,13 @@ export class RoutineStore {
       failurePolicy: input.failurePolicy ?? previous.failurePolicy,
       destination: input.destination ?? previous.destination,
     }, now)
-    writeJsonIfAbsent(this.revisionPath(current.routineId, nextRevision), revision)
+    const revisionPath = this.revisionPath(current.routineId, nextRevision)
     const cutoverPath = this.cutoverPath(current.routineId, nextRevision)
+    if (existsSync(revisionPath)) {
+      const cutover = readJsonFile(cutoverPath) as Record<string, unknown> | null
+      if (cutover?.state !== 'pending') throw new Error(`Routine revision has an incomplete cutover: ${current.routineId}@${nextRevision}`)
+    }
+    writeJsonIfAbsent(revisionPath, revision)
     writeJsonIfAbsent(cutoverPath, { routineId: current.routineId, previousRevision: current.activeRevision, nextRevision, nextName: assertText(input.name ?? current.name, 'name'), state: 'pending', createdAt: now })
     const active = this.readRevisionFile(current.routineId, nextRevision)
     writeJsonRecord(this.activePath(current.routineId), active)

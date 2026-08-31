@@ -49,6 +49,19 @@ describe('RoutineStore', () => {
     })).toThrow('trigger.matcher.matches is too complex')
   })
 
+  it('rejects an orphaned revision instead of reusing its revision number', () => {
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const routine = store.create(routineInput())
+    writeJsonRecord(join(root, '.routines', 'routines', routine.routineId, 'revisions', '2.json'), {
+      ...store.getRevision(routine.routineId, 1),
+      revision: 2,
+    })
+
+    expect(() => store.update(routine.routineId, { name: 'Should not overwrite orphan' })).toThrow('incomplete cutover')
+    expect(store.get(routine.routineId)?.activeRevision).toBe(1)
+  })
+
   it('deduplicates occurrences and atomically maps one occurrence to one run', () => {
     const root = workspace()
     const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at, randomId: () => 'id_1' })
