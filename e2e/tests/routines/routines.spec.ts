@@ -87,6 +87,9 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
 
       await appWindow.close();
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
+      // Keep every renderer closed through a scheduler boundary before reconnecting.
+      await new Promise(resolve => setTimeout(resolve, 65_000));
+      await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
       const windowPromise = electronApp.waitForEvent("window");
       await electronApp.evaluate(({ app }) => { app.emit("activate"); });
       const reconnected = await windowPromise;

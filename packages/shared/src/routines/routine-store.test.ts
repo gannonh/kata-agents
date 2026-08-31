@@ -39,6 +39,16 @@ describe('RoutineStore', () => {
     expect(restarted.list({ lifecycle: 'deleted' })).toHaveLength(1)
   })
 
+  it('rejects catastrophic event regexes before persistence', () => {
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+
+    expect(() => store.create({
+      ...routineInput(),
+      trigger: { kind: 'event', source: 'source_1', matcher: { field: 'value', matches: '(a+)+' } },
+    })).toThrow('trigger.matcher.matches is too complex')
+  })
+
   it('deduplicates occurrences and atomically maps one occurrence to one run', () => {
     const root = workspace()
     const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at, randomId: () => 'id_1' })

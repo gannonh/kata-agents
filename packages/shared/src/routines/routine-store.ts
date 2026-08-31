@@ -21,6 +21,7 @@ import type {
 } from '@kata-sh/core'
 import { ROUTINE_SCHEMA_VERSION } from '@kata-sh/core'
 import { ensureDurableDirectory } from '../spawn-tasks/durable-fs.ts'
+import { isPotentiallyCatastrophicRegex } from '../automations/regex-safety.ts'
 import { readJsonFile, removePointer, writeJsonIfAbsent, writeJsonRecord } from '../conversations/durable-json.ts'
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$/
@@ -149,7 +150,10 @@ function assertTrigger(value: unknown): RoutineTrigger {
     if ((equals === undefined) === (matches === undefined)) throw new TypeError('trigger.matcher requires exactly one of equals or matches')
     if (equals !== undefined && typeof equals !== 'string') throw new TypeError('trigger.matcher.equals must be text')
     if (matches !== undefined && typeof matches !== 'string') throw new TypeError('trigger.matcher.matches must be text')
-    if (matches !== undefined) { try { new RegExp(matches) } catch { throw new TypeError('trigger.matcher.matches must be a valid regex') } }
+    if (matches !== undefined) {
+      try { new RegExp(matches) } catch { throw new TypeError('trigger.matcher.matches must be a valid regex') }
+      if (isPotentiallyCatastrophicRegex(matches)) throw new TypeError('trigger.matcher.matches is too complex')
+    }
     return { kind: 'event', source, matcher: { field, ...(equals !== undefined ? { equals } : { matches }) } }
   }
   if (trigger.kind === 'on-demand') return { kind: 'on-demand' }
