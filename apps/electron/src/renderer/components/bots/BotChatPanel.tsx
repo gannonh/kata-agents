@@ -67,6 +67,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [routineDestinationKind, setRoutineDestinationKind] = React.useState<'direct' | 'channel'>('direct')
   const [routineChannelId, setRoutineChannelId] = React.useState('')
   const [routineBusy, setRoutineBusy] = React.useState<string | null>(null)
+  const [routineError, setRoutineError] = React.useState<string | null>(null)
   const [editingRoutineId, setEditingRoutineId] = React.useState<string | null>(null)
   const [editRoutineName, setEditRoutineName] = React.useState('')
   const [editRoutineInput, setEditRoutineInput] = React.useState('')
@@ -267,19 +268,25 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     } finally {
       setRoutineBusy(null)
     }
-  }, [bot?.directChatId, editRoutineName, editRoutineInput, editRoutineExpectedResult, editRoutineCron, editRoutineTimezone, editRoutineApprovalBoundary, editRoutineFailurePolicy, editRoutineDestinationKind, editRoutineChannelId, workspaceId, refresh])
+  }, [bot?.directChatId, editRoutineName, editRoutineInput, editRoutineExpectedResult, editRoutineCron, editRoutineTimezone, editRoutineApprovalBoundary, editRoutineFailurePolicy, editRoutineDestinationKind, editRoutineChannelId, editRoutineEventSource, editRoutineEventField, editRoutineEventValue, workspaceId, refresh])
 
   const runRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    if (routine.lifecycle !== 'enabled') {
+      setRoutineError(t('routines.notEnabled'))
+      return
+    }
+    setRoutineError(null)
     setRoutineBusy(routine.routineId)
     try {
       await window.electronAPI.testRoutine(workspaceId, routine.routineId)
       await refresh()
     } catch (err) {
       console.error('[Bots] Failed to run routine:', err)
+      setRoutineError(t('routines.runFailed'))
     } finally {
       setRoutineBusy(null)
     }
-  }, [workspaceId, refresh])
+  }, [workspaceId, refresh, t])
 
   const replayRoutine = React.useCallback(async (run: RoutineRunPublicDto) => {
     setRoutineBusy(run.routineId)
@@ -387,6 +394,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
             <strong>{t('routines.title')}</strong>
             <span className="text-xs text-muted-foreground">{routines.length}</span>
           </div>
+          {routineError && <p data-testid="routine-action-error" className="text-xs text-destructive">{routineError}</p>}
           <form onSubmit={createRoutine} className="grid gap-2 border-t border-foreground/10 pt-2">
             <Input
               data-testid="routine-name-input"
@@ -582,7 +590,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
                 )}
                 {latest && <div data-testid={`routine-latest-${routine.routineId}`} className="text-xs whitespace-pre-wrap break-words">{latestLabel}</div>}
                 <div className="flex gap-2">
-                  <Button type="button" size="sm" disabled={routineBusy !== null} data-testid={`routine-run-${routine.routineId}`} onClick={() => runRoutine(routine)}>{t('routines.runNow')}</Button>
+                  <Button type="button" size="sm" disabled={routineBusy !== null || routine.lifecycle !== 'enabled'} data-testid={`routine-run-${routine.routineId}`} onClick={() => runRoutine(routine)}>{t('routines.runNow')}</Button>
                   {latest && ['succeeded', 'failed', 'cancelled', 'uncertain', 'reconciled'].includes(latest.state.kind) && <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-replay-${routine.routineId}`} onClick={() => replayRoutine(latest)}>{t('routines.replay')}</Button>}
                   <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-toggle-${routine.routineId}`} onClick={() => toggleRoutine(routine)}>{routine.lifecycle === 'enabled' ? t('routines.pause') : t('routines.resume')}</Button>
                   <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-edit-button-${routine.routineId}`} onClick={() => beginEditRoutine(routine)}>{t('routines.edit')}</Button>
