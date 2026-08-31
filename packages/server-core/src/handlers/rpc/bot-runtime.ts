@@ -163,8 +163,9 @@ async function recoverPending(
   sessionManager: HandlerDeps['sessionManager'],
   pointerPath: string,
   pending: DispatchRecord,
-  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig' | 'botId' | 'conversationId'>,
+  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig' | 'botId' | 'conversationId' | 'approvalInvocation'>,
   stopOnPendingApproval: boolean,
+  replayAfterApproval: boolean,
 ): Promise<{ sessionId: string; reply: string } | null> {
   const deadline = Date.now() + SEND_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -181,6 +182,7 @@ async function recoverPending(
       return { sessionId: pending.sessionId, reply }
     }
     if (!(session as { isProcessing?: boolean }).isProcessing && !reply) {
+      if (replayAfterApproval) return null
       if (stopOnPendingApproval) throw new BotDispatchUncertainError()
       return null
     }
@@ -267,6 +269,7 @@ export async function sendToBotSession(
             cached,
             target,
             options.stopOnPendingApproval === true,
+            target.approvalInvocation !== undefined,
           )
           if (recovered) return recovered
           // Unsuccessful recovery must not leave the stale pending record: a later

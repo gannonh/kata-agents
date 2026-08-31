@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import type { ToolInvocation } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
 import { resetBotProviderSessions, sendToBotSession } from './bot-runtime'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
@@ -165,6 +166,38 @@ describe('sendToBotSession', () => {
     const result = await sendToBotSession(fixture.manager as unknown as HandlerDeps['sessionManager'], { ...target, sessionPointerPath }, 'hello', { waitForReply: true, dispatchIdempotencyKey: key })
     expect(result.reply).toBe('recovered reply')
     expect(fixture.calls).toEqual([])
+  })
+
+  it('restarts an approved idle dispatch with its approval invocation', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-approved-restart-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'session-1\n')
+    fixture.sessions.set('session-1', {
+      id: 'session-1',
+      workspaceId: target.workspaceId,
+      hidden: true,
+      model: target.providerConfig.modelId,
+      llmConnection: target.providerConfig.providerId,
+      messages: [{ id: 'user-one', role: 'user', content: 'approved work' }],
+    })
+    const key = 'dispatch.approved-restart'
+    const dispatchDir = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    const hash = createHash('sha256').update(key).digest('hex')
+    writeFileSync(join(dispatchDir, `${hash}.json`), JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
+    const approvalInvocation = {} as ToolInvocation
+
+    const result = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath, approvalInvocation },
+      'approved work',
+      { waitForReply: true, dispatchIdempotencyKey: key, stopOnPendingApproval: true },
+    )
+
+    expect(result.reply).toBe('reply: approved work')
+    expect(fixture.calls).toEqual(['session-1'])
   })
 
   it('does not recover an assistant reply from a later provider turn', async () => {

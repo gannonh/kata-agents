@@ -110,6 +110,7 @@ export class BotRoutineExecutor implements RoutineExecutor {
     })
 
     const approvalInvocation = this.approvalInvocations.get(run.runId)
+    const prompt = `${run.input}\n\nExpected result: ${revision.expectedResult}`
     const target = {
       workspaceId: this.workspaceId,
       botId: bot.botId,
@@ -127,7 +128,7 @@ export class BotRoutineExecutor implements RoutineExecutor {
       const result = await sendToBotSession(
         this.sessionManager,
         target,
-        run.input,
+        prompt,
         {
           waitForReply: true,
           dispatchIdempotencyKey: `routine:${run.runId}`,

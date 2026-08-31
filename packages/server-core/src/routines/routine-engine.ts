@@ -77,6 +77,7 @@ export interface RoutineApprovalAttempt {
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000
 const DEFAULT_CLAIM_LEASE_MS = 120_000
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000
 
 function timestamp(clock: () => string): string {
   const value = clock()
@@ -126,6 +127,7 @@ export class RoutineEngine {
   private readonly inFlight = new Map<string, Promise<RoutineRun>>()
   private readonly approvalRecovery = new Set<Promise<unknown>>()
   private stopping = false
+  private shutdownTimedOut = false
 
   constructor(options: RoutineEngineOptions) {
     this.workspaceId = options.workspaceId
@@ -153,6 +155,7 @@ export class RoutineEngine {
     if (this.startPromise) return this.startPromise
     if (this.started) return
     this.stopping = false
+    this.shutdownTimedOut = false
     this.startPromise = this.startOwned().catch(error => {
       this.started = false
       this.startPromise = null
@@ -188,15 +191,26 @@ export class RoutineEngine {
     }
     this.started = false
     this.startPromise = null
+    // ponytail: cap shutdown drain at 5s; restart recovery marks unfinished runs uncertain.
+    const deadline = Date.now() + SHUTDOWN_DRAIN_TIMEOUT_MS
     while (this.tickPromise || this.legacyTickPromise || this.inFlight.size > 0 || this.approvalRecovery.size > 0) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
       const pending = [
         ...(this.tickPromise ? [this.tickPromise] : []),
         ...(this.legacyTickPromise ? [this.legacyTickPromise] : []),
         ...this.inFlight.values(),
         ...this.approvalRecovery,
       ]
-      await Promise.allSettled(pending)
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise<void>(resolve => setTimeout(resolve, remaining)),
+      ])
     }
+    this.shutdownTimedOut = this.tickPromise !== null
+      || this.legacyTickPromise !== null
+      || this.inFlight.size > 0
+      || this.approvalRecovery.size > 0
   }
 
   create(input: CreateRoutineInput): RoutinePublicDto {
@@ -700,6 +714,31 @@ export class RoutineEngine {
       : this.takeBufferedApprovalResolution(current.runId)
 
     const liveRoutine = this.store.get(current.routineId)
+    if (this.shutdownTimedOut) {
+      const shutdownAttempt = result.kind === 'awaiting-approval'
+        ? {
+            schemaVersion: 1 as const,
+            runId: current.runId,
+            approvalId: result.approvalId,
+            operationHash: result.operationHash,
+            version: result.version,
+            invocation: result.invocation,
+            sessionId: result.invocation.runtimeId,
+            ...(result.requestId ? { requestId: result.requestId } : {}),
+            createdAt: timestamp(this.clock),
+          }
+        : null
+      if (shutdownAttempt) this.writeApprovalAttempt(shutdownAttempt)
+      current = this.store.transitionRun(current.runId, current.version, {
+        kind: 'uncertain',
+        at: timestamp(this.clock),
+        reason: 'server-shutdown-during-execution',
+      })
+      await this.publish(current)
+      await this.cleanupApproval(current, shutdownAttempt?.approvalId)
+      this.notify(current.routineId)
+      return current
+    }
     if (!liveRoutine || liveRoutine.lifecycle !== 'enabled') {
       const cancellationAttempt = result.kind === 'awaiting-approval'
         ? {
