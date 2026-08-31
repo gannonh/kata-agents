@@ -25,6 +25,15 @@ function input(trigger: RoutineRevision['trigger'], failurePolicy: RoutineRevisi
   }
 }
 
+async function waitFor(check: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (check()) return
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('Timed out waiting for routine execution')
+}
+
 function invocation(): ToolInvocation {
   return {
     workspaceId: 'ws_1', botId: 'bot_1', conversationId: 'chat_1', runtimeId: 'session_1',
@@ -67,10 +76,10 @@ describe('RoutineEngine', () => {
     const first = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'event_1', payload: { newState: 'done' } })
     const second = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'event_1', payload: { newState: 'done' } })
 
+    await waitFor(() => engine.listRuns(routine.routineId)[0]?.state.kind === 'succeeded')
     expect(first).toHaveLength(1)
     expect(second[0]?.runId).toBe(first[0]?.runId)
     expect(executor.calls).toBe(1)
-    expect(engine.listRuns(routine.routineId)[0]?.state.kind).toBe('succeeded')
   })
 
   it('persists every matching event occurrence before dispatching any run', async () => {
@@ -89,7 +98,7 @@ describe('RoutineEngine', () => {
 
     const runs = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'event-all', payload: { newState: 'done' } })
 
-    expect(runCountAtFirstExecution).toBe(2)
+    await waitFor(() => runCountAtFirstExecution === 2)
     expect(runs).toHaveLength(2)
     expect(engine.listRuns(first.routineId)).toHaveLength(1)
     expect(engine.listRuns(second.routineId)).toHaveLength(1)

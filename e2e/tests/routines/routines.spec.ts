@@ -32,6 +32,22 @@ async function workspaceId(page: Page): Promise<string> {
   });
 }
 
+type RoutineRunView = {
+  runId: string;
+  state: { kind: string; result?: string };
+};
+
+async function listRoutineRuns(page: Page, workspaceId: string, routineId: string): Promise<RoutineRunView[]> {
+  return page.evaluate(async ({ workspaceId, routineId }) => {
+    const api = (window as unknown as {
+      electronAPI: {
+        listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<RoutineRunView[]>;
+      };
+    }).electronAPI;
+    return api.listRoutineRuns(workspaceId, routineId, 10);
+  }, { workspaceId, routineId });
+}
+
 async function ingestEvent(page: Page, workspaceId: string, source: string, eventId: string, value: string) {
   return page.evaluate(async ({ workspaceId, source, eventId, value }) => {
     const api = (window as unknown as {
@@ -56,22 +72,24 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
       throw new Error(formatMissingPrerequisiteError("Bot routines", prerequisite.missing));
     }
 
+    let activePage = appWindow;
     await runWithAgentProviderFallback(appWindow, "Bot routines offline schedule", async candidate => {
-      await configureAgentConnection(appWindow, candidate);
-      await waitForAppReady(appWindow);
+      const page = activePage;
+      await configureAgentConnection(page, candidate);
+      await waitForAppReady(page);
       const stamp = `${candidate.provider}-${Date.now()}`;
       const botName = `Offline Routine Bot ${stamp}`;
       const resultToken = `OFFLINE_ROUTINE_RESULT_${stamp}`;
-      await createBot(appWindow, botName);
-      const workspace = await workspaceId(appWindow);
-      const bot = await appWindow.evaluate(async ({ workspaceId, botName }) => {
+      await createBot(page, botName);
+      const workspace = await workspaceId(page);
+      const bot = await page.evaluate(async ({ workspaceId, botName }) => {
         const api = (window as unknown as { electronAPI: { listBots: (id: string) => Promise<Array<{ name: string; directChatId: string; botId: string }>> } }).electronAPI;
         const bots = await api.listBots(workspaceId);
         const match = bots.find(entry => entry.name === botName);
         if (!match) throw new Error("Created routine Bot was not returned by the server");
         return match;
       }, { workspaceId: workspace, botName });
-      const routine = await appWindow.evaluate(async ({ workspaceId, bot, resultToken }) => {
+      const routine = await page.evaluate(async ({ workspaceId, bot, resultToken }) => {
         const api = (window as unknown as { electronAPI: { createRoutine: (id: string, input: unknown) => Promise<{ routineId: string }> } }).electronAPI;
         return api.createRoutine(workspaceId, {
           ownerBotId: bot.botId,
@@ -85,31 +103,39 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
         });
       }, { workspaceId: workspace, bot, resultToken });
 
-      await appWindow.close();
+      await page.close();
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
       // Keep every renderer closed through a scheduler boundary before reconnecting.
       await new Promise(resolve => setTimeout(resolve, 65_000));
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
       const windowPromise = electronApp.waitForEvent("window");
       await electronApp.evaluate(({ app }) => { app.emit("activate"); });
-      const reconnected = await windowPromise;
-      await waitForAppReady(reconnected);
+      activePage = await windowPromise;
+      await waitForAppReady(activePage);
       await expect.poll(async () => {
-        const runs = await reconnected.evaluate(async ({ workspaceId, routineId }) => {
-          const api = (window as unknown as { electronAPI: { listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<Array<{ runId: string; state: { kind: string; result?: string } }>> } }).electronAPI;
-          return api.listRoutineRuns(workspaceId, routineId, 10);
-        }, { workspaceId: workspace, routineId: routine.routineId });
+        const runs = await listRoutineRuns(activePage, workspace, routine.routineId);
         return runs.filter(run => run.state.kind === "succeeded");
       }, { timeout: 120_000, intervals: [1_000] }).not.toHaveLength(0);
-      const runs = await reconnected.evaluate(async ({ workspaceId, routineId }) => {
-        const api = (window as unknown as { electronAPI: { listRoutineRuns: (id: string, routineId: string, limit?: number) => Promise<Array<{ runId: string; state: { kind: string; result?: string } }>> } }).electronAPI;
-        return api.listRoutineRuns(workspaceId, routineId, 10);
-      }, { workspaceId: workspace, routineId: routine.routineId });
+      const runs = await listRoutineRuns(activePage, workspace, routine.routineId);
       const succeededRuns = runs.filter(run => run.state.kind === "succeeded");
       expect(succeededRuns.length).toBeGreaterThanOrEqual(1);
       expect(succeededRuns.length).toBeLessThanOrEqual(2);
       expect(succeededRuns[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
       expect(succeededRuns[0]?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
+    }, {
+      recoverAfterFailure: async () => {
+        const existing = electronApp.windows().find(page => !page.isClosed());
+        if (existing) {
+          activePage = existing;
+          await waitForAppReady(activePage);
+          return;
+        }
+        const windowPromise = electronApp.waitForEvent("window");
+        await electronApp.evaluate(({ app }) => { app.emit("activate"); });
+        activePage = await windowPromise;
+        await waitForAppReady(activePage);
+      },
+    });
     });
   });
 

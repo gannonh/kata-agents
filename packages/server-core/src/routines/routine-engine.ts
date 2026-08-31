@@ -463,13 +463,13 @@ export class RoutineEngine {
       const run = this.ensureRunForOccurrence(occurrence)
       if (run) pendingRuns.push(run)
     }
-    const runs: RoutineRunPublicDto[] = []
     for (const run of pendingRuns) {
-      await this.dispatch(run)
-      const current = this.store.getRun(run.runId)
-      if (current) runs.push(toRoutineRunPublicDto(current))
+      void this.dispatch(run).catch(() => undefined)
     }
-    return runs
+    return pendingRuns
+      .map(run => this.store.getRun(run.runId))
+      .filter((run): run is RoutineRun => run !== null)
+      .map(toRoutineRunPublicDto)
   }
 
   async testRoutine(routineId: RoutineId): Promise<RoutineRunPublicDto> {
