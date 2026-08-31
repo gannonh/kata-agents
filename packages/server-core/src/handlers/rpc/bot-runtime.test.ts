@@ -12,6 +12,7 @@ import { channelProviderSessionPath } from '@kata-sh/shared/channels'
 function makeSessionManager() {
   const sessions = new Map<string, { id: string; workspaceId: string; hidden?: boolean; model?: string; llmConnection?: string; messages: Array<{ id?: string; role: string; content: string }> }>()
   const calls: string[] = []
+  const rpcContexts: unknown[] = []
   let created = 0
   let messageCount = 0
 
@@ -36,6 +37,7 @@ function makeSessionManager() {
     ) {
       const session = sessions.get(sessionId)
       if (!session) throw new Error('session not found')
+      rpcContexts.push(args[6])
       calls.push(sessionId)
       const messageId = `message-${++messageCount}`
       session.messages.push({ id: messageId, role: 'user', content: message })
@@ -45,7 +47,7 @@ function makeSessionManager() {
     },
   }
 
-  return { manager, sessions, calls, get created() { return created } }
+  return { manager, sessions, calls, rpcContexts, get created() { return created } }
 }
 
 const target = {
@@ -57,6 +59,44 @@ const target = {
 }
 
 describe('sendToBotSession', () => {
+  it('forwards Bot routine identity and context to SessionManager', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-context-'))
+    const context = {
+      workspaceId: target.workspaceId,
+      botId: target.botId,
+      conversationId: 'chat-one',
+      runId: 'run-one',
+      operationId: 'routine.run-one',
+      journalCursor: 0,
+      conversationCursor: 0,
+      memoryRevision: 0,
+      checkpointRevision: 0,
+      text: 'routine prompt',
+      memoryIds: [],
+    }
+    const result = await sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath: join(root, 'provider-session') },
+      'routine prompt',
+      {
+        waitForReply: true,
+        botTurnContext: context,
+        botRoutineRunId: 'run-one',
+        botAttempt: 3,
+        stopOnPendingApproval: true,
+      },
+    )
+
+    expect(result.reply).toBe('reply: routine prompt')
+    expect(fixture.rpcContexts[0]).toMatchObject({
+      botTurnContext: context,
+      botRoutineRunId: 'run-one',
+      botPermissionMode: 'ask',
+      botAttempt: 3,
+    })
+  })
+
   it('creates one durable hidden session per pointer and serializes concurrent sends', async () => {
     const fixture = makeSessionManager()
     const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-'))
