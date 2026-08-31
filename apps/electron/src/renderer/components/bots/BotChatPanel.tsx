@@ -55,6 +55,10 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [editRoutineExpectedResult, setEditRoutineExpectedResult] = React.useState('')
   const [editRoutineCron, setEditRoutineCron] = React.useState('')
   const [editRoutineTimezone, setEditRoutineTimezone] = React.useState('')
+  const [editRoutineApprovalBoundary, setEditRoutineApprovalBoundary] = React.useState<RoutineRevision['approvalBoundary']>('ask')
+  const [editRoutineFailurePolicy, setEditRoutineFailurePolicy] = React.useState<RoutineRevision['failurePolicy']>('uncertain')
+  const [editRoutineDestinationKind, setEditRoutineDestinationKind] = React.useState<RoutineRevision['destination']['kind']>('direct')
+  const [editRoutineChannelId, setEditRoutineChannelId] = React.useState('')
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
@@ -196,6 +200,10 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     setEditRoutineName(routine.name)
     setEditRoutineInput(routine.revision.input)
     setEditRoutineExpectedResult(routine.revision.expectedResult)
+    setEditRoutineApprovalBoundary(routine.revision.approvalBoundary)
+    setEditRoutineFailurePolicy(routine.revision.failurePolicy)
+    setEditRoutineDestinationKind(routine.revision.destination.kind)
+    setEditRoutineChannelId(routine.revision.destination.kind === 'channel' ? routine.revision.destination.channelId : '')
     if (routine.revision.trigger.kind === 'schedule') {
       setEditRoutineCron(routine.revision.trigger.cron)
       setEditRoutineTimezone(routine.revision.trigger.timezone)
@@ -203,6 +211,9 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   }, [])
 
   const saveRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    const directChatId = routine.revision.destination.kind === 'direct' ? routine.revision.destination.chatId : bot?.directChatId
+    if (editRoutineDestinationKind === 'channel' && !editRoutineChannelId) return
+    if (editRoutineDestinationKind === 'direct' && !directChatId) return
     setRoutineBusy(routine.routineId)
     try {
       const trigger = routine.revision.trigger.kind === 'schedule'
@@ -212,6 +223,11 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
         name: editRoutineName.trim(),
         input: editRoutineInput.trim(),
         expectedResult: editRoutineExpectedResult.trim(),
+        approvalBoundary: editRoutineApprovalBoundary,
+        failurePolicy: editRoutineFailurePolicy,
+        destination: editRoutineDestinationKind === 'channel'
+          ? { kind: 'channel', channelId: editRoutineChannelId }
+          : { kind: 'direct', chatId: directChatId! },
         trigger,
       })
       setEditingRoutineId(null)
@@ -221,7 +237,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     } finally {
       setRoutineBusy(null)
     }
-  }, [editRoutineName, editRoutineInput, editRoutineExpectedResult, editRoutineCron, editRoutineTimezone, workspaceId, refresh])
+  }, [bot?.directChatId, editRoutineName, editRoutineInput, editRoutineExpectedResult, editRoutineCron, editRoutineTimezone, editRoutineApprovalBoundary, editRoutineFailurePolicy, editRoutineDestinationKind, editRoutineChannelId, workspaceId, refresh])
 
   const runRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
     setRoutineBusy(routine.routineId)
@@ -473,6 +489,46 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
                         <Input value={editRoutineTimezone} onChange={event => setEditRoutineTimezone(event.target.value)} aria-label={t('routines.timezone')} required />
                       </div>
                     )}
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        data-testid="routine-edit-approval-select"
+                        className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+                        value={editRoutineApprovalBoundary}
+                        onChange={event => setEditRoutineApprovalBoundary(event.target.value as RoutineRevision['approvalBoundary'])}
+                        aria-label={t('routines.approvalBoundary')}
+                      >
+                        <option value="safe">{t('mode.safe')}</option>
+                        <option value="ask">{t('mode.ask')}</option>
+                        <option value="allow-all">{t('mode.allow-all')}</option>
+                      </select>
+                      <select
+                        data-testid="routine-edit-failure-select"
+                        className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+                        value={editRoutineFailurePolicy}
+                        onChange={event => setEditRoutineFailurePolicy(event.target.value as RoutineRevision['failurePolicy'])}
+                        aria-label={t('routines.failurePolicy')}
+                      >
+                        <option value="stop">{t('routines.failureStop')}</option>
+                        <option value="retry">{t('routines.failureRetry')}</option>
+                        <option value="uncertain">{t('routines.failureUncertain')}</option>
+                      </select>
+                    </div>
+                    <select
+                      data-testid="routine-edit-destination-select"
+                      className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+                      value={editRoutineDestinationKind === 'channel' ? `channel:${editRoutineChannelId}` : 'direct'}
+                      onChange={event => {
+                        const value = event.target.value
+                        if (value === 'direct') setEditRoutineDestinationKind('direct')
+                        else { setEditRoutineDestinationKind('channel'); setEditRoutineChannelId(value.slice('channel:'.length)) }
+                      }}
+                      aria-label={t('routines.destination')}
+                    >
+                      <option value="direct">{t('routines.directDestination')}</option>
+                      {channels.filter(channel => channel.members.some(member => member.botId === botId)).map(channel => (
+                        <option key={channel.channelId} value={`channel:${channel.channelId}`}>{channel.name}</option>
+                      ))}
+                    </select>
                     <div className="flex gap-2">
                       <Button type="button" size="sm" disabled={routineBusy !== null} onClick={() => saveRoutine(routine)}>{t('bots.memorySave')}</Button>
                       <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} onClick={() => setEditingRoutineId(null)}>{t('common.cancel')}</Button>

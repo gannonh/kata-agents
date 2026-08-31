@@ -127,7 +127,9 @@ export class RoutineEngine {
   private readonly inFlight = new Map<string, Promise<RoutineRun>>()
   private readonly approvalRecovery = new Set<Promise<unknown>>()
   private stopping = false
-  private shutdownTimedOut = false
+  private lifecycleGeneration = 0
+  private stopPromise: Promise<void> | null = null
+  private readonly timedOutGenerations = new Set<number>()
 
   constructor(options: RoutineEngineOptions) {
     this.workspaceId = options.workspaceId
@@ -152,22 +154,28 @@ export class RoutineEngine {
   }
 
   async start(): Promise<void> {
+    if (this.stopPromise) await this.stopPromise
     if (this.startPromise) return this.startPromise
     if (this.started) return
     this.stopping = false
-    this.shutdownTimedOut = false
-    this.startPromise = this.startOwned().catch(error => {
-      this.started = false
-      this.startPromise = null
+    const generation = ++this.lifecycleGeneration
+    let promise!: Promise<void>
+    promise = this.startOwned(generation).catch(error => {
+      if (this.startPromise === promise) {
+        this.started = false
+        this.startPromise = null
+      }
       throw error
     })
-    return this.startPromise
+    this.startPromise = promise
+    return promise
   }
 
-  private async startOwned(): Promise<void> {
+  private async startOwned(generation: number): Promise<void> {
     this.started = true
     this.store.recover()
     await this.recoverRuns()
+    if (this.stopping || generation !== this.lifecycleGeneration) return
     void this.tick().catch(() => undefined)
     this.timer = setInterval(() => {
       const now = timestamp(this.clock)
@@ -183,16 +191,35 @@ export class RoutineEngine {
   }
 
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise
+    const promise = this.stopOwned()
+    this.stopPromise = promise
+    try {
+      await promise
+    } finally {
+      if (this.stopPromise === promise) this.stopPromise = null
+    }
+  }
+
+  private async stopOwned(): Promise<void> {
     this.stopping = true
-    await this.startPromise?.catch(() => undefined)
+    const generation = this.lifecycleGeneration++
+    // ponytail: cap startup and shutdown drain at 5s; restart recovery marks unfinished runs uncertain.
+    const deadline = Date.now() + SHUTDOWN_DRAIN_TIMEOUT_MS
+    const startup = this.startPromise
+    const startupRemaining = deadline - Date.now()
+    if (startup && startupRemaining > 0) {
+      await Promise.race([
+        startup.catch(() => undefined),
+        new Promise<void>(resolve => setTimeout(resolve, startupRemaining)),
+      ])
+    }
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
     }
     this.started = false
-    this.startPromise = null
-    // ponytail: cap shutdown drain at 5s; restart recovery marks unfinished runs uncertain.
-    const deadline = Date.now() + SHUTDOWN_DRAIN_TIMEOUT_MS
+    if (this.startPromise === startup) this.startPromise = null
     while (this.tickPromise || this.legacyTickPromise || this.inFlight.size > 0 || this.approvalRecovery.size > 0) {
       const remaining = deadline - Date.now()
       if (remaining <= 0) break
@@ -207,10 +234,9 @@ export class RoutineEngine {
         new Promise<void>(resolve => setTimeout(resolve, remaining)),
       ])
     }
-    this.shutdownTimedOut = this.tickPromise !== null
-      || this.legacyTickPromise !== null
-      || this.inFlight.size > 0
-      || this.approvalRecovery.size > 0
+    if (this.tickPromise || this.legacyTickPromise || this.inFlight.size > 0 || this.approvalRecovery.size > 0) {
+      this.timedOutGenerations.add(generation)
+    }
   }
 
   create(input: CreateRoutineInput): RoutinePublicDto {
@@ -417,7 +443,7 @@ export class RoutineEngine {
     }
     if (attempt) await this.executeAdapter.resolveApproval?.(attempt, true)
     const running = this.store.transitionRun(current.runId, current.version, { kind: 'running', at: timestamp(this.clock) })
-    await this.dispatchOwned(running)
+    await this.dispatchOwned(running, this.lifecycleGeneration)
     const latest = this.store.getRun(running.runId)
     if (!latest) throw new Error(`Routine run disappeared: ${running.runId}`)
     return toRoutineRunPublicDto(latest)
@@ -648,10 +674,10 @@ export class RoutineEngine {
     })
   }
 
-  private async dispatch(run: RoutineRun): Promise<RoutineRun> {
+  private async dispatch(run: RoutineRun, generation = this.lifecycleGeneration): Promise<RoutineRun> {
     const existing = this.inFlight.get(run.runId)
     if (existing) return existing
-    const promise = this.dispatchOwned(run)
+    const promise = this.dispatchOwned(run, generation)
     this.inFlight.set(run.runId, promise)
     try {
       return await promise
@@ -660,7 +686,7 @@ export class RoutineEngine {
     }
   }
 
-  private async dispatchOwned(initial: RoutineRun): Promise<RoutineRun> {
+  private async dispatchOwned(initial: RoutineRun, generation: number): Promise<RoutineRun> {
     let current = this.store.getRun(initial.runId) ?? initial
     const routine = this.store.get(current.routineId)
     if (!routine || routine.lifecycle !== 'enabled') {
@@ -711,7 +737,7 @@ export class RoutineEngine {
       : this.takeBufferedApprovalResolution(current.runId)
 
     const liveRoutine = this.store.get(current.routineId)
-    if (this.shutdownTimedOut) {
+    if (this.timedOutGenerations.has(generation)) {
       const shutdownAttempt = result.kind === 'awaiting-approval'
         ? {
             schemaVersion: 1 as const,
@@ -820,7 +846,7 @@ export class RoutineEngine {
       // ponytail: one automatic retry; raise the persisted attempt ceiling with
       // an explicit policy and idempotent provider operation when needed.
       current = this.store.retryRun(current.runId, current.version)
-      current = await this.dispatchOwned(current)
+      current = await this.dispatchOwned(current, generation)
     } else if (result.kind === 'uncertain' || revision.failurePolicy === 'uncertain') {
       const reason = result.kind === 'uncertain' ? result.reason : result.error
       current = this.store.transitionRun(current.runId, current.version, { kind: 'uncertain', at: timestamp(this.clock), reason })
