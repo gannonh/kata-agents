@@ -64,6 +64,7 @@ export interface RecordOccurrenceInput {
   readonly scheduledInstant?: string
   readonly externalEventId?: string
   readonly occurrenceId?: TriggerOccurrenceId
+  readonly occurredAt?: string
 }
 
 export interface ClaimOccurrenceInput {
@@ -224,6 +225,8 @@ function assertRun(value: unknown, workspaceId: string): RoutineRun {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Routine run is corrupt')
   const record = value as Record<string, unknown>
   if (record.schemaVersion !== ROUTINE_SCHEMA_VERSION) throw new Error('Routine run schema mismatch')
+  const attempt = record.attempt === undefined ? 1 : record.attempt
+  if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) throw new Error('Routine run attempt is corrupt')
   if (!Number.isSafeInteger(record.version) || (record.version as number) < 1) throw new Error('Routine run version is corrupt')
   if (!record.origin || typeof record.origin !== 'object' || !record.state || typeof record.state !== 'object') throw new Error('Routine run is corrupt')
   const origin = record.origin as Record<string, unknown>
@@ -250,6 +253,7 @@ function assertRun(value: unknown, workspaceId: string): RoutineRun {
     destination: assertDestination(record.destination),
     input: assertText(record.input, 'input'),
     state: parsedState,
+    attempt: attempt as number,
     version: record.version as number,
     createdAt: assertTimestamp(record.createdAt, 'createdAt'),
     updatedAt: assertTimestamp(record.updatedAt, 'updatedAt'),
@@ -267,7 +271,7 @@ export function toRoutinePublicDto(record: RoutineRecord, revision: RoutineRevis
   return { routineId: record.routineId, workspaceId: record.workspaceId, ownerBotId: record.ownerBotId, name: record.name, lifecycle: record.lifecycle, activeRevision: record.activeRevision, revision: clone(revision), createdAt: record.createdAt, updatedAt: record.updatedAt }
 }
 export function toRoutineRunPublicDto(run: RoutineRun): RoutineRunPublicDto {
-  return { runId: run.runId, routineId: run.routineId, routineRevision: run.routineRevision, ownerBotId: run.ownerBotId, origin: clone(run.origin), destination: clone(run.destination), state: publicState(run.state), version: run.version, createdAt: run.createdAt, updatedAt: run.updatedAt }
+  return { runId: run.runId, routineId: run.routineId, routineRevision: run.routineRevision, ownerBotId: run.ownerBotId, origin: clone(run.origin), destination: clone(run.destination), state: publicState(run.state), attempt: run.attempt, version: run.version, createdAt: run.createdAt, updatedAt: run.updatedAt }
 }
 
 export class RoutineStore {
@@ -349,7 +353,7 @@ export class RoutineStore {
   }
   enable(routineId: RoutineId): RoutineRecord { return this.setLifecycle(routineId, 'enabled') }
   pause(routineId: RoutineId): RoutineRecord { return this.setLifecycle(routineId, 'paused') }
-  delete(routineId: RoutineId): void { this.setLifecycle(routineId, 'deleted') }
+  delete(routineId: RoutineId): RoutineRecord { return this.setLifecycle(routineId, 'deleted') }
   private setLifecycle(routineId: RoutineId, lifecycle: RoutineLifecycle): RoutineRecord {
     const current = this.require(routineId)
     if (current.lifecycle === 'deleted' && lifecycle !== 'deleted') throw new Error('Deleted routines cannot be re-enabled')
@@ -370,7 +374,8 @@ export class RoutineStore {
     const derivedOccurrenceId = deriveTriggerOccurrenceId({ routineId: routine.routineId, revision: input.routineRevision, source, ...(scheduledInstant ? { scheduledInstant } : { externalEventId }) })
     if (input.occurrenceId !== undefined && input.occurrenceId !== derivedOccurrenceId) throw new TypeError('occurrenceId does not match its trigger identity')
     const occurrenceId = (input.occurrenceId ?? derivedOccurrenceId) as TriggerOccurrenceId
-    const occurrence: RoutineOccurrence = { schemaVersion: ROUTINE_SCHEMA_VERSION, occurrenceId: assertId(occurrenceId, 'occurrenceId') as TriggerOccurrenceId, routineId: routine.routineId, routineRevision: input.routineRevision, source, ...(scheduledInstant ? { scheduledInstant } : { externalEventId }), createdAt: this.clock() }
+    const createdAt = input.occurredAt === undefined ? this.clock() : new Date(assertTimestamp(input.occurredAt, 'occurredAt')).toISOString()
+    const occurrence: RoutineOccurrence = { schemaVersion: ROUTINE_SCHEMA_VERSION, occurrenceId: assertId(occurrenceId, 'occurrenceId') as TriggerOccurrenceId, routineId: routine.routineId, routineRevision: input.routineRevision, source, ...(scheduledInstant ? { scheduledInstant } : { externalEventId }), createdAt }
     const path = this.occurrencePath(occurrence.occurrenceId)
     if (!writeJsonIfAbsent(path, occurrence)) {
       const existing = this.readOccurrence(occurrence.occurrenceId)
@@ -385,7 +390,9 @@ export class RoutineStore {
     const now = this.clock()
     const leaseMs = input.leaseMs ?? 120_000
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) throw new TypeError('leaseMs must be positive')
-    if (occurrence.leaseUntil && Date.parse(occurrence.leaseUntil) > Date.parse(now)) return null
+    if (occurrence.leaseUntil && Date.parse(occurrence.leaseUntil) > Date.parse(now)) {
+      return occurrence.workerId === input.workerId ? clone(occurrence) : null
+    }
     const leaseUntil = new Date(Date.parse(now) + leaseMs).toISOString()
     const claimToken = `claim_${this.randomId()}`
     const claimPath = this.claimPath(occurrence.occurrenceId)
@@ -406,8 +413,9 @@ export class RoutineStore {
     const revision = this.getRevision(routine.routineId, occurrence.routineRevision)
     const runId = deriveRoutineRunId(occurrence.occurrenceId)
     const origin = input.origin ?? { kind: 'triggered' as const, occurrenceId: occurrence.occurrenceId }
+    if (origin.occurrenceId !== occurrence.occurrenceId) throw new Error('Routine run origin occurrence mismatch')
     const now = this.clock()
-    const run: RoutineRun = { schemaVersion: ROUTINE_SCHEMA_VERSION, runId, routineId: routine.routineId, routineRevision: occurrence.routineRevision, ownerBotId: assertId(input.ownerBotId, 'ownerBotId'), origin, destination: input.destination ? assertDestination(input.destination) : revision.destination, input: assertText(input.input ?? revision.input, 'input'), state: { kind: 'queued', at: now }, version: 1, createdAt: now, updatedAt: now }
+    const run: RoutineRun = { schemaVersion: ROUTINE_SCHEMA_VERSION, runId, routineId: routine.routineId, routineRevision: occurrence.routineRevision, ownerBotId: assertId(input.ownerBotId, 'ownerBotId'), origin, destination: input.destination ? assertDestination(input.destination) : revision.destination, input: assertText(input.input ?? revision.input, 'input'), state: { kind: 'queued', at: now }, attempt: 1, version: 1, createdAt: now, updatedAt: now }
     if (run.ownerBotId !== routine.ownerBotId) throw new Error('Routine run owner mismatch')
     const runPath = this.runPath(runId)
     if (!writeJsonIfAbsent(runPath, run)) return this.readRun(runId)
@@ -421,27 +429,43 @@ export class RoutineStore {
   }
 
   getRun(runId: RoutineRunId): RoutineRun | null { return existsSync(this.runPath(runId)) ? this.readRun(runId) : null }
+  listAllRuns(): RoutineRun[] {
+    const directory = join(this.rootPath, 'runs')
+    if (!existsSync(directory)) return []
+    return readdirSync(directory).filter(file => file.endsWith('.json')).map(file => this.readRun(file.slice(0, -5) as RoutineRunId)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(clone)
+  }
   listRuns(routineId: RoutineId): RoutineRun[] {
     const id = assertId(routineId, 'routineId')
-    if (!existsSync(join(this.rootPath, 'runs'))) return []
-    return readdirSync(join(this.rootPath, 'runs')).filter(file => file.endsWith('.json')).map(file => this.readRun(file.slice(0, -5) as RoutineRunId)).filter(run => run.routineId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(clone)
+    return this.listAllRuns().filter(run => run.routineId === id)
   }
-  listHistory(routineId: RoutineId, limit = 50): RoutineRunPublicDto[] { return this.listRuns(routineId).slice(-limit).reverse().map(toRoutineRunPublicDto) }
+  listHistory(routineId: RoutineId, limit = 50): RoutineRunPublicDto[] {
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new TypeError('limit must be a non-negative safe integer')
+    const runs = limit === 0 ? [] : this.listRuns(routineId).slice(-limit)
+    return runs.reverse().map(toRoutineRunPublicDto)
+  }
 
-  transitionRun(runId: RoutineRunId, expectedVersion: number, next: RoutineRunState): RoutineRun {
+  transitionRun(runId: RoutineRunId, expectedVersion: number, next: RoutineRunState, options?: { attempt?: number }): RoutineRun {
     const current = this.readRun(runId)
     if (current.version !== expectedVersion) throw new Error(`Routine run version conflict: expected ${expectedVersion}, current ${current.version}`)
+    assertTransition(current.state, next)
     const path = this.transitionPath(current.runId, expectedVersion)
-    const marker = { runId: current.runId, expectedVersion, next }
+    const attempt = options?.attempt ?? current.attempt
+    if (!Number.isSafeInteger(attempt) || attempt < 1) throw new TypeError('attempt must be a positive safe integer')
+    const marker = { runId: current.runId, expectedVersion, next, attempt }
     if (!writeJsonIfAbsent(path, marker)) {
       const existing = readJsonFile(path) as Record<string, unknown> | null
       if (!existing || JSON.stringify(existing.next) !== JSON.stringify(next)) throw new Error('Routine run transition conflict')
     }
-    assertTransition(current.state, next)
-    const updated: RoutineRun = { ...current, state: clone(next), version: current.version + 1, updatedAt: this.clock() }
+    const updated: RoutineRun = { ...current, state: clone(next), attempt, version: current.version + 1, updatedAt: this.clock() }
     writeJsonRecord(this.runPath(current.runId), updated)
     removePointer(path)
     return clone(updated)
+  }
+
+  retryRun(runId: RoutineRunId, expectedVersion: number): RoutineRun {
+    const current = this.readRun(runId)
+    if (current.state.kind !== 'running') throw new Error('Only running routine runs can be retried')
+    return this.transitionRun(runId, expectedVersion, { kind: 'queued', at: this.clock() }, { attempt: current.attempt + 1 })
   }
 
   listRecoverableRuns(now = this.clock()): RoutineRun[] {
@@ -490,7 +514,7 @@ export class RoutineStore {
       const current = this.getRun(runId)
       if (!current) continue
       if (current.version === raw.expectedVersion) {
-        this.transitionRun(runId, raw.expectedVersion as number, raw.next as RoutineRunState)
+        this.transitionRun(runId, raw.expectedVersion as number, raw.next as RoutineRunState, { attempt: raw.attempt as number | undefined })
         transitions.push(runId)
       } else removePointer(join(transitionDir, file))
     }
@@ -515,7 +539,7 @@ export class RoutineStore {
   private readRevisionFile(routineId: RoutineId | string, revision: number): RoutineRevision { const raw = readJsonFile(this.revisionPath(routineId, revision)); if (!raw) throw new Error(`Routine revision not found: ${routineId}@${revision}`); return assertRevisionRecord(raw, this.workspaceId, assertId(routineId, 'routineId')) }
   private readOccurrence(id: TriggerOccurrenceId): RoutineOccurrence { const raw = readJsonFile(this.occurrencePath(id)); if (!raw) throw new Error(`Routine occurrence not found: ${id}`); return clone(assertOccurrence(raw, this.workspaceId)) }
   private readRun(id: RoutineRunId): RoutineRun { const raw = readJsonFile(this.runPath(id)); if (!raw) throw new Error(`Routine run not found: ${id}`); return clone(assertRun(raw, this.workspaceId)) }
-  private allRuns(): RoutineRun[] { const directory = join(this.rootPath, 'runs'); return readdirSync(directory).filter(file => file.endsWith('.json')).map(file => this.readRun(file.slice(0, -5) as RoutineRunId)) }
+  private allRuns(): RoutineRun[] { return this.listAllRuns() }
   private recordPath(id: RoutineId | string): string { return join(this.rootPath, 'routines', assertId(id, 'routineId'), 'record.json') }
   private revisionPath(id: RoutineId | string, revision: number): string { return join(this.rootPath, 'routines', assertId(id, 'routineId'), 'revisions', `${assertRevision(revision)}.json`) }
   private activePath(id: RoutineId | string): string { return join(this.rootPath, 'routines', assertId(id, 'routineId'), 'active.json') }
@@ -530,7 +554,7 @@ export class RoutineStore {
 
 function assertTransition(current: RoutineRunState, next: RoutineRunState): void {
   const allowed: Record<RoutineRunState['kind'], readonly RoutineRunState['kind'][]> = {
-    queued: ['claimed', 'cancelled'], claimed: ['running', 'queued', 'uncertain', 'cancelled'], running: ['awaiting-approval', 'succeeded', 'failed', 'uncertain', 'cancelled'], 'awaiting-approval': ['running', 'failed', 'cancelled', 'uncertain'], succeeded: [], failed: [], cancelled: [], uncertain: ['reconciled'], reconciled: [],
+    queued: ['claimed', 'cancelled'], claimed: ['running', 'queued', 'uncertain', 'cancelled'], running: ['queued', 'awaiting-approval', 'succeeded', 'failed', 'uncertain', 'cancelled'], 'awaiting-approval': ['running', 'failed', 'cancelled', 'uncertain'], succeeded: [], failed: [], cancelled: [], uncertain: ['reconciled'], reconciled: [],
   }
   if (!allowed[current.kind].includes(next.kind)) throw new Error(`Invalid routine run transition: ${current.kind} -> ${next.kind}`)
 }

@@ -8,7 +8,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, JournalEntry, StandingRule } from '@kata-sh/core'
+import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, ChannelPublicDto, JournalEntry, RoutinePublicDto, RoutineRevision, RoutineRunPublicDto, StandingRule } from '@kata-sh/core'
 import type { ApprovalCardView, HandoffRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +32,29 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [standingRules, setStandingRules] = React.useState<StandingRule[]>([])
   const [memory, setMemory] = React.useState<BotMemoryHead | null>(null)
   const [context, setContext] = React.useState<BotContextSnapshot | null>(null)
+  const [routines, setRoutines] = React.useState<RoutinePublicDto[]>([])
+  const [routineRuns, setRoutineRuns] = React.useState<Record<string, RoutineRunPublicDto[]>>({})
+  const [channels, setChannels] = React.useState<ChannelPublicDto[]>([])
+  const [routineName, setRoutineName] = React.useState('')
+  const [routineInput, setRoutineInput] = React.useState('')
+  const [routineExpectedResult, setRoutineExpectedResult] = React.useState('Done.')
+  const [routineTriggerKind, setRoutineTriggerKind] = React.useState<RoutineRevision['trigger']['kind']>('schedule')
+  const [routineEventSource, setRoutineEventSource] = React.useState('SessionStatusChange')
+  const [routineEventField, setRoutineEventField] = React.useState('newState')
+  const [routineEventValue, setRoutineEventValue] = React.useState('done')
+  const [routineCron, setRoutineCron] = React.useState('0 9 * * *')
+  const [routineTimezone, setRoutineTimezone] = React.useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const [routineApprovalBoundary, setRoutineApprovalBoundary] = React.useState<BotPublicDto['permissionMode']>('ask')
+  const [routineFailurePolicy, setRoutineFailurePolicy] = React.useState<'stop' | 'retry' | 'uncertain'>('uncertain')
+  const [routineDestinationKind, setRoutineDestinationKind] = React.useState<'direct' | 'channel'>('direct')
+  const [routineChannelId, setRoutineChannelId] = React.useState('')
+  const [routineBusy, setRoutineBusy] = React.useState<string | null>(null)
+  const [editingRoutineId, setEditingRoutineId] = React.useState<string | null>(null)
+  const [editRoutineName, setEditRoutineName] = React.useState('')
+  const [editRoutineInput, setEditRoutineInput] = React.useState('')
+  const [editRoutineExpectedResult, setEditRoutineExpectedResult] = React.useState('')
+  const [editRoutineCron, setEditRoutineCron] = React.useState('')
+  const [editRoutineTimezone, setEditRoutineTimezone] = React.useState('')
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
   const [message, setMessage] = React.useState('')
   const [sending, setSending] = React.useState(false)
@@ -50,6 +73,9 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     const loadedHandoffs = await window.electronAPI.listConversationHandoffs(journal.bot.directChatId)
     const loadedApprovals = await window.electronAPI.listConversationApprovals(journal.bot.directChatId)
     const loadedRules = await window.electronAPI.listStandingRules(botId)
+    const loadedRoutines = await window.electronAPI.listRoutines(workspaceId, botId)
+    const loadedChannels = await window.electronAPI.listChannels(workspaceId, { lifecycle: 'active' })
+    const loadedRuns = await Promise.all(loadedRoutines.map(async routine => [routine.routineId, await window.electronAPI.listRoutineRuns(workspaceId, routine.routineId, 5)] as const))
     if (generation !== refreshGeneration.current) return
     setBot(journal.bot)
     setEntries(journal.entries)
@@ -58,6 +84,9 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     setStandingRules(loadedRules)
     setMemory(loadedMemory)
     setContext(loadedContext)
+    setRoutines(loadedRoutines)
+    setRoutineRuns(Object.fromEntries(loadedRuns))
+    setChannels(loadedChannels)
   }, [workspaceId, botId])
 
   React.useEffect(() => {
@@ -74,13 +103,21 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       if (bot?.directChatId && event.conversationId !== bot.directChatId) return
       refresh().catch(err => console.error('[Bots] Failed to refresh approvals:', err))
     })
+    const unsubscribeRoutines = window.electronAPI.onRoutineEvent(() => {
+      refresh().catch(err => console.error('[Bots] Failed to refresh routines:', err))
+    })
     return () => {
       refreshGeneration.current += 1
       unsubscribe()
       unsubscribeHandoffs()
       unsubscribeApprovals()
+      unsubscribeRoutines()
     }
   }, [refresh, botId, bot?.directChatId])
+
+  React.useEffect(() => {
+    if (bot) setRoutineApprovalBoundary(bot.permissionMode)
+  }, [bot?.permissionMode])
 
   const openHandoff = React.useCallback((rail: HandoffRailView) => {
     updateRightSidebar({ type: 'handoff', conversationId: rail.conversationId, handoffId: rail.handoffId })
@@ -119,6 +156,121 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       setSavingMemory(null)
     }
   }, [memory, workspaceId, botId, refresh])
+
+  const createRoutine = React.useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!bot || !routineName.trim() || !routineInput.trim() || !routineExpectedResult.trim() || routineBusy) return
+    if (routineDestinationKind === 'channel' && !routineChannelId) return
+    setRoutineBusy('create')
+    try {
+      const trigger: RoutineRevision['trigger'] = routineTriggerKind === 'schedule'
+        ? { kind: 'schedule', cron: routineCron.trim(), timezone: routineTimezone.trim(), dst: { gap: 'skip', fold: 'once' } }
+        : routineTriggerKind === 'event'
+          ? { kind: 'event', source: routineEventSource.trim(), matcher: { field: routineEventField.trim(), equals: routineEventValue } }
+          : { kind: 'on-demand' }
+      await window.electronAPI.createRoutine(workspaceId, {
+        ownerBotId: botId,
+        name: routineName.trim(),
+        trigger,
+        input: routineInput.trim(),
+        expectedResult: routineExpectedResult.trim(),
+        approvalBoundary: routineApprovalBoundary,
+        failurePolicy: routineFailurePolicy,
+        destination: routineDestinationKind === 'channel'
+          ? { kind: 'channel', channelId: routineChannelId }
+          : { kind: 'direct', chatId: bot.directChatId },
+      })
+      setRoutineName('')
+      setRoutineInput('')
+      setRoutineExpectedResult('Done.')
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to create routine:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [bot, botId, routineBusy, routineName, routineInput, routineExpectedResult, routineTriggerKind, routineEventSource, routineEventField, routineEventValue, routineCron, routineTimezone, routineApprovalBoundary, routineFailurePolicy, routineDestinationKind, routineChannelId, workspaceId, refresh])
+
+  const beginEditRoutine = React.useCallback((routine: RoutinePublicDto) => {
+    setEditingRoutineId(routine.routineId)
+    setEditRoutineName(routine.name)
+    setEditRoutineInput(routine.revision.input)
+    setEditRoutineExpectedResult(routine.revision.expectedResult)
+    if (routine.revision.trigger.kind === 'schedule') {
+      setEditRoutineCron(routine.revision.trigger.cron)
+      setEditRoutineTimezone(routine.revision.trigger.timezone)
+    }
+  }, [])
+
+  const saveRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    setRoutineBusy(routine.routineId)
+    try {
+      const trigger = routine.revision.trigger.kind === 'schedule'
+        ? { kind: 'schedule' as const, cron: editRoutineCron.trim(), timezone: editRoutineTimezone.trim(), dst: { gap: 'skip' as const, fold: 'once' as const } }
+        : routine.revision.trigger
+      await window.electronAPI.updateRoutine(workspaceId, routine.routineId, {
+        name: editRoutineName.trim(),
+        input: editRoutineInput.trim(),
+        expectedResult: editRoutineExpectedResult.trim(),
+        trigger,
+      })
+      setEditingRoutineId(null)
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to edit routine:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [editRoutineName, editRoutineInput, editRoutineExpectedResult, editRoutineCron, editRoutineTimezone, workspaceId, refresh])
+
+  const runRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    setRoutineBusy(routine.routineId)
+    try {
+      await window.electronAPI.testRoutine(workspaceId, routine.routineId)
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to run routine:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [workspaceId, refresh])
+
+  const replayRoutine = React.useCallback(async (run: RoutineRunPublicDto) => {
+    setRoutineBusy(run.routineId)
+    try {
+      await window.electronAPI.replayRoutineRun(workspaceId, run.runId)
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to replay routine:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [workspaceId, refresh])
+
+  const toggleRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    setRoutineBusy(routine.routineId)
+    try {
+      if (routine.lifecycle === 'enabled') await window.electronAPI.pauseRoutine(workspaceId, routine.routineId)
+      else await window.electronAPI.enableRoutine(workspaceId, routine.routineId)
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to change routine state:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [workspaceId, refresh])
+
+  const deleteRoutine = React.useCallback(async (routine: RoutinePublicDto) => {
+    setRoutineBusy(routine.routineId)
+    try {
+      await window.electronAPI.deleteRoutine(workspaceId, routine.routineId)
+      await refresh()
+    } catch (err) {
+      console.error('[Bots] Failed to delete routine:', err)
+    } finally {
+      setRoutineBusy(null)
+    }
+  }, [workspaceId, refresh])
 
   const handleSend = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -183,6 +335,161 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
               </div>
             </div>
           ))}
+        </section>
+        <section data-testid="bot-routines-panel" className="rounded border border-foreground/10 p-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <strong>{t('routines.title')}</strong>
+            <span className="text-xs text-muted-foreground">{routines.length}</span>
+          </div>
+          <form onSubmit={createRoutine} className="grid gap-2 border-t border-foreground/10 pt-2">
+            <Input
+              data-testid="routine-name-input"
+              value={routineName}
+              onChange={event => setRoutineName(event.target.value)}
+              placeholder={t('routines.name')}
+              required
+            />
+            <Input
+              data-testid="routine-input"
+              value={routineInput}
+              onChange={event => setRoutineInput(event.target.value)}
+              placeholder={t('routines.input')}
+              required
+            />
+            <Input
+              data-testid="routine-expected-result-input"
+              value={routineExpectedResult}
+              onChange={event => setRoutineExpectedResult(event.target.value)}
+              placeholder={t('routines.expectedResult')}
+              aria-label={t('routines.expectedResult')}
+              required
+            />
+            <select
+              data-testid="routine-trigger-select"
+              className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+              value={routineTriggerKind}
+              onChange={event => setRoutineTriggerKind(event.target.value as RoutineRevision['trigger']['kind'])}
+              aria-label={t('routines.trigger')}
+            >
+              <option value="schedule">{t('routines.scheduleTrigger')}</option>
+              <option value="event">{t('routines.eventTrigger')}</option>
+              <option value="on-demand">{t('routines.onDemandTrigger')}</option>
+            </select>
+            {routineTriggerKind === 'schedule' && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  data-testid="routine-cron-input"
+                  value={routineCron}
+                  onChange={event => setRoutineCron(event.target.value)}
+                  placeholder={t('routines.cron')}
+                  aria-label={t('routines.cron')}
+                  required
+                />
+                <Input
+                  data-testid="routine-timezone-input"
+                  value={routineTimezone}
+                  onChange={event => setRoutineTimezone(event.target.value)}
+                  placeholder={t('routines.timezone')}
+                  aria-label={t('routines.timezone')}
+                  required
+                />
+              </div>
+            )}
+            {routineTriggerKind === 'event' && (
+              <div className="grid grid-cols-3 gap-2">
+                <Input data-testid="routine-event-source" value={routineEventSource} onChange={event => setRoutineEventSource(event.target.value)} placeholder={t('routines.eventSource')} aria-label={t('routines.eventSource')} required />
+                <Input data-testid="routine-event-field" value={routineEventField} onChange={event => setRoutineEventField(event.target.value)} placeholder={t('routines.eventField')} aria-label={t('routines.eventField')} required />
+                <Input data-testid="routine-event-value" value={routineEventValue} onChange={event => setRoutineEventValue(event.target.value)} placeholder={t('routines.eventValue')} aria-label={t('routines.eventValue')} required />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                data-testid="routine-approval-select"
+                className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+                value={routineApprovalBoundary}
+                onChange={event => setRoutineApprovalBoundary(event.target.value as BotPublicDto['permissionMode'])}
+                aria-label={t('routines.approvalBoundary')}
+              >
+                <option value="safe">{t('mode.safe')}</option>
+                <option value="ask">{t('mode.ask')}</option>
+                <option value="allow-all">{t('mode.allow-all')}</option>
+              </select>
+              <select
+                data-testid="routine-failure-select"
+                className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+                value={routineFailurePolicy}
+                onChange={event => setRoutineFailurePolicy(event.target.value as 'stop' | 'retry' | 'uncertain')}
+                aria-label={t('routines.failurePolicy')}
+              >
+                <option value="stop">{t('routines.failureStop')}</option>
+                <option value="retry">{t('routines.failureRetry')}</option>
+                <option value="uncertain">{t('routines.failureUncertain')}</option>
+              </select>
+            </div>
+            <select
+              data-testid="routine-destination-select"
+              className="h-8 rounded border border-foreground/15 bg-transparent px-2 text-sm"
+              value={routineDestinationKind === 'channel' ? `channel:${routineChannelId}` : 'direct'}
+              onChange={event => {
+                const value = event.target.value
+                if (value === 'direct') setRoutineDestinationKind('direct')
+                else { setRoutineDestinationKind('channel'); setRoutineChannelId(value.slice('channel:'.length)) }
+              }}
+              aria-label={t('routines.destination')}
+            >
+              <option value="direct">{t('routines.directDestination')}</option>
+              {channels.filter(channel => channel.members.some(member => member.botId === botId)).map(channel => (
+                <option key={channel.channelId} value={`channel:${channel.channelId}`}>{channel.name}</option>
+              ))}
+            </select>
+            <Button type="submit" size="sm" disabled={routineBusy !== null} data-testid="routine-create">
+              {t('routines.create')}
+            </Button>
+          </form>
+          {routines.length === 0 ? (
+            <p data-testid="routine-empty" className="text-xs text-muted-foreground">{t('routines.noRoutines')}</p>
+          ) : routines.map(routine => {
+            const trigger = routine.revision.trigger
+            const latest = routineRuns[routine.routineId]?.[0]
+            return (
+              <div key={routine.routineId} data-testid={`routine-${routine.routineId}`} data-routine-state={routine.lifecycle} className="flex flex-col gap-1 border-t border-foreground/10 pt-2">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <strong>{routine.name}</strong>
+                  <span className="text-xs text-muted-foreground">{t('routines.status', { status: latest?.state.kind ?? routine.lifecycle })}</span>
+                </div>
+                  <div className="text-xs text-muted-foreground">
+                  {trigger.kind === 'schedule'
+                    ? `${trigger.cron} · ${trigger.timezone}${routine.nextRunAt ? ` · ${new Date(routine.nextRunAt).toLocaleString()}` : ''}`
+                    : trigger.kind === 'event' ? `${t('routines.eventTrigger')} · ${trigger.source}` : t('routines.onDemandTrigger')}
+                </div>
+                {editingRoutineId === routine.routineId && (
+                  <div data-testid={`routine-edit-${routine.routineId}`} className="grid gap-2">
+                    <Input value={editRoutineName} onChange={event => setEditRoutineName(event.target.value)} aria-label={t('routines.name')} required />
+                    <Input value={editRoutineInput} onChange={event => setEditRoutineInput(event.target.value)} aria-label={t('routines.input')} required />
+                    <Input value={editRoutineExpectedResult} onChange={event => setEditRoutineExpectedResult(event.target.value)} aria-label={t('routines.expectedResult')} required />
+                    {trigger.kind === 'schedule' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input value={editRoutineCron} onChange={event => setEditRoutineCron(event.target.value)} aria-label={t('routines.cron')} required />
+                        <Input value={editRoutineTimezone} onChange={event => setEditRoutineTimezone(event.target.value)} aria-label={t('routines.timezone')} required />
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" disabled={routineBusy !== null} onClick={() => saveRoutine(routine)}>{t('bots.memorySave')}</Button>
+                      <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} onClick={() => setEditingRoutineId(null)}>{t('common.cancel')}</Button>
+                    </div>
+                  </div>
+                )}
+                {latest && <div data-testid={`routine-latest-${routine.routineId}`} className="text-xs whitespace-pre-wrap break-words">{latest.state.kind === 'succeeded' ? latest.state.result : latest.state.kind === 'failed' ? latest.state.error : latest.state.kind}</div>}
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" disabled={routineBusy !== null} data-testid={`routine-run-${routine.routineId}`} onClick={() => runRoutine(routine)}>{t('routines.runNow')}</Button>
+                  {latest && <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-replay-${routine.routineId}`} onClick={() => replayRoutine(latest)}>{t('routines.replay')}</Button>}
+                  <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-toggle-${routine.routineId}`} onClick={() => toggleRoutine(routine)}>{routine.lifecycle === 'enabled' ? t('routines.pause') : t('routines.resume')}</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-edit-button-${routine.routineId}`} onClick={() => beginEditRoutine(routine)}>{t('routines.edit')}</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-delete-${routine.routineId}`} onClick={() => deleteRoutine(routine)}>{t('routines.delete')}</Button>
+                </div>
+              </div>
+            )
+          })}
         </section>
         <section data-testid="bot-memory-panel" className="rounded border border-foreground/10 p-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">

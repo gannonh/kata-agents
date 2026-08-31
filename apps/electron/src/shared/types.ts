@@ -371,6 +371,21 @@ export interface ElectronAPI {
   }>
   onBotEvent(callback: (event: { type: string; botId?: string; chatId?: string; bot?: unknown }) => void): () => void
 
+  // Durable Bot routines
+  listRoutines(workspaceId: string, ownerBotId?: string): Promise<import('@kata-sh/core').RoutinePublicDto[]>
+  getRoutine(workspaceId: string, routineId: string): Promise<import('@kata-sh/core').RoutinePublicDto>
+  createRoutine(workspaceId: string, input: import('@kata-sh/shared/routines').CreateRoutineInput): Promise<import('@kata-sh/core').RoutinePublicDto>
+  updateRoutine(workspaceId: string, routineId: string, input: import('@kata-sh/shared/routines').UpdateRoutineInput): Promise<import('@kata-sh/core').RoutinePublicDto>
+  enableRoutine(workspaceId: string, routineId: string): Promise<import('@kata-sh/core').RoutinePublicDto>
+  pauseRoutine(workspaceId: string, routineId: string): Promise<import('@kata-sh/core').RoutinePublicDto>
+  deleteRoutine(workspaceId: string, routineId: string): Promise<import('@kata-sh/core').RoutinePublicDto>
+  testRoutine(workspaceId: string, routineId: string): Promise<import('@kata-sh/core').RoutineRunPublicDto>
+  listRoutineRuns(workspaceId: string, routineId: string, limit?: number): Promise<import('@kata-sh/core').RoutineRunPublicDto[]>
+  replayRoutineRun(workspaceId: string, runId: string): Promise<import('@kata-sh/core').RoutineRunPublicDto>
+  resumeRoutineApproval(workspaceId: string, input: { runId: string; expectedVersion: number }): Promise<import('@kata-sh/core').RoutineRunPublicDto>
+  ingestRoutineEvent(workspaceId: string, event: { source: string; externalEventId: string; payload: unknown; occurredAt?: string }): Promise<import('@kata-sh/core').RoutineRunPublicDto[]>
+  onRoutineEvent(callback: (event: { type: string; routineId?: string; runId?: string }) => void): () => void
+
   // Channels
   listChannels(workspaceId: string, filter?: { lifecycle?: 'active' | 'archived' | 'all' }): Promise<import('@kata-sh/core').ChannelPublicDto[]>
   getChannel(workspaceId: string, channelId: string): Promise<import('@kata-sh/core').ChannelPublicDto>

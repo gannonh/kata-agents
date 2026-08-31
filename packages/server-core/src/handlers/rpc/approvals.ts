@@ -12,6 +12,16 @@ import {
   type ApprovalRuntime,
 } from '../../approvals/runtime'
 
+const LIVE_LINK_CLEANUP_MS = 120_000
+
+function retainRequestlessLink(runtime: ApprovalRuntime, approvalId: string, sessionId: string): void {
+  const cleanup = setTimeout(() => {
+    const current = runtime.links.get(approvalId)
+    if (current?.sessionId === sessionId && !current.requestId) runtime.links.delete(approvalId)
+  }, LIVE_LINK_CLEANUP_MS)
+  cleanup.unref?.()
+}
+
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.approvals.LIST,
   RPC_CHANNELS.approvals.RESOLVE,
@@ -85,13 +95,35 @@ export function registerApprovalsHandlers(server: RpcServer, deps: HandlerDeps):
           try {
             runtime.broker.claimExecution(record.approvalId, link.invocation)
           } catch (error) {
-            sessionManager.respondToPermission(link.sessionId, link.requestId, false, false)
+            try {
+              const current = runtime.store.get(record.approvalId)
+              if (current?.status === 'allowed-once') runtime.store.markStale(record.approvalId)
+            } catch { /* the approval may have reached a terminal state concurrently */ }
+            try {
+              sessionManager.respondToPermission(link.sessionId, link.requestId, false, false)
+            } finally {
+              runtime.links.delete(record.approvalId)
+            }
+            try {
+              await sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(record.approvalId, false)
+            } catch (recoveryError) {
+              console.error('[Approvals] Failed to cancel routine after claim failure', recoveryError)
+            }
             throw error
           }
         }
         sessionManager.respondToPermission(link.sessionId, link.requestId, input.choice === 'allow-once', false)
+        runtime.links.delete(record.approvalId)
+      } else if (input.choice === 'deny' && link) {
+        retainRequestlessLink(runtime, record.approvalId, link.sessionId)
+      } else if (link && input.choice === 'allow-once') {
+        retainRequestlessLink(runtime, record.approvalId, link.sessionId)
       }
       notifyApproval(runtime, runtime.store.get(record.approvalId) ?? record)
+      void sessionManager.getRoutineEngine(runtime.workspaceId)?.onApprovalResolved(
+        record.approvalId,
+        input.choice === 'allow-once',
+      ).catch(error => console.error('[Approvals] Failed to resume routine run:', error))
       return toApprovalCardView(runtime.store.get(record.approvalId) ?? record)
     },
   )

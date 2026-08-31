@@ -311,13 +311,16 @@ describe('ApprovalStore and ToolBroker', () => {
     expect(verdict.reason).toBe('denied')
   })
 
-  it('preExecute rejects a runtime identity mismatch', () => {
+  it('rejects a runtime identity mismatch before approval consumption', () => {
     const owner = broker(tempWorkspace())
     const asked = owner.authorize(invocation(), 'ask')
     expect(asked.kind).toBe('ask')
     if (asked.kind !== 'ask') return
     owner.resolve(asked.request.approvalId, asked.request.version, 'allow-once')
-    const verdict = owner.preExecute(asked.request.approvalId, invocation({ runtimeId: 'session_other' }))
+    const otherSession = invocation({ runtimeId: 'session_other' })
+    expect(() => owner.claimExecution(asked.request.approvalId, otherSession)).toThrow(ApprovalConflictError)
+    expect(owner.store.get(asked.request.approvalId)?.status).toBe('allowed-once')
+    const verdict = owner.preExecute(asked.request.approvalId, otherSession)
     expect(verdict.kind).toBe('block')
     if (verdict.kind !== 'block') return
     expect(verdict.reason).toBe('unauthorized')

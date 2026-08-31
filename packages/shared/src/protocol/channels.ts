@@ -58,6 +58,21 @@ export const RPC_CHANNELS = {
   tasks: {
     GET_OUTPUT: 'tasks:getOutput',
   },
+  routines: {
+    LIST: 'routines:list',
+    GET: 'routines:get',
+    CREATE: 'routines:create',
+    UPDATE: 'routines:update',
+    ENABLE: 'routines:enable',
+    PAUSE: 'routines:pause',
+    DELETE: 'routines:delete',
+    TEST: 'routines:test',
+    LIST_RUNS: 'routines:listRuns',
+    REPLAY: 'routines:replay',
+    RESUME_APPROVAL: 'routines:resumeApproval',
+    INGEST_EVENT: 'routines:ingestEvent',
+    EVENT: 'routines:event',
+  },
   bots: {
     LIST: 'bots:list',
     GET: 'bots:get',

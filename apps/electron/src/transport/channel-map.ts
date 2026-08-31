@@ -46,6 +46,21 @@ export const CHANNEL_MAP = {
   convertSessionToBot: invoke(RPC_CHANNELS.bots.CONVERT_SESSION),
   onBotEvent: listener(RPC_CHANNELS.bots.EVENT),
 
+  // Durable Bot routines
+  listRoutines: invoke(RPC_CHANNELS.routines.LIST),
+  getRoutine: invoke(RPC_CHANNELS.routines.GET),
+  createRoutine: invoke(RPC_CHANNELS.routines.CREATE),
+  updateRoutine: invoke(RPC_CHANNELS.routines.UPDATE),
+  enableRoutine: invoke(RPC_CHANNELS.routines.ENABLE),
+  pauseRoutine: invoke(RPC_CHANNELS.routines.PAUSE),
+  deleteRoutine: invoke(RPC_CHANNELS.routines.DELETE),
+  testRoutine: invoke(RPC_CHANNELS.routines.TEST),
+  listRoutineRuns: invoke(RPC_CHANNELS.routines.LIST_RUNS),
+  replayRoutineRun: invoke(RPC_CHANNELS.routines.REPLAY),
+  resumeRoutineApproval: invoke(RPC_CHANNELS.routines.RESUME_APPROVAL),
+  ingestRoutineEvent: invoke(RPC_CHANNELS.routines.INGEST_EVENT),
+  onRoutineEvent: listener(RPC_CHANNELS.routines.EVENT),
+
   // Channels
   listChannels: invoke(RPC_CHANNELS.channels.LIST),
   getChannel: invoke(RPC_CHANNELS.channels.GET),

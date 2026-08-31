@@ -93,6 +93,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
   // Core handler channels (now in server-core)
   const [
     auth,
+    approvals,
     automations,
     bots,
     channels,
@@ -111,9 +112,11 @@ async function getExpectedChannels(): Promise<Set<string>> {
     coreWorkspace,
     onboarding,
     resources,
+    routines,
     transfer,
   ] = await Promise.all([
     import('@kata-sh/server-core/handlers/rpc/auth'),
+    import('@kata-sh/server-core/handlers/rpc/approvals'),
     import('@kata-sh/server-core/handlers/rpc/automations'),
     import('@kata-sh/server-core/handlers/rpc/bots'),
     import('@kata-sh/server-core/handlers/rpc/channels'),
@@ -132,6 +135,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     import('@kata-sh/server-core/handlers/rpc/workspace'),
     import('@kata-sh/server-core/handlers/rpc/onboarding'),
     import('@kata-sh/server-core/handlers/rpc/resources'),
+    import('@kata-sh/server-core/handlers/rpc/routines'),
     import('@kata-sh/server-core/handlers/rpc/transfer'),
   ])
 
@@ -145,6 +149,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
 
   return new Set([
     ...auth.HANDLED_CHANNELS,
+    ...approvals.HANDLED_CHANNELS,
     ...automations.HANDLED_CHANNELS,
     ...bots.HANDLED_CHANNELS,
     ...channels.HANDLED_CHANNELS,
@@ -163,6 +168,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...coreWorkspace.CORE_HANDLED_CHANNELS,
     ...onboarding.HANDLED_CHANNELS,
     ...resources.HANDLED_CHANNELS,
+    ...routines.HANDLED_CHANNELS,
     ...transfer.HANDLED_CHANNELS,
     ...browser.HANDLED_CHANNELS,
     ...guiSystem.GUI_HANDLED_CHANNELS,

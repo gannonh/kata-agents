@@ -125,6 +125,19 @@ describe('AutomationSystem', () => {
     });
   });
 
+  describe('scheduler bridge', () => {
+    it('emits legacy SchedulerTick events when driven by the routine clock', async () => {
+      const system = new AutomationSystem({ workspaceRootPath: tempDir, workspaceId: 'test-workspace' })
+      const payloads: Array<{ timestamp: number; utcTime: string }> = []
+      system.eventBus.on('SchedulerTick', payload => payloads.push({ timestamp: payload.timestamp, utcTime: payload.utcTime }))
+
+      await system.emitSchedulerTick('2026-08-31T12:34:56.000Z')
+
+      expect(payloads).toEqual([{ timestamp: Date.parse('2026-08-31T12:34:56.000Z'), utcTime: '2026-08-31T12:34:56.000Z' }])
+      await system.dispose()
+    })
+  })
+
   describe('reloadConfig', () => {
     it('should reload automations.json', async () => {
       const system = new AutomationSystem({

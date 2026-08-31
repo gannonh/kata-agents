@@ -53,8 +53,8 @@ import {
   type WorkspaceInfo,
 } from '@kata-sh/shared/config'
 import type { ActiveSessionInfo, SessionProcessingStatus } from '@kata-sh/core/types'
-import { APPROVAL_SCHEMA_VERSION, type BotTurnContext, type SpawnTask, type SpawnTaskJsonValue } from '@kata-sh/core'
-import { resolveToolTarget } from '@kata-sh/shared/tools'
+import { APPROVAL_SCHEMA_VERSION, type BotTurnContext, type RoutineRunId, type SpawnTask, type SpawnTaskJsonValue } from '@kata-sh/core'
+import { computeOperationHash, resolveToolTarget } from '@kata-sh/shared/tools'
 import { loadWorkspaceConfig } from '@kata-sh/shared/workspaces'
 import {
   // Session persistence functions
@@ -98,6 +98,7 @@ import { toolMetadataStore, getLastApiError } from '@kata-sh/shared/interceptor'
 import { isParentTaskTool } from '@kata-sh/shared/utils/toolNames'
 import { restoreFiles } from '@kata-sh/shared/utils/bundle-files'
 import { getCredentialManager } from '@kata-sh/shared/credentials'
+import { BotRoutineExecutor, RoutineEngine } from '../routines'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@kata-sh/shared/mcp'
 import { type Session, type SessionCheckout, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type WorktreeRemovalConfirmation, RPC_CHANNELS, WorktreeV2CapabilityError, CodedError, WORKTREE_FORK_PENDING_CODE, WORKTREE_FORK_ERROR_CODE, generateMessageId } from '@kata-sh/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@kata-sh/core/types'
@@ -969,6 +970,10 @@ interface ManagedSession {
     workspaceId: string
     botId: string
     conversationId: string
+    routineRunId?: RoutineRunId
+    routineAttempt?: number
+    permissionMode?: PermissionMode
+    approvalInvocation?: import('@kata-sh/core').ToolInvocation
   }
   branchFromMessageId?: string
   // Branch context strategy:
@@ -1303,6 +1308,9 @@ export class SessionManager implements ISessionManager {
   private configWatchers: Map<string, ConfigWatcher> = new Map()
   // Automation systems for workspace event automations - one per workspace (includes scheduler, diffing, and handlers)
   private automationSystems: Map<string, AutomationSystem> = new Map()
+  // Durable Bot routine engines - one per workspace, sharing this manager's lifecycle.
+  private routineEngines: Map<string, RoutineEngine> = new Map()
+  private cleanupPromise: Promise<void> | null = null
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('@kata-sh/shared/protocol').CredentialResponse) => void> = new Map()
   // Permission request metadata tracking (keyed by requestId)
@@ -1970,12 +1978,13 @@ export class SessionManager implements ISessionManager {
     watcher.start()
     this.configWatchers.set(workspaceRootPath, watcher)
 
-    // Initialize AutomationSystem for this workspace (includes scheduler, handlers, and event logging)
+    // Initialize legacy automation handlers. RoutineEngine owns the workspace
+    // clock and forwards one deduplicated SchedulerTick to this system.
     if (!this.automationSystems.has(workspaceRootPath)) {
       const automationSystem = new AutomationSystem({
         workspaceRootPath,
         workspaceId,
-        enableScheduler: true,
+        enableScheduler: false,
         onPromptsReady: async (prompts) => {
           // Execute prompt automations by creating new sessions
           const settled = await Promise.allSettled(
@@ -2025,6 +2034,56 @@ export class SessionManager implements ISessionManager {
       this.automationSystems.set(workspaceRootPath, automationSystem)
       sessionLog.info(`Initialized AutomationSystem for workspace ${workspaceId}`)
     }
+
+    const routineEngine = this.ensureRoutineEngine(workspaceRootPath, workspaceId)
+    const automationSystem = this.automationSystems.get(workspaceRootPath)
+    if (automationSystem) {
+      automationSystem.eventBus.onAny((event, payload) => {
+        if (!this.sessionsInitialized) return
+        const externalEventId = `automation:${event}:${randomUUID()}`
+        void routineEngine.ingestEvent({
+          source: event,
+          externalEventId,
+          payload,
+          occurredAt: new Date(payload.timestamp).toISOString(),
+        }).catch(error => sessionLog.error(`Failed to ingest ${event} for routines:`, error))
+      })
+    }
+    if (this.sessionsInitialized) {
+      void routineEngine.start().catch(error => sessionLog.error(`Failed to start routine engine for ${workspaceId}:`, error))
+    }
+  }
+
+  /** Return the durable routine engine for an accessible workspace. */
+  getRoutineEngine(workspaceId: string): RoutineEngine | null {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    return workspace ? this.routineEngines.get(workspace.rootPath) ?? null : null
+  }
+
+  private ensureRoutineEngine(workspaceRootPath: string, workspaceId: string): RoutineEngine {
+    const existing = this.routineEngines.get(workspaceRootPath)
+    if (existing) return existing
+    const executor = new BotRoutineExecutor({
+      sessionManager: this,
+      workspaceRoot: workspaceRootPath,
+      workspaceId,
+    })
+    const engine = new RoutineEngine({
+      workspaceRoot: workspaceRootPath,
+      workspaceId,
+      execute: executor,
+      onChanged: routineId => {
+        this.eventSink?.(
+          RPC_CHANNELS.routines.EVENT,
+          { to: 'workspace', workspaceId },
+          { type: 'routine-updated', routineId },
+        )
+      },
+      onLegacyScheduleTick: timestamp => this.automationSystems.get(workspaceRootPath)?.emitSchedulerTick(timestamp),
+    })
+    this.routineEngines.set(workspaceRootPath, engine)
+    sessionLog.info(`Initialized RoutineEngine for workspace ${workspaceId}`)
+    return engine
   }
 
   /**
@@ -2217,6 +2276,14 @@ export class SessionManager implements ISessionManager {
 
       // Load existing sessions from disk
       await this.loadSessionsFromDisk()
+
+      await Promise.all([...this.routineEngines].map(async ([workspaceRootPath, engine]) => {
+        try {
+          await engine.start()
+        } catch (error) {
+          sessionLog.error(`Failed to start routine engine for ${workspaceRootPath}:`, error)
+        }
+      }))
 
       // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
       this.initGate.markReady()
@@ -2718,8 +2785,7 @@ export class SessionManager implements ISessionManager {
 
     return {
       automationCount,
-      // SchedulerService is running if the system was created with enableScheduler
-      schedulerRunning: !automationSystem.isDisposed(),
+      schedulerRunning: this.routineEngines.get(workspace.rootPath)?.isRunning() ?? false,
     }
   }
 
@@ -4677,19 +4743,69 @@ export class SessionManager implements ISessionManager {
             promptSummary: `${request.toolName} permission requested`,
           })
           if (!canAwait) return
+          if (this.sessions.get(managed.id) !== managed || this.sessionTeardownFences.has(managed.id) || !managed.agent) {
+            sessionLog.warn(`Ignoring permission request for unavailable session ${managed.id}`)
+            return
+          }
 
           sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
+          const routineRunId = managed.botRuntimeAuthority?.routineRunId
+          const routineApprovalAccepted = request.approvalId && routineRunId
+            ? this.getRoutineEngine(managed.workspace.id)?.onApprovalRequest(routineRunId, request.approvalId, request.requestId)
+            : undefined
+          if (routineApprovalAccepted === false) {
+            try {
+              const runtime = getApprovalRuntime(managed.workspace.id)
+              const record = runtime.store.get(request.approvalId!)
+              if (record?.status === 'pending') {
+                try { runtime.broker.resolve(record.approvalId, record.version, 'deny') } catch { /* another resolver won */ }
+              }
+              runtime.links.delete(request.approvalId!)
+            } catch { /* cleanup is best effort during teardown */ }
+            const agent = managed.agent
+            if (!agent) throw new Error('Routine approval session is unavailable')
+            try {
+              agent.respondToPermission(request.requestId, false, false)
+              const resumed = await this.resumeSpawnTaskInput(managed, request.requestId)
+              if (!resumed) await this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${request.requestId}.`)
+            } catch (error) {
+              await this.interruptSpawnTaskInput(managed, error)
+            }
+            return
+          }
           if (request.approvalId && managed.botRuntimeAuthority) {
             const runtime = getApprovalRuntime(managed.workspace.id)
-            const pending = runtime.store.get(request.approvalId)
-            if (pending?.status === 'pending') {
-              const link = runtime.links.get(request.approvalId)
-              if (link) runtime.links.set(request.approvalId, { ...link, requestId: request.requestId })
-              announceApproval(runtime, pending)
+            const record = runtime.store.get(request.approvalId)
+            const link = runtime.links.get(request.approvalId)
+            if (link) runtime.links.set(request.approvalId, { ...link, requestId: request.requestId })
+            if (record?.status === 'pending') {
+              announceApproval(runtime, record)
               this.pendingPermissionRequests.set(request.requestId, {
                 sessionId: managed.id,
                 type: request.type,
               })
+              return
+            }
+            if (record) {
+              const agent = managed.agent
+              if (!agent) throw new Error('Routine approval session is unavailable')
+              if (record.status === 'allowed-once') {
+                if (!link?.invocation) throw new Error('Routine approval invocation is missing')
+                runtime.broker.claimExecution(record.approvalId, link.invocation)
+              }
+              this.pendingPermissionRequests.set(request.requestId, {
+                sessionId: managed.id,
+                type: request.type,
+              })
+              try {
+                agent.respondToPermission(request.requestId, record.status === 'allowed-once' || record.status === 'consumed', false)
+                const resumed = await this.resumeSpawnTaskInput(managed, request.requestId)
+                if (!resumed) await this.interruptSpawnTaskInput(managed, `Permission response could not resume request ${request.requestId}.`)
+              } catch (error) {
+                await this.interruptSpawnTaskInput(managed, error)
+              } finally {
+                runtime.links.delete(request.approvalId)
+              }
               return
             }
           }
@@ -8218,7 +8334,7 @@ export class SessionManager implements ISessionManager {
      * that should host this session's browser tools. Pass undefined when calling
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
-    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext },
+    rpcContext?: { callerClientId?: string; botTurnContext?: BotTurnContext; botRoutineRunId?: string; botPermissionMode?: PermissionMode; botAttempt?: number; botApprovalInvocation?: import('@kata-sh/core').ToolInvocation },
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -8229,6 +8345,10 @@ export class SessionManager implements ISessionManager {
         workspaceId: rpcContext.botTurnContext.workspaceId,
         botId: rpcContext.botTurnContext.botId,
         conversationId: rpcContext.botTurnContext.conversationId,
+        routineRunId: rpcContext.botRoutineRunId as RoutineRunId | undefined,
+        routineAttempt: rpcContext.botAttempt,
+        permissionMode: rpcContext.botPermissionMode,
+        approvalInvocation: rpcContext.botApprovalInvocation,
       }
       this.bindBotToolPolicy(managed)
     }
@@ -9362,7 +9482,7 @@ export class SessionManager implements ISessionManager {
     const authority = managed.botRuntimeAuthority
     managed.agent.evaluateToolPolicy = (toolName, input) => {
       const runtime = getApprovalRuntime(managed.workspace.id)
-      const mode = managed.permissionMode ?? 'ask'
+      const mode = authority.permissionMode ?? managed.permissionMode ?? 'ask'
       const standingRules = runtime.rules.list(authority.botId)
       const policyRevision = [mode, ...standingRules.map((rule) => `${rule.ruleId}:${rule.version}:${rule.state}`).sort()].join('|')
       const invocation = {
@@ -9373,9 +9493,13 @@ export class SessionManager implements ISessionManager {
         toolName,
         toolSchemaVersion: String(APPROVAL_SCHEMA_VERSION),
         normalizedInput: input,
-        attempt: 1 as const,
+        attempt: authority.routineAttempt ?? 1,
         target: resolveToolTarget(toolName, input),
         policyRevision,
+      }
+      if (authority.approvalInvocation && computeOperationHash(authority.approvalInvocation) === computeOperationHash(invocation)) {
+        authority.approvalInvocation = undefined
+        return { kind: 'allow' as const }
       }
       const result = runtime.broker.authorize(invocation, mode, standingRules)
       if (result.kind === 'allow') return { kind: 'allow' as const }
@@ -9403,6 +9527,11 @@ export class SessionManager implements ISessionManager {
     alwaysAllow: boolean,
     options?: import('@kata-sh/shared/protocol').PermissionResponseOptions,
   ): boolean {
+    const requestMeta = this.pendingPermissionRequests.get(requestId)
+    if (!requestMeta || requestMeta.sessionId !== sessionId) {
+      sessionLog.warn(`Ignoring duplicate or unknown permission response ${requestId}`)
+      return false
+    }
     const managed = this.sessions.get(sessionId)
     if (managed?.spawnTaskRef && !this.spawnedTaskInputResponseIsCurrent(managed, requestId, 'permission_response')) {
       this.pendingPermissionRequests.delete(requestId)
@@ -9412,7 +9541,6 @@ export class SessionManager implements ISessionManager {
       return false
     }
     if (managed?.agent) {
-      const requestMeta = this.pendingPermissionRequests.get(requestId)
       this.pendingPermissionRequests.delete(requestId)
 
       if (requestMeta?.type === 'admin_approval') {
@@ -11045,6 +11173,21 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    void this.cleanupAsync().catch(error => sessionLog.error('Failed to clean up SessionManager:', error))
+  }
+
+  async cleanupAsync(): Promise<void> {
+    if (this.cleanupPromise) return this.cleanupPromise
+    const promise = this.cleanupOwned()
+    this.cleanupPromise = promise
+    try {
+      await promise
+    } finally {
+      if (this.cleanupPromise === promise) this.cleanupPromise = null
+    }
+  }
+
+  private async cleanupOwned(): Promise<void> {
     sessionLog.info('Cleaning up resources...')
 
     // Stop all ConfigWatchers (file system watchers)
@@ -11053,6 +11196,16 @@ export class SessionManager implements ISessionManager {
       sessionLog.info(`Stopped config watcher for ${path}`)
     }
     this.configWatchers.clear()
+
+    const routineStops = [...this.routineEngines.entries()].map(async ([workspacePath, engine]) => {
+      try {
+        await engine.stop()
+      } catch (error) {
+        sessionLog.error(`Failed to stop routine engine for ${workspacePath}:`, error)
+      }
+    })
+    await Promise.all(routineStops)
+    this.routineEngines.clear()
 
     // Dispose all AutomationSystems (includes scheduler, handlers, and event loggers)
     for (const [workspacePath, automationSystem] of this.automationSystems) {

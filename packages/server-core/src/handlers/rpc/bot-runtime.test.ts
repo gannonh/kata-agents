@@ -291,6 +291,37 @@ describe('sendToBotSession', () => {
     expect(sessions.get('session-1')?.messages.filter(message => message.role === 'user')).toHaveLength(2)
   })
 
+  it('preserves an unresolved routine dispatch instead of replaying an idle provider turn', async () => {
+    const fixture = makeSessionManager()
+    const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-uncertain-'))
+    const sessionPointerPath = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-session')
+    mkdirSync(join(root, 'channels', 'channel-one', 'members', 'bot-one'), { recursive: true })
+    writeFileSync(sessionPointerPath, 'session-1\\n')
+    fixture.sessions.set('session-1', {
+      id: 'session-1',
+      workspaceId: target.workspaceId,
+      hidden: true,
+      model: target.providerConfig.modelId,
+      llmConnection: target.providerConfig.providerId,
+      messages: [{ id: 'user-one', role: 'user', content: 'mutate' }],
+    })
+    const key = 'dispatch.uncertain'
+    const dispatchDir = join(root, 'channels', 'channel-one', 'members', 'bot-one', 'provider-dispatches')
+    mkdirSync(dispatchDir, { recursive: true })
+    const hash = createHash('sha256').update(key).digest('hex')
+    const dispatchPath = join(dispatchDir, `${hash}.json`)
+    writeFileSync(dispatchPath, JSON.stringify({ schemaVersion: 1, dispatchIdempotencyKey: key, sessionId: 'session-1', state: 'pending', userMessageId: 'user-one' }))
+
+    await expect(sendToBotSession(
+      fixture.manager as unknown as HandlerDeps['sessionManager'],
+      { ...target, sessionPointerPath },
+      'mutate',
+      { waitForReply: true, dispatchIdempotencyKey: key, stopOnPendingApproval: true },
+    )).rejects.toThrow('uncertain')
+    expect(fixture.calls).toEqual([])
+    expect(JSON.parse(readFileSync(dispatchPath, 'utf8')).state).toBe('pending')
+  })
+
   it('invalidates provider session pointers when deleteSession fails so the next send creates a new session', async () => {
     const fixture = makeSessionManager()
     const root = mkdtempSync(join(tmpdir(), 'kata-bot-runtime-reset-fail-'))

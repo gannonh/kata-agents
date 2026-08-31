@@ -194,6 +194,12 @@ export class ApprovalStore {
     if (current.status === 'stale') throw new ApprovalConflictError('stale')
     if (current.status === 'denied') throw new ApprovalConflictError('denied')
     if (current.status !== 'allowed-once') throw new ApprovalConflictError('consumed')
+    if (
+      current.workspaceId !== invocation.workspaceId
+      || current.botId !== invocation.botId
+      || current.conversationId !== invocation.conversationId
+      || current.runtimeId !== invocation.runtimeId
+    ) throw new ApprovalConflictError('unauthorized')
     const liveHash = computeOperationHash(invocation)
     if (current.operationHash !== liveHash || current.targetFingerprint !== invocation.target.fingerprint) {
       const stale: ApprovalStale = {

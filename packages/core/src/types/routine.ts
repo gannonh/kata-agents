@@ -100,6 +100,7 @@ export interface RoutineRun {
   readonly destination: RoutineDestination
   readonly input: string
   readonly state: RoutineRunState
+  readonly attempt: number
   readonly version: number
   readonly createdAt: string
   readonly updatedAt: string
@@ -114,6 +115,7 @@ export interface RoutinePublicDto {
   readonly lifecycle: RoutineLifecycle
   readonly activeRevision: number
   readonly revision: RoutineRevision
+  readonly nextRunAt?: string
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -137,6 +139,7 @@ export interface RoutineRunPublicDto {
   readonly origin: RoutineRunOrigin
   readonly destination: RoutineDestination
   readonly state: RoutinePublicRunState
+  readonly attempt: number
   readonly version: number
   readonly createdAt: string
   readonly updatedAt: string

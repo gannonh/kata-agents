@@ -3,9 +3,10 @@ import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { botProviderSessionPath } from '@kata-sh/shared/bots'
 import { channelProviderSessionPath, RetryableStageDispatchError } from '@kata-sh/shared/channels'
-import type { BotPermissionMode, BotProviderConfig } from '@kata-sh/core'
+import type { ApprovalPending, BotPermissionMode, BotProviderConfig, ToolInvocation } from '@kata-sh/core'
 import type { BotTurnContext } from '@kata-sh/core'
 import type { HandlerDeps } from '../handler-deps'
+import { getApprovalRuntime } from '../../approvals/runtime'
 import { ensureDurableDirectory, syncDirectory, writeDurableFile, writeDurableFileIfAbsent } from '@kata-sh/shared/spawn-tasks/durable-fs'
 
 export interface BotSessionTarget {
@@ -15,6 +16,26 @@ export interface BotSessionTarget {
   readonly permissionMode: BotPermissionMode
   readonly providerConfig: BotProviderConfig
   readonly sessionPointerPath: string
+  /** Public conversation that owns this Bot turn, when the caller needs approval recovery. */
+  readonly conversationId?: string
+  /** Exact approved invocation used only to reconstruct a provider turn after restart. */
+  readonly approvalInvocation?: ToolInvocation
+}
+
+export class BotApprovalPendingError extends Error {
+  override readonly name = 'BotApprovalPendingError'
+
+  constructor(readonly record: ApprovalPending) {
+    super(`Bot execution is awaiting approval ${record.approvalId}`)
+  }
+}
+
+export class BotDispatchUncertainError extends Error {
+  override readonly name = 'BotDispatchUncertainError'
+
+  constructor() {
+    super('Bot provider dispatch outcome is uncertain')
+  }
 }
 
 const SEND_TIMEOUT_MS = 120_000
@@ -80,6 +101,26 @@ function clearDispatchRecord(sessionPointerPath: string, key: string): void { rm
 
 type DispatchRecord = { dispatchIdempotencyKey: string; sessionId: string; state: 'pending' | 'completed'; userMessageId?: string; reply?: string }
 
+function pendingApprovalFor(
+  target: Pick<BotSessionTarget, 'workspaceId' | 'botId' | 'conversationId'>,
+  sessionId: string,
+): ApprovalPending | null {
+  if (!target.conversationId) return null
+  try {
+    const runtime = getApprovalRuntime(target.workspaceId)
+    const record = runtime.store.listForConversation(target.conversationId).find(candidate =>
+      candidate.status === 'pending'
+      && candidate.botId === target.botId
+      && candidate.runtimeId === sessionId,
+    )
+    if (!record || record.status !== 'pending') return null
+    const current = runtime.store.expireIfDue(record.approvalId)
+    return current.status === 'pending' ? current : null
+  } catch {
+    return null
+  }
+}
+
 function readDispatchRecord(sessionPointerPath: string, key: string): DispatchRecord | null {
   const path = dispatchResultPath(sessionPointerPath, key)
   if (!existsSync(path)) return null
@@ -122,10 +163,15 @@ async function recoverPending(
   sessionManager: HandlerDeps['sessionManager'],
   pointerPath: string,
   pending: DispatchRecord,
-  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig'>,
+  target: Pick<BotSessionTarget, 'workspaceId' | 'providerConfig' | 'botId' | 'conversationId'>,
+  stopOnPendingApproval: boolean,
 ): Promise<{ sessionId: string; reply: string } | null> {
   const deadline = Date.now() + SEND_TIMEOUT_MS
   while (Date.now() < deadline) {
+    if (stopOnPendingApproval) {
+      const approval = pendingApprovalFor(target, pending.sessionId)
+      if (approval) throw new BotApprovalPendingError(approval)
+    }
     const session = await sessionManager.getSession(pending.sessionId)
     if (!isUsableBotSession(session, target)) return null
     const messages = (session.messages ?? []) as Array<{ id?: string; role?: string; content?: string; text?: string }>
@@ -134,7 +180,10 @@ async function recoverPending(
       writeDispatchRecord(pointerPath, pending.dispatchIdempotencyKey, { sessionId: pending.sessionId, state: 'completed', reply })
       return { sessionId: pending.sessionId, reply }
     }
-    if (!(session as { isProcessing?: boolean }).isProcessing && !reply) return null
+    if (!(session as { isProcessing?: boolean }).isProcessing && !reply) {
+      if (stopOnPendingApproval) throw new BotDispatchUncertainError()
+      return null
+    }
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   const session = await sessionManager.getSession(pending.sessionId)
@@ -183,7 +232,15 @@ export async function sendToBotSession(
   sessionManager: HandlerDeps['sessionManager'],
   target: BotSessionTarget,
   message: string,
-  options: { callerClientId?: string; waitForReply: boolean; dispatchIdempotencyKey?: string; botTurnContext?: BotTurnContext },
+  options: {
+    callerClientId?: string
+    waitForReply: boolean
+    dispatchIdempotencyKey?: string
+    botTurnContext?: BotTurnContext
+    botRoutineRunId?: string
+    botAttempt?: number
+    stopOnPendingApproval?: boolean
+  },
 ): Promise<{ sessionId: string; reply: string | null }> {
   if (options.botTurnContext && (
     options.botTurnContext.workspaceId !== target.workspaceId
@@ -199,14 +256,25 @@ export async function sendToBotSession(
       if (cached?.state === 'completed' && isUsableBotSession(cachedSession, target)) {
         return { sessionId: cached.sessionId, reply: cached.reply! }
       }
-      if (cached?.state === 'pending' && isUsableBotSession(cachedSession, target)) {
-        const recovered = await recoverPending(sessionManager, target.sessionPointerPath, cached, target)
-        if (recovered) return recovered
-        // Unsuccessful recovery must not leave the stale pending record: a later
-        // read would retry its userMessageId and a restart could revive the old turn.
-        clearDispatchRecord(target.sessionPointerPath, key)
+      if (cached?.state === 'pending') {
+        if (!isUsableBotSession(cachedSession, target)) {
+          if (options.stopOnPendingApproval) throw new BotDispatchUncertainError()
+          clearDispatchRecord(target.sessionPointerPath, key)
+        } else {
+          const recovered = await recoverPending(
+            sessionManager,
+            target.sessionPointerPath,
+            cached,
+            target,
+            options.stopOnPendingApproval === true,
+          )
+          if (recovered) return recovered
+          // Unsuccessful recovery must not leave the stale pending record: a later
+          // read would retry its userMessageId and a restart could revive the old turn.
+          clearDispatchRecord(target.sessionPointerPath, key)
+        }
       }
-      if (cached && !isUsableBotSession(cachedSession, target)) clearDispatchRecord(target.sessionPointerPath, key)
+      if (cached?.state !== 'pending' && cached && !isUsableBotSession(cachedSession, target)) clearDispatchRecord(target.sessionPointerPath, key)
     }
 
     let pending = key ? readDispatchRecord(target.sessionPointerPath, key) : null
@@ -214,6 +282,7 @@ export async function sendToBotSession(
       ? await sessionManager.getSession(pending.sessionId)
       : null
     if (pending && !isUsableBotSession(pendingSession, target)) {
+      if (options.stopOnPendingApproval) throw new BotDispatchUncertainError()
       clearDispatchRecord(target.sessionPointerPath, key!)
       pending = null
     }
@@ -246,7 +315,7 @@ export async function sendToBotSession(
           resolve()
         }
       }
-      sessionManager.sendMessage(sessionId!, message, undefined, undefined, undefined, acknowledgedMessageId, undefined, onAck, options.callerClientId || options.botTurnContext ? { callerClientId: options.callerClientId, botTurnContext: options.botTurnContext } : undefined).then(() => {
+      sessionManager.sendMessage(sessionId!, message, undefined, undefined, undefined, acknowledgedMessageId, undefined, onAck, options.callerClientId || options.botTurnContext ? { callerClientId: options.callerClientId, botTurnContext: options.botTurnContext, botRoutineRunId: options.botRoutineRunId, botPermissionMode: target.permissionMode, botAttempt: options.botAttempt, botApprovalInvocation: target.approvalInvocation } : undefined).then(() => {
         if (!settled) {
           settled = true
           reject(new Error('Bot send completed without persisting a user message'))
@@ -262,6 +331,10 @@ export async function sendToBotSession(
     if (!options.waitForReply) return { sessionId, reply: null }
     const deadline = Date.now() + SEND_TIMEOUT_MS
     while (Date.now() < deadline) {
+      if (options.stopOnPendingApproval) {
+        const approval = pendingApprovalFor(target, sessionId)
+        if (approval) throw new BotApprovalPendingError(approval)
+      }
       const session = await sessionManager.getSession(sessionId)
       if (!isUsableBotSession(session, target)) throw new Error('Bot provider session identity changed while dispatching')
       const messages = session.messages ?? []

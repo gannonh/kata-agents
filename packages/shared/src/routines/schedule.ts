@@ -33,6 +33,7 @@ export function scheduledInstantsBetween(
   const cron = cronFor(trigger)
   const instants: string[] = []
   let after = start
+  // ponytail: cap catch-up at 10,000 instants; batch older downtime across ticks.
   for (let count = 0; count < 10_000; count += 1) {
     const next = cron.nextRun(after)
     if (!next || next.getTime() > end.getTime()) break

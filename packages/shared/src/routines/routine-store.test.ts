@@ -40,7 +40,8 @@ describe('RoutineStore', () => {
   })
 
   it('deduplicates occurrences and atomically maps one occurrence to one run', () => {
-    const store = new RoutineStore({ workspaceRoot: workspace(), workspaceId: 'ws_1', clock: () => at, randomId: () => 'id_1' })
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at, randomId: () => 'id_1' })
     const routine = store.create(routineInput())
     const scheduledInstant = '2026-08-31T07:00:00.000Z'
     const occurrence = store.recordOccurrence({ routineId: routine.routineId, routineRevision: 1, source: 'schedule', scheduledInstant })
@@ -52,7 +53,11 @@ describe('RoutineStore', () => {
     expect(store.claimOccurrence({ occurrenceId: occurrence.occurrenceId, workerId: 'server_2' })).toBeNull()
     const run = store.createRun({ occurrenceId: occurrence.occurrenceId, ownerBotId: 'bot_1' })
     expect(run.runId).toBe(deriveRoutineRunId(occurrence.occurrenceId))
-    expect(store.createRun({ occurrenceId: occurrence.occurrenceId, ownerBotId: 'bot_1' })).toEqual(run)
+    const legacyRun = { ...run } as Record<string, unknown>
+    delete legacyRun.attempt
+    writeJsonRecord(join(root, '.routines', 'runs', `${run.runId}.json`), legacyRun)
+    expect(store.getRun(run.runId)?.attempt).toBe(1)
+    expect(store.createRun({ occurrenceId: occurrence.occurrenceId, ownerBotId: 'bot_1' })).toEqual({ ...run, attempt: 1 })
     expect(store.listRuns(routine.routineId)).toHaveLength(1)
     const publicRun = toRoutineRunPublicDto(run)
     expect(publicRun.state).toEqual({ kind: 'queued', at })
