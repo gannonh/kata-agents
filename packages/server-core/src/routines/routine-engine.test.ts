@@ -1187,6 +1187,41 @@ describe('RoutineEngine', () => {
     await engine.stop()
   })
 
+  it('notifies when a scheduled run is created before execution finishes', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let now = at
+    const events: string[] = []
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => now })
+    const routine = store.create(input({ kind: 'schedule', cron: '0 * * * *', timezone: 'UTC', dst: { gap: 'skip', fold: 'once' } }))
+    const engine = new RoutineEngine({
+      workspaceRoot: root,
+      workspaceId: 'ws_1',
+      store,
+      execute: {
+        async execute() {
+          events.push('execute')
+          await gate
+          return { kind: 'completed', reply: 'done' }
+        },
+      },
+      clock: () => now,
+      onChanged: () => { events.push('notify') },
+    })
+
+    now = '2026-08-31T01:00:00.000Z'
+    const ticking = engine.tick(now)
+    await waitFor(() => events.includes('notify') && engine.listRuns(routine.routineId).length === 1)
+    expect(events[0]).toBe('notify')
+    expect(engine.listRuns(routine.routineId)[0]?.state.kind).not.toBe('succeeded')
+
+    release()
+    await ticking
+    await waitFor(() => engine.listRuns(routine.routineId)[0]?.state.kind === 'succeeded')
+    await engine.stop()
+  })
+
   it('forwards one legacy scheduler tick per clock minute', async () => {
     const ticks: string[] = []
     let now = '2026-08-31T12:00:00.000Z'

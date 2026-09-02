@@ -422,7 +422,10 @@ export class RoutineEngine {
       if (allRunsCreated && instants.length > 0) {
         this.store.advanceScheduleCursor(record.routineId, revision.revision, instants.at(-1)!)
       }
-      for (const run of scheduledRuns) due.push(this.dispatch(run, generation))
+      for (const run of scheduledRuns) {
+        this.notify(run.routineId)
+        due.push(this.dispatch(run, generation))
+      }
     }
     await Promise.allSettled(due)
     if (this.stopping || generation !== this.lifecycleGeneration) return
@@ -985,11 +988,13 @@ export class RoutineEngine {
     try {
       const routine = this.store.get(occurrence.routineId)
       if (!routine) return null
-      return this.store.createRun({
+      const created = this.store.createRun({
         occurrenceId: occurrence.occurrenceId,
         ownerBotId: routine.ownerBotId,
         ...(origin ? { origin } : {}),
       })
+      this.notify(created.routineId)
+      return created
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Routine is not enabled:')) return null
       throw error
