@@ -1077,4 +1077,142 @@ describe('RoutineEngine', () => {
     expect(run.state.kind).toBe('succeeded')
     expect(engine.isRunning()).toBe(false)
   })
+
+  it('replays a terminal run with replayOfRunId and a new occurrence', async () => {
+    const executor = new FakeExecutor()
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const routine = store.create(input({ kind: 'on-demand' }))
+    const engine = new RoutineEngine({ workspaceRoot: root, workspaceId: 'ws_1', store, execute: executor, clock: () => at })
+    const original = await engine.testRoutine(routine.routineId)
+    await waitFor(() => engine.listRuns(routine.routineId)[0]?.state.kind === 'succeeded')
+
+    const replayed = await engine.replayRun(original.runId)
+    await waitFor(() => engine.listRuns(routine.routineId).filter(run => run.state.kind === 'succeeded').length === 2)
+
+    expect(replayed.runId).not.toBe(original.runId)
+    expect(replayed.origin).toEqual({
+      kind: 'replay',
+      occurrenceId: expect.stringMatching(/^occ_/),
+      replayOfRunId: original.runId,
+    })
+    expect(replayed.origin.kind === 'replay' && replayed.origin.occurrenceId).not.toBe(original.origin.occurrenceId)
+    expect(executor.calls).toBe(2)
+    expect(JSON.stringify(replayed)).not.toContain('session_')
+    await engine.stop()
+  })
+
+  it('commits a result before notifying listeners, including an empty reply', async () => {
+    const events: string[] = []
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const empty = store.create({
+      ...input({ kind: 'event', source: 'SessionStatusChange', matcher: { field: 'value', equals: 'empty' } }),
+      name: 'Empty',
+    })
+    const done = store.create({
+      ...input({ kind: 'event', source: 'SessionStatusChange', matcher: { field: 'value', equals: 'done' } }),
+      name: 'Done',
+    })
+    const replies = ['', 'done']
+    const executor: RoutineExecutor = {
+      async execute() {
+        events.push('execute')
+        return { kind: 'completed', reply: replies.shift() ?? 'done' }
+      },
+      async publish() {
+        events.push('publish')
+      },
+    }
+    const engine = new RoutineEngine({
+      workspaceRoot: root,
+      workspaceId: 'ws_1',
+      store,
+      execute: executor,
+      clock: () => at,
+      onChanged: () => { events.push('notify') },
+    })
+
+    const emptyRuns = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'stale-empty', payload: { value: 'empty' } })
+    await waitFor(() => engine.listRuns(empty.routineId)[0]?.state.kind === 'uncertain')
+    const doneRuns = await engine.ingestEvent({ source: 'SessionStatusChange', externalEventId: 'stale-done', payload: { value: 'done' } })
+    await waitFor(() => engine.listRuns(done.routineId)[0]?.state.kind === 'succeeded')
+
+    expect(emptyRuns).toHaveLength(1)
+    expect(doneRuns).toHaveLength(1)
+    expect(engine.listRuns(empty.routineId)[0]?.state).toEqual({
+      kind: 'uncertain',
+      at,
+      reason: 'Routine completed without a result',
+    })
+    expect(engine.listRuns(done.routineId)[0]?.state).toEqual({ kind: 'succeeded', at, result: 'done' })
+    expect(events.filter(event => event === 'execute' || event === 'publish')).toEqual([
+      'execute',
+      'publish',
+      'execute',
+      'publish',
+    ])
+    for (const [index, event] of events.entries()) {
+      if (event === 'publish') expect(events[index + 1]).toBe('notify')
+    }
+    await engine.stop()
+  })
+
+  it('passes safe and allow-all approval boundaries through to execution', async () => {
+    const seen: string[] = []
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => at })
+    const safe = store.create({ ...input({ kind: 'on-demand' }), approvalBoundary: 'safe', name: 'Safe' })
+    const allowAll = store.create({ ...input({ kind: 'on-demand' }), approvalBoundary: 'allow-all', name: 'Allow' })
+    const engine = new RoutineEngine({
+      workspaceRoot: root,
+      workspaceId: 'ws_1',
+      store,
+      execute: {
+        async execute(_run, revision) {
+          seen.push(revision.approvalBoundary)
+          return { kind: 'completed', reply: revision.approvalBoundary }
+        },
+      },
+      clock: () => at,
+    })
+
+    await engine.testRoutine(safe.routineId)
+    await engine.testRoutine(allowAll.routineId)
+    await waitFor(() => seen.length === 2)
+
+    expect(seen).toEqual(['safe', 'allow-all'])
+    expect(engine.get(safe.routineId).revision.approvalBoundary).toBe('safe')
+    expect(engine.get(allowAll.routineId).revision.approvalBoundary).toBe('allow-all')
+    await engine.stop()
+  })
+
+  it('forwards one legacy scheduler tick per clock minute', async () => {
+    const ticks: string[] = []
+    let now = '2026-08-31T12:00:00.000Z'
+    const root = workspace()
+    const store = new RoutineStore({ workspaceRoot: root, workspaceId: 'ws_1', clock: () => now })
+    const engine = new RoutineEngine({
+      workspaceRoot: root,
+      workspaceId: 'ws_1',
+      store,
+      execute: new FakeExecutor(),
+      clock: () => now,
+      tickIntervalMs: 15,
+      onLegacyScheduleTick: timestamp => { ticks.push(timestamp) },
+    })
+
+    await engine.start()
+    await waitFor(() => ticks.length >= 1)
+    now = '2026-08-31T12:00:30.000Z'
+    await new Promise(resolve => setTimeout(resolve, 40))
+    now = '2026-08-31T12:01:00.000Z'
+    await waitFor(() => ticks.length >= 2)
+
+    expect([...new Set(ticks.map(tick => tick.slice(0, 16)))].sort()).toEqual([
+      '2026-08-31T12:00',
+      '2026-08-31T12:01',
+    ])
+    await engine.stop()
+  })
 })

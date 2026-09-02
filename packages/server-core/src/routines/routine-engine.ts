@@ -464,6 +464,7 @@ export class RoutineEngine {
       if (run) pendingRuns.push(run)
     }
     for (const run of pendingRuns) {
+      this.notify(run.routineId)
       void this.dispatch(run).catch(() => undefined)
     }
     return pendingRuns
@@ -967,6 +968,7 @@ export class RoutineEngine {
       : { kind: 'triggered' as const, occurrenceId: occurrence.occurrenceId }
     const run = this.ensureRunForOccurrence(occurrence, origin)
     if (!run) return null
+    this.notify(run.routineId)
     await this.dispatch(run)
     return this.store.getRun(run.runId)
   }
@@ -1085,6 +1087,9 @@ export class RoutineEngine {
       result = await this.executeAdapter.execute(current, revision)
     } catch {
       result = { kind: 'failed', error: 'Routine executor failed' }
+    }
+    if (result.kind === 'completed' && !result.reply.trim()) {
+      result = { kind: 'uncertain', reason: 'Routine completed without a result' }
     }
     const bufferedResolution = result.kind === 'awaiting-approval'
       ? undefined
