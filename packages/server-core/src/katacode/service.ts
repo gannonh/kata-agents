@@ -187,6 +187,10 @@ export class KatacodeService {
           ? task.childConfig.acceptanceCriteria
           : '',
         worktreePolicy: current.worktreePolicy,
+        ...(current.worktreePolicy === 'shared'
+          && typeof task.childConfig.sharedWorktreeId === 'string'
+          ? { sharedWorktreeId: task.childConfig.sharedWorktreeId }
+          : {}),
       },
     })
     const result = await this.bridge.retry(taskId, identity)

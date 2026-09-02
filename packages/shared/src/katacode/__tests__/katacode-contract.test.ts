@@ -327,6 +327,30 @@ describe('Katacode execution bridge', () => {
     expect(worktrees.released).toEqual([result.taskId]);
   });
 
+  test('retries a shared checkout with the persisted worktree id', async () => {
+    const { bridge, adapter, taskStore } = harness();
+    const shared = identity({ worktreePolicy: 'shared', sharedWorktreeId: 'repo-aabbccdd' });
+    const result = await bridge.dispatch({
+      identity: shared,
+      clientIdempotencyKey: 'shared-retry',
+      sharedApproved: true,
+    });
+    expect(taskStore.get(result.taskId)?.childConfig.sharedWorktreeId).toBe('repo-aabbccdd');
+    const found = await adapter.lookupByIdempotencyKey('shared-retry');
+    expect(found.kind).toBe('found');
+    if (found.kind === 'found') adapter.fail(found.runRef.runId, 'tests failed');
+    await bridge.refresh(result.taskId);
+    const storedId = taskStore.get(result.taskId)?.childConfig.sharedWorktreeId;
+    expect(typeof storedId).toBe('string');
+    const retried = await bridge.retry(result.taskId, identity({
+      worktreePolicy: 'shared',
+      sharedWorktreeId: storedId,
+    }));
+    expect(retried.taskId).not.toBe(result.taskId);
+    expect(taskStore.get(retried.taskId)?.childConfig.sharedWorktreeId).toBe('repo-aabbccdd');
+    expect(bridge.rail(retried.taskId, 1).worktreePolicy).toBe('shared');
+  });
+
   test('duplicate journal appends do not create a second card', async () => {
     const { bridge, journal } = harness();
     const result = await bridge.dispatch({ identity: identity(), clientIdempotencyKey: 'key-dup' });

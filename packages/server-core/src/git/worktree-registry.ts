@@ -642,9 +642,12 @@ function writeBytesAtomically(
     rmSync(claimPath, { force: true })
   } catch (error) {
     try {
-      rmSync(tmp, { force: true })
+      // After a successful exchange, tmp may hold the previous registry.
+      // Delete it only when it still contains the unpublished payload.
+      const unpublished = existsSync(tmp) && sha256(readFileSync(tmp)) === sha256(bytes)
+      if (unpublished) rmSync(tmp, { force: true })
     } catch {
-      /* preserve the original error */
+      /* preserve tmp if we cannot prove it is unpublished payload */
     }
     try {
       rmSync(claimPath, { force: true })

@@ -114,6 +114,9 @@ export class KatacodeExecutionBridge {
           acceptanceCriteria: input.identity.acceptanceCriteria,
           permissionMode: input.identity.permissionMode,
           worktreePolicy: input.identity.worktreePolicy,
+          ...(input.identity.sharedWorktreeId
+            ? { sharedWorktreeId: input.identity.sharedWorktreeId }
+            : {}),
         },
       },
     );

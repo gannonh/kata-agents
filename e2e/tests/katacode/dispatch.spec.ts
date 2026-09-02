@@ -13,6 +13,7 @@ import {
   runWithAgentProviderFallback,
 } from "../../src/flows/agentChat.ts";
 import { configureAgentConnection, resumeAfterAppRestart } from "../../src/flows/onboarding.ts";
+import { useRepositoryAsWorkspaceDefault } from "../../src/flows/gitWorkspace.ts";
 import { waitForAppReady } from "../../src/flows/shell.ts";
 import { expect, test } from "../../src/fixtures/testFixtures.ts";
 import { buildElectronLaunchEnv } from "../../src/harness/launchEnv.ts";
@@ -147,6 +148,7 @@ test.describe(`Katacode dispatch ${E2E_TAGS.katacode}`, () => {
       await runWithAgentProviderFallback(page, "Katacode dispatch", async candidate => {
         await configureAgentConnection(page, candidate);
         await waitForAppReady(page);
+        await useRepositoryAsWorkspaceDefault(page, repo);
         const workspaceId = await workspaceIdFromPage(page);
         await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId, runContext.baseEnv);
 
@@ -230,6 +232,7 @@ test.describe(`Katacode dispatch ${E2E_TAGS.katacode}`, () => {
       await runWithAgentProviderFallback(page, "Katacode concurrent dispatch", async candidate => {
         await configureAgentConnection(page, candidate);
         await waitForAppReady(page);
+        await useRepositoryAsWorkspaceDefault(page, repo);
         const workspaceId = await workspaceIdFromPage(page);
         await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId, runContext.baseEnv);
 
