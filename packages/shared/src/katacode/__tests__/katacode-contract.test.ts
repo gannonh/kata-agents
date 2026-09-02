@@ -54,9 +54,11 @@ function identity(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function worktrees(): KatacodeWorktreeAllocator {
+function worktrees(): KatacodeWorktreeAllocator & { readonly released: string[] } {
   let seq = 0;
+  const released: string[] = [];
   return {
+    released,
     async allocateIsolated(input) {
       seq += 1;
       return {
@@ -79,6 +81,9 @@ function worktrees(): KatacodeWorktreeAllocator {
         leaseId: `lease_${input.ownerTaskId}`,
       };
     },
+    release({ ownerTaskId }) {
+      released.push(ownerTaskId);
+    },
   };
 }
 
@@ -88,6 +93,7 @@ function harness() {
   const taskStore = new SpawnTaskStore({ workspaceRoot: root, workspaceId: 'ws_test' });
   const attempts = new KatacodeAttemptStore({ workspaceRoot: root, workspaceId: 'ws_test' });
   const adapter = new MemoryKatacodeAdapter();
+  const allocator = worktrees();
   const journal = new ConversationJournal({
     journalRoot: join(root, 'journals'),
     workspaceId: 'ws_test',
@@ -102,11 +108,11 @@ function harness() {
     taskStore,
     attempts,
     adapter,
-    worktrees: worktrees(),
+    worktrees: allocator,
     journal,
     resolveBotName: () => 'Owner',
   });
-  return { bridge, adapter, taskStore, attempts, journal };
+  return { bridge, adapter, taskStore, attempts, journal, worktrees: allocator };
 }
 
 describe('Katacode adapter contract v1', () => {
@@ -292,6 +298,33 @@ describe('Katacode execution bridge', () => {
     expect(terminal).toHaveLength(1);
     expect(JSON.parse(terminal[0]!.body).runtimeState).toBe('completed');
     expect(bridge.rail(current.taskId, 2).pullRequest?.number).toBe(1);
+  });
+
+  test('completes a run that omits result markdown', async () => {
+    const { bridge, adapter, taskStore } = harness();
+    const result = await bridge.dispatch({ identity: identity(), clientIdempotencyKey: 'key-empty-result' });
+    const found = await adapter.lookupByIdempotencyKey('key-empty-result');
+    expect(found.kind).toBe('found');
+    if (found.kind === 'found') adapter.complete(found.runRef.runId);
+    const current = await bridge.refresh(result.taskId);
+    expect(current.runtimeState).toBe('completed');
+    expect(taskStore.get(current.taskId)?.runtimeState).toBe('completed');
+  });
+
+  test('releases a shared checkout lease when the task becomes terminal', async () => {
+    const { bridge, adapter, worktrees } = harness();
+    const shared = identity({ worktreePolicy: 'shared', sharedWorktreeId: 'repo-aabbccdd' });
+    const result = await bridge.dispatch({
+      identity: shared,
+      clientIdempotencyKey: 'shared-lease',
+      sharedApproved: true,
+    });
+    expect(worktrees.released).toEqual([]);
+    const found = await adapter.lookupByIdempotencyKey('shared-lease');
+    expect(found.kind).toBe('found');
+    if (found.kind === 'found') adapter.complete(found.runRef.runId, 'done');
+    await bridge.refresh(result.taskId);
+    expect(worktrees.released).toEqual([result.taskId]);
   });
 
   test('duplicate journal appends do not create a second card', async () => {

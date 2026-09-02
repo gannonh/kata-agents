@@ -97,7 +97,7 @@ export class MemoryKatacodeAdapter implements KatacodeAdapter {
     run.failureMessage = failureMessage;
   }
 
-  complete(runId: string, resultMarkdown: string): void {
+  complete(runId: string, resultMarkdown?: string): void {
     const run = this.runs.get(runId);
     if (!run) return;
     run.status = {
@@ -106,7 +106,7 @@ export class MemoryKatacodeAdapter implements KatacodeAdapter {
       tests: { passed: 1, failed: 0, total: 1 },
       evidence: [{ label: 'unit', kind: 'log' }],
     };
-    run.resultMarkdown = resultMarkdown;
+    if (resultMarkdown !== undefined) run.resultMarkdown = resultMarkdown;
     run.artifacts = {
       artifacts: [{ label: 'coverage', kind: 'artifact' }],
       pullRequest: { title: 'Fix', url: 'https://github.com/example/repo/pull/1', number: 1 },

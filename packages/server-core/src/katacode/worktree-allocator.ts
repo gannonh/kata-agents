@@ -35,6 +35,7 @@ export function createManagedKatacodeWorktreeAllocator(input: {
   readonly workspaceName: string
 }): KatacodeWorktreeAllocator {
   const { git, workspaceRoot, workspaceName } = input
+  const sharedLeases = new Map<string, string>()
   return {
     async allocateIsolated(request) {
       const ctx = await git.repository.getContext(workspaceRoot)
@@ -75,6 +76,7 @@ export function createManagedKatacodeWorktreeAllocator(input: {
         throw new KatacodeRepositoryResolutionError('Shared worktree belongs to another workspace')
       }
       await git.pathLeases.lease(request.ownerTaskId, record.checkoutPath)
+      sharedLeases.set(request.ownerTaskId, record.checkoutPath)
       return {
         managedWorktreeId: record.managedWorktreeId,
         summary: {
@@ -84,6 +86,13 @@ export function createManagedKatacodeWorktreeAllocator(input: {
         },
         leaseId: request.ownerTaskId,
       } satisfies KatacodeWorktreeAllocation
+    },
+
+    release({ ownerTaskId }) {
+      const checkoutPath = sharedLeases.get(ownerTaskId)
+      if (!checkoutPath) return
+      git.pathLeases.release(ownerTaskId, checkoutPath)
+      sharedLeases.delete(ownerTaskId)
     },
   }
 }

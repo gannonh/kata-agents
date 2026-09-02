@@ -326,8 +326,8 @@ export class KatacodeExecutionBridge {
       lookup: { kind: 'found', runRef, status: status.status },
       runtimeState: this.requireTask(taskId).runtimeState,
     });
-    if (canonical.runtimeState === 'completed' && status.resultMarkdown) {
-      this.taskStore.commitResult(taskId, status.resultMarkdown, { committedAt: now() });
+    if (canonical.runtimeState === 'completed') {
+      this.taskStore.commitResult(taskId, status.resultMarkdown ?? '', { committedAt: now() });
       this.attempts.transition(taskId, latest.attemptId, latest.fence.attemptNonce, 'reconciled');
       this.publishTerminal(taskId, latest);
     } else if (canonical.runtimeState === 'failed') {
@@ -392,6 +392,7 @@ export class KatacodeExecutionBridge {
       idempotencyKey: `katacode.${taskId}.terminal`,
       body: JSON.stringify({ type: 'katacode-terminal', taskId, runtimeState: task.runtimeState }),
     });
+    this.worktrees.release?.({ ownerTaskId: taskId });
   }
 
   private snapshot(taskId: string, attemptId: string): KatacodeDispatchResult {

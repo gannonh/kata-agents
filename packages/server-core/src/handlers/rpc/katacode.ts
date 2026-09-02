@@ -153,6 +153,13 @@ export function registerKatacodeHandlers(
       const controller = waits.begin(ctx.clientId, input.waitId)
       const deadline = Date.now() + timeoutMs
       try {
+        // Refresh once per WAIT. The client already re-enters after ~5s, so a
+        // 50ms poll must not hammer the provider. Persistence still drives the loop.
+        try {
+          await runtime.service.refresh(input.conversationId, input.taskId)
+        } catch {
+          // Keep the last persisted rail if the provider poll fails.
+        }
         while (!controller.signal.aborted) {
           const rail = runtime.service.getRail(input.conversationId, input.taskId)
           if (isNewer(rail, input.after) || Date.now() >= deadline) return rail

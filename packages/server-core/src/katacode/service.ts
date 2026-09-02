@@ -117,9 +117,10 @@ export class KatacodeService {
     const result = await this.bridge.dispatch({
       identity,
       clientIdempotencyKey: mintKatacodeIdempotencyKey(),
-      // dispatchFromSession runs only after the session-tool approval boundary
-      // (safe blocks; ask pauses; allow-all proceeds). That is the explicit
-      // shared-checkout warning/approval.
+      // Shared checkout is require-approval even in allow-all
+      // (`evaluatePolicy` treats `worktreePolicy === 'shared'` like a standing
+      // require-approval rule). This flag is therefore true only after that
+      // explicit warning/approval, or after a user-initiated rail retry.
       sharedApproved: identity.worktreePolicy === 'shared',
     })
     this.emit(identity.conversationId, result.taskId)

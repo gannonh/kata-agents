@@ -92,14 +92,18 @@ async function workspaceIdFromPage(page: Page): Promise<string> {
   return workspaceId;
 }
 
-async function bootstrapKatacodeCredential(repoRoot: string, workspaceId: string): Promise<void> {
+async function bootstrapKatacodeCredential(
+  repoRoot: string,
+  workspaceId: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   const token = readKatacodeToken();
   if (!token) {
     throw new Error(formatMissingPrerequisiteError("Katacode E2E", ["KATA_E2E_KATACODE_TOKEN"]));
   }
   execFileSync("bun", ["e2e/scripts/bootstrap-katacode-credential.ts", workspaceId], {
     cwd: repoRoot,
-    env: process.env,
+    env,
     stdio: "inherit",
   });
 }
@@ -144,7 +148,7 @@ test.describe(`Katacode dispatch ${E2E_TAGS.katacode}`, () => {
         await configureAgentConnection(page, candidate);
         await waitForAppReady(page);
         const workspaceId = await workspaceIdFromPage(page);
-        await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId);
+        await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId, runContext.baseEnv);
 
         const stamp = `${candidate.provider} ${Date.now()}`;
         const botName = `Katacode Owner ${stamp}`;
@@ -227,7 +231,7 @@ test.describe(`Katacode dispatch ${E2E_TAGS.katacode}`, () => {
         await configureAgentConnection(page, candidate);
         await waitForAppReady(page);
         const workspaceId = await workspaceIdFromPage(page);
-        await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId);
+        await bootstrapKatacodeCredential(runContext.repoRoot, workspaceId, runContext.baseEnv);
 
         const stamp = `${candidate.provider} ${Date.now()}`;
         const botName = `Katacode Concurrent ${stamp}`;

@@ -21,6 +21,11 @@ export interface KatacodeWorktreeAllocator {
     readonly managedWorktreeId: string;
     readonly repositoryLabel: string;
   }): Promise<KatacodeWorktreeAllocation>;
+
+  /** Release a shared-checkout lease when the owning task becomes terminal. Isolated allocators may omit this. */
+  release?(input: {
+    readonly ownerTaskId: string;
+  }): void;
 }
 
 export class SharedWorktreeRequiresApprovalError extends Error {
