@@ -1115,6 +1115,7 @@
   "routines.notEnabled": "Diese Routine ist pausiert.",
   "routines.onDemandTrigger": "Manueller Auslöser",
   "routines.pause": "Pausieren",
+  "routines.recentHistory": "Letzte Verläufe",
   "routines.replay": "Erneut ausführen",
   "routines.resume": "Fortsetzen",
   "routines.runFailed": "Die Routine konnte nicht ausgeführt werden.",

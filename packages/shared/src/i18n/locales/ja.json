@@ -1115,6 +1115,7 @@
   "routines.notEnabled": "このルーティンは一時停止中です。",
   "routines.onDemandTrigger": "オンデマンドトリガー",
   "routines.pause": "一時停止",
+  "routines.recentHistory": "最近の履歴",
   "routines.replay": "再実行",
   "routines.resume": "再開",
   "routines.runFailed": "ルーティンを実行できませんでした。",

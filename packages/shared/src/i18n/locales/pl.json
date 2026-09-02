@@ -1131,6 +1131,7 @@
   "routines.notEnabled": "Ta procedura jest wstrzymana.",
   "routines.onDemandTrigger": "Wyzwalacz na żądanie",
   "routines.pause": "Wstrzymaj",
+  "routines.recentHistory": "Ostatnia historia",
   "routines.replay": "Uruchom ponownie",
   "routines.resume": "Wznów",
   "routines.runFailed": "Nie udało się uruchomić tej procedury.",

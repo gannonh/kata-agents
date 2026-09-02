@@ -504,7 +504,12 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
             <p data-testid="routine-empty" className="text-xs text-muted-foreground">{t('routines.noRoutines')}</p>
           ) : routines.map(routine => {
             const trigger = routine.revision.trigger
-            const latest = routineRuns[routine.routineId]?.[0]
+            const history = routineRuns[routine.routineId] ?? []
+            const latest = history[0]
+            const destination = routine.revision.destination
+            const destinationLabel = destination.kind === 'direct'
+              ? t('routines.directDestination')
+              : channels.find(channel => channel.channelId === destination.channelId)?.name ?? destination.channelId
             const latestStatus = t('routines.status', { status: t(latest ? ROUTINE_STATE_KEYS[latest.state.kind] : ROUTINE_LIFECYCLE_KEYS[routine.lifecycle]) })
             const latestLabel = latest
               ? latest.state.kind === 'succeeded'
@@ -517,12 +522,18 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
               <div key={routine.routineId} data-testid={`routine-${routine.routineId}`} data-routine-state={routine.lifecycle} className="flex flex-col gap-1 border-t border-foreground/10 pt-2">
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <strong>{routine.name}</strong>
-                  <span className="text-xs text-muted-foreground">{latestStatus}</span>
+                  <span className="text-xs text-muted-foreground" data-testid={`routine-lifecycle-${routine.routineId}`}>
+                    {t(ROUTINE_LIFECYCLE_KEYS[routine.lifecycle])}
+                    {latest ? ` · ${latestStatus}` : ''}
+                  </span>
                 </div>
-                  <div className="text-xs text-muted-foreground">
+                <div className="text-xs text-muted-foreground" data-testid={`routine-trigger-${routine.routineId}`}>
                   {trigger.kind === 'schedule'
                     ? `${trigger.cron} · ${trigger.timezone}${routine.nextRunAt ? ` · ${new Date(routine.nextRunAt).toLocaleString()}` : ''}`
                     : trigger.kind === 'event' ? `${t('routines.eventTrigger')} · ${trigger.source}` : t('routines.onDemandTrigger')}
+                </div>
+                <div className="text-xs text-muted-foreground" data-testid={`routine-destination-${routine.routineId}`}>
+                  {t('routines.destination')}: {destinationLabel}
                 </div>
                 {editingRoutineId === routine.routineId && (
                   <div data-testid={`routine-edit-${routine.routineId}`} className="grid gap-2">
@@ -589,6 +600,24 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
                   </div>
                 )}
                 {latest && <div data-testid={`routine-latest-${routine.routineId}`} className="text-xs whitespace-pre-wrap break-words">{latestLabel}</div>}
+                {history.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs font-medium text-foreground/80">{t('routines.recentHistory')}</div>
+                    <ol data-testid={`routine-history-${routine.routineId}`} className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      {history.map(run => (
+                        <li
+                          key={run.runId}
+                          data-testid={`routine-run-${run.runId}`}
+                          data-run-id={run.runId}
+                          data-run-state={run.state.kind}
+                        >
+                          {run.runId} · {t(ROUTINE_STATE_KEYS[run.state.kind])}
+                          {run.origin.kind === 'replay' ? ` · ${t('routines.replay')}` : ''}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Button type="button" size="sm" disabled={routineBusy !== null || routine.lifecycle !== 'enabled'} data-testid={`routine-run-${routine.routineId}`} onClick={() => runRoutine(routine)}>{t('routines.runNow')}</Button>
                   {latest && ['succeeded', 'failed', 'cancelled', 'uncertain', 'reconciled'].includes(latest.state.kind) && <Button type="button" size="sm" variant="outline" disabled={routineBusy !== null} data-testid={`routine-replay-${routine.routineId}`} onClick={() => replayRoutine(latest)}>{t('routines.replay')}</Button>}

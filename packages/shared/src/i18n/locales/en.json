@@ -1115,6 +1115,7 @@
   "routines.notEnabled": "This routine is paused.",
   "routines.onDemandTrigger": "On-demand trigger",
   "routines.pause": "Pause",
+  "routines.recentHistory": "Recent history",
   "routines.replay": "Replay",
   "routines.resume": "Resume",
   "routines.runFailed": "Couldn't run this routine.",
