@@ -117,6 +117,7 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'spawn_session',
   'send_handoff',
   'inspect_handoff',
+  'dispatch_katacode',
   'browser_tool',
 ]);
 
@@ -1411,6 +1412,7 @@ export class PiAgent extends BaseAgent {
       case 'spawn_session_intercept':
       case 'send_handoff_intercept':
       case 'inspect_handoff_intercept':
+      case 'dispatch_katacode_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
@@ -1602,6 +1604,22 @@ export class PiAgent extends BaseAgent {
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           return { content: `inspect_handoff failed: ${msg}`, isError: true };
+        }
+      }
+
+      if (toolName === 'dispatch_katacode') {
+        try {
+          const result = await this.preExecuteDispatchKatacode(args);
+          return { content: JSON.stringify(result, null, 2), isError: false };
+        } catch (error) {
+          const failure = (error && typeof error === 'object' && 'failure' in error)
+            ? (error as { failure?: unknown }).failure
+            : undefined
+          if (failure && typeof failure === 'object') {
+            return { content: JSON.stringify(failure, null, 2), isError: true }
+          }
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: `dispatch_katacode failed: ${msg}`, isError: true };
         }
       }
 

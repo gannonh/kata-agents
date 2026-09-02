@@ -28,6 +28,15 @@ function matchesRule(rule: StandingRule, invocation: ToolInvocation): boolean {
     && rule.targetFingerprint === invocation.target.fingerprint
 }
 
+function canonicalToolName(toolName: string): string {
+  return toolName.replace(/^(mcp__session__|session__|mcp__[^_]+__)/, '')
+}
+
+function isSharedKatacodeDispatch(invocation: ToolInvocation): boolean {
+  return canonicalToolName(invocation.toolName) === 'dispatch_katacode'
+    && invocation.normalizedInput.worktreePolicy === 'shared'
+}
+
 function block(reason: Extract<PolicyVerdict, { kind: 'block' }>['reason'], message: string): PolicyVerdict {
   return { kind: 'block', reason, message }
 }
@@ -109,6 +118,10 @@ export function evaluatePolicy(input: EvaluatePolicyInput): PolicyVerdict {
     }
     return { kind: 'allow', reason: 'one-time' }
   }
+
+  // Shared checkout mutates the user's live worktree. Standing allow and
+  // allowed-once already returned; allow-all must still pause for this case.
+  if (isSharedKatacodeDispatch(invocation)) return ask(invocation)
 
   if (mode === 'allow-all') return { kind: 'allow', reason: 'allow-all' }
   if (classified.class === 'read') return { kind: 'allow', reason: 'safe-read' }

@@ -193,6 +193,32 @@ export const SendHandoffSchema = z.object({
   callback: z.never().optional(),
 });
 
+export const DispatchKatacodeSchema = z.object({
+  help: z.boolean().optional()
+    .describe('If true, returns usage guidance instead of dispatching to Katacode'),
+  repository: z.string().optional()
+    .describe('Server-resolved repository label (not a path)'),
+  prompt: z.string().optional()
+    .describe('Self-contained development request for Katacode (required when not in help mode)'),
+  acceptanceCriteria: z.string().optional()
+    .describe('Observable acceptance criteria Katacode must verify (required when not in help mode)'),
+  permissionMode: z.enum(['safe', 'ask', 'allow-all']).optional()
+    .describe('Permission mode for the dispatched work'),
+  worktreePolicy: z.enum(['isolated', 'shared']).optional()
+    .describe('Worktree policy. Isolated is the default. Shared requires an opaque server-issued worktree id.'),
+  sharedWorktreeId: z.string().optional()
+    .describe('Opaque managed worktree id required when worktreePolicy is shared'),
+  workspaceId: z.never().optional(),
+  botId: z.never().optional(),
+  conversationId: z.never().optional(),
+  checkoutPath: z.never().optional(),
+  credential: z.never().optional(),
+  recipient: z.never().optional(),
+  runtimeId: z.never().optional(),
+  sessionId: z.never().optional(),
+  callback: z.never().optional(),
+});
+
 export const InspectHandoffSchema = z.object({
   help: z.boolean().optional(),
   action: z.enum(['get', 'wait', 'read-result']).optional(),
@@ -483,6 +509,13 @@ The request must be self-contained: the receiving Bot does not see this conversa
 Identity is derived from the current session. Never pass workspace, Bot, or conversation fields.
 A successful handoff returns exactly \`{ handoffId, deliveryId, taskId, runtimeState, version, targetBotId }\`.`,
 
+  dispatch_katacode: `Dispatch development work to Katacode from this Bot conversation.
+
+The request must include a repository label, a self-contained prompt, and observable acceptance criteria.
+Identity is derived from the current Bot session. Never pass workspace, Bot, conversation, path, credential, or recipient fields.
+Isolated worktrees are the default. Shared checkout requires an explicit opaque worktree id and later approval.
+A successful dispatch returns exactly \`{ taskId, runtimeState, version, attemptId }\`.`,
+
   inspect_handoff: `Read a handoff task owned by the current Bot conversation.
 
 Use action=get for current state, action=wait with afterVersion for a bounded authoritative wait, or action=read-result with byte offset and limit for canonical result chunks.
@@ -588,6 +621,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', safeMode: 'block', handler: null },
   { name: 'send_handoff', description: TOOL_DESCRIPTIONS.send_handoff, inputSchema: SendHandoffSchema, executionMode: 'backend', safeMode: 'block', handler: null },
   { name: 'inspect_handoff', description: TOOL_DESCRIPTIONS.inspect_handoff, inputSchema: InspectHandoffSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
+  { name: 'dispatch_katacode', description: TOOL_DESCRIPTIONS.dispatch_katacode, inputSchema: DispatchKatacodeSchema, executionMode: 'backend', safeMode: 'block', handler: null },
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
   // Single CLI-like tool that handles all browser actions via command string.
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', safeMode: 'allow', handler: null },

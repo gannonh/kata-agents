@@ -52,6 +52,7 @@ import { initModelRefreshService, setFetcherPlatform } from '@kata-sh/server-cor
 import { setSearchPlatform, setImageProcessor } from '@kata-sh/server-core/services'
 import { getDefaultGitServices } from '@kata-sh/server-core/git'
 import { attachHandoffDelegate } from '@kata-sh/server-core/handoffs'
+import { attachKatacodeDelegate } from '@kata-sh/server-core/katacode'
 import type { HandlerDeps } from '@kata-sh/server-core/handlers'
 import { filterCapabilitiesForComputer, parseComputerConfig } from '@kata-sh/shared/computer'
 import { Computer } from '@kata-sh/server-core/computer'
@@ -245,6 +246,7 @@ const instance = await (async () => {
       createSessionManager: () => {
         const sessionManager = new SessionManager()
         attachHandoffDelegate(sessionManager)
+        attachKatacodeDelegate(sessionManager)
         sessionManager.setComputer(computer)
         return sessionManager
       },

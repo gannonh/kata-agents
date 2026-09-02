@@ -453,7 +453,8 @@ export type PreToolUseCheckResult =
   | { type: 'call_llm_intercept'; input: Record<string, unknown> }
   | { type: 'spawn_session_intercept'; input: Record<string, unknown> }
   | { type: 'send_handoff_intercept'; input: Record<string, unknown> }
-  | { type: 'inspect_handoff_intercept'; input: Record<string, unknown> };
+  | { type: 'inspect_handoff_intercept'; input: Record<string, unknown> }
+  | { type: 'dispatch_katacode_intercept'; input: Record<string, unknown> };
 
 /**
  * Input for `runPreToolUseChecks()`. Each agent builds this from its SDK-specific
@@ -678,13 +679,14 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // ============================================================
   // 4. CALL_LLM / SPAWN_SESSION INTERCEPTION
   // ============================================================
-  if (toolName === 'mcp__session__call_llm' || toolName === 'mcp__session__spawn_session' || toolName === 'mcp__session__send_handoff' || toolName === 'mcp__session__inspect_handoff') {
+  if (toolName === 'mcp__session__call_llm' || toolName === 'mcp__session__spawn_session' || toolName === 'mcp__session__send_handoff' || toolName === 'mcp__session__inspect_handoff' || toolName === 'mcp__session__dispatch_katacode') {
     const policy = applyBotPolicy(ctx, toolName, input)
     if (policy) return policy
     if (toolName === 'mcp__session__call_llm') return { type: 'call_llm_intercept', input }
     if (toolName === 'mcp__session__spawn_session') return { type: 'spawn_session_intercept', input }
     if (toolName === 'mcp__session__send_handoff') return { type: 'send_handoff_intercept', input }
-    return { type: 'inspect_handoff_intercept', input }
+    if (toolName === 'mcp__session__inspect_handoff') return { type: 'inspect_handoff_intercept', input }
+    return { type: 'dispatch_katacode_intercept', input }
   }
 
   // ============================================================

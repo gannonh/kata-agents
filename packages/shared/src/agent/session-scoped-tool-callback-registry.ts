@@ -13,6 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { SendHandoffFn } from './handoff-tool.ts';
+import type { DispatchKatacodeFn } from './dispatch-katacode-tool.ts';
 import type { InspectHandoffFn } from './inspect-handoff-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
 import type { AuthRequest } from '@kata-sh/session-tools-core';
@@ -51,6 +52,7 @@ export interface SessionScopedToolCallbacks {
    * Each agent backend delegates to its onSendHandoff callback.
    */
   sendHandoffFn?: SendHandoffFn;
+  dispatchKatacodeFn?: DispatchKatacodeFn;
   inspectHandoffFn?: InspectHandoffFn;
 
   /**

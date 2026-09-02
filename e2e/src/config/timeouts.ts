@@ -12,4 +12,5 @@ export const E2E_TIMEOUTS = {
   assertionMs: readPositiveIntEnv("KATA_E2E_ASSERTION_TIMEOUT_MS", 10_000),
   authMs: readPositiveIntEnv("KATA_E2E_AUTH_TIMEOUT_MS", 15_000),
   agentReplyMs: readPositiveIntEnv("KATA_E2E_AGENT_REPLY_TIMEOUT_MS", 60_000),
+  katacodeTestMs: readPositiveIntEnv("KATA_E2E_KATACODE_TEST_TIMEOUT_MS", 30 * 60 * 1000),
 } as const;

@@ -1,6 +1,6 @@
 ---
 name: verify-kata-agents
-description: "Verify the Kata Agents macOS Electron desktop app with its isolated Playwright harness; use when proving launch, onboarding, settings, browser-panel, agent, channels, memory, handoffs, or Git behavior."
+description: "Verify the Kata Agents macOS Electron desktop app with its isolated Playwright harness; use when proving launch, onboarding, settings, browser-panel, agent, channels, memory, handoffs, Katacode dispatch, or Git behavior."
 ---
 
 # Verify Kata Agents
@@ -38,6 +38,7 @@ bun run e2e --grep @agent --trace on
 bun run e2e --grep @channels --trace on
 bun run e2e --grep @memory --trace on
 bun run e2e --grep @handoffs --trace on
+bun run e2e --grep @katacode --trace on
 bun run e2e --grep @approvals --trace on
 ```
 
@@ -76,6 +77,7 @@ Read [`features/README.md`](features/README.md) first, then the feature file for
 - `[data-testid="channels-nav"]`, `[data-testid="channel-chat"]`, `[data-testid^="channel-route-"]`, and `[data-testid^="channel-journal-entry-"]` for Channel routing.
 - `[data-testid="bots-nav"]`, `[data-testid="bot-chat"]`, `[data-testid^="bot-memory-"]`, and `[data-testid="bot-memory-context"]` for Bot memory.
 - `[data-testid^="handoff-card-"]`, `[data-testid^="handoff-rail-"]`, and `[data-testid="handoff-rail-result"]` for Bot handoffs.
+- `[data-testid^="task-card-"]`, `[data-testid^="task-rail-"]`, `[data-testid="task-rail-repo"]`, and `[data-testid="task-open"]` for Katacode dispatch.
 - `[data-testid="bot-permission-mode"]`, `[data-testid^="approval-card-"]`, `[data-testid^="approval-deny-"]`, `[data-testid^="approval-allow-once-"]`, `[data-testid^="approval-always-"]`, and `[data-testid^="standing-rule-"]` for Bot tool approvals.
 
 Prefer ARIA roles and these markers over coordinates, tab order, generated class names, or DOM position. Drive the user action first and assert the resulting UI and side effect second. The checked-in browser flow uses the Electron `webContents` adapter only for clicks inside a native BrowserView, which Playwright cannot treat as a normal page; it still exercises the guest page's visible target.
@@ -100,6 +102,7 @@ The Playwright runner writes its JSON report and any `--trace on` trace under `e
 - channels: route rows expose `data-route-mode` and `data-owner-bot-id`; journal entries survive restart.
 - memory: memory row `data-memory-state` / `data-memory-provenance` and context `data-memory-ids` / cursors / checkpoint revision survive restart.
 - handoffs: one `[data-testid^="handoff-card-"]` with `data-handoff-id`, rail result text, and the same card after restart.
+- katacode: one `[data-testid^="task-card-"]` with `data-task-id`, rail repository summary, and the same card after restart.
 - approvals: a pending `[data-testid^="approval-card-"]`, deny leaves the unique file absent, allow-once writes it, Explore blocks a later Write, and a standing rule matches only its exact target.
 
 Do not use renderer setters, direct local-storage writes, test-only endpoints, or a final screenshot alone as proof. For external providers, use the existing credential boundary and real provider fallback; do not add a fake production adapter. If a safe path is called a dry run, inspect its files, network, and Git refs before treating it as non-mutating.

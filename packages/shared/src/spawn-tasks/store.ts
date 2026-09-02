@@ -184,6 +184,22 @@ export class SpawnTaskStore {
     return this.reserveInternal(input);
   }
 
+  reserveForKatacode(
+    origin: { readonly conversationId: string; readonly ownerBotId: string },
+    input: ReserveSpawnTaskInput,
+  ): SpawnTask {
+    assertSpawnTaskId(origin.conversationId, 'origin.conversationId');
+    assertSpawnTaskId(origin.ownerBotId, 'origin.ownerBotId');
+    return this.reserveInternal(input, { kind: 'katacode', ...origin });
+  }
+
+  listByConversation(conversationId: string): SpawnTask[] {
+    assertSpawnTaskId(conversationId, 'conversationId');
+    return [...this.tasks.values()]
+      .filter((task) => task.origin?.kind === 'katacode' && task.origin.conversationId === conversationId)
+      .map((task) => clone(task));
+  }
+
   reserveForHandoff(handoffId: string, input: ReserveHandoffSpawnTaskInput): SpawnTask {
     assertSpawnTaskId(handoffId, 'handoffId');
     const pointerPath = this.handoffIndexPathFor(handoffId);

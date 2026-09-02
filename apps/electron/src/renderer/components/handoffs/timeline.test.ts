@@ -99,4 +99,44 @@ describe('mergeHandoffTimeline', () => {
       { kind: 'approval', card },
     ])
   })
+
+  it('renders loaded Katacode rails in place of their journal entries', () => {
+    const taskEntry: JournalEntry = {
+      schemaVersion: 1,
+      entryId: 'entry_task',
+      conversationId: 'chat_1',
+      seq: 2,
+      kind: 'task',
+      taskId: 'task_1',
+      authorBotId: 'bot_source',
+      idempotencyKey: 'katacode.task_1.requested',
+      body: '{"type":"katacode-requested"}',
+      createdAt: '2026-08-28T00:00:00.000Z',
+    }
+    const rail = {
+      taskId: 'task_1',
+      conversationId: 'chat_1',
+      ownerBotName: 'Owner',
+      repositoryLabel: 'demo',
+      branchLabel: 'kata-agent/a',
+      worktreePolicy: 'isolated' as const,
+      runtimeState: 'processing' as const,
+      attemptState: 'acknowledged' as const,
+      prompt: 'Add a test',
+      acceptanceCriteria: 'bun test exits 0',
+      evidence: [],
+      artifacts: [],
+      reconciliationRequired: false,
+      unread: false,
+      actions: ['cancel', 'open'] as const,
+      freshness: { taskVersion: 1, attemptId: 'attempt_1', journalSequence: 2 },
+    }
+    expect(mergeHandoffTimeline([
+      entry('entry_before', 1),
+      taskEntry,
+    ], [], [], [rail])).toEqual([
+      { kind: 'entry', entry: entry('entry_before', 1) },
+      { kind: 'katacode', rail },
+    ])
+  })
 })

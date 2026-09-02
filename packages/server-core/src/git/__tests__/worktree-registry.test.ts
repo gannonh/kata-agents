@@ -321,6 +321,28 @@ describe('WorktreeRegistry', () => {
     expect(readFileSync(path, 'utf8')).toBe(writerBytes)
   })
 
+  test('does not overwrite a writer that lands after the pre-publish CAS check', async () => {
+    const root = tmp()
+    const path = join(root, 'registry.json')
+    const seed = new WorktreeRegistry(path)
+    await seed.upsert(legacyRecord(root, 'repo-aabbccdd'))
+    const first = (await seed.get('repo-aabbccdd')) as ManagedWorktreeRecordV2
+    const second = {
+      ...first,
+      managedWorktreeId: 'repo-eeff0011',
+      expectedBranch: 'kata-agent/eeff0011',
+      displayName: 'eeff0011',
+      checkoutPath: join(root, 'workspace-1', '0123456789abcdef', 'eeff0011'),
+    }
+    const writerBytes = JSON.stringify({ version: 2, records: [first, second] }, null, 2) + '\n'
+    const racing = new WorktreeRegistry(path, undefined, {
+      beforePublish: () => writeFileSync(path, writerBytes),
+    })
+
+    await expect(racing.setState(first.managedWorktreeId, 'blocked')).rejects.toThrow(WorktreeRegistryError)
+    expect(readFileSync(path, 'utf8')).toBe(writerBytes)
+  })
+
   test('rejects a source that conflicts with prior upgrade evidence', async () => {
     const root = tmp()
     const path = join(root, 'registry.json')

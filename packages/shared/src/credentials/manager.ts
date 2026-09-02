@@ -314,6 +314,15 @@ export class CredentialManager {
     }
   }
 
+  async getKatacodeCredential(workspaceId: string): Promise<string | null> {
+    const cred = await this.get({ type: 'katacode', workspaceId });
+    return cred?.value || null;
+  }
+
+  async setKatacodeCredential(workspaceId: string, value: string): Promise<void> {
+    await this.set({ type: 'katacode', workspaceId }, { value });
+  }
+
   // Note: OpenAI API key methods removed - Codex uses native ChatGPT OAuth flow
 
   // ============================================================

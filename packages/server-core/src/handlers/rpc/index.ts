@@ -31,6 +31,7 @@ import { registerTransferHandlers } from './transfer'
 import { registerWorkspaceCoreHandlers } from './workspace'
 import { registerMessagingHandlers } from './messaging'
 import { registerHandoffsHandlers } from './handoffs'
+import { registerKatacodeHandlers } from './katacode'
 import { registerApprovalsHandlers } from './approvals'
 
 export function registerCoreRpcHandlers(
@@ -61,5 +62,6 @@ export function registerCoreRpcHandlers(
   registerWorkspaceCoreHandlers(server, deps)
   registerMessagingHandlers(server, deps)
   registerHandoffsHandlers(server, deps)
+  registerKatacodeHandlers(server, deps)
   registerApprovalsHandlers(server, deps)
 }

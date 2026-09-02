@@ -30,5 +30,6 @@ This directory is the maintained user-facing verification map for the Kata Agent
 - [Channel routing](./channels.md) covers durable Channel creation, Bot membership, autonomous and explicit routing, fan-out, restart, and persisted route evidence.
 - [Bot memory and compaction](./memory.md) covers explicit preference extraction, provenance, edit and forget controls, bounded context, compaction, and restart recovery.
 - [Bot handoffs](./handoffs.md) covers `send_handoff` from DirectChat, the inline card, the result rail, and restart recovery.
+- [Katacode dispatch](./katacode.md) covers `dispatch_katacode` from DirectChat, the inline task card, the result rail, isolated worktrees, and restart recovery.
 - [Bot tool approvals](./approvals.md) covers Ask-mode pause cards, deny versus allow-once side effects, Explore-mode blocks, and exact standing allows.
 - [Git workspaces](./git-workspaces.md) covers current checkout versus managed worktree selection, branch identity, configured roots, and cleanup. Offline identity/root proof is `@worktree-v2 name root`; bare `@git` includes local V1 specs plus authenticated GitHub UAT.

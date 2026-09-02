@@ -17,6 +17,8 @@ export const E2E_TAGS = {
   worktreeV2: "@worktree-v2",
   /** Self-hosted headless computer with a thin Electron client. */
   computerHeadless: "@computer-headless",
+  /** Real Katacode dispatch from a Bot DirectChat. */
+  katacode: "@katacode",
 } as const;
 
 export type E2ETag = (typeof E2E_TAGS)[keyof typeof E2E_TAGS];

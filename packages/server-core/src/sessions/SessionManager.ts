@@ -119,6 +119,7 @@ import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAtta
 import { SpawnTaskCoordinator, type SpawnTaskCancellationResult, type SpawnTaskCancellationRuntime, type SpawnTaskDispatchInput, type SpawnTaskLateEvent, type SpawnTaskRecoveryAdapter, type SpawnTaskRecoveryReference, type SpawnTaskUpdated } from './spawn-task-coordinator'
 import { isSpawnTaskTerminal, SpawnTaskStore, type CreateSpawnTaskAwaitingInputInput, type SpawnTaskStoreOptions } from '@kata-sh/shared/spawn-tasks'
 import type { HandoffDelegate } from '../handoffs/service'
+import type { KatacodeCaller, KatacodeDelegate } from '../katacode'
 import { announceApproval, getApprovalRuntime } from '../approvals/runtime'
 
 // Import from server-core domain utilities
@@ -1250,6 +1251,7 @@ export interface SessionManagerOptions {
    * unavailable and handoff reconciliation is skipped.
    */
   handoffDelegateFactory?: (workspaceId: string) => HandoffDelegate | undefined
+  katacodeDelegateFactory?: (workspaceId: string) => KatacodeDelegate | undefined
 }
 
 interface ForkChildCreateOptions {
@@ -1276,6 +1278,7 @@ export class SessionManager implements ISessionManager {
   private readonly spawnTaskUpdated?: (change: SpawnTaskUpdated) => void | Promise<void>
   private readonly spawnTaskLateEvent?: (event: SpawnTaskLateEvent) => void | Promise<void>
   private handoffDelegateFactory?: (workspaceId: string) => HandoffDelegate | undefined
+  private katacodeDelegateFactory?: (workspaceId: string) => KatacodeDelegate | undefined
   private readonly spawnTaskStores: Map<string, SpawnTaskStore> = new Map()
   private readonly spawnTaskCoordinators: Map<string, SpawnTaskCoordinator> = new Map()
   private readonly spawnTaskRecoveryPending = new Set<string>()
@@ -1371,6 +1374,7 @@ export class SessionManager implements ISessionManager {
     this.spawnTaskUpdated = options.spawnTaskUpdated
     this.spawnTaskLateEvent = options.spawnTaskLateEvent
     this.handoffDelegateFactory = options.handoffDelegateFactory
+    this.katacodeDelegateFactory = options.katacodeDelegateFactory
   }
 
   /**
@@ -1381,8 +1385,40 @@ export class SessionManager implements ISessionManager {
     this.handoffDelegateFactory = factory ?? undefined
   }
 
+  setKatacodeDelegateFactory(factory: ((workspaceId: string) => KatacodeDelegate | undefined) | null): void {
+    this.katacodeDelegateFactory = factory ?? undefined
+  }
+
+  getKatacodeCaller(sessionId: string): KatacodeCaller | null {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.botRuntimeAuthority) return null
+    const authority = managed.botRuntimeAuthority
+    const permissionMode = (authority.permissionMode ?? managed.permissionMode ?? 'ask') as KatacodeCaller['permissionMode']
+    return {
+      parentSessionId: sessionId,
+      permissionMode,
+      context: {
+        runId: `run_${sessionId}`,
+        operationId: `op_${randomUUID()}`,
+        workspaceId: authority.workspaceId,
+        botId: authority.botId,
+        conversationId: authority.conversationId,
+        journalCursor: 0,
+        conversationCursor: 0,
+        memoryRevision: 1,
+        checkpointRevision: 1,
+        text: '',
+        memoryIds: [],
+      },
+    }
+  }
+
   private handoffDelegateFor(workspaceId: string): HandoffDelegate | undefined {
     return this.handoffDelegateFactory?.(workspaceId)
+  }
+
+  private katacodeDelegateFor(workspaceId: string): KatacodeDelegate | undefined {
+    return this.katacodeDelegateFactory?.(workspaceId)
   }
 
   /**
@@ -5162,6 +5198,12 @@ export class SessionManager implements ISessionManager {
         const delegate = this.handoffDelegateFor(managed.workspace.id)
         if (!delegate) throw new Error('inspect_handoff is not available in this context.')
         return delegate.inspectHandoff(managed.id, request, signal)
+      }
+
+      managed.agent.onDispatchKatacode = async (request) => {
+        const delegate = this.katacodeDelegateFor(managed.workspace.id)
+        if (!delegate) throw new Error('dispatch_katacode is not available in this context.')
+        return delegate.dispatchKatacode(managed.id, request)
       }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
