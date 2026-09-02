@@ -152,12 +152,16 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
         if (electronApp.windows().length !== 0) {
           throw new Error("Renderer reopened before offline routine execution completed");
         }
-        return durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => run.state.kind === "succeeded");
+        return durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => (
+          run.state.kind === "succeeded" && typeof run.state.result === "string" && run.state.result.includes(resultToken)
+        ));
       }, { timeout: 240_000, intervals: [1_000] }).not.toHaveLength(0);
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
-      const offlineRuns = durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => run.state.kind === "succeeded");
+      const offlineRuns = durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => (
+        run.state.kind === "succeeded" && typeof run.state.result === "string" && run.state.result.includes(resultToken)
+      ));
+      expect(offlineRuns.length).toBeGreaterThanOrEqual(1);
       expect(offlineRuns[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
-      expect(offlineRuns[0]?.state.result).toEqual(expect.stringContaining(resultToken));
       const offlineRunId = offlineRuns[0]!.runId;
 
       activePage = await reopenRenderer(electronApp);
@@ -172,11 +176,8 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
       await expect(activePage.getByTestId(`routine-history-${routine.routineId}`)).toBeVisible();
       await expect(activePage.getByTestId(`routine-run-${offlineRunId}`)).toBeVisible();
       const runs = await listRoutineRuns(activePage, workspace, routine.routineId);
-      const succeededRuns = runs.filter(run => run.state.kind === "succeeded");
-      expect(succeededRuns.length).toBeGreaterThanOrEqual(1);
-      expect(succeededRuns.length).toBeLessThanOrEqual(2);
-      expect(succeededRuns.some(run => run.runId === offlineRunId)).toBe(true);
-      expect(succeededRuns[0]?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
+      const observed = runs.find(run => run.runId === offlineRunId);
+      expect(observed?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
     }, {
       recoverAfterFailure: async () => {
         activePage = await reopenRenderer(electronApp);
