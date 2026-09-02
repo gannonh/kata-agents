@@ -65,13 +65,6 @@ export function subscribeKatacodeEvents(
   return () => eventListeners.delete(listener)
 }
 
-function refreshRuntime(runtime: KatacodeRuntime): KatacodeRuntime {
-  runtime.bots.recover()
-  runtime.bots.reload()
-  runtime.channels.reload()
-  return runtime
-}
-
 export function getKatacodeRuntime(
   sessionManager: KatacodeRuntimeSessionManager,
   workspaceId: string,
@@ -80,7 +73,7 @@ export function getKatacodeRuntime(
   if (!workspace) throw new Error('Workspace not found')
 
   const existing = runtimes.get(workspace.rootPath)
-  if (existing) return refreshRuntime(existing)
+  if (existing) return existing
 
   const bots = new BotDirectory({ workspaceRoot: workspace.rootPath, workspaceId: workspace.id })
   bots.recover()

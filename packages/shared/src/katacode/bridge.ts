@@ -121,20 +121,27 @@ export class KatacodeExecutionBridge {
       },
     );
 
-    const worktree = input.identity.worktreePolicy === 'shared' && input.identity.sharedWorktreeId
-      ? await this.worktrees.acquireSharedLease({
-        workspaceId: this.workspaceId,
-        ownerTaskId: task.taskId,
-        ownerSessionId: input.identity.parentSessionId,
-        managedWorktreeId: input.identity.sharedWorktreeId,
-        repositoryLabel: input.identity.repositoryLabel,
-      })
-      : await this.worktrees.allocateIsolated({
-        workspaceId: this.workspaceId,
-        ownerTaskId: task.taskId,
-        ownerSessionId: input.identity.parentSessionId,
-        repositoryLabel: input.identity.repositoryLabel,
-      });
+    let worktree;
+    try {
+      worktree = input.identity.worktreePolicy === 'shared' && input.identity.sharedWorktreeId
+        ? await this.worktrees.acquireSharedLease({
+          workspaceId: this.workspaceId,
+          ownerTaskId: task.taskId,
+          ownerSessionId: input.identity.parentSessionId,
+          managedWorktreeId: input.identity.sharedWorktreeId,
+          repositoryLabel: input.identity.repositoryLabel,
+        })
+        : await this.worktrees.allocateIsolated({
+          workspaceId: this.workspaceId,
+          ownerTaskId: task.taskId,
+          ownerSessionId: input.identity.parentSessionId,
+          repositoryLabel: input.identity.repositoryLabel,
+        });
+    } catch (error) {
+      this.worktrees.release?.({ ownerTaskId: task.taskId });
+      this.failReservedTask(task.taskId, error);
+      throw error;
+    }
 
     const attempt = this.attempts.createPending({
       taskId: task.taskId,
@@ -350,6 +357,22 @@ export class KatacodeExecutionBridge {
       this.taskStore.transition(taskId, { runtimeState: 'processing', at: now() });
     }
     return this.snapshot(taskId, latest.attemptId);
+  }
+
+  private failReservedTask(taskId: string, error: unknown): void {
+    const current = this.requireTask(taskId);
+    if (isSpawnTaskTerminal(current.runtimeState)) return;
+    const message = error instanceof Error ? error.message : String(error);
+    this.taskStore.transition(taskId, {
+      runtimeState: 'failed',
+      at: now(),
+      failure: createSpawnTaskFailure({
+        code: 'tool_error',
+        message,
+        retryable: true,
+        committedAt: now(),
+      }),
+    });
   }
 
   private markFailed(

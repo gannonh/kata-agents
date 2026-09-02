@@ -89,7 +89,7 @@ export class KatacodeService {
       taskStore: options.taskStore,
       attempts: options.attempts,
       adapter: new KatacodeHttpAdapter({
-        endpoint: this.getEndpoint() ?? 'https://katacode.invalid',
+        getEndpoint: () => this.getEndpoint() ?? 'https://katacode.invalid',
         getCredential: options.getCredential ?? (() => getCredentialManager().getKatacodeCredential(options.workspaceId)),
       }),
       worktrees: options.worktrees,
@@ -231,7 +231,9 @@ export class KatacodeService {
     try {
       const payload = JSON.parse(input.body) as { taskId?: string; conversationId?: string }
       if (typeof payload.taskId === 'string' && typeof payload.conversationId === 'string') {
-        void this.refresh(payload.conversationId, payload.taskId)
+        void this.refresh(payload.conversationId, payload.taskId).catch((error) => {
+          console.error('[Katacode] Authenticated callback refresh failed', error)
+        })
       }
     } catch {
       return false

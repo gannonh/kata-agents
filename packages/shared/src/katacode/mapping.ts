@@ -88,12 +88,14 @@ export function projectKatacodeCanonicalState(input: {
   }
 
   if (attempt.state === 'failed') {
+    const failureCode = attempt.failureCode ?? 'provider_error';
+    const actions = actionsFor('failed', 'failed');
     return {
       runtimeState: 'failed',
-      failureCode: attempt.failureCode ?? 'provider_error',
-      retryable: attempt.failureCode !== undefined,
+      failureCode,
+      retryable: actions.includes('retry'),
       reconciliationRequired: false,
-      actions: actionsFor('failed', 'failed'),
+      actions,
     };
   }
 

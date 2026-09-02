@@ -26,7 +26,7 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 const MAX_WAIT_MS = 25_000
-const WAIT_POLL_MS = 50
+const WAIT_FALLBACK_MS = 1_000
 
 class KatacodeWaitRegistry {
   private readonly activeByClient = new Map<string, Map<string, AbortController>>()
@@ -82,21 +82,19 @@ function isNewer(rail: KatacodeTaskRailView, after?: KatacodeTaskRailView['fresh
     || rail.freshness.journalSequence > (after.journalSequence ?? 0)
 }
 
-function delay(ms: number, signal: AbortSignal): Promise<void> {
+function delay(ms: number, ...signals: AbortSignal[]): Promise<void> {
   return new Promise((resolve) => {
-    if (signal.aborted) {
+    if (signals.some((signal) => signal.aborted)) {
       resolve()
       return
     }
-    const onAbort = () => {
+    const onDone = () => {
       clearTimeout(timer)
+      for (const signal of signals) signal.removeEventListener('abort', onDone)
       resolve()
     }
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    signal.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(onDone, ms)
+    for (const signal of signals) signal.addEventListener('abort', onDone, { once: true })
   })
 }
 
@@ -153,19 +151,41 @@ export function registerKatacodeHandlers(
       const controller = waits.begin(ctx.clientId, input.waitId)
       const deadline = Date.now() + timeoutMs
       try {
-        // Refresh once per WAIT. The client already re-enters after ~5s, so a
-        // 50ms poll must not hammer the provider. Persistence still drives the loop.
+        // Refresh once per WAIT. Persistence and in-process events drive the
+        // loop; the fallback poll is only a missed-event safety net.
         try {
           await runtime.service.refresh(input.conversationId, input.taskId)
         } catch {
           // Keep the last persisted rail if the provider poll fails.
         }
-        while (!controller.signal.aborted) {
-          const rail = runtime.service.getRail(input.conversationId, input.taskId)
-          if (isNewer(rail, input.after) || Date.now() >= deadline) return rail
-          await delay(Math.min(WAIT_POLL_MS, Math.max(1, deadline - Date.now())), controller.signal)
+        let pendingEvent = false
+        let wake = new AbortController()
+        const unsubscribe = subscribeKatacodeEvents((workspaceId, event) => {
+          if (workspaceId !== runtime.workspaceId) return
+          if (event.conversationId !== input.conversationId || event.taskId !== input.taskId) return
+          pendingEvent = true
+          wake.abort()
+        })
+        try {
+          while (!controller.signal.aborted) {
+            const rail = runtime.service.getRail(input.conversationId, input.taskId)
+            if (isNewer(rail, input.after) || Date.now() >= deadline) return rail
+            if (!pendingEvent) {
+              await delay(
+                Math.min(WAIT_FALLBACK_MS, Math.max(1, deadline - Date.now())),
+                controller.signal,
+                wake.signal,
+              )
+            }
+            if (pendingEvent) {
+              pendingEvent = false
+              if (wake.signal.aborted) wake = new AbortController()
+            }
+          }
+          return runtime.service.getRail(input.conversationId, input.taskId)
+        } finally {
+          unsubscribe()
         }
-        return runtime.service.getRail(input.conversationId, input.taskId)
       } finally {
         waits.finish(ctx.clientId, input.waitId, controller)
       }

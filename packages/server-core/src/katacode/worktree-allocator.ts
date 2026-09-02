@@ -7,7 +7,7 @@ export class KatacodeRepositoryResolutionError extends Error {
   readonly code = 'repository_unresolved' as const
 }
 
-function matchesRepositoryLabel(
+export function matchesRepositoryLabel(
   label: string,
   workspaceName: string,
   repositoryRoot: string,
@@ -18,9 +18,10 @@ function matchesRepositoryLabel(
   return remotes.some((remote) => {
     const url = remote.url ?? ''
     return remote.name === label
-      || url.includes(label)
       || url.endsWith(`/${label}.git`)
       || url.endsWith(`:${label}.git`)
+      || url.endsWith(`/${label}`)
+      || url.endsWith(`:${label}`)
   })
 }
 

@@ -3,7 +3,7 @@ export type { KatacodeAttemptStoreOptions, CreateKatacodeAttemptInput } from './
 export { KatacodeExecutionBridge, mintKatacodeIdempotencyKey } from './bridge.ts';
 export type { KatacodeBridgeOptions, KatacodeDispatchResult, KatacodeJournalSink } from './bridge.ts';
 export { signKatacodeCallback, verifyKatacodeCallback, KATACODE_SIGNATURE_HEADER, KATACODE_TIMESTAMP_HEADER } from './callbacks.ts';
-export { KatacodeHttpAdapter } from './http-adapter.ts';
+export { KatacodeHttpAdapter, isCredentialSafeKatacodeEndpoint } from './http-adapter.ts';
 export type { KatacodeHttpAdapterOptions } from './http-adapter.ts';
 export { KatacodeIdentityError, resolveKatacodeDispatchIdentity } from './identity.ts';
 export type { KatacodeDispatchCallerFields, ResolvedKatacodeIdentity } from './identity.ts';

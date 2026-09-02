@@ -13,7 +13,7 @@ import { KatacodeExecutionBridge } from '../bridge.ts';
 import { signKatacodeCallback, verifyKatacodeCallback } from '../callbacks.ts';
 import { KatacodeIdentityError, resolveKatacodeDispatchIdentity } from '../identity.ts';
 import { actionsFor, projectKatacodeCanonicalState, retryBlockedByUncertain } from '../mapping.ts';
-import { KatacodeHttpAdapter } from '../http-adapter.ts';
+import { KatacodeHttpAdapter, isCredentialSafeKatacodeEndpoint } from '../http-adapter.ts';
 import { MemoryKatacodeAdapter } from './memory-adapter.ts';
 import type { KatacodeWorktreeAllocator } from '../worktree.ts';
 import { SharedWorktreeRequiresApprovalError } from '../worktree.ts';
@@ -208,6 +208,28 @@ describe('Katacode canonical mapping', () => {
     expect(actionsFor('processing', 'uncertain')).not.toContain('retry');
     expect(actionsFor('processing', 'uncertain')).not.toContain('cancel');
   });
+
+  test('failed attempts without an explicit code stay retryable like provider_error', () => {
+    const projection = projectKatacodeCanonicalState({
+      attempt: {
+        schemaVersion: 1,
+        attemptId: 'a1',
+        taskId: 'task_1',
+        workspaceId: 'ws_test',
+        conversationId: 'chat_owner',
+        ownerBotId: 'bot_owner',
+        clientIdempotencyKey: 'k',
+        state: 'failed',
+        fence: { attemptNonce: 'n', taskVersion: 1 },
+        worktree: { policy: 'isolated', repositoryLabel: 'demo', branchLabel: 'b' },
+        createdAt: '2026-09-02T00:00:00.000Z',
+      },
+      runtimeState: 'failed',
+    });
+    expect(projection.failureCode).toBe('provider_error');
+    expect(projection.retryable).toBe(true);
+    expect(projection.actions).toContain('retry');
+  });
 });
 
 describe('Katacode execution bridge', () => {
@@ -380,6 +402,22 @@ describe('Katacode execution bridge', () => {
     expect(adapter.dispatches.length).toBeGreaterThan(1);
   });
 
+  test('fails the reserved task when worktree allocation throws', async () => {
+    const { bridge, taskStore, adapter, worktrees } = harness();
+    worktrees.allocateIsolated = async () => {
+      throw new Error('no checkout available');
+    };
+    await expect(bridge.dispatch({ identity: identity(), clientIdempotencyKey: 'key-alloc' }))
+      .rejects.toThrow(/no checkout available/);
+    const reserved = taskStore.listByConversation('chat_owner');
+    expect(reserved).toHaveLength(1);
+    expect(reserved[0]?.runtimeState).toBe('failed');
+    expect(reserved[0]?.failure?.code).toBe('tool_error');
+    expect(reserved[0]?.failure?.retryable).toBe(true);
+    expect(adapter.dispatches).toHaveLength(0);
+    expect(worktrees.released).toEqual([reserved[0]!.taskId]);
+  });
+
   test('cancel is compare-and-set safe against completion', async () => {
     const { bridge, adapter, taskStore } = harness();
     const result = await bridge.dispatch({ identity: identity(), clientIdempotencyKey: 'key-cancel' });
@@ -435,6 +473,75 @@ describe('Katacode HTTP adapter', () => {
       permissionMode: 'safe',
       worktree: { policy: 'isolated', repositoryLabel: 'demo', branchLabel: 'b' },
     })).resolves.toEqual({ kind: 'uncertain' });
+  });
+
+  test('resolves the endpoint at request time', async () => {
+    const calls: string[] = [];
+    let endpoint = 'https://katacode.invalid';
+    const adapter = new KatacodeHttpAdapter({
+      getEndpoint: () => endpoint,
+      getCredential: async () => 'secret-token',
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify({ runId: 'run_live', phase: 'queued' }), { status: 200 });
+      }) as typeof fetch,
+    });
+    endpoint = 'https://katacode.example';
+    await expect(adapter.dispatch({
+      contractVersion: KATACODE_ADAPTER_CONTRACT_VERSION,
+      idempotencyKey: 'http-live',
+      prompt: 'change one file',
+      acceptanceCriteria: 'tests pass',
+      permissionMode: 'ask',
+      worktree: { policy: 'isolated', repositoryLabel: 'demo', branchLabel: 'b' },
+    })).resolves.toEqual({ kind: 'accepted', runRef: { runId: 'run_live' } });
+    expect(calls).toEqual(['https://katacode.example/v1/runs']);
+  });
+
+  test('rejects a credentialed request to a non-HTTPS remote endpoint', async () => {
+    const calls: string[] = [];
+    const adapter = new KatacodeHttpAdapter({
+      endpoint: 'http://katacode.example',
+      getCredential: async () => 'secret-token',
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        throw new Error('network should not be used');
+      }) as unknown as typeof fetch,
+    });
+    await expect(adapter.dispatch({
+      contractVersion: KATACODE_ADAPTER_CONTRACT_VERSION,
+      idempotencyKey: 'http-insecure',
+      prompt: 'change one file',
+      acceptanceCriteria: 'tests pass',
+      permissionMode: 'ask',
+      worktree: { policy: 'isolated', repositoryLabel: 'demo', branchLabel: 'b' },
+    })).resolves.toEqual({ kind: 'rejected', reason: 'Katacode endpoint must use HTTPS' });
+    expect(calls).toEqual([]);
+    expect(isCredentialSafeKatacodeEndpoint('https://katacode.invalid')).toBe(true);
+    expect(isCredentialSafeKatacodeEndpoint('http://localhost:8787')).toBe(true);
+    expect(isCredentialSafeKatacodeEndpoint('http://127.0.0.1:8787')).toBe(true);
+    expect(isCredentialSafeKatacodeEndpoint('http://katacode.example')).toBe(false);
+  });
+
+  test('allows localhost HTTP for local development and E2E', async () => {
+    const calls: string[] = [];
+    const adapter = new KatacodeHttpAdapter({
+      endpoint: 'http://127.0.0.1:8787/',
+      getCredential: async () => 'secret-token',
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify({ runId: 'run_local', phase: 'queued' }), { status: 200 });
+      }) as typeof fetch,
+    });
+    await expect(adapter.dispatch({
+      contractVersion: KATACODE_ADAPTER_CONTRACT_VERSION,
+      idempotencyKey: 'http-local',
+      prompt: 'change one file',
+      acceptanceCriteria: 'tests pass',
+      permissionMode: 'ask',
+      worktree: { policy: 'isolated', repositoryLabel: 'demo', branchLabel: 'b' },
+    })).resolves.toEqual({ kind: 'accepted', runRef: { runId: 'run_local' } });
+    expect(calls).toEqual(['http://127.0.0.1:8787/v1/runs']);
   });
 
   test('missing credential is a rejected dispatch, not an uncertain acceptance', async () => {

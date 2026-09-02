@@ -14,24 +14,47 @@ import {
 } from '@kata-sh/core';
 
 export interface KatacodeHttpAdapterOptions {
-  readonly endpoint: string;
+  readonly endpoint?: string;
+  readonly getEndpoint?: () => string;
   readonly getCredential: () => Promise<string | null>;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
 }
 
+const DUMMY_ENDPOINT = 'https://katacode.invalid';
+
+export function isCredentialSafeKatacodeEndpoint(endpoint: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'https:') return true;
+  if (parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+}
+
 export class KatacodeHttpAdapter implements KatacodeAdapter {
   readonly contractVersion = KATACODE_ADAPTER_CONTRACT_VERSION;
-  private readonly endpoint: string;
+  private readonly resolveEndpoint: () => string;
   private readonly getCredential: () => Promise<string | null>;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
   constructor(options: KatacodeHttpAdapterOptions) {
-    this.endpoint = options.endpoint.replace(/\/+$/, '');
+    const fallback = (options.endpoint ?? DUMMY_ENDPOINT).replace(/\/+$/, '');
+    this.resolveEndpoint = options.getEndpoint
+      ? () => options.getEndpoint!().replace(/\/+$/, '')
+      : () => fallback;
     this.getCredential = options.getCredential;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 30_000;
+  }
+
+  private endpoint(): string {
+    return this.resolveEndpoint();
   }
 
   async dispatch(input: KatacodeDispatchRequest): Promise<KatacodeDispatchAcceptance> {
@@ -106,7 +129,7 @@ export class KatacodeHttpAdapter implements KatacodeAdapter {
   async getDeepLink(runRef: KatacodeRunRef): Promise<KatacodeDeepLink> {
     const response = await this.request('GET', `/v1/runs/${encodeURIComponent(runRef.runId)}/link`);
     if (response.kind === 'ok' && typeof response.body?.url === 'string') return { url: response.body.url };
-    return { url: `${this.endpoint}/runs/${encodeURIComponent(runRef.runId)}` };
+    return { url: `${this.endpoint()}/runs/${encodeURIComponent(runRef.runId)}` };
   }
 
   private async request(
@@ -117,15 +140,23 @@ export class KatacodeHttpAdapter implements KatacodeAdapter {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
+      const endpoint = this.endpoint();
       const credential = await this.getCredential();
       if (!credential) throw new Error('Katacode credential is not configured');
+      if (!isCredentialSafeKatacodeEndpoint(endpoint)) {
+        return {
+          kind: 'ok',
+          status: 400,
+          error: 'Katacode endpoint must use HTTPS',
+        };
+      }
       const headers: Record<string, string> = {
         authorization: `Bearer ${credential}`,
         accept: 'application/json',
       };
       if (options.idempotencyKey) headers['idempotency-key'] = options.idempotencyKey;
       if (options.body) headers['content-type'] = 'application/json';
-      const response = await this.fetchImpl(`${this.endpoint}${path}`, {
+      const response = await this.fetchImpl(`${endpoint}${path}`, {
         method,
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
