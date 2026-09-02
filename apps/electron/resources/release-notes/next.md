@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Bots can dispatch development work to Katacode.** Ask a Bot to send a repository, prompt, and acceptance criteria; follow one durable task card and right-rail for isolated worktree progress, tests, artifacts, PR/diff, cancel, retry, and Open in Katacode ([#84](https://github.com/gannonh/kata-agents/issues/84)).
 - **Bot-owned routines keep running while clients are offline.** Schedule durable Bot prompts, trigger narrow event routines with deduplication, inspect destination and recent run history on the Bot panel, and recover approval pauses after restart without exposing provider Session IDs ([#83](https://github.com/gannonh/kata-agents/issues/83), commit [d287e3b](https://github.com/gannonh/kata-agents/commit/d287e3ba)).
 - **One self-hosted computer for every Bot.** Deploy the Linux server with Docker Compose, connect a thin desktop client over WSS, and keep files, Git, credentials, and the server-resident browser on one durable data root across restart ([#82](https://github.com/gannonh/kata-agents/issues/82)).
 - **Bot tool approvals at Grok-style boundaries.** In Ask mode a Bot pauses on a consequential tool until you deny or allow once. Explore mode blocks the same mutation without a prompt. A standing allow matches only that exact tool and target ([#81](https://github.com/gannonh/kata-agents/issues/81)).

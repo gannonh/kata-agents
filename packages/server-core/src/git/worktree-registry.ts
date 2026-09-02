@@ -127,6 +127,8 @@ export const worktreeRegistryEvidencePaths = getWorktreeRegistryEvidencePaths
 export interface WorktreeRegistryHooks {
   beforePersist?: () => void
   beforeReplace?: () => void
+  /** Fired after the pre-publish CAS check and immediately before the atomic replace. */
+  beforePublish?: () => void
 }
 
 const VALID_STATES = new Set<ManagedWorktreeState>([
@@ -530,10 +532,57 @@ function wrapError(
   return new WorktreeRegistryError(code, message, registryPath, error)
 }
 
-function writeBytesAtomically(path: string, bytes: string | Buffer, beforeRename?: () => void): void {
+const AT_FDCWD = -100
+const RENAME_EXCHANGE = 2
+const RENAME_SWAP = 2
+
+function cstr(value: string): Buffer {
+  return Buffer.from(`${value}\0`)
+}
+
+function tryExchangePaths(left: string, right: string): boolean {
+  try {
+    if (process.platform === 'linux') {
+      const { dlopen, FFIType, suffix, ptr } = require('bun:ffi') as typeof import('bun:ffi')
+      const lib = dlopen(`libc.${suffix}`, {
+        renameat2: {
+          args: [FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.cstring, FFIType.u64],
+          returns: FFIType.i32,
+        },
+      })
+      const leftBuf = cstr(left)
+      const rightBuf = cstr(right)
+      return lib.symbols.renameat2(AT_FDCWD, ptr(leftBuf), AT_FDCWD, ptr(rightBuf), BigInt(RENAME_EXCHANGE)) === 0
+    }
+    if (process.platform === 'darwin') {
+      const { dlopen, FFIType, suffix, ptr } = require('bun:ffi') as typeof import('bun:ffi')
+      const lib = dlopen(`libc.${suffix}`, {
+        renamex_np: {
+          args: [FFIType.cstring, FFIType.cstring, FFIType.u32],
+          returns: FFIType.i32,
+        },
+      })
+      const leftBuf = cstr(left)
+      const rightBuf = cstr(right)
+      return lib.symbols.renamex_np(ptr(leftBuf), ptr(rightBuf), RENAME_SWAP) === 0
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
+function writeBytesAtomically(
+  path: string,
+  bytes: string | Buffer,
+  beforeRename?: () => void,
+  expected?: { exists: boolean; hash: string },
+): void {
   const dir = dirname(path)
   mkdirSync(dir, { recursive: true })
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}-${randomBytes(6).toString('hex')}`
+  const claimPath = `${path}.publish.json`
+  const writerToken = randomBytes(8).toString('hex')
   try {
     const fd = openSync(tmp, 'wx', 0o600)
     try {
@@ -547,11 +596,61 @@ function writeBytesAtomically(path: string, bytes: string | Buffer, beforeRename
     } finally {
       closeSync(fd)
     }
+    writeFileSync(claimPath, JSON.stringify({
+      status: 'prepared',
+      expectedSourceHash: expected?.hash ?? null,
+      expectedExists: expected?.exists ?? null,
+      targetHash: sha256(bytes),
+      writerToken,
+    }))
     beforeRename?.()
-    renameSync(tmp, path)
+    if (expected?.exists) {
+      if (!tryExchangePaths(tmp, path)) {
+        const latest = existsSync(path) ? sha256(readFileSync(path)) : null
+        if (latest !== expected.hash) {
+          throw new WorktreeRegistryError(
+            'REGISTRY_CONFLICT',
+            'The registry source changed during mutation; source bytes were preserved.',
+            path,
+          )
+        }
+        renameSync(tmp, path)
+      } else {
+        const swappedAside = existsSync(tmp) ? sha256(readFileSync(tmp)) : null
+        if (swappedAside !== expected.hash) {
+          tryExchangePaths(tmp, path)
+          throw new WorktreeRegistryError(
+            'REGISTRY_CONFLICT',
+            'The registry source changed during mutation; source bytes were preserved.',
+            path,
+          )
+        }
+        rmSync(tmp, { force: true })
+      }
+    } else if (expected) {
+      if (existsSync(path)) {
+        throw new WorktreeRegistryError(
+          'REGISTRY_CONFLICT',
+          'The registry source changed before the mutation could be committed.',
+          path,
+        )
+      }
+      renameSync(tmp, path)
+    } else {
+      renameSync(tmp, path)
+    }
+    rmSync(claimPath, { force: true })
   } catch (error) {
     try {
-      rmSync(tmp, { force: true })
+      // After a successful exchange, tmp may hold the previous registry.
+      // Delete it only when it still contains the unpublished payload.
+      const unpublished = existsSync(tmp) && sha256(readFileSync(tmp)) === sha256(bytes)
+      if (unpublished) rmSync(tmp, { force: true })
+    } catch {
+      /* preserve tmp if we cannot prove it is unpublished payload */
+    }
+    try {
+      rmSync(claimPath, { force: true })
     } catch {
       /* preserve the original error */
     }
@@ -984,7 +1083,8 @@ export class WorktreeRegistry {
             this.registryPath,
           )
         }
-      })
+        this.hooks.beforePublish?.()
+      }, { exists: true, hash: source.hash })
     } catch (error) {
       throw wrapError(
         error,
@@ -1109,7 +1209,8 @@ export class WorktreeRegistry {
             this.registryPath,
           )
         }
-      })
+        this.hooks.beforePublish?.()
+      }, expectedSource)
     } catch (error) {
       throw wrapError(
         error,

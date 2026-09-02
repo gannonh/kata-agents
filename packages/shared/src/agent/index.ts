@@ -134,6 +134,9 @@ export {
   type InspectHandoffRequest,
   type InspectHandoffResult,
   type InspectHandoffHelpResult,
+  type DispatchKatacodeRequest,
+  type DispatchKatacodeResult,
+  type DispatchKatacodeHelpResult,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
   MINI_AGENT_TOOLS,

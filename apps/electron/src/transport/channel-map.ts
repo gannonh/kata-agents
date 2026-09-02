@@ -85,6 +85,16 @@ export const CHANNEL_MAP = {
   markHandoffResultRead: invoke(RPC_CHANNELS.handoffs.MARK_RESULT_READ),
   onHandoffEvent: listener(RPC_CHANNELS.handoffs.EVENT),
 
+  listConversationKatacodeTasks: invoke(RPC_CHANNELS.katacode.LIST),
+  getKatacodeRail: invoke(RPC_CHANNELS.katacode.GET_RAIL),
+  waitForKatacode: invoke(RPC_CHANNELS.katacode.WAIT),
+  cancelKatacodeWait: invoke(RPC_CHANNELS.katacode.CANCEL_WAIT),
+  cancelKatacode: invoke(RPC_CHANNELS.katacode.CANCEL),
+  retryKatacode: invoke(RPC_CHANNELS.katacode.RETRY),
+  reconcileKatacode: invoke(RPC_CHANNELS.katacode.RECONCILE),
+  markKatacodeResultRead: invoke(RPC_CHANNELS.katacode.MARK_RESULT_READ),
+  onKatacodeEvent: listener(RPC_CHANNELS.katacode.EVENT),
+
   listConversationApprovals: invoke(RPC_CHANNELS.approvals.LIST),
   resolveApproval: invoke(RPC_CHANNELS.approvals.RESOLVE),
   listStandingRules: invoke(RPC_CHANNELS.approvals.LIST_STANDING_RULES),

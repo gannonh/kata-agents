@@ -652,6 +652,7 @@ export class ClaudeAgent extends BaseAgent {
       spawnSessionFn: (input) => this.preExecuteSpawnSession(input),
       sendHandoffFn: (input) => this.preExecuteSendHandoff(input),
       inspectHandoffFn: (input, signal) => this.preExecuteInspectHandoff(input, signal),
+      dispatchKatacodeFn: (input) => this.preExecuteDispatchKatacode(input),
     });
 
     // Start config watcher for hot-reloading source changes
@@ -1229,6 +1230,7 @@ export class ClaudeAgent extends BaseAgent {
                 case 'spawn_session_intercept':
                 case 'send_handoff_intercept':
                 case 'inspect_handoff_intercept':
+                case 'dispatch_katacode_intercept':
                   // Claude's session tools run in-process via SDK — just allow
                   return { continue: true };
 

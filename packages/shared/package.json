@@ -34,6 +34,7 @@
     "./config/types": "./src/config/types.ts",
     "./conversations": "./src/conversations/index.ts",
     "./handoffs": "./src/handoffs/index.ts",
+    "./katacode": "./src/katacode/index.ts",
     "./credentials": "./src/credentials/index.ts",
     "./docs": "./src/docs/index.ts",
     "./docs/doc-links": "./src/docs/doc-links.ts",

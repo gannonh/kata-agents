@@ -10,6 +10,9 @@
 import type { ApprovalId } from './tool-approval.ts';
 import type { HandoffId } from './handoff.ts';
 
+/** Opaque SpawnTask identity used on public task journal entries. */
+export type TaskId = string;
+
 export const CONVERSATION_SCHEMA_VERSION = 1 as const;
 
 /** Bounds are UTF-8 byte counts, not JavaScript string lengths. */
@@ -18,7 +21,7 @@ export const CONVERSATION_LIMITS = Object.freeze({
   idempotencyKeyBytes: 512,
 });
 
-export const JOURNAL_ENTRY_KINDS = ['user', 'bot', 'tool', 'error', 'lifecycle', 'handoff', 'approval'] as const;
+export const JOURNAL_ENTRY_KINDS = ['user', 'bot', 'tool', 'error', 'lifecycle', 'handoff', 'approval', 'task'] as const;
 export type JournalEntryKind = (typeof JOURNAL_ENTRY_KINDS)[number];
 
 /** `chat_<uuid>` or `channel_<uuid>` */
@@ -36,6 +39,8 @@ export interface JournalEntry {
   readonly handoffId?: HandoffId;
   /** Approval this entry announces. Required on approval entries; absent otherwise. */
   readonly approvalId?: ApprovalId;
+  /** Spawned task this entry announces. Required on task entries; absent otherwise. */
+  readonly taskId?: TaskId;
   readonly seq: number;
   readonly kind: JournalEntryKind;
   readonly idempotencyKey: string;

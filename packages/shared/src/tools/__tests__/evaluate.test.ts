@@ -143,6 +143,60 @@ describe('evaluatePolicy', () => {
     expect(bypass.kind).toBe('ask');
   });
 
+  it('requires approval for shared Katacode checkout even in allow-all', () => {
+    const isolated = evaluatePolicy({
+      invocation: invocation({
+        toolName: 'dispatch_katacode',
+        normalizedInput: {
+          repository: 'demo',
+          prompt: 'fix',
+          acceptanceCriteria: 'tests pass',
+          worktreePolicy: 'isolated',
+        },
+      }),
+      mode: 'allow-all',
+      standingRules: [],
+    });
+    expect(isolated).toEqual({ kind: 'allow', reason: 'allow-all' });
+
+    const shared = evaluatePolicy({
+      invocation: invocation({
+        toolName: 'mcp__session__dispatch_katacode',
+        normalizedInput: {
+          repository: 'demo',
+          prompt: 'fix',
+          acceptanceCriteria: 'tests pass',
+          worktreePolicy: 'shared',
+          sharedWorktreeId: 'repo-aabbccdd',
+        },
+      }),
+      mode: 'allow-all',
+      standingRules: [],
+    });
+    expect(shared.kind).toBe('ask');
+
+    const standingAllow = evaluatePolicy({
+      invocation: invocation({
+        toolName: 'dispatch_katacode',
+        normalizedInput: {
+          repository: 'demo',
+          prompt: 'fix',
+          acceptanceCriteria: 'tests pass',
+          worktreePolicy: 'shared',
+          sharedWorktreeId: 'repo-aabbccdd',
+        },
+        target: { kind: 'tool', value: 'dispatch_katacode', fingerprint: 'fp_a' },
+      }),
+      mode: 'allow-all',
+      standingRules: [standingRule({
+        effect: 'allow',
+        toolName: 'dispatch_katacode',
+        target: 'dispatch_katacode',
+      })],
+    });
+    expect(standingAllow).toEqual({ kind: 'allow', reason: 'standing-allow' });
+  });
+
   it('standing allow matches target fingerprint, not only the display target', () => {
     const rule = standingRule({
       effect: 'allow',

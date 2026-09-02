@@ -162,6 +162,10 @@ export function assertSpawnTask(value: unknown): SpawnTask {
     } else if (origin.kind === 'handoff') {
       exactKeys(origin, 'origin', ['kind', 'handoffId']);
       assertSpawnTaskId(origin.handoffId, 'origin.handoffId');
+    } else if (origin.kind === 'katacode') {
+      exactKeys(origin, 'origin', ['kind', 'conversationId', 'ownerBotId']);
+      assertSpawnTaskId(origin.conversationId, 'origin.conversationId');
+      assertSpawnTaskId(origin.ownerBotId, 'origin.ownerBotId');
     } else {
       fail('unknown origin.kind');
     }

@@ -197,6 +197,7 @@ export {
   CredentialPromptSchema,
   CallLlmSchema,
   SendHandoffSchema,
+  DispatchKatacodeSchema,
   InspectHandoffSchema,
   UpdatePreferencesSchema,
   TransformDataSchema,

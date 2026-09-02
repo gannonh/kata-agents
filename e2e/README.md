@@ -32,6 +32,7 @@ bun run e2e --grep @handoffs                    # Bot send_handoff card and rail
 bun run e2e --grep @approvals                   # Bot tool approval cards and standing rules
 bun run e2e --grep @routines                   # Durable Bot routines and event deduplication
 bun run e2e --grep @computer-headless           # thin client against a Linux Docker computer
+bun run e2e --grep @katacode                    # real Katacode dispatch, isolated worktree, restart
 bun run e2e --grep @git                         # authenticated GitHub V1 flow
 bun run e2e:headed --grep @smoke                # headed (debug selectors)
 bun run e2e:web                                 # browser/WebUI Playwright tests
@@ -87,6 +88,7 @@ produced by the production pipeline (hardened runtime), re-sign it first:
 | `@approvals` | (in-test)                              | Real provider Bot flow: deny and allow-once a Write, Explore-mode block, exact standing allow.                                                                                                         |
 | `@routines` | (in-test)                              | Real provider Bot flow: run a scheduled routine with its renderer window closed, then create an event-triggered routine and verify matching, unrelated, and duplicate events.                                                         |
 | `@computer-headless` | `appWindow` plus `KATA_E2E_COMPUTER_URL` | Thin Electron client against a Linux Docker computer with TLS. Requires `KATA_E2E_COMPUTER_URL` and `KATA_E2E_COMPUTER_TOKEN`. Missing vars fail the spec. GUI launch is macOS-only. This tag does not replace issue #82 acceptance 15. Persistence unit tests live under `packages/server` and `packages/server-core`. |
+| `@katacode` | (in-test) | Real Katacode dispatch from a Bot DirectChat: one task card, isolated worktree rail, restart recovery. Requires `KATA_E2E_KATACODE_URL` and `KATA_E2E_KATACODE_TOKEN` (or `KATA_KATACODE_URL` / `KATA_KATACODE_API_KEY`) plus the agent provider chain. The token is stored through the credentials subsystem. Missing values fail loud. There is no production fake-provider seam. GUI launch is macOS-only. |
 | `@agent`     | (in-test)                              | Real provider onboarding → new session → pick a live model → deterministic prompt → assert reply. `workers: 1`.                                                                                       |
 | `@git`      | `authenticatedAppWindow`               | Real GitHub UAT checkout cloned to a temporary workspace → managed worktree → commit/push/PR → cleanup. Requires authenticated `gh`; `workers: 1`.                                                     |
 | `@oauth`    | `web-dev` Playwright + Bun integration | Local relay + WebUI callback chain and MCP OAuth prepare (relay vs Electron local callback). Browser coverage runs with `bun run e2e:web`; offline integration coverage runs with `bun run e2e:oauth`. |
@@ -203,7 +205,8 @@ pipeline; generic harness modules must not import flows.
   Guest page clicks go through the guest `webContents` (`sendInputEvent`)
   because Electron BrowserViews are not Playwright pages.
 - **Fail loud.** Missing build artifacts, release app path, provider key, or
-  `KATA_E2E_COMPUTER_URL` / `KATA_E2E_COMPUTER_TOKEN` for `@computer-headless`
+  `KATA_E2E_COMPUTER_URL` / `KATA_E2E_COMPUTER_TOKEN` for `@computer-headless`,
+  or `KATA_E2E_KATACODE_URL` / `KATA_E2E_KATACODE_TOKEN` for `@katacode`
   throw with the variable name and a pointer here.
 
 ## Known follow-ups

@@ -9,12 +9,13 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import type { BotContextSnapshot, BotMemoryHead, BotPublicDto, ChannelPublicDto, JournalEntry, RoutinePublicDto, RoutineRevision, RoutineRunPublicDto, StandingRule } from '@kata-sh/core'
-import type { ApprovalCardView, HandoffRailView } from '@kata-sh/shared/protocol'
+import type { ApprovalCardView, HandoffRailView, KatacodeTaskRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
 import { ApprovalCard } from '../approvals/ApprovalCard'
 import { HandoffCard } from '../handoffs/HandoffCard'
+import { TaskCard } from '../katacode/TaskCard'
 import { mergeHandoffTimeline } from '../handoffs/timeline'
 import { useNavigation } from '@/contexts/NavigationContext'
 
@@ -46,6 +47,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
   const [bot, setBot] = React.useState<BotPublicDto | null>(null)
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
   const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
+  const [tasks, setTasks] = React.useState<KatacodeTaskRailView[]>([])
   const [approvals, setApprovals] = React.useState<ApprovalCardView[]>([])
   const [standingRules, setStandingRules] = React.useState<StandingRule[]>([])
   const [memory, setMemory] = React.useState<BotMemoryHead | null>(null)
@@ -97,6 +99,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       window.electronAPI.getBotContext(workspaceId, botId),
     ])
     const loadedHandoffs = await window.electronAPI.listConversationHandoffs(journal.bot.directChatId)
+    const loadedTasks = await window.electronAPI.listConversationKatacodeTasks(journal.bot.directChatId)
     const loadedApprovals = await window.electronAPI.listConversationApprovals(journal.bot.directChatId)
     const loadedRules = await window.electronAPI.listStandingRules(botId)
     const loadedRoutines = await window.electronAPI.listRoutines(workspaceId, botId)
@@ -106,6 +109,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     setBot(journal.bot)
     setEntries(journal.entries)
     setHandoffs(loadedHandoffs)
+    setTasks(loadedTasks)
     setApprovals(loadedApprovals)
     setStandingRules(loadedRules)
     setMemory(loadedMemory)
@@ -125,6 +129,10 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       if (bot?.directChatId && event.conversationId !== bot.directChatId) return
       refresh().catch(err => console.error('[Bots] Failed to refresh handoffs:', err))
     })
+    const unsubscribeKatacode = window.electronAPI.onKatacodeEvent(event => {
+      if (bot?.directChatId && event.conversationId !== bot.directChatId) return
+      refresh().catch(err => console.error('[Bots] Failed to refresh Katacode tasks:', err))
+    })
     const unsubscribeApprovals = window.electronAPI.onApprovalEvent(event => {
       if (bot?.directChatId && event.conversationId !== bot.directChatId) return
       refresh().catch(err => console.error('[Bots] Failed to refresh approvals:', err))
@@ -136,6 +144,7 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
       refreshGeneration.current += 1
       unsubscribe()
       unsubscribeHandoffs()
+      unsubscribeKatacode()
       unsubscribeApprovals()
       unsubscribeRoutines()
     }
@@ -149,9 +158,13 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
     updateRightSidebar({ type: 'handoff', conversationId: rail.conversationId, handoffId: rail.handoffId })
   }, [updateRightSidebar])
 
+  const openTask = React.useCallback((rail: KatacodeTaskRailView) => {
+    updateRightSidebar({ type: 'katacode', conversationId: rail.conversationId, taskId: rail.taskId })
+  }, [updateRightSidebar])
+
   const timeline = React.useMemo(() => {
-    return mergeHandoffTimeline(entries, handoffs, approvals)
-  }, [entries, handoffs, approvals])
+    return mergeHandoffTimeline(entries, handoffs, approvals, tasks)
+  }, [entries, handoffs, approvals, tasks])
 
   const resolveApproval = React.useCallback(async (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => {
     await window.electronAPI.resolveApproval({
@@ -667,6 +680,8 @@ export function BotChatPanel({ workspaceId, botId }: BotChatPanelProps) {
         ) : (
           timeline.map(item => item.kind === 'handoff' ? (
             <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : item.kind === 'katacode' ? (
+            <TaskCard key={item.rail.taskId} rail={item.rail} onOpen={openTask} />
           ) : item.kind === 'approval' ? (
             <ApprovalCard key={item.card.approvalId} card={item.card} onResolve={resolveApproval} />
           ) : (

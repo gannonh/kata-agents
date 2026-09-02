@@ -7,12 +7,13 @@ import type {
   JournalEntry,
   RouteRecord,
 } from '@kata-sh/core'
-import type { ApprovalCardView, HandoffRailView } from '@kata-sh/shared/protocol'
+import type { ApprovalCardView, HandoffRailView, KatacodeTaskRailView } from '@kata-sh/shared/protocol'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PanelHeader } from '../app-shell/PanelHeader'
 import { ApprovalCard } from '../approvals/ApprovalCard'
 import { HandoffCard } from '../handoffs/HandoffCard'
+import { TaskCard } from '../katacode/TaskCard'
 import { mergeHandoffTimeline } from '../handoffs/timeline'
 import { useNavigation } from '@/contexts/NavigationContext'
 
@@ -34,6 +35,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
   const [members, setMembers] = React.useState<BotPublicDto[]>([])
   const [entries, setEntries] = React.useState<JournalEntry[]>([])
   const [handoffs, setHandoffs] = React.useState<HandoffRailView[]>([])
+  const [tasks, setTasks] = React.useState<KatacodeTaskRailView[]>([])
   const [approvals, setApprovals] = React.useState<ApprovalCardView[]>([])
   const [routes, setRoutes] = React.useState<RouteRecord[]>([])
   const [message, setMessage] = React.useState('')
@@ -59,11 +61,13 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       window.electronAPI.listChannelRoutes(workspaceId, channelId),
     ])
     const loadedHandoffs = await window.electronAPI.listConversationHandoffs(channelId)
+    const loadedTasks = await window.electronAPI.listConversationKatacodeTasks(channelId)
     if (generation !== refreshGeneration.current) return
     setChannel(journal.channel)
     setMembers(journal.members)
     setEntries(journal.entries)
     setHandoffs(loadedHandoffs)
+    setTasks(loadedTasks)
     setRoutes([...loadedRoutes].sort((a, b) => a.routeSeq - b.routeSeq))
     try {
       const loadedApprovals = await window.electronAPI.listConversationApprovals(channelId)
@@ -83,6 +87,10 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       if (event.conversationId !== channelId) return
       refresh().catch(err => console.error('[Channels] Failed to refresh handoffs:', err))
     })
+    const unsubscribeKatacode = window.electronAPI.onKatacodeEvent(event => {
+      if (event.conversationId !== channelId) return
+      refresh().catch(err => console.error('[Channels] Failed to refresh Katacode tasks:', err))
+    })
     const unsubscribeApprovals = window.electronAPI.onApprovalEvent(event => {
       if (event.conversationId !== channelId) return
       refresh().catch(err => console.error('[Channels] Failed to refresh approvals:', err))
@@ -91,6 +99,7 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
       refreshGeneration.current += 1
       unsubscribe()
       unsubscribeHandoffs()
+      unsubscribeKatacode()
       unsubscribeApprovals()
     }
   }, [refresh])
@@ -99,9 +108,13 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
     updateRightSidebar({ type: 'handoff', conversationId: rail.conversationId, handoffId: rail.handoffId })
   }, [updateRightSidebar])
 
+  const openTask = React.useCallback((rail: KatacodeTaskRailView) => {
+    updateRightSidebar({ type: 'katacode', conversationId: rail.conversationId, taskId: rail.taskId })
+  }, [updateRightSidebar])
+
   const timeline = React.useMemo(() => {
-    return mergeHandoffTimeline(entries, handoffs, approvals)
-  }, [entries, handoffs, approvals])
+    return mergeHandoffTimeline(entries, handoffs, approvals, tasks)
+  }, [entries, handoffs, approvals, tasks])
 
   const resolveApproval = React.useCallback(async (card: ApprovalCardView, choice: 'deny' | 'allow-once', createStandingAllow?: boolean) => {
     await window.electronAPI.resolveApproval({
@@ -257,6 +270,8 @@ export function ChannelChatPanel({ workspaceId, channelId }: ChannelChatPanelPro
         ) : (
           timeline.map(item => item.kind === 'handoff' ? (
             <HandoffCard key={item.rail.handoffId} rail={item.rail} onOpen={openHandoff} />
+          ) : item.kind === 'katacode' ? (
+            <TaskCard key={item.rail.taskId} rail={item.rail} onOpen={openTask} />
           ) : item.kind === 'approval' ? (
             <ApprovalCard key={item.card.approvalId} card={item.card} onResolve={resolveApproval} />
           ) : (

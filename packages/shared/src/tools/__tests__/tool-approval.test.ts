@@ -70,6 +70,7 @@ describe('classifyTool conformance', () => {
     { name: 'Read', class: 'read', sideEffect: 'read' },
     { name: 'Write', class: 'consequential', sideEffect: 'write' },
     { name: 'send_handoff', class: 'consequential', sideEffect: 'send' },
+    { name: 'dispatch_katacode', class: 'consequential', sideEffect: 'send' },
     { name: 'mcp__docs__publish_page', class: 'consequential', sideEffect: 'publish' },
     { name: 'mcp__shop__purchase_item', class: 'consequential', sideEffect: 'purchase' },
     { name: 'mcp__files__delete_file', class: 'consequential', sideEffect: 'delete' },

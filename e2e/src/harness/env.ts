@@ -223,6 +223,33 @@ export function readComputerHeadlessPrerequisite(): PrerequisiteResult {
   return { ok: true };
 }
 
+/**
+ * Real Katacode UAT. The endpoint is `KATA_E2E_KATACODE_URL` (or
+ * `KATA_KATACODE_URL`). The token is stored through the credentials
+ * subsystem as type `katacode`, bootstrapped from
+ * `KATA_E2E_KATACODE_TOKEN` or `KATA_KATACODE_API_KEY`. Missing values
+ * fail loud. There is no production fake-provider seam.
+ */
+export function readKatacodePrerequisite(): PrerequisiteResult {
+  const missing: string[] = [];
+  if (!firstNonEmpty(process.env.KATA_E2E_KATACODE_URL, process.env.KATA_KATACODE_URL)) {
+    missing.push("KATA_E2E_KATACODE_URL");
+  }
+  if (!firstNonEmpty(process.env.KATA_E2E_KATACODE_TOKEN, process.env.KATA_KATACODE_API_KEY)) {
+    missing.push("KATA_E2E_KATACODE_TOKEN");
+  }
+  if (missing.length > 0) return { ok: false, missing };
+  return { ok: true };
+}
+
+export function readKatacodeEndpoint(): string | undefined {
+  return firstNonEmpty(process.env.KATA_E2E_KATACODE_URL, process.env.KATA_KATACODE_URL);
+}
+
+export function readKatacodeToken(): string | undefined {
+  return firstNonEmpty(process.env.KATA_E2E_KATACODE_TOKEN, process.env.KATA_KATACODE_API_KEY);
+}
+
 export function assertMacOsHost(): void {
   if (platform() !== "darwin") {
     throw new Error(

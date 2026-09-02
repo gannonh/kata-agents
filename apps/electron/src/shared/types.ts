@@ -188,6 +188,15 @@ import type {
   ChannelEvent,
   HandoffRailView,
   HandoffInvalidatedEvent,
+  KatacodeTaskRailView,
+  KatacodeInvalidatedEvent,
+  GetKatacodeRailInput,
+  WaitForKatacodeInput,
+  CancelKatacodeWaitInput,
+  CancelKatacodeInput,
+  RetryKatacodeInput,
+  ReconcileKatacodeInput,
+  MarkKatacodeResultReadInput,
   GetHandoffRailInput,
   WaitForHandoffInput,
   CancelHandoffWaitInput,
@@ -435,6 +444,16 @@ export interface ElectronAPI {
   cancelHandoff(input: CancelHandoffInput): Promise<HandoffRailView>
   markHandoffResultRead(input: MarkHandoffResultReadInput): Promise<HandoffRailView>
   onHandoffEvent(callback: (event: HandoffInvalidatedEvent) => void): () => void
+
+  listConversationKatacodeTasks(conversationId: string): Promise<KatacodeTaskRailView[]>
+  getKatacodeRail(input: GetKatacodeRailInput): Promise<KatacodeTaskRailView>
+  waitForKatacode(input: WaitForKatacodeInput): Promise<KatacodeTaskRailView>
+  cancelKatacodeWait(input: CancelKatacodeWaitInput): Promise<{ cancelled: boolean }>
+  cancelKatacode(input: CancelKatacodeInput): Promise<KatacodeTaskRailView>
+  retryKatacode(input: RetryKatacodeInput): Promise<KatacodeTaskRailView>
+  reconcileKatacode(input: ReconcileKatacodeInput): Promise<KatacodeTaskRailView>
+  markKatacodeResultRead(input: MarkKatacodeResultReadInput): Promise<KatacodeTaskRailView>
+  onKatacodeEvent(callback: (event: KatacodeInvalidatedEvent) => void): () => void
 
   listConversationApprovals(conversationId: string): Promise<ApprovalCardView[]>
   resolveApproval(input: ResolveApprovalInput): Promise<ApprovalCardView>
@@ -1073,6 +1092,7 @@ export type RightSidebarPanel =
   | { type: 'history' }
   | { type: 'changes'; path?: string }
   | { type: 'handoff'; conversationId: string; handoffId: string }
+  | { type: 'katacode'; conversationId: string; taskId: string }
   | { type: 'none' }
 
 /**

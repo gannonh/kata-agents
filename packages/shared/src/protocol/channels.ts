@@ -115,6 +115,17 @@ export const RPC_CHANNELS = {
     MARK_RESULT_READ: 'handoffs:markResultRead',
     EVENT: 'handoffs:event',
   },
+  katacode: {
+    LIST: 'katacode:list',
+    GET_RAIL: 'katacode:getRail',
+    WAIT: 'katacode:wait',
+    CANCEL_WAIT: 'katacode:cancelWait',
+    CANCEL: 'katacode:cancel',
+    RETRY: 'katacode:retry',
+    RECONCILE: 'katacode:reconcile',
+    MARK_RESULT_READ: 'katacode:markResultRead',
+    EVENT: 'katacode:event',
+  },
   approvals: {
     LIST: 'approvals:list',
     RESOLVE: 'approvals:resolve',
