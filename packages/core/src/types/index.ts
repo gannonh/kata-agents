@@ -105,6 +105,7 @@ export {
   CONVERSATION_LIMITS,
   JOURNAL_ENTRY_KINDS,
 } from './conversation.ts';
+export type { TaskId } from './conversation.ts';
 
 // Bot identity and DirectChat contracts
 export type {
@@ -275,3 +276,38 @@ export type {
   RoutineRunPublicDto,
 } from './routine.ts';
 export { ROUTINE_SCHEMA_VERSION } from './routine.ts';
+
+export type {
+  KatacodeAdapter,
+  KatacodeArtifacts,
+  KatacodeAttempt,
+  KatacodeAttemptFence,
+  KatacodeAttemptState,
+  KatacodeCancelResult,
+  KatacodeCanonicalProjection,
+  KatacodeDeepLink,
+  KatacodeDispatchAcceptance,
+  KatacodeDispatchRequest,
+  KatacodeEvidenceItem,
+  KatacodeInvalidatedEvent,
+  KatacodeLookupResult,
+  KatacodeProviderPhase,
+  KatacodeProviderStatus,
+  KatacodePublicAction,
+  KatacodePullRequestRef,
+  KatacodeRunRef,
+  KatacodeStatusResult,
+  KatacodeTaskCardView,
+  KatacodeTaskRailView,
+  KatacodeTestSummary,
+  KatacodeWorktreePolicy,
+  KatacodeWorktreeSummary,
+} from './katacode.ts';
+export {
+  KATACODE_ADAPTER_CONTRACT_VERSION,
+  KATACODE_ATTEMPT_SCHEMA_VERSION,
+  KATACODE_ATTEMPT_STATES,
+  KATACODE_LIMITS,
+  KATACODE_PUBLIC_ACTIONS,
+  KATACODE_WORKTREE_POLICIES,
+} from './katacode.ts';

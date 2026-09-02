@@ -45,7 +45,8 @@ export type SpawnTaskAwaitingInputKind = 'permission' | 'authentication';
 
 export type SpawnTaskOrigin =
   | { readonly kind: 'session' }
-  | { readonly kind: 'handoff'; readonly handoffId: string };
+  | { readonly kind: 'handoff'; readonly handoffId: string }
+  | { readonly kind: 'katacode'; readonly conversationId: string; readonly ownerBotId: string };
 
 /** Bounds are UTF-8 byte counts, not JavaScript string lengths. */
 export const SPAWN_TASK_LIMITS = Object.freeze({

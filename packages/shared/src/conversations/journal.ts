@@ -55,6 +55,8 @@ export interface AppendJournalEntryInput {
   readonly handoffId?: string;
   /** Required for approval entries; rejected on every other kind. */
   readonly approvalId?: string;
+  /** Required for task entries; rejected on every other kind. */
+  readonly taskId?: string;
   readonly kind: JournalEntryKind;
   readonly body: string;
   readonly idempotencyKey: string;
@@ -220,6 +222,7 @@ export function assertJournalEntry(value: unknown): JournalEntry {
     'authorBotId',
     'handoffId',
     'approvalId',
+    'taskId',
     'seq',
     'kind',
     'idempotencyKey',
@@ -250,15 +253,25 @@ export function assertJournalEntry(value: unknown): JournalEntry {
     assertConversationId(entry.handoffId, 'handoffId');
     if (entry.authorBotId === undefined) fail('handoff entries require an author Bot');
     if (entry.approvalId !== undefined) fail('only approval entries may carry approvalId');
+    if (entry.taskId !== undefined) fail('only task entries may carry taskId');
   } else if (entry.kind === 'approval') {
     if (entry.approvalId === undefined) fail('approval entries require approvalId');
     assertConversationId(entry.approvalId, 'approvalId');
     if (entry.authorBotId === undefined) fail('approval entries require an author Bot');
     if (entry.handoffId !== undefined) fail('only handoff entries may carry handoffId');
+    if (entry.taskId !== undefined) fail('only task entries may carry taskId');
+  } else if (entry.kind === 'task') {
+    if (entry.taskId === undefined) fail('task entries require taskId');
+    assertConversationId(entry.taskId, 'taskId');
+    if (entry.authorBotId === undefined) fail('task entries require an author Bot');
+    if (entry.handoffId !== undefined) fail('only handoff entries may carry handoffId');
+    if (entry.approvalId !== undefined) fail('only approval entries may carry approvalId');
   } else if (entry.handoffId !== undefined) {
     fail('only handoff entries may carry handoffId');
   } else if (entry.approvalId !== undefined) {
     fail('only approval entries may carry approvalId');
+  } else if (entry.taskId !== undefined) {
+    fail('only task entries may carry taskId');
   }
   return entry as unknown as JournalEntry;
 }
@@ -314,6 +327,7 @@ export class ConversationJournal {
         ...(authorBotId !== undefined ? { authorBotId } : {}),
         ...(input.handoffId !== undefined ? { handoffId: input.handoffId } : {}),
         ...(input.approvalId !== undefined ? { approvalId: input.approvalId } : {}),
+        ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
         seq,
         kind: input.kind,
         idempotencyKey,
@@ -397,7 +411,7 @@ export class ConversationJournal {
     }
     const authorBotId = input.authorBotId ?? conversation.soleAuthorBotId;
     if (authorBotId === undefined) {
-      if (input.kind === 'bot' || input.kind === 'tool' || input.kind === 'handoff' || input.kind === 'approval') {
+      if (input.kind === 'bot' || input.kind === 'tool' || input.kind === 'handoff' || input.kind === 'approval' || input.kind === 'task') {
         throw new Error(`A ${input.kind} entry requires an author Bot`);
       }
       return undefined;
@@ -624,7 +638,7 @@ export class ConversationJournal {
       return;
     }
     const authorBotId = entry.authorBotId;
-    if ((entry.kind === 'bot' || entry.kind === 'tool' || entry.kind === 'handoff') && authorBotId === undefined) {
+    if ((entry.kind === 'bot' || entry.kind === 'tool' || entry.kind === 'handoff' || entry.kind === 'approval' || entry.kind === 'task') && authorBotId === undefined) {
       throw new Error(`Persisted ${entry.kind} entry ${entry.entryId} has no Bot author`);
     }
     if (authorBotId === undefined) return;

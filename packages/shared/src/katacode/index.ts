@@ -1,0 +1,13 @@
+export { KatacodeAttemptStore, KatacodeAttemptError } from './attempts.ts';
+export type { KatacodeAttemptStoreOptions, CreateKatacodeAttemptInput } from './attempts.ts';
+export { KatacodeExecutionBridge, mintKatacodeIdempotencyKey } from './bridge.ts';
+export type { KatacodeBridgeOptions, KatacodeDispatchResult, KatacodeJournalSink } from './bridge.ts';
+export { signKatacodeCallback, verifyKatacodeCallback, KATACODE_SIGNATURE_HEADER, KATACODE_TIMESTAMP_HEADER } from './callbacks.ts';
+export { KatacodeHttpAdapter } from './http-adapter.ts';
+export type { KatacodeHttpAdapterOptions } from './http-adapter.ts';
+export { KatacodeIdentityError, resolveKatacodeDispatchIdentity } from './identity.ts';
+export type { KatacodeDispatchCallerFields, ResolvedKatacodeIdentity } from './identity.ts';
+export { actionsFor, canAdvanceKatacodeAttempt, projectKatacodeCanonicalState, retryBlockedByUncertain } from './mapping.ts';
+export { projectKatacodeTaskCard, projectKatacodeTaskRail } from './projection.ts';
+export { SharedWorktreeRequiresApprovalError } from './worktree.ts';
+export type { KatacodeWorktreeAllocation, KatacodeWorktreeAllocator } from './worktree.ts';
