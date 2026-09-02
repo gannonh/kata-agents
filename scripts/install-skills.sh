@@ -2,8 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# gannonh/skills
-npx --yes skills add gannonh/skills --skill plan-build-verify -y --copy --agent claude-code cursor
+# gannonh/skills (plan-build-verify is a plugin — see AGENTS.md; do not npx-add it here)
 npx --yes skills add gannonh/skills --skill thermo-run -y --copy --agent claude-code cursor
 npx --yes skills add gannonh/skills --skill readme -y --copy --agent claude-code cursor
 

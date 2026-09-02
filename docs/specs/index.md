@@ -24,8 +24,9 @@ gh sub-issue list <N>                                   # read an epic's phases
 
 ## Writing and executing specs
 
-Use the `plan-build-verify` skill. It publishes specs as issues, runs Build
+Use the `plan-build-verify` plugin. It publishes specs as issues, runs Build
 against approved issues, and posts acceptance evidence back to the issue.
+Install from `gannonh/plan-build-verify` (see `AGENTS.md`); do not npx-add it from `gannonh/skills`.
 
 ## Archive
 

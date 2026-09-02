@@ -6,20 +6,47 @@ Specs for this repository are GitHub Issues, not files. `docs/specs/` holds only
 
 - Read the roadmap with `gh issue list --label kind:spec --state open`.
 - Read a spec with `gh issue view <N>`; read an epic's phases with `gh sub-issue list <N>`.
-- Do not create spec files under `docs/specs/`. Use the `plan-build-verify` skill, which publishes specs as issues.
+- Do not create spec files under `docs/specs/`. Use the `plan-build-verify` plugin, which publishes specs as issues.
 - Never build an issue that is not labeled `status:approved` without explicit maintainer approval.
 - Post build reports and acceptance evidence as comments on the spec issue.
 - ADRs remain files under `docs/adrs/`. Cross-link them with the issues they constrain.
 
 ## Skills
 
-Install project skills with Vercel `npx skills` (project-local, not `-g`) so cloud VMs pick them up:
+Product OS is the `plan-build-verify` plugin. Specs are GitHub Issues, not files under `docs/specs/`.
+
+Install the plugin for the host you use. Do not npx-add `plan-build-verify` from `gannonh/skills`.
+
+**Cursor** (local plugin import):
+
+```bash
+git clone --depth 1 https://github.com/gannonh/plan-build-verify.git /tmp/plan-build-verify
+cp -R /tmp/plan-build-verify/plugins/cursor ~/.cursor/plugins/local/plan-build-verify
+```
+
+Enable Allow Local Plugin Imports, then enable `plan-build-verify`.
+
+**Claude Code:**
+
+```text
+/plugin marketplace add gannonh/plan-build-verify
+/plugin install plan-build-verify@plan-build-verify
+```
+
+**Codex:**
+
+```text
+codex plugin marketplace add gannonh/plan-build-verify
+codex plugin add plan-build-verify@plan-build-verify
+```
+
+Install other project skills with Vercel `npx skills` (project-local, not `-g`) so cloud VMs pick them up:
 
 ```bash
 ./scripts/install-skills.sh
 ```
 
-That copies skills into `.agents/skills/` and `.claude/skills/`; those copies and `skills-lock.json` are gitignored. Repo-local skills under `.agents/skills/` stay tracked: `e2e-test-author`, `release-kata-agents`, `verify-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it.
+That copies skills into `.agents/skills/` and `.claude/skills/`; those copies and `skills-lock.json` are gitignored. Repo-local skills under `.agents/skills/` stay tracked: `e2e-test-author`, `release-kata-agents`, `verify-kata-agents`. Do not install the whole pack. Cursor engineering execution is the **pstack** plugin; do not npx-install it. Do not install `ps`, `okf`, or `kata-linear` for this repo. OKF is retired.
 
 ## Package-level context
 
