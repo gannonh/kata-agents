@@ -1157,6 +1157,7 @@
   "routines.notEnabled": "Esta rutina está en pausa.",
   "routines.onDemandTrigger": "Disparador bajo demanda",
   "routines.pause": "Pausar",
+  "routines.recentHistory": "Historial reciente",
   "routines.replay": "Repetir",
   "routines.resume": "Reanudar",
   "routines.runFailed": "No se pudo ejecutar esta rutina.",

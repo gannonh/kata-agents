@@ -422,7 +422,10 @@ export class RoutineEngine {
       if (allRunsCreated && instants.length > 0) {
         this.store.advanceScheduleCursor(record.routineId, revision.revision, instants.at(-1)!)
       }
-      for (const run of scheduledRuns) due.push(this.dispatch(run, generation))
+      for (const run of scheduledRuns) {
+        this.notify(run.routineId)
+        due.push(this.dispatch(run, generation))
+      }
     }
     await Promise.allSettled(due)
     if (this.stopping || generation !== this.lifecycleGeneration) return
@@ -464,6 +467,7 @@ export class RoutineEngine {
       if (run) pendingRuns.push(run)
     }
     for (const run of pendingRuns) {
+      this.notify(run.routineId)
       void this.dispatch(run).catch(() => undefined)
     }
     return pendingRuns
@@ -967,6 +971,7 @@ export class RoutineEngine {
       : { kind: 'triggered' as const, occurrenceId: occurrence.occurrenceId }
     const run = this.ensureRunForOccurrence(occurrence, origin)
     if (!run) return null
+    this.notify(run.routineId)
     await this.dispatch(run)
     return this.store.getRun(run.runId)
   }
@@ -983,11 +988,13 @@ export class RoutineEngine {
     try {
       const routine = this.store.get(occurrence.routineId)
       if (!routine) return null
-      return this.store.createRun({
+      const created = this.store.createRun({
         occurrenceId: occurrence.occurrenceId,
         ownerBotId: routine.ownerBotId,
         ...(origin ? { origin } : {}),
       })
+      this.notify(created.routineId)
+      return created
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Routine is not enabled:')) return null
       throw error
@@ -1085,6 +1092,9 @@ export class RoutineEngine {
       result = await this.executeAdapter.execute(current, revision)
     } catch {
       result = { kind: 'failed', error: 'Routine executor failed' }
+    }
+    if (result.kind === 'completed' && !result.reply.trim()) {
+      result = { kind: 'uncertain', reason: 'Routine completed without a result' }
     }
     const bufferedResolution = result.kind === 'awaiting-approval'
       ? undefined

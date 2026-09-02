@@ -1157,6 +1157,7 @@
   "routines.notEnabled": "Ez a rutin szünetel.",
   "routines.onDemandTrigger": "Igény szerinti indító",
   "routines.pause": "Szüneteltetés",
+  "routines.recentHistory": "Legutóbbi előzmények",
   "routines.replay": "Újrajátszás",
   "routines.resume": "Folytatás",
   "routines.runFailed": "A rutint nem sikerült futtatni.",

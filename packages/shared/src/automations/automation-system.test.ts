@@ -136,6 +136,30 @@ describe('AutomationSystem', () => {
       expect(payloads).toEqual([{ timestamp: Date.parse('2026-08-31T12:34:56.000Z'), utcTime: '2026-08-31T12:34:56.000Z' }])
       await system.dispose()
     })
+
+    it('leaves leftover automations legacy without starting a second scheduler clock', async () => {
+      writeFileSync(join(tempDir, AUTOMATIONS_CONFIG_FILE), JSON.stringify({
+        automations: {
+          LabelAdd: [
+            {
+              matcher: 'legacy',
+              actions: [{ type: 'prompt', prompt: 'echo hello' }],
+            },
+          ],
+        },
+      }))
+      const system = new AutomationSystem({ workspaceRootPath: tempDir, workspaceId: 'test-workspace' })
+      const payloads: Array<{ utcTime: string }> = []
+      system.eventBus.on('SchedulerTick', payload => payloads.push({ utcTime: payload.utcTime }))
+
+      await new Promise(resolve => setTimeout(resolve, 40))
+      expect(payloads).toEqual([])
+      expect(system.getConfig()?.automations.LabelAdd).toHaveLength(1)
+
+      await system.emitSchedulerTick('2026-08-31T12:00:00.000Z')
+      expect(payloads).toEqual([{ utcTime: '2026-08-31T12:00:00.000Z' }])
+      await system.dispose()
+    })
   })
 
   describe('reloadConfig', () => {

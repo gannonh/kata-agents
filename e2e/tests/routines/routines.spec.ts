@@ -1,4 +1,7 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import type { ElectronApplication } from "@playwright/test";
 
 import { E2E_TAGS } from "../../src/config/tags.ts";
 import { agentSuiteTimeoutMs, runWithAgentProviderFallback } from "../../src/flows/agentChat.ts";
@@ -10,6 +13,13 @@ import {
   readAgentProviderPrerequisite,
 } from "../../src/harness/env.ts";
 
+async function openBot(page: Page, name: string): Promise<void> {
+  await page.getByTestId("bots-nav").scrollIntoViewIfNeeded();
+  await page.getByTestId("bots-nav").click();
+  await page.locator("[data-testid^='bot-row-']").filter({ hasText: name }).first().click();
+  await expect(page.getByTestId("bot-chat")).toBeVisible({ timeout: 15_000 });
+}
+
 async function createBot(page: Page, name: string): Promise<void> {
   await page.getByTestId("bots-nav").scrollIntoViewIfNeeded();
   await page.getByTestId("bots-nav").click();
@@ -18,8 +28,7 @@ async function createBot(page: Page, name: string): Promise<void> {
   await page.getByTestId("bots-profile-input").fill("Runs short durable routines.");
   await page.getByTestId("bots-create-submit").click();
   await expect(page.locator("[data-testid^='bot-row-']").filter({ hasText: name }).first()).toBeVisible({ timeout: 15_000 });
-  await page.locator("[data-testid^='bot-row-']").filter({ hasText: name }).first().click();
-  await expect(page.getByTestId("bot-chat")).toBeVisible({ timeout: 15_000 });
+  await openBot(page, name);
 }
 
 async function workspaceId(page: Page): Promise<string> {
@@ -63,10 +72,44 @@ async function ingestEvent(page: Page, workspaceId: string, source: string, even
   }, { workspaceId, source, eventId, value });
 }
 
+function workspaceRoots(configDir: string): string[] {
+  const configPath = join(configDir, "config.json");
+  if (!existsSync(configPath)) return [];
+  const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { workspaces?: Array<{ rootPath?: string }> };
+  return (parsed.workspaces ?? []).map(workspace => workspace.rootPath).filter((root): root is string => typeof root === "string");
+}
+
+function durableRoutineRuns(configDir: string, routineId: string): Array<{ runId: string; state: { kind: string; result?: string } }> {
+  const runs: Array<{ runId: string; state: { kind: string; result?: string } }> = [];
+  for (const root of workspaceRoots(configDir)) {
+    const runDir = join(root, ".routines", "runs");
+    if (!existsSync(runDir)) continue;
+    for (const name of readdirSync(runDir)) {
+      if (!name.endsWith(".json")) continue;
+      const record = JSON.parse(readFileSync(join(runDir, name), "utf8")) as {
+        runId?: string
+        routineId?: string
+        state?: { kind?: string; result?: string }
+      };
+      if (record.routineId !== routineId || !record.runId || !record.state?.kind) continue;
+      runs.push({ runId: record.runId, state: { kind: record.state.kind, result: record.state.result } });
+    }
+  }
+  return runs;
+}
+
+async function reopenRenderer(electronApp: ElectronApplication): Promise<Page> {
+  const existing = electronApp.windows().find(page => !page.isClosed());
+  if (existing) return existing;
+  const windowPromise = electronApp.waitForEvent("window");
+  await electronApp.evaluate(({ app }) => { app.emit("activate"); });
+  return windowPromise;
+}
+
 test.describe.configure({ mode: "serial", timeout: agentSuiteTimeoutMs() * 2 });
 
 test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
-  test("runs a scheduled routine while its renderer window is closed", async ({ appWindow, electronApp }) => {
+  test("runs a scheduled routine while its renderer window is closed", async ({ appWindow, electronApp, runContext }) => {
     const prerequisite = readAgentProviderPrerequisite();
     if (!prerequisite.ok) {
       throw new Error(formatMissingPrerequisiteError("Bot routines", prerequisite.missing));
@@ -105,34 +148,39 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
 
       await page.close();
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
-      // Keep every renderer closed through a scheduler boundary before reconnecting.
-      await new Promise(resolve => setTimeout(resolve, 65_000));
+      await expect.poll(() => {
+        if (electronApp.windows().length !== 0) {
+          throw new Error("Renderer reopened before offline routine execution completed");
+        }
+        return durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => (
+          run.state.kind === "succeeded" && typeof run.state.result === "string" && run.state.result.includes(resultToken)
+        ));
+      }, { timeout: 240_000, intervals: [1_000] }).not.toHaveLength(0);
       await expect.poll(() => electronApp.windows().length, { timeout: 15_000 }).toBe(0);
-      const windowPromise = electronApp.waitForEvent("window");
-      await electronApp.evaluate(({ app }) => { app.emit("activate"); });
-      activePage = await windowPromise;
+      const offlineRuns = durableRoutineRuns(runContext.configDir, routine.routineId).filter(run => (
+        run.state.kind === "succeeded" && typeof run.state.result === "string" && run.state.result.includes(resultToken)
+      ));
+      expect(offlineRuns.length).toBeGreaterThanOrEqual(1);
+      expect(offlineRuns[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
+      const offlineRunId = offlineRuns[0]!.runId;
+
+      activePage = await reopenRenderer(electronApp);
       await waitForAppReady(activePage);
+      await openBot(activePage, botName);
       await expect.poll(async () => {
         const runs = await listRoutineRuns(activePage, workspace, routine.routineId);
-        return runs.filter(run => run.state.kind === "succeeded");
-      }, { timeout: 120_000, intervals: [1_000] }).not.toHaveLength(0);
+        return runs.filter(run => run.runId === offlineRunId && run.state.kind === "succeeded");
+      }, { timeout: 30_000, intervals: [1_000] }).not.toHaveLength(0);
+      await expect(activePage.getByTestId(`routine-lifecycle-${routine.routineId}`)).toBeVisible({ timeout: 15_000 });
+      await expect(activePage.getByTestId(`routine-destination-${routine.routineId}`)).toBeVisible();
+      await expect(activePage.getByTestId(`routine-history-${routine.routineId}`)).toBeVisible();
+      await expect(activePage.getByTestId(`routine-run-${offlineRunId}`)).toBeVisible();
       const runs = await listRoutineRuns(activePage, workspace, routine.routineId);
-      const succeededRuns = runs.filter(run => run.state.kind === "succeeded");
-      expect(succeededRuns.length).toBeGreaterThanOrEqual(1);
-      expect(succeededRuns.length).toBeLessThanOrEqual(2);
-      expect(succeededRuns[0]?.runId).toMatch(/^run_[A-Za-z0-9_-]+$/);
-      expect(succeededRuns[0]?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
+      const observed = runs.find(run => run.runId === offlineRunId);
+      expect(observed?.state).toEqual({ kind: "succeeded", at: expect.any(String), result: expect.stringContaining(resultToken) });
     }, {
       recoverAfterFailure: async () => {
-        const existing = electronApp.windows().find(page => !page.isClosed());
-        if (existing) {
-          activePage = existing;
-          await waitForAppReady(activePage);
-          return;
-        }
-        const windowPromise = electronApp.waitForEvent("window");
-        await electronApp.evaluate(({ app }) => { app.emit("activate"); });
-        activePage = await windowPromise;
+        activePage = await reopenRenderer(electronApp);
         await waitForAppReady(activePage);
       },
     });
@@ -164,18 +212,25 @@ test.describe(`Bot routines ${E2E_TAGS.routines}`, () => {
       await appWindow.getByTestId("routine-create").click();
       const routine = appWindow.locator("[data-testid^='routine-']").filter({ hasText: `Event routine ${stamp}` }).first();
       await expect(routine).toBeVisible({ timeout: 15_000 });
+      await expect(routine.locator("[data-testid^='routine-lifecycle-']")).toBeVisible();
+      await expect(routine.locator("[data-testid^='routine-destination-']")).toContainText("Bot direct chat");
 
       const workspace = await workspaceId(appWindow);
       const first = await ingestEvent(appWindow, workspace, source, `event-${stamp}`, value);
       expect(first).toHaveLength(1);
-      const runId = (first[0] as { runId?: string }).runId;
-      if (!runId) throw new Error("Matching routine event did not return a run ID");
-      await expect(routine.locator(`[data-testid^='routine-latest-']`)).toContainText(resultToken, { timeout: 60_000 });
-
+      const runId = (first[0] as { runId?: string; routineId?: string }).runId;
+      const routineId = (first[0] as { runId?: string; routineId?: string }).routineId;
+      if (!runId || !routineId) throw new Error("Matching routine event did not return a run ID");
       const duplicate = await ingestEvent(appWindow, workspace, source, `event-${stamp}`, value);
       expect((duplicate[0] as { runId?: string }).runId).toBe(runId);
       const unrelated = await ingestEvent(appWindow, workspace, source, `unrelated-${stamp}`, "different");
       expect(unrelated).toHaveLength(0);
+      await expect.poll(async () => {
+        const runs = await listRoutineRuns(appWindow, workspace, routineId);
+        return runs.map(run => run.runId);
+      }, { timeout: 15_000 }).toEqual([runId]);
+      await expect(routine.locator("[data-testid^='routine-destination-']")).toContainText("Bot direct chat");
+      await expect(routine.locator(`[data-testid='routine-run-${runId}']`)).toBeVisible({ timeout: 15_000 });
     });
   });
 });
