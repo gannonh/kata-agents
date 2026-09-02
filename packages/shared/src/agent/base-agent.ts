@@ -167,6 +167,30 @@ export interface InspectHandoffHelpResult {
   actions: readonly ['get', 'wait', 'read-result'];
 }
 
+export interface DispatchKatacodeRequest {
+  repository: string;
+  prompt: string;
+  acceptanceCriteria: string;
+  permissionMode?: PermissionMode;
+  worktreePolicy?: 'isolated' | 'shared';
+  sharedWorktreeId?: string;
+}
+
+export interface DispatchKatacodeResult {
+  taskId: string;
+  runtimeState: import('@kata-sh/core').SpawnTaskRuntimeState;
+  version: number;
+  attemptId: string;
+}
+
+export interface DispatchKatacodeHelpResult {
+  tool: 'dispatch_katacode';
+  repository: string;
+  prompt: string;
+  acceptanceCriteria: string;
+  worktreePolicy: string;
+}
+
 /** Tool list for mini agents - quick config edits only */
 export const MINI_AGENT_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'] as const;
 
@@ -305,6 +329,7 @@ export abstract class BaseAgent implements AgentBackend {
   onSpawnSession: ((request: SpawnSessionRequest) => Promise<SpawnSessionResult>) | null = null;
   onSendHandoff: ((request: SendHandoffRequest) => Promise<SendHandoffResult>) | null = null;
   onInspectHandoff: ((request: InspectHandoffRequest, signal?: AbortSignal) => Promise<InspectHandoffResult>) | null = null;
+  onDispatchKatacode: ((request: DispatchKatacodeRequest) => Promise<DispatchKatacodeResult>) | null = null;
   evaluateToolPolicy: ((toolName: string, input: Record<string, unknown>) => {
     kind: 'allow' | 'block' | 'ask';
     message?: string;
@@ -1308,6 +1333,35 @@ ${formattedMessages}
     }
 
     return this.onSendHandoff({ targetBot, request });
+  }
+
+  protected async preExecuteDispatchKatacode(
+    input: Record<string, unknown>,
+  ): Promise<DispatchKatacodeResult | DispatchKatacodeHelpResult> {
+    if (input.help) {
+      return {
+        tool: 'dispatch_katacode',
+        repository: i18n.t('katacode.sendToolHelpRepository'),
+        prompt: i18n.t('katacode.sendToolHelpPrompt'),
+        acceptanceCriteria: i18n.t('katacode.sendToolHelpAcceptance'),
+        worktreePolicy: i18n.t('katacode.sendToolHelpWorktree'),
+      };
+    }
+    const repository = typeof input.repository === 'string' ? input.repository.trim() : '';
+    if (!repository) throw new Error(i18n.t('katacode.sendToolRepositoryRequired'));
+    const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+    if (!prompt.trim()) throw new Error(i18n.t('katacode.sendToolPromptRequired'));
+    const acceptanceCriteria = typeof input.acceptanceCriteria === 'string' ? input.acceptanceCriteria : '';
+    if (!acceptanceCriteria.trim()) throw new Error(i18n.t('katacode.sendToolAcceptanceRequired'));
+    if (!this.onDispatchKatacode) throw new Error(i18n.t('katacode.sendToolUnavailable'));
+    return this.onDispatchKatacode({
+      repository,
+      prompt,
+      acceptanceCriteria,
+      permissionMode: input.permissionMode as DispatchKatacodeRequest['permissionMode'],
+      worktreePolicy: input.worktreePolicy as DispatchKatacodeRequest['worktreePolicy'],
+      sharedWorktreeId: typeof input.sharedWorktreeId === 'string' ? input.sharedWorktreeId : undefined,
+    });
   }
 
   protected async preExecuteInspectHandoff(

@@ -3,6 +3,7 @@ import {
   SESSION_TOOL_DEFS,
   InspectHandoffSchema,
   SendHandoffSchema,
+  DispatchKatacodeSchema,
   getSessionToolDefs,
   getSessionToolNames,
   getSessionToolRegistry,
@@ -65,6 +66,7 @@ describe('session tool filtering helpers', () => {
     expect(blocked.has('source_credential_prompt')).toBe(true);
     expect(blocked.has('spawn_session')).toBe(true);
     expect(blocked.has('send_handoff')).toBe(true);
+    expect(blocked.has('dispatch_katacode')).toBe(true);
   });
 
   it('safe-mode helpers support MCP prefixing', () => {
@@ -114,6 +116,32 @@ describe('session tool filtering helpers', () => {
       action: 'get',
       taskId: 'task_1',
       botId: 'spoofed',
+    }).success).toBe(false);
+  });
+
+  it('exposes dispatch_katacode and rejects caller identity fields', () => {
+    const defs = getToolDefsAsJsonSchema({ prefix: 'mcp__session__' });
+    const dispatch = defs.find(def => def.name === 'mcp__session__dispatch_katacode');
+    expect(dispatch).toBeDefined();
+    expect(dispatch?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        repository: { type: 'string' },
+        prompt: { type: 'string' },
+        acceptanceCriteria: { type: 'string' },
+      },
+    });
+    expect(DispatchKatacodeSchema.safeParse({
+      repository: 'demo',
+      prompt: 'fix',
+      acceptanceCriteria: 'tests pass',
+      workspaceId: 'spoofed',
+    }).success).toBe(false);
+    expect(DispatchKatacodeSchema.safeParse({
+      repository: 'demo',
+      prompt: 'fix',
+      acceptanceCriteria: 'tests pass',
+      checkoutPath: '/tmp/repo',
     }).success).toBe(false);
   });
 });

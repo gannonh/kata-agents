@@ -20,6 +20,7 @@ describe('tool consequence classifier', () => {
       { toolName: 'MultiEdit', input: { path: '/tmp/a' }, class: 'consequential', sideEffect: 'write' },
       { toolName: 'NotebookEdit', input: { notebook_path: '/tmp/a.ipynb' }, class: 'consequential', sideEffect: 'write' },
       { toolName: 'send_handoff', input: { targetBot: 'bot_1' }, class: 'consequential', sideEffect: 'send' },
+      { toolName: 'dispatch_katacode', input: { repository: 'demo', prompt: 'fix', acceptanceCriteria: 'tests pass' }, class: 'consequential', sideEffect: 'send' },
       { toolName: 'spawn_session', input: { prompt: 'go' }, class: 'consequential', sideEffect: 'send' },
       { toolName: 'mcp__blog__publish_post', input: { method: 'POST' }, class: 'consequential', sideEffect: 'publish' },
       { toolName: 'mcp__store__purchase_item', input: { method: 'POST' }, class: 'consequential', sideEffect: 'purchase' },

@@ -796,6 +796,7 @@ export interface AgentBackend {
    */
   onSendHandoff?: ((request: import('../base-agent.ts').SendHandoffRequest) => Promise<import('../base-agent.ts').SendHandoffResult>) | null;
   onInspectHandoff?: ((request: import('../base-agent.ts').InspectHandoffRequest, signal?: AbortSignal) => Promise<import('../base-agent.ts').InspectHandoffResult>) | null;
+  onDispatchKatacode?: ((request: import('../base-agent.ts').DispatchKatacodeRequest) => Promise<import('../base-agent.ts').DispatchKatacodeResult>) | null;
 }
 
 /**

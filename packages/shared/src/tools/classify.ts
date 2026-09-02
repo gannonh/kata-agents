@@ -22,6 +22,7 @@ const SESSION_SIDE_EFFECT: Record<string, ToolSideEffect> = {
   set_session_labels: 'permission',
   set_session_status: 'permission',
   send_handoff: 'send',
+  dispatch_katacode: 'send',
   spawn_session: 'send',
   send_agent_message: 'send',
   unbind_messaging_channel: 'permission',
