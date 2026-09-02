@@ -481,7 +481,7 @@ describe('Katacode HTTP adapter', () => {
     const adapter = new KatacodeHttpAdapter({
       getEndpoint: () => endpoint,
       getCredential: async () => 'secret-token',
-      fetchImpl: (async (url) => {
+      fetchImpl: (async (url: Parameters<typeof fetch>[0]) => {
         calls.push(String(url));
         return new Response(JSON.stringify({ runId: 'run_live', phase: 'queued' }), { status: 200 });
       }) as typeof fetch,
@@ -503,7 +503,7 @@ describe('Katacode HTTP adapter', () => {
     const adapter = new KatacodeHttpAdapter({
       endpoint: 'http://katacode.example',
       getCredential: async () => 'secret-token',
-      fetchImpl: (async (url) => {
+      fetchImpl: (async (url: Parameters<typeof fetch>[0]) => {
         calls.push(String(url));
         throw new Error('network should not be used');
       }) as unknown as typeof fetch,
@@ -528,7 +528,7 @@ describe('Katacode HTTP adapter', () => {
     const adapter = new KatacodeHttpAdapter({
       endpoint: 'http://127.0.0.1:8787/',
       getCredential: async () => 'secret-token',
-      fetchImpl: (async (url) => {
+      fetchImpl: (async (url: Parameters<typeof fetch>[0]) => {
         calls.push(String(url));
         return new Response(JSON.stringify({ runId: 'run_local', phase: 'queued' }), { status: 200 });
       }) as typeof fetch,
