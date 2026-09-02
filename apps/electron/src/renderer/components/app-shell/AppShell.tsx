@@ -150,6 +150,7 @@ import { clearSourceIconCaches } from "@/lib/icon-cache"
 import { FEATURE_FLAGS } from "@kata-sh/shared/feature-flags"
 import { ChangesPanel } from "@/components/right-sidebar/git-changes/ChangesPanel"
 import { HandoffRail } from "@/components/handoffs/HandoffRail"
+import { TaskRail } from "@/components/katacode/TaskRail"
 
 /** Fixed width of the Changes right-sidebar on regular (non-compact) layouts. */
 const RIGHT_SIDEBAR_WIDTH = 380
@@ -613,7 +614,9 @@ function AppShellContent({
   const showChangesPanel = FEATURE_FLAGS.gitWorkspaceV1 && navState.rightSidebar?.type === 'changes'
   const handoffPanel = navState.rightSidebar?.type === 'handoff' ? navState.rightSidebar : null
   const showHandoffPanel = handoffPanel !== null
-  const showRightSidebarPanel = showChangesPanel || showHandoffPanel
+  const katacodePanel = navState.rightSidebar?.type === 'katacode' ? navState.rightSidebar : null
+  const showKatacodePanel = katacodePanel !== null
+  const showRightSidebarPanel = showChangesPanel || showHandoffPanel || showKatacodePanel
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -3378,6 +3381,13 @@ function AppShellContent({
                 handoffId={handoffPanel.handoffId}
               />
             )}
+            {showKatacodePanel && katacodePanel && (
+              <TaskRail
+                key={`${katacodePanel.conversationId}:${katacodePanel.taskId}`}
+                conversationId={katacodePanel.conversationId}
+                taskId={katacodePanel.taskId}
+              />
+            )}
           </div>
         )}
         {showRightSidebarPanel && isAutoCompact && (
@@ -3393,6 +3403,13 @@ function AppShellContent({
                   key={`${handoffPanel.conversationId}:${handoffPanel.handoffId}`}
                   conversationId={handoffPanel.conversationId}
                   handoffId={handoffPanel.handoffId}
+                />
+              )}
+              {showKatacodePanel && katacodePanel && (
+                <TaskRail
+                  key={`${katacodePanel.conversationId}:${katacodePanel.taskId}`}
+                  conversationId={katacodePanel.conversationId}
+                  taskId={katacodePanel.taskId}
                 />
               )}
             </div>
