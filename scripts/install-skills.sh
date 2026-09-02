@@ -10,11 +10,33 @@ add_skill() {
   fi
 }
 
-# Shared workflow skills from @gannonh/agent-setup. Callers must cd to the
-# worktree root first; `npx skills add` writes into the current project.
-if ! npx --yes @gannonh/agent-setup --skills; then
-  echo "install-skills: skipped @gannonh/agent-setup shared skills (command failed)" >&2
-fi
+# Published @gannonh/agent-setup@0.2.1 has no --skills flag. Skills run only in
+# interactive mode or --all, and --all writes machine configs under $HOME.
+# Unpack the package and run its project-local install-skills.sh instead.
+bootstrap_shared_skills() {
+  local tmpdir tarball unpack script
+  tmpdir="$(mktemp -d)"
+  if ! npm pack @gannonh/agent-setup --pack-destination "$tmpdir" --silent >/dev/null 2>&1; then
+    echo "install-skills: skipped @gannonh/agent-setup shared skills (npm pack failed)" >&2
+    rm -rf "$tmpdir"
+    return 0
+  fi
+  tarball="$(ls "$tmpdir"/*.tgz)"
+  unpack="$(mktemp -d)"
+  tar -xzf "$tarball" -C "$unpack"
+  script="$unpack/package/scripts/install-skills.sh"
+  if [[ ! -f "$script" ]]; then
+    echo "install-skills: skipped @gannonh/agent-setup shared skills (missing install-skills.sh)" >&2
+    rm -rf "$tmpdir" "$unpack"
+    return 0
+  fi
+  if ! bash "$script"; then
+    echo "install-skills: skipped @gannonh/agent-setup shared skills (script failed)" >&2
+  fi
+  rm -rf "$tmpdir" "$unpack"
+}
+
+bootstrap_shared_skills
 
 # plan-build-verify is required for spec-driven work but not yet in @gannonh/agent-setup's skill pack.
 add_skill gannonh/skills --skill plan-build-verify
