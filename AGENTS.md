@@ -13,13 +13,13 @@ Specs for this repository are GitHub Issues, not files. `docs/specs/` holds only
 
 ## Skills
 
-Install project skills with Vercel `npx skills` (project-local, not `-g`) so cloud VMs pick them up:
+Bootstrap shared workflow skills and project-specific installs (project-local, not `-g`) so cloud VMs and worktrees pick them up:
 
 ```bash
 ./scripts/install-skills.sh
 ```
 
-That copies skills into `.agents/skills/` and `.claude/skills/`; those copies and `skills-lock.json` are gitignored. Repo-local skills under `.agents/skills/` stay tracked: `e2e-test-author`, `release-kata-agents`, `verify-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it.
+`worktree:setup` and Codex's Darwin environment hook call this automatically. The script runs `@gannonh/agent-setup`'s shared skill pack, adds the repo-critical `plan-build-verify` skill, and copies Mintlify into `.agents/skills/` and `.claude/skills/`; those copies and `skills-lock.json` are gitignored. Repo-local skills under `.agents/skills/` stay tracked: `e2e-test-author`, `release-kata-agents`, `verify-kata-agents`. Do not install the whole pack. pstack is a Cursor plugin; do not npx-install it. For a full machine bootstrap (Codex/Cursor plugins, Pi extensions, home-dir configs), use `npx @gannonh/agent-setup --all`.
 
 ## Package-level context
 
