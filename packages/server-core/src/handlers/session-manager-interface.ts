@@ -26,8 +26,11 @@ import type {
 import type { SessionBundle, DispatchMode } from '@kata-sh/shared/sessions'
 import type { EventSink } from '../transport'
 import type { HandoffRuntimeSessionManager } from '../handoffs/runtime'
+import type { KatacodeCaller, KatacodeDelegate } from '../katacode'
 
 export interface ISessionManager extends HandoffRuntimeSessionManager {
+  getKatacodeCaller(sessionId: string): KatacodeCaller | null
+  setKatacodeDelegateFactory(factory: ((workspaceId: string) => KatacodeDelegate | undefined) | null): void
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------

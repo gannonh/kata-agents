@@ -936,6 +936,12 @@ export function parseRightSidebarParam(sidebarStr?: string): RightSidebarPanel |
       return { type: 'handoff', conversationId, handoffId }
     }
   }
+  if (sidebarStr.startsWith('katacode/')) {
+    const [, conversationId, taskId, ...rest] = sidebarStr.split('/')
+    if (conversationId && taskId && rest.length === 0) {
+      return { type: 'katacode', conversationId, taskId }
+    }
+  }
   if (sidebarStr.startsWith('files')) {
     const path = sidebarStr.substring(6) // Remove 'files/' prefix
     return { type: 'files', path: path || undefined }
@@ -964,6 +970,8 @@ export function buildRightSidebarParam(panel?: RightSidebarPanel): string | unde
       return panel.path ? `files/${panel.path}` : 'files'
     case 'handoff':
       return `handoff/${panel.conversationId}/${panel.handoffId}`
+    case 'katacode':
+      return `katacode/${panel.conversationId}/${panel.taskId}`
     default:
       return undefined
   }

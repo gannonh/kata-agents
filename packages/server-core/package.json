@@ -23,6 +23,7 @@
     "./sessions": "./src/sessions/index.ts",
     "./computer": "./src/computer/index.ts",
     "./handoffs": "./src/handoffs/index.ts",
+    "./katacode": "./src/katacode/index.ts",
     "./webui": "./src/webui/index.ts",
     "./routines": "./src/routines/index.ts"
   },

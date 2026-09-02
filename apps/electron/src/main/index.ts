@@ -91,6 +91,7 @@ import { existsSync, readFileSync } from 'fs'
 import { RPC_CHANNELS } from '@kata-sh/shared/protocol'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@kata-sh/server-core/sessions'
 import { attachHandoffDelegate } from '@kata-sh/server-core/handoffs'
+import { attachKatacodeDelegate } from '@kata-sh/server-core/katacode'
 import { getDefaultGitServices } from '@kata-sh/server-core/git'
 import { registerAllRpcHandlers } from './handlers/index'
 import { registerCoreRpcHandlers, cleanupSessionFileWatchForClient } from '@kata-sh/server-core/handlers/rpc'
@@ -672,6 +673,7 @@ app.whenReady().then(async () => {
           const sm = new SessionManager()
           sm.setBrowserPaneManager(browserPaneManager!)
           attachHandoffDelegate(sm)
+          attachKatacodeDelegate(sm)
           return sm
         },
         bindRpcServer: (sm, server) => sm.setRpcServer(server),
